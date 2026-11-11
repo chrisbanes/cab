@@ -10,6 +10,7 @@ import {
 } from "../fixtures/browser-diagnostics.js";
 import { desktop, phone } from "../fixtures/operator-settings.js";
 import { createOperatorFixture } from "../fixtures/operator-web.js";
+import { openTaskOptions, taskOptionButton } from "../fixtures/task-tabs.js";
 import {
   FakeGitHub,
   type PublicationFixtureOptions,
@@ -80,24 +81,20 @@ async function launch(
     await page.goto(`${web.origin}/tasks/${taskId}`);
     await page.getByLabel("Password").fill(web.password);
     await page.getByRole("button", { name: "Sign in", exact: true }).click();
-    await page.getByLabel("More task options").click();
-    await page
-      .locator(".task-tools")
-      .getByRole("button", { name: "Publish to GitHub" })
-      .waitFor();
+    await openOptions(page);
   };
   return { f, gh, page, taskId, commands, open, seeded };
 }
 
 const panel = (page: Page) =>
   page.locator("section.task-publish", { hasText: "Publish to GitHub" });
-const header = (page: Page) =>
-  page
-    .locator(".task-tools")
-    .getByRole("button", { name: "Publish to GitHub" });
+const header = (page: Page) => taskOptionButton(page, "Publish to GitHub");
+const openOptions = (page: Page) => openTaskOptions(page, "Publish to GitHub");
 async function openPanel(page: Page) {
-  if ((await header(page).getAttribute("aria-expanded")) !== "true")
+  if ((await header(page).getAttribute("aria-expanded")) !== "true") {
+    await openOptions(page);
     await header(page).click();
+  }
   await panel(page).waitFor();
 }
 const noOverflow = (page: Page) =>

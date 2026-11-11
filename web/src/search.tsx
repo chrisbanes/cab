@@ -306,17 +306,6 @@ export function Search({
                 </span>
               </h2>
             )}
-            <Button
-              id="search-refresh"
-              variant="secondary"
-              onClick={() => {
-                if (datesPending) submit();
-                else resource.refresh();
-                onRefresh?.();
-              }}
-            >
-              Refresh results
-            </Button>
             <div className="search-filters">
               <label htmlFor="search-project">
                 Project
@@ -394,7 +383,7 @@ export function Search({
               </label>
               {datesPending && (
                 <p className="metadata search-pending" role="status">
-                  Dates not applied yet. Press Enter or Refresh results to apply
+                  Dates not applied yet. Press Enter or Search records to apply
                   them.
                 </p>
               )}
@@ -445,10 +434,12 @@ export function Search({
                         />
                       )}
                     </p>
-                    <p className="identifier search-provenance">
+                    <p className="metadata search-provenance">
                       {m.projectName ?? "Project unavailable"} ·{" "}
                       {m.historical ? "historical" : "current"} ·{" "}
-                      {new Date(m.createdAt).toLocaleString()}
+                      <span className="identifier">
+                        {new Date(m.createdAt).toLocaleString()}
+                      </span>
                     </p>
                     <a
                       href={m.href}

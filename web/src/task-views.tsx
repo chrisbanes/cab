@@ -108,9 +108,12 @@ const identity = (task: TaskListSummary) => taskIdentity(task).label;
 function TaskFacts({
   task,
   shared = [],
+  hideOperatorNext = false,
 }: {
   task: TaskListSummary;
   shared?: readonly string[];
+  /** A card with the operator's response link already says what the operator does. */
+  hideOperatorNext?: boolean;
 }) {
   // The Next line names who acts; a task nobody must act on shows none (the task strip still says so).
   const next = nextActor(task.attention.codes, taskColumn(task));
@@ -126,7 +129,7 @@ function TaskFacts({
             <ReasonText reason={r} />
           </p>
         ))}
-      {next.code && (
+      {next.code && !(hideOperatorNext && next.operator) && (
         <p
           className="body task-next"
           data-operator={next.operator ? "true" : undefined}
@@ -226,7 +229,11 @@ export function TaskCard({
             </span>
           )}
         </p>
-        <TaskFacts task={task} shared={shared ?? []} />
+        <TaskFacts
+          task={task}
+          shared={shared ?? []}
+          hideOperatorNext={!!request}
+        />
         {task.source && task.source.state !== "open" && (
           <p className="metadata muted task-source-state">
             {sourceStateText(task.source)}
@@ -345,30 +352,6 @@ export function TaskBoard({
       area.scrollLeft += Math.min(c.right - a.right, c.left - a.left);
     else if (c.left < a.left) area.scrollLeft -= a.left - c.left;
   }, [tasks.length, initial, columns, selected]);
-  // Keep the pressed chip fully inside the phone row. Assigning scrollLeft is instant and
-  // derives from the selection, so it needs no history restore. It repeats once the web
-  // fonts settle, which widens the chips.
-  useLayoutEffect(() => {
-    const row = columnsTarget?.parentElement;
-    if (!columnsTarget || !row) return;
-    const fit = () => {
-      const chip =
-        columnsTarget.querySelectorAll<HTMLElement>(".column-tab")[selected];
-      if (!chip) return;
-      const r = row.getBoundingClientRect(),
-        c = chip.getBoundingClientRect();
-      if (c.right > r.right) row.scrollLeft += c.right - r.right;
-      else if (c.left < r.left) row.scrollLeft -= r.left - c.left;
-    };
-    fit();
-    let current = true;
-    void document.fonts?.ready.then(() => current && fit());
-    return () => {
-      current = false;
-    };
-  }, [columnsTarget, selected]);
-  const before = columns[selected - 1],
-    after = columns[selected + 1];
   const chips = (
     <div
       className="column-navigation"
@@ -442,32 +425,6 @@ export function TaskBoard({
             )}
           </section>
         ))}
-      </div>
-      <div className="phone-column-controls">
-        <Button
-          variant="outline"
-          disabled={!before}
-          aria-label={
-            before
-              ? `Previous column: ${before}`
-              : `Previous column: none, column 1 of ${columns.length}`
-          }
-          onClick={() => setSelected(selected - 1)}
-        >
-          {before ? `← ${before}` : `1 of ${columns.length}`}
-        </Button>
-        <Button
-          variant="outline"
-          disabled={!after}
-          aria-label={
-            after
-              ? `Next column: ${after}`
-              : `Next column: none, column ${columns.length} of ${columns.length}`
-          }
-          onClick={() => setSelected(selected + 1)}
-        >
-          {after ? `${after} →` : `${columns.length} of ${columns.length}`}
-        </Button>
       </div>
       <p className="metadata muted board-footer">
         Columns describe cab work, not source issue state. Cards open the task;

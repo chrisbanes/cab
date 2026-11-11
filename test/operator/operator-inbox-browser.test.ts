@@ -2223,10 +2223,13 @@ test("Inbox dismissal keeps the question draft and history restoration starts no
   await page
     .getByRole("textbox", { name: "Your answer: Optional", exact: true })
     .fill("Keep this draft");
+  await page.getByRole("button", { name: "Dismiss", exact: true }).click();
   await page
     .getByLabel("Dismissal note (optional)")
     .fill("Waiting for context");
-  await page.getByRole("button", { name: "Dismiss", exact: true }).click();
+  await page
+    .getByRole("button", { name: "Dismiss request", exact: true })
+    .click();
   await page
     .getByText(
       "Dismissed. No answer or agent input was sent. This request is no longer required for completion.",
@@ -2330,6 +2333,9 @@ test("a completion rejection links to dismissal of its exact withheld request wi
   const turns = f.runtime.turns;
   await page.getByRole("button", { name: "Dismiss", exact: true }).click();
   await page
+    .getByRole("button", { name: "Dismiss request", exact: true })
+    .click();
+  await page
     .getByText(
       "Dismissed. No answer or agent input was sent. This request is no longer required for completion.",
       { exact: true },
@@ -2340,4 +2346,87 @@ test("a completion rejection links to dismissal of its exact withheld request wi
     .getByText(/Dismissed; no longer required for completion/)
     .waitFor();
   assert.equal(f.runtime.turns, turns);
+});
+
+for (const viewport of [
+  { width: 1366, height: 900 },
+  { width: 390, height: 844 },
+]) {
+  test(`Dismiss follows the answer form and reveals its note on request at ${viewport.width}px`, async (_t, j) => {
+    const { page } = await openInbox(j, 1, viewport);
+    if (viewport.width < 600) await page.locator(".inbox-row").click();
+    const dismiss = page.getByRole("button", { name: "Dismiss", exact: true });
+    await dismiss.waitFor();
+    const order = await page.evaluate(() => {
+      const all = [...document.querySelectorAll("*")];
+      const at = (el: Element | null) => (el ? all.indexOf(el) : -1);
+      const heading = document.querySelector(".inbox-detail-intro h2");
+      const submit = [...document.querySelectorAll("button")].find((b) =>
+        /^Submit answers?$/.test(b.textContent?.trim() ?? ""),
+      );
+      const dismissButton = [...document.querySelectorAll("button")].find(
+        (b) => b.textContent?.trim() === "Dismiss",
+      );
+      return {
+        textareaBefore: [...document.querySelectorAll("textarea")].some(
+          (t) => at(t) < at(heading),
+        ),
+        submitBeforeDismiss: at(submit ?? null) < at(dismissButton ?? null),
+      };
+    });
+    assert.equal(order.textareaBefore, false);
+    assert.equal(order.submitBeforeDismiss, true);
+    const note = page.getByLabel("Dismissal note (optional)");
+    assert.equal(await note.count(), 0);
+    await dismiss.focus();
+    await page.keyboard.press("Enter");
+    await note.waitFor();
+    assert.equal(
+      await note.evaluate((el) => el === document.activeElement),
+      true,
+    );
+    assert.equal(
+      await page
+        .locator("label", { hasText: "Dismissal note (optional)" })
+        .isVisible(),
+      true,
+    );
+    assert.equal(await note.evaluate((e) => e.tagName), "TEXTAREA");
+    await page.getByRole("button", { name: "Cancel", exact: true }).click();
+    assert.equal(await note.count(), 0);
+    assert.equal(
+      await dismiss.evaluate((el) => el === document.activeElement),
+      true,
+    );
+    const commands: string[] = [];
+    page.on("request", (r) => {
+      const body = r.postData() ?? "";
+      if (body.includes("inbox.dismiss")) commands.push(body);
+    });
+    await dismiss.click();
+    await note.fill("Waiting for context");
+    await page
+      .getByRole("button", { name: "Dismiss request", exact: true })
+      .click();
+    await page
+      .getByText(
+        "Dismissed. No answer or agent input was sent. This request is no longer required for completion.",
+        { exact: true },
+      )
+      .waitFor();
+    assert.equal(commands.length, 1);
+    assert.match(commands[0]!, /Waiting for context/);
+  });
+}
+
+test("Inbox in-app links carry no external-link icon", async (_t, j) => {
+  const { page } = await openInbox(j, 1, { width: 1366, height: 900 });
+  await page.locator(".inbox-context-evidence a").first().waitFor();
+  for (const link of [
+    page.locator(".inbox-context-task"),
+    page.getByRole("link", { name: "Task evidence", exact: true }),
+    page.getByRole("link", { name: "Requesting conversation", exact: true }),
+    page.locator(".inbox-open-task"),
+  ])
+    assert.equal(await link.locator("svg").count(), 0);
 });

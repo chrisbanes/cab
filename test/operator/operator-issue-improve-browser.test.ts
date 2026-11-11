@@ -15,6 +15,7 @@ import {
 } from "../fixtures/drafting.js";
 import { desktop, phone } from "../fixtures/operator-settings.js";
 import { createOperatorFixture } from "../fixtures/operator-web.js";
+import { openTaskOptions, taskOptionButton } from "../fixtures/task-tabs.js";
 import { until } from "../fixtures/operator-work.js";
 import { githubFake } from "../fixtures/delivery-fixture.js";
 
@@ -181,8 +182,7 @@ async function launch(
     await page.goto(`${web.origin}/tasks/${taskId}`);
     await page.getByLabel("Password").fill(web.password);
     await page.getByRole("button", { name: "Sign in", exact: true }).click();
-    await page.getByLabel("More task options").click();
-    await page.getByRole("button", { name: "Improve with lead" }).waitFor();
+    await openOptions(page);
   };
   return {
     f,
@@ -199,14 +199,13 @@ async function launch(
 
 const panel = (page: Page) =>
   page.locator("section.issue-improve", { hasText: "Improve with lead" });
-const header = (page: Page) =>
-  page
-    .locator(".task-tools")
-    .getByRole("button", { name: "Improve with lead" });
+const header = (page: Page) => taskOptionButton(page, "Improve with lead");
+const openOptions = (page: Page) => openTaskOptions(page, "Improve with lead");
 const startButton = (page: Page) =>
   panel(page).getByRole("button", { name: "Improve with lead", exact: true });
 
 async function openPanel(page: Page) {
+  await openOptions(page);
   await header(page).click();
   await panel(page).waitFor();
 }

@@ -16,7 +16,7 @@
   container-type: inline-size;
   padding: var(--space-12);
   border: 1px solid var(--line);
-  border-radius: 8px;
+  border-radius: var(--radius-xl);
   background: var(--surface);
 }
 
@@ -28,8 +28,28 @@
 .changes-pane-actions {
   display: flex;
   flex-wrap: wrap;
-  justify-content: flex-end;
+  align-items: center;
   gap: var(--space-8);
+}
+
+.changes-pane-actions h3 {
+  margin: 0 auto 0 0;
+  font-size: var(--type-md);
+}
+
+/* The pane is the one card: the comparison content inside it is hairline sections. */
+.changes-pane .workspace-changes {
+  margin: 0;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+}
+
+/* The pane's own heading row names the content; the section and comparison headings repeat it. */
+.changes-pane #changes > .section-heading,
+.changes-pane .workspace-changes > h4 {
+  display: none;
 }
 
 /* A 1px hairline with a wider hit target; the focus ring is the visible keyboard cue. */

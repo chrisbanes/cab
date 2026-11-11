@@ -367,6 +367,49 @@ test("shared controls retain visible focus in forced colours and remove optional
 const inboxResponse = (response: import("playwright").Response) =>
   new URL(response.url()).pathname === "/api/operator/inbox";
 
+test("a paused project's sidebar row keeps its name on one line and shows Paused as metadata", async (_t, journey) => {
+  const f = await journey.start("fixture.create", () =>
+    createOperatorFixture(null, undefined, undefined, journey.fixtureOptions),
+  );
+  let browser: Browser | undefined;
+  journey.cleanup(
+    (primary) => f.close(browser, primary),
+    "fixture.close",
+    () => f.lifecycle.steps,
+  );
+  const { projectId } = await seedOwnApproval(f);
+  const domain = f.service.domain();
+  domain.execute({
+    type: "project.configure",
+    key: randomUUID(),
+    actor: "operator",
+    projectId,
+    expectedVersion: Number(domain.project(projectId).version),
+    paused: true,
+  });
+  const web = await journey.start("fixture.web", () => f.startWeb());
+  browser = await journey.start("browser.launch", () => chromium.launch());
+  const page = await browser.newPage({
+    viewport: { width: 1366, height: 900 },
+  });
+  journey.observe(page);
+  page.setDefaultTimeout(5000);
+  await signIn(page, web.origin, web.password, "/");
+  const link = page
+    .locator(".sidebar")
+    .getByRole("link", { name: /Approval project/ });
+  await link.getByText("Paused", { exact: true }).waitFor();
+  assert.equal(await link.locator('[data-slot="badge"]').count(), 0);
+  assert.equal(await link.locator(".nav-count svg").count(), 1);
+  const name = await link.locator(".nav-label > span").evaluate((el) => ({
+    height: el.getBoundingClientRect().height,
+    lineHeight: parseFloat(getComputedStyle(el).lineHeight),
+    title: (el.closest("a") as HTMLElement).title,
+  }));
+  assert.ok(name.height <= name.lineHeight * 1.5, JSON.stringify(name));
+  assert.match(name.title, /Approval project/);
+});
+
 test("desktop shell lists the designed destinations, an honest Inbox count and a footer account group", async (_t, journey) => {
   const f = await journey.start("fixture.create", () =>
     createOperatorFixture(null, undefined, undefined, journey.fixtureOptions),
@@ -562,7 +605,7 @@ test("desktop shell lists the designed destinations, an honest Inbox count and a
   await page.goto(`${web.origin}/settings`);
   await failed;
   await page.locator("main.page h1").waitFor();
-  assert.equal(await sidebar.locator(".nav-count").count(), 0);
+  assert.equal(await sidebar.locator('a[href="/inbox"] .nav-count').count(), 0);
   await sidebar.getByRole("link", { name: "Inbox", exact: true }).waitFor();
   await captureBrowserEvidence(page, "1366-shell-inbox-count-unavailable");
 });
@@ -593,7 +636,6 @@ test("page-owned refresh replaces the shell Refresh and still re-reads the works
     ["/", "Refresh tasks"],
     ["/tasks", "Refresh tasks"],
     [`/projects/${projectId}`, "Refresh tasks"],
-    ["/search?query=Refresh", "Refresh results"],
   ];
   for (const [route, name] of owned) {
     await page.goto(web.origin + route);
@@ -614,6 +656,16 @@ test("page-owned refresh replaces the shell Refresh and still re-reads the works
     await workspace;
     await inbox;
   }
+  // Search has no refresh of its own: Search records re-reads, and the shell Refresh stays gone.
+  await page.goto(`${web.origin}/search?query=Refresh`);
+  await page
+    .getByRole("button", { name: "Search records", exact: true })
+    .waitFor();
+  assert.equal(
+    await page.getByRole("button", { name: /^Refresh/ }).count(),
+    0,
+    "/search has no Refresh button",
+  );
   for (const route of ["/inbox", "/settings"]) {
     await page.goto(web.origin + route);
     await page.locator("main.page h1").waitFor();
@@ -623,7 +675,12 @@ test("page-owned refresh replaces the shell Refresh and still re-reads the works
       `${route} keeps one Refresh`,
     );
   }
-  for (const route of [...owned.map(([r]) => r), "/inbox", "/settings"]) {
+  for (const route of [
+    ...owned.map(([r]) => r),
+    "/search?query=Refresh",
+    "/inbox",
+    "/settings",
+  ]) {
     await page.goto(web.origin + route);
     await page.locator("main.page h1").waitFor();
     await page.waitForLoadState("networkidle");

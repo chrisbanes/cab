@@ -93,10 +93,12 @@ export function ChangesSplit({
 
 /** The Changes content beside the conversation; Escape closes it only when nothing inside dismissed it. */
 export function ChangesPane({
+  heading,
   onClose,
   onFullWidth,
   children,
 }: {
+  heading: string;
   onClose: () => void;
   onFullWidth: () => void;
   children: ReactNode;
@@ -117,6 +119,7 @@ export function ChangesPane({
       onKeyDown={dismiss}
     >
       <div className="changes-pane-actions">
+        <h3>{heading}</h3>
         <Button variant="secondary" onClick={onFullWidth}>
           Open full width
         </Button>

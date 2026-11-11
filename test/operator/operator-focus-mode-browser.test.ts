@@ -65,7 +65,9 @@ async function start(
       };
     });
   await signIn(page, web, options.path ?? `/tasks/${task.taskId}`);
-  await page.getByLabel("More task options").click();
+  // A phone has no strip menu: its task options are in the header's Task actions.
+  if ((options.viewport ?? desktop).width >= 760)
+    await page.getByLabel("More task options").click();
   return { page, errors, task, other, web };
 }
 

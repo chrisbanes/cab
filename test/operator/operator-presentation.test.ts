@@ -15,6 +15,7 @@ import {
 } from "../../src/operator/runtime-restart-copy.js";
 import { resultWorkspaceLines } from "../../src/operator/task-presentation.js";
 import { harnessReason } from "../../web/src/execution-runtime.js";
+import { recoveryEvidenceLabels } from "../../web/src/recovery-labels.js";
 import {
   leadFeedbackMode,
   leadReceivesNotice,
@@ -178,6 +179,28 @@ test("a reason code reads as its sentence and an unmapped code never leaks", () 
   assert.doesNotMatch(unmapped, /reviewable-pr/);
 });
 
+test("the outcome line shows plain text without inline Markdown markers", () => {
+  const plain = (text: string) => outcomeLine(text).line;
+  assert.deepEqual(
+    outcomeLine("Let keyboard users **open** the command menu."),
+    { line: "Let keyboard users open the command menu.", more: false },
+  );
+  assert.equal(plain("Run `npm run check`."), "Run npm run check.");
+  assert.equal(
+    plain("Read [the guide](https://x) first."),
+    "Read the guide first.",
+  );
+  assert.equal(
+    plain("Use __bold__ and *soft* and _word_ here."),
+    "Use bold and soft and word here.",
+  );
+  assert.equal(
+    plain("Rename snake_case_name and 2 * 3 * 4."),
+    "Rename snake_case_name and 2 * 3 * 4.",
+  );
+  assert.equal(plain("**Open** the menu. Then close it."), "Open the menu.");
+});
+
 test("the outcome line skips context and metadata and uses the first meaningful sentence", () => {
   assert.deepEqual(outcomeLine("## Context\n\n- [ ] Restore focus"), {
     line: "Restore focus",
@@ -197,7 +220,7 @@ test("the outcome line skips context and metadata and uses the first meaningful 
   });
   // Trailing blank lines are not more text, and a link labelled x keeps its label.
   assert.deepEqual(outcomeLine("[X](https://example.com) first\n\n  \n"), {
-    line: "[X](https://example.com) first",
+    line: "X first",
     more: false,
   });
   // Nothing meaningful, and a redacted outcome, give no line and no exception.
@@ -389,4 +412,43 @@ test("a result's workspace state reads as one line per repository", () => {
       "lib: recorded at 0123456 on detached HEAD, with uncommitted changes",
     ],
   );
+});
+
+test("recovery evidence labels stay distinct only as far as needed", () => {
+  const a = (
+    assignmentId: string,
+    name: string | null,
+    brief: string | null,
+  ) => ({
+    assignmentId,
+    name,
+    brief,
+  });
+  assert.deepEqual(
+    recoveryEvidenceLabels([a("a1", "Grace", "x."), a("a2", "Ada", "x.")]),
+    ["Grace: recovery evidence", "Ada: recovery evidence"],
+  );
+  assert.deepEqual(
+    recoveryEvidenceLabels([
+      a("a1", "Task lead", "Restore focus. Then more."),
+      a("a2", "Task lead", "Fix the strip."),
+    ]),
+    [
+      "Task lead: recovery evidence (Restore focus.)",
+      "Task lead: recovery evidence (Fix the strip.)",
+    ],
+  );
+  assert.deepEqual(
+    recoveryEvidenceLabels([
+      a("assignment-one-1111", "Task lead", "Same."),
+      a("assignment-two-2222", "Task lead", "Same."),
+    ]),
+    [
+      `Task lead: recovery evidence (Same.; ${shortId("assignment-one-1111")})`,
+      `Task lead: recovery evidence (Same.; ${shortId("assignment-two-2222")})`,
+    ],
+  );
+  assert.deepEqual(recoveryEvidenceLabels([a("a1", null, null)]), [
+    "Agent name unavailable: recovery evidence",
+  ]);
 });

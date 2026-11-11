@@ -1,4 +1,3 @@
-import { ArrowUpRight } from "lucide-react";
 import type { TaskInboxItem } from "../../src/operator/contracts.js";
 import { ResourceStatus } from "./components.js";
 import type { useInboxTask } from "./inbox-detail.js";
@@ -38,8 +37,7 @@ export function InboxContext({
       <section>
         <h2>Task</h2>
         <a className="inbox-context-task" href={`/tasks/${item.taskId}`}>
-          {item.taskTitle ?? "Unavailable task"}{" "}
-          <ArrowUpRight aria-hidden="true" size={12} />
+          {item.taskTitle ?? "Unavailable task"}
         </a>
         <p className="muted">
           {item.projectName ?? "Unavailable project"} ·{" "}
@@ -87,16 +85,9 @@ export function InboxContext({
       {(item.evidence || item.conversation) && (
         <section className="inbox-context-evidence">
           <h3>Evidence</h3>
-          {item.evidence && (
-            <a href={item.evidence}>
-              Task evidence <ArrowUpRight aria-hidden="true" size={12} />
-            </a>
-          )}
+          {item.evidence && <a href={item.evidence}>Task evidence</a>}
           {item.conversation && (
-            <a href={item.conversation}>
-              Requesting conversation{" "}
-              <ArrowUpRight aria-hidden="true" size={12} />
-            </a>
+            <a href={item.conversation}>Requesting conversation</a>
           )}
         </section>
       )}

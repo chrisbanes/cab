@@ -629,8 +629,8 @@
   --state-border: var(--ok-border);
 }
 
-/* Board (04-tasks-board): equal columns with a 140px floor, so seven fit one 1366 screen;
-   anything wider scrolls inside .board-columns only. */
+/* Board (04-tasks-board): equal columns with a 240px floor; whatever does not fit scrolls
+   inside .board-columns only. */
 .column-navigation {
   display: flex;
   flex-wrap: wrap;
@@ -668,7 +668,7 @@
 }
 
 .board-columns {
-  --board-column-min: 140px;
+  --board-column-min: 240px;
   display: flex;
   align-items: stretch;
   gap: 10px;
@@ -740,31 +740,16 @@
   margin: 0 var(--space-4);
 }
 
-/* An empty column is a 44px labelled rail: count, then name and sentence read vertically. */
+/* An empty column is a narrow labelled column; its text stays horizontal. */
 @media (min-width: 760px) {
   .board-column[data-empty="true"] {
-    flex: 0 0 44px;
-    align-items: center;
-    gap: 10px;
+    flex: 0 0 120px;
     min-width: 0;
-    padding: 10px 0;
   }
 
   .board-column[data-empty="true"] .board-column-heading {
-    flex-direction: column-reverse;
-    gap: 10px;
-    padding: 0;
-  }
-
-  .board-column[data-empty="true"] .board-column-name,
-  .board-column[data-empty="true"] > p {
-    writing-mode: vertical-rl;
-  }
-
-  /* The bounded block length wraps a long sentence onto a second vertical line. */
-  .board-column[data-empty="true"] > p {
-    max-height: 10rem;
-    margin: 0;
+    flex-wrap: wrap;
+    padding: 2px 4px 4px;
   }
 }
 
@@ -858,10 +843,6 @@
   font-weight: var(--weight-medium);
 }
 
-.phone-column-controls {
-  display: none;
-}
-
 .board-footer {
   margin: var(--space-4) 0 0;
 }
@@ -911,8 +892,8 @@
     order: 4;
   }
 
-  /* Phone Board: Project, State and the column chips share one row that scrolls sideways;
-     the switch and Refresh tasks sit on the line below. The wrapper dissolves in List. */
+  /* Phone Board: Project and State share a row, the column tabs wrap in a row of their
+     own, and the switch and Refresh tasks sit on the line below. The wrapper dissolves in List. */
   .work-filters {
     display: contents;
   }
@@ -922,10 +903,8 @@
     flex: 1 0 100%;
     align-items: center;
     gap: var(--space-4);
+    flex-wrap: wrap;
     min-width: 0;
-    overflow-x: auto;
-    overscroll-behavior-x: contain;
-    scrollbar-width: none;
   }
 
   .work-toolbar[data-view="board"] .work-filters > * {
@@ -937,20 +916,19 @@
     text-overflow: ellipsis;
   }
 
-  .work-columns {
+  .work-toolbar[data-view="board"] .work-filters > .work-columns {
     display: flex;
-    margin-left: var(--space-4);
+    flex: 1 0 100%;
   }
 
   .work-columns .column-navigation {
     display: flex;
-    flex-wrap: nowrap;
+    flex-wrap: wrap;
     margin: 0;
   }
 
   .work-columns .column-tab {
     min-height: 44px;
-    white-space: nowrap;
   }
 
   .overview-stats {
@@ -1047,16 +1025,5 @@
 
   .board-column.selected-column {
     display: flex;
-  }
-
-  .phone-column-controls {
-    display: flex;
-    justify-content: space-between;
-    gap: var(--space-12);
-    margin-top: var(--space-16);
-  }
-
-  .phone-column-controls [data-slot="button"] {
-    flex: 0 1 auto;
   }
 }

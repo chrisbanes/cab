@@ -43,7 +43,6 @@ import { useOperatorResource, type ResourceState } from "./resource.js";
 import {
   ActionLink,
   Button,
-  StatusBadge,
   ResourceStatus,
   MobileNavigation,
   BrandMark,
@@ -98,6 +97,7 @@ function RouteLink({
   trailing,
   className,
   describedBy,
+  title,
   children,
 }: {
   href: string;
@@ -109,6 +109,7 @@ function RouteLink({
   trailing?: ReactNode;
   className?: string;
   describedBy?: string;
+  title?: string | undefined;
   children: ReactNode;
 }) {
   return (
@@ -117,6 +118,7 @@ function RouteLink({
       href={href}
       aria-current={current === true ? "page" : current || undefined}
       aria-describedby={describedBy}
+      title={title}
       onClick={(e) => {
         if (
           e.button === 0 &&
@@ -172,6 +174,7 @@ function ProjectNavigation({
       trailing?: ReactNode;
       className?: string;
       describedBy?: string;
+      title?: string | undefined;
     } = {},
   ) => (
     <RouteLink
@@ -240,10 +243,13 @@ function ProjectNavigation({
           <Folder {...navIcon} />,
           <ProjectName label={projectLabel(labels, p.id, p.name)} id={p.id} />,
           {
+            className: "nav-project",
+            title: projectLabel(labels, p.id, p.name).name ?? undefined,
             trailing: p.paused ? (
-              <StatusBadge tone="idle" icon={CirclePause}>
+              <span className="nav-count metadata">
+                <CirclePause aria-hidden="true" className="nav-icon" />
                 Paused
-              </StatusBadge>
+              </span>
             ) : tasks ? (
               <span className="nav-count metadata">
                 {

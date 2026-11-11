@@ -103,7 +103,10 @@ badge with a symbol and a word.
 Project identity uses a small square dot per project, coloured from `--accent-text`,
 `--fg-2` and `--fg-3`; it is never a state colour.
 
-Code and evidence views take their colours from the tokens in both themes. Diffs
+Code and evidence views take their colours from the tokens in both themes; the
+changed-files tree uses `--ok` for added, `--risk` for deleted, `--accent-text` for
+modified and renamed, `--fg-3` for ignored and untracked, and `--focus` for the
+selected row's focus border. Diffs
 render with `@pierre/diffs` in Geist Mono 12/20: syntax colouring for the common
 languages in `web/src/shiki-langs.ts` (others render as plain text), word-level
 emphasis inside changed lines, wrapped long lines and the library's light or dark
@@ -147,7 +150,8 @@ fixed application dimensions.
 
 - **Shell:** a 232px sidebar (cab mark, installation name, Search work field
   with ⌘K, Overview, Inbox with an amber count, Tasks, the projects list with
-  activity meta, a capacity meter and the account menu), a 48px top bar
+  activity meta — a paused project shows the paused symbol and the word "Paused" as that meta,
+  and project names stay on one line with an ellipsis, the full name in the link's title — a capacity meter and the account menu), a 48px top bar
   (breadcrumb, connection status — Connected, Updates delayed or Disconnected — and
   New task with its key), then the page. Settings, Getting started, Approval and
   delivery forms, the Theme choice and Sign out live in the account menu. Main content uses 20px padding and 12–16px gaps; multi-pane screens
@@ -160,8 +164,11 @@ fixed application dimensions.
   without covering content.
 - **Changes pane:** from 1024px the Overview's Changes actions open a split in place of
   the inspector: the conversation (at least 480px) and the Changes view (at least
-  320px, a surface card like the inspector, sticky under the page top) share the row,
-  and the page's 1100px maximum width is lifted while it is open. The handle between
+  320px, one surface card like the inspector, sticky under the page top) share the row,
+  and the page's 1100px maximum width is lifted while it is open. The card has one
+  heading row, "Changes" with Open full width and Close, and its comparison controls,
+  status line, changed files and diff are hairline-separated sections inside it, not
+  nested cards; the content's own headings are not repeated. The handle between
   them is a 1px `--line` hairline with a 16px hit target (`--line-strong` on hover and
   drag, a 2px `--focus` line on keyboard focus), is a window splitter that Arrow keys,
   Home and End resize, and keeps its width per browser in `localStorage`. Opening
@@ -211,6 +218,9 @@ Rules:
 - Phone screens use one of two headers: top-level (menu, title, count badge, one
   icon or outline action) or detail (back with the parent label, centred title and
   mono subtitle, at most one outline action).
+- The Reply destination (Comment on task, Message task lead, Post GitHub comment) is
+  a segmented radio group named Send to; Send is the only primary button in Reply.
+  An unavailable destination stays focusable with `aria-disabled` and its reason.
 - Use a navigation row for anything that only opens another view. Keep buttons for
   actions, with one primary action per view. Desktop buttons hug their label.
 - Stop uses the destructive treatment and confirms first; reversible states show
@@ -234,12 +244,21 @@ Make the next decision obvious, and keep its evidence close:
   brief, evidence and assignments in the inspector. Default visibility is task
   meaning, state, next actor and decision; Details holds identifiers, revisions,
   provenance and contract caveats. First arrival shows the latest conversation entry
-  with Reply docked within its column; phone results and Details follow it. The strip
-  stays on one line with one identity chip. Refresh source, Focus mode and Improve
-  with lead share More task options. Delegations read as collapsible
-  sub-conversations in place, retaining the task's accountable lead and
-  assignment/conversation identities. Use recorded facts and attributed excerpts;
-  add no invented summary capability.
+  with Reply docked within its column; phone results and Details follow it. On a
+  phone the docked Reply is one textarea (at most 12% of the viewport); it expands
+  while the operator engages it (from focus or a press inside it until they move
+  outside) or while a send, notice or uncertain state shows. An unsent draft alone
+  stays compact. The page's `scroll-padding-bottom` is 62px while the dock is
+  compact and 40dvh while it is engaged or expanded, so a focused control clears
+  it. From 760px the strip stays on one line with one identity chip; on a phone
+  it wraps instead, in strip order, and nothing in it is truncated. Refresh
+  source, Focus mode, Improve with lead and Publish share More task options, an
+  icon toggle (32px from 1121px, a 44px target below); on a phone they join the
+  header's Task actions, so the page has one task menu. Focus mode is
+  desktop-only. Delegations read as collapsible sub-conversations in place,
+  retaining the task's accountable lead and assignment/conversation identities.
+  Use recorded facts and attributed excerpts; add no invented summary
+  capability.
 - **Composer:** keep project, title and outcome prominent; disclose optional
   context, references, assignee and dependencies with a summary of supplied values.
   Preserve validation, drafts and truthful creation/admission feedback.

@@ -413,7 +413,7 @@ test("contextual feedback and the draft turn stay their own destinations, and as
   const { f, a, page, commands } = await open(j, "chromium");
   // "Ask lead about …" is lead-only feedback with its exact reference, sent through `message`.
   await page
-    .getByRole("button", { name: "Message task lead" })
+    .getByRole("radio", { name: "Message task lead" })
     .waitFor({ state: "detached" });
   const ask = page.getByRole("button", { name: /^Ask lead about / }).first();
   await ask.waitFor();

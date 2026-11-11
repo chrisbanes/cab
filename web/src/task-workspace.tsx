@@ -140,8 +140,10 @@ import {
   type TimelineWindow,
 } from "./task-conversation-model.js";
 import { taskAttentionProjection } from "./inbox-presentation.js";
+import { Ellipsis } from "lucide-react";
 import {
   type TaskHeaderReport,
+  type TaskOption,
   TaskStrip,
   TaskTabs,
   taskHeaderReport,
@@ -459,6 +461,58 @@ export function TaskWorkspace({
     },
     [auxSend],
   );
+  // The phone Reply dock stays open (data-engaged) from focus or a press inside it until the
+  // operator moves outside. Safari and iOS do not focus a tapped radio or button, so engagement
+  // cannot follow :focus-within. An outside click collapses it only after dispatch, so the layout
+  // never shifts between pointerdown and click.
+  useEffect(() => {
+    const dock = () => document.getElementById("reply");
+    const inside = (e: Event) =>
+      e.target instanceof Node && Boolean(dock()?.contains(e.target));
+    // Counts engagements, so a collapse queued by an earlier outside click is dropped once the
+    // operator has engaged the dock again before it runs.
+    let engagements = 0;
+    const engage = (on: boolean) => {
+      if (on) engagements++;
+      dock()?.toggleAttribute("data-engaged", on);
+    };
+    let pressing = false;
+    const onPointerDown = (e: Event) => {
+      pressing = true;
+      if (inside(e)) engage(true);
+    };
+    const onPointerEnd = () => {
+      setTimeout(() => {
+        pressing = false;
+      }, 0);
+    };
+    const onFocusIn = (e: Event) => {
+      if (inside(e)) engage(true);
+      else if (!pressing) engage(false);
+    };
+    const onClick = (e: Event) => {
+      if (inside(e)) engage(true);
+      // Most clicks land while the dock is already compact: nothing to collapse.
+      else if (dock()?.hasAttribute("data-engaged")) {
+        const seen = engagements;
+        requestAnimationFrame(() => {
+          if (engagements === seen) engage(false);
+        });
+      }
+    };
+    document.addEventListener("pointerdown", onPointerDown, true);
+    document.addEventListener("pointerup", onPointerEnd, true);
+    document.addEventListener("pointercancel", onPointerEnd, true);
+    document.addEventListener("focusin", onFocusIn, true);
+    document.addEventListener("click", onClick, true);
+    return () => {
+      document.removeEventListener("pointerdown", onPointerDown, true);
+      document.removeEventListener("pointerup", onPointerEnd, true);
+      document.removeEventListener("pointercancel", onPointerEnd, true);
+      document.removeEventListener("focusin", onFocusIn, true);
+      document.removeEventListener("click", onClick, true);
+    };
+  }, []);
   const focusUnconfirmed = useRef(false);
   // The control whose replayed check just settled, focused once the commit enables it.
   const focusReplay = useRef<string | null>(null);
@@ -503,6 +557,7 @@ export function TaskWorkspace({
     material = useRef<string | null>(null);
   const params = new URLSearchParams((path.split("?")[1] ?? "").split("#")[0]);
   const wide = useMediaQuery("(min-width: 1024px)");
+  const phone = useMediaQuery("(max-width: 759px)");
   const initialVisit = useRef(!state.selectionInitialized);
   const selectedPath = useRef<string | null>(null);
   if (selectedPath.current !== path) {
@@ -634,6 +689,54 @@ export function TaskWorkspace({
   useEffect(() => {
     if (publishWork) setPublishOpen((open) => open ?? true);
   }, [publishWork]);
+  const publishPolicy = data?.publication;
+  const publishShown = publishPolicy ? (publishOpen ?? publishWork) : false;
+  const improvePolicy = data?.issueEdit;
+  const improveShown = improvePolicy
+    ? (improveOpen ?? hasImproveWork(taskId, improvePolicy))
+    : false;
+  // The strip's options; a phone's Task actions shows the same ones and asks this page to run them.
+  const taskOptions: TaskOption[] = !data
+    ? []
+    : data.source
+      ? [
+          ...(improvePolicy
+            ? [
+                {
+                  kind: "improve" as const,
+                  label: "Improve with lead",
+                  disabled: projectReadOnly,
+                  expanded: improveShown,
+                },
+              ]
+            : []),
+          {
+            kind: "refresh",
+            label: "Refresh source",
+            disabled: projectReadOnly,
+          },
+        ]
+      : publishPolicy
+        ? [
+            {
+              kind: "publish",
+              label: "Publish to GitHub",
+              disabled: projectReadOnly,
+              expanded: publishShown,
+            },
+          ]
+        : [];
+  const runOption = useRef<(kind: TaskOption["kind"]) => void>(() => {});
+  runOption.current = (kind) => {
+    if (kind === "improve") setImproveOpen(!improveShown);
+    else if (kind === "publish") setPublishOpen(!publishShown);
+    else void refreshSource();
+  };
+  // Stable, so the shell header re-renders only when the reported data changes.
+  const runTaskOption = useCallback(
+    (kind: TaskOption["kind"]) => runOption.current(kind),
+    [],
+  );
   const headerReport =
     data &&
     JSON.stringify(
@@ -641,11 +744,13 @@ export function TaskWorkspace({
         data,
         data.project?.name ?? null,
         (window.history.state as { origin?: string } | null)?.origin,
+        taskOptions,
       ),
     );
   useEffect(() => {
-    if (headerReport) onHeader?.(JSON.parse(headerReport));
-  }, [headerReport, onHeader]);
+    if (headerReport)
+      onHeader?.({ ...JSON.parse(headerReport), run: runTaskOption });
+  }, [headerReport, onHeader, runTaskOption]);
   useEffect(() => () => onHeader?.(null), [onHeader]);
   // The answer to a send or a check has had its turn at the focus.
   useEffect(() => {
@@ -2141,62 +2246,77 @@ export function TaskWorkspace({
               data.commentPolicy?.mode === "approval",
             ));
   const reply = (
-    <section id="reply" className="reply-card">
+    <section
+      id="reply"
+      className="reply-card"
+      data-expanded={pending || state.uncertain || outcome ? "" : undefined}
+    >
       <h3 className="section-heading">Reply</h3>
-      <div className="task-actions">
-        <Button
-          variant={destination === "comment" ? "primary" : "secondary"}
-          disabled={projectReadOnly || pending || state.uncertain}
-          onClick={() => {
-            // A sent lead message's outcome is read by now; leaving it would keep that destination.
-            if (
-              state.destination === "lead" &&
-              state.notice?.tone === "success"
-            )
-              state.notice = null;
-            state.destination = "comment";
-            changed();
-          }}
-        >
-          Comment on task
-        </Button>
-        {(draftTurn || state.leadInUse || destination === "lead") && (
-          <Button
-            variant={destination === "lead" ? "primary" : "secondary"}
+      <fieldset className="reply-destination">
+        <legend className="sr-only">Send to</legend>
+        <label className="reply-destination-option">
+          <input
+            type="radio"
+            name="reply-destination"
+            checked={destination === "comment"}
             disabled={projectReadOnly || pending || state.uncertain}
-            onClick={() => {
-              state.destination = "lead";
+            onChange={() => {
+              // A sent lead message's outcome is read by now; leaving it would keep that destination.
+              if (
+                state.destination === "lead" &&
+                state.notice?.tone === "success"
+              )
+                state.notice = null;
+              state.destination = "comment";
               changed();
             }}
-          >
-            {draftTurn ? draftTurnHeading(leadName) : "Message task lead"}
-          </Button>
+          />
+          <span>Comment on task</span>
+        </label>
+        {(draftTurn || state.leadInUse || destination === "lead") && (
+          <label className="reply-destination-option">
+            <input
+              type="radio"
+              name="reply-destination"
+              checked={destination === "lead"}
+              disabled={projectReadOnly || pending || state.uncertain}
+              onChange={() => {
+                state.destination = "lead";
+                changed();
+              }}
+            />
+            <span>
+              {draftTurn ? draftTurnHeading(leadName) : "Message task lead"}
+            </span>
+          </label>
         )}
         {data.source && (
-          <Button
-            variant={destination === "github" ? "primary" : "secondary"}
-            // Native `disabled` is out of the tab order; an unavailable tab stays focusable so
-            // its reason is read.
-            disabled={projectReadOnly || pending || state.uncertain}
-            aria-disabled={!comment.postable || undefined}
-            aria-describedby={comment.postable ? undefined : githubReasonId}
-            title={comment.sentence ?? undefined}
-            className="aria-disabled:opacity-50"
-            onClick={() => {
-              if (!comment.postable) return;
-              state.destination = "github";
-              changed();
-            }}
-          >
-            Post {trackerName(data.source)} comment
-          </Button>
+          <label className="reply-destination-option">
+            <input
+              type="radio"
+              name="reply-destination"
+              checked={destination === "github"}
+              // Native `disabled` is out of the tab order; an unavailable option stays focusable
+              // so its reason is read.
+              disabled={projectReadOnly || pending || state.uncertain}
+              aria-disabled={!comment.postable || undefined}
+              aria-describedby={comment.postable ? undefined : githubReasonId}
+              title={comment.sentence ?? undefined}
+              onChange={() => {
+                if (!comment.postable) return;
+                state.destination = "github";
+                changed();
+              }}
+            />
+            <span>Post {trackerName(data.source)} comment</span>
+          </label>
         )}
         {data.source && comment.sentence && (
           <span id={githubReasonId} className="sr-only">
             {comment.sentence}
           </span>
         )}
-      </div>
+      </fieldset>
       {destination === "lead" && lead && leadMode === "resumes" ? (
         <p role="status">{replyNote}</p>
       ) : (
@@ -2232,6 +2352,7 @@ export function TaskWorkspace({
       {destination === "github" && data.commentPolicy?.mode === "approval" && (
         <>
           <Button
+            variant="secondary"
             disabled={
               projectReadOnly ||
               pending ||
@@ -2327,12 +2448,6 @@ export function TaskWorkspace({
       )}
     </section>
   );
-  const publishPolicy = data.publication;
-  const publishShown = publishPolicy ? (publishOpen ?? publishWork) : false;
-  const improvePolicy = data.issueEdit;
-  const improveShown = improvePolicy
-    ? (improveOpen ?? hasImproveWork(taskId, improvePolicy))
-    : false;
   const columns = (
     <div className="task-columns">
       <section
@@ -2731,54 +2846,39 @@ export function TaskWorkspace({
           </p>
         )}
         <TaskStrip data={data}>
-          <details className="task-tools">
-            <summary aria-label="More task options">•••</summary>
-            <div className="task-actions">
-              {data.source && (
-                <>
-                  {improvePolicy && (
-                    <Button
-                      variant="secondary"
-                      disabled={projectReadOnly}
-                      aria-expanded={improveShown}
-                      onClick={() => setImproveOpen(!improveShown)}
-                    >
-                      Improve with lead
-                    </Button>
-                  )}
+          {/* A phone has one task menu: these options are in the header's Task actions. */}
+          {!phone && (
+            <details className="task-tools">
+              <summary aria-label="More task options">
+                <Ellipsis aria-hidden="true" />
+              </summary>
+              <div className="task-actions">
+                {taskOptions.map((option) => (
                   <Button
+                    key={option.kind}
                     variant="secondary"
-                    disabled={projectReadOnly}
-                    onClick={() => void refreshSource()}
+                    disabled={option.disabled}
+                    aria-expanded={option.expanded}
+                    onClick={() => runOption.current(option.kind)}
                   >
-                    Refresh source
+                    {option.label}
                   </Button>
-                </>
-              )}
-              {!data.source && publishPolicy && (
-                <Button
-                  variant="secondary"
-                  disabled={projectReadOnly}
-                  aria-expanded={publishShown}
-                  onClick={() => setPublishOpen(!publishShown)}
-                >
-                  Publish to GitHub
-                </Button>
-              )}
-              {wide && (
-                <Button
-                  ref={focusToggle}
-                  variant="secondary"
-                  aria-pressed={focus}
-                  aria-keyshortcuts={"\\"}
-                  title={"Focus mode (\\)"}
-                  onClick={toggleFocus}
-                >
-                  Focus mode
-                </Button>
-              )}
-            </div>
-          </details>
+                ))}
+                {wide && (
+                  <Button
+                    ref={focusToggle}
+                    variant="secondary"
+                    aria-pressed={focus}
+                    aria-keyshortcuts={"\\"}
+                    title={"Focus mode (\\)"}
+                    onClick={toggleFocus}
+                  >
+                    Focus mode
+                  </Button>
+                )}
+              </div>
+            </details>
+          )}
         </TaskStrip>
         {!projectReadOnly && publishPolicy && publishShown && (
           <PublishToGitHub
@@ -2845,6 +2945,9 @@ export function TaskWorkspace({
                 conversation={columns}
                 pane={
                   <ChangesPane
+                    heading={
+                      deliveryApplies(data) ? "Changes and delivery" : "Changes"
+                    }
                     onClose={closePane}
                     onFullWidth={paneToFullWidth}
                   >

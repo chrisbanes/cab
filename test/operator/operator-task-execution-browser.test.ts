@@ -741,6 +741,14 @@ test("a blocked lead's idle delegate is withdrawn with a reason after a final-en
 
   // Cancel sends nothing; Confirm stays off until a reason is entered.
   const withdraw = blocked.getByRole("button", { name: "Withdraw…" });
+  const gap = await page.evaluate(
+    ([w, s]) =>
+      (document.querySelector(s!) as HTMLElement).getBoundingClientRect().top -
+      (document.querySelector(w!) as HTMLElement).getBoundingClientRect()
+        .bottom,
+    ["[data-blocked-lead] button", "#assignments > details > summary"],
+  );
+  assert.ok(gap >= 8, `Withdraw sits ${gap}px above the Assignments summary`);
   await withdraw.click();
   const dialog = page.getByRole("alertdialog");
   await dialog.getByText(/ends this delegate for good/).waitFor();

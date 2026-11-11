@@ -165,7 +165,7 @@ test("Task detail shows the designed header, two columns and C1/C2 criteria", as
   // The subtitle is the outcome's first line; the strip carries state and the lead.
   assert.equal(
     await header.locator(".page-header-title p.introduction").textContent(),
-    "Let keyboard users **open** the command menu.",
+    "Let keyboard users open the command menu.",
   );
   const strip = page.locator("[data-task-strip]");
   assert.doesNotMatch((await strip.textContent()) ?? "", /Lead · Task lead/);
@@ -481,10 +481,7 @@ test("Task detail Back returns to the originating Board entry", async (_t, j) =>
   await signIn(page, web.origin, web.password, "/tasks?view=board&ready=any");
   const card = page.locator(`[data-task-id="${a.taskId}"] .task-title`);
   await card.waitFor();
-  // Columns and rails now fit one 1366 screen; widen them so the board still scrolls.
-  await page.addStyleTag({
-    content: ".board-columns .board-column{min-width:600px !important}",
-  });
+  // Columns keep a 240px floor, so the board scrolls at this width.
   const board = page.locator(".board-columns");
   // The card sits in the first column, off screen at this scroll. A pointer click would first
   // scroll the board to it. Leave in the same turn as the scroll, before its event can save it.
@@ -842,6 +839,7 @@ test("The strip and decision card follow the server's attention codes, not a cli
     "Next: you · inspect execution",
   );
   await page.setViewportSize({ width: 390, height: 844 });
+  // A phone's strip wraps rather than truncating: the action and identity stay whole.
   const usable = await strip.evaluate((element) => {
     const next = element.querySelector(".task-next")!.getBoundingClientRect();
     const chip = element
@@ -850,8 +848,6 @@ test("The strip and decision card follow the server's attention codes, not a cli
     return {
       nextWidth: next.width,
       chipWidth: chip.width,
-      oneLine:
-        Math.abs(next.top + next.height / 2 - chip.top - chip.height / 2) < 2,
       noOverflow: document.documentElement.scrollWidth <= innerWidth,
     };
   });
@@ -859,10 +855,7 @@ test("The strip and decision card follow the server's attention codes, not a cli
     usable.nextWidth >= 44 && usable.chipWidth >= 44,
     "action and identity stay usable on a phone",
   );
-  assert.ok(
-    usable.oneLine && usable.noOverflow,
-    "strip stays on one line without widening the phone",
-  );
+  assert.ok(usable.noOverflow, "the strip does not widen the phone");
   const card = page.locator("section#decisions");
   assert.equal(
     await card
@@ -875,6 +868,42 @@ test("The strip and decision card follow the server's attention codes, not a cli
   await page.reload();
   await strip.waitFor();
   await strip.locator("[data-task-reason]").waitFor();
+  // A phone wraps the strip in its reading order: each fact follows the one before it.
+  assert.deepEqual(
+    await strip.evaluate((element) => {
+      const facts = [...element.querySelectorAll(".task-strip-facts > *")]
+        .filter((e) => e.checkVisibility())
+        .map((e) => ({
+          name: e.className || "reason",
+          box: e.getBoundingClientRect(),
+        }));
+      // Right of the previous fact on its line, or on a later line.
+      return facts.every(({ box }, i) => {
+        const prev = facts[i - 1]?.box;
+        if (!prev) return true;
+        const sameLine = box.top < prev.bottom - 1 && box.bottom > prev.top + 1;
+        return sameLine
+          ? box.left >= prev.right - 1
+          : box.top >= prev.bottom - 1;
+      })
+        ? facts.map((f) => f.name)
+        : ["out of order", ...facts.map((f) => f.name)];
+    }),
+    ["task-state", "reason", "task-next", "task-source-chip"],
+  );
+  // The reason and identity are each shown whole.
+  for (const fact of ["[data-task-reason]", ".task-source-chip"])
+    assert.deepEqual(
+      await strip
+        .locator(fact)
+        .evaluate((e) => [
+          e.checkVisibility(),
+          e.scrollWidth <= e.clientWidth,
+          getComputedStyle(e).textOverflow,
+        ]),
+      [true, true, "clip"],
+      fact,
+    );
   assert.equal(
     await strip.locator("span.task-next").innerText(),
     "Next: cab · recording routing fallback",
@@ -2508,6 +2537,9 @@ test("An open approval leads Overview and stays reachable from every tab in Deci
 
   // Phone: conversation and Reply precede the inspector; controls keep 44px targets.
   await page.setViewportSize({ width: 390, height: 844 });
+  // The page switches to its phone render a frame after the resize; until the strip's desktop
+  // options are gone the strip is still two rows tall and every box below it is offset.
+  await page.locator(".task-tools").waitFor({ state: "detached" });
   await page.evaluate(() => scrollTo(0, 0));
   const phoneCard = await box("section#decisions"),
     phoneAside = await box('aside[aria-label="Task context"]'),
@@ -2520,6 +2552,148 @@ test("An open approval leads Overview and stays reachable from every tab in Deci
     "results and Details follow the conversation column",
   );
   assert.ok(phoneReply.y + phoneReply.height <= phoneAside.y);
+  // Reply docks compactly until focus enters it, and a focused control stays clear of it.
+  assert.ok(
+    phoneReply.height <= 0.12 * 844,
+    `compact Reply is ${phoneReply.height}px`,
+  );
+  assert.equal(
+    await page.getByRole("heading", { name: "Reply" }).count(),
+    1,
+    "the compact Reply keeps its heading for assistive tech",
+  );
+  const review = page
+    .locator(".decision")
+    .getByRole("link", { name: "Review material & decide" });
+  await review.focus();
+  const reviewBox = await box(".decision a[href*='request=']");
+  const dockBox = await box("section#reply");
+  assert.ok(
+    reviewBox.y >= 0 && reviewBox.y + reviewBox.height <= 844,
+    "the focused link is in the viewport",
+  );
+  assert.ok(
+    reviewBox.y + reviewBox.height <= dockBox.y ||
+      dockBox.y + dockBox.height <= reviewBox.y,
+    "the focused link is clear of Reply",
+  );
+  const reply = page.locator("section#reply");
+  await reply.locator("#workspace-reply").focus();
+  for (const shown of [
+    reply.getByRole("radio", { name: "Comment on task" }),
+    reply.locator(".comment-recipients"),
+    reply.getByRole("button", { name: "Send comment" }),
+  ])
+    assert.ok(await shown.isVisible(), "the focused Reply shows its controls");
+  await reply.locator("#workspace-reply").fill("Keep this draft");
+  await page.evaluate(() => (document.activeElement as HTMLElement).blur());
+  assert.equal(
+    await reply.locator("#workspace-reply").inputValue(),
+    "Keep this draft",
+  );
+  // An unsent draft does not hold the dock open: keyboard focus moving outside compacts it and
+  // the focused link stays clear of it, with the draft still in the textarea.
+  await review.focus();
+  const draftDock = await box("section#reply");
+  assert.ok(
+    draftDock.height <= 0.12 * 844,
+    `Reply with a draft is ${draftDock.height}px`,
+  );
+  const draftReview = await box(".decision a[href*='request=']");
+  assert.ok(
+    draftReview.y >= 0 && draftReview.y + draftReview.height <= 844,
+    "the focused link is in the viewport",
+  );
+  assert.ok(
+    draftReview.y + draftReview.height <= draftDock.y,
+    "the focused link is clear of Reply with a draft",
+  );
+  assert.equal(
+    await reply.locator("#workspace-reply").inputValue(),
+    "Keep this draft",
+  );
+  // Safari and iOS leave focus off a tapped control: a press inside keeps the dock open.
+  await reply.locator("#workspace-reply").focus();
+  await reply.locator(".reply-destination").evaluate((el) => {
+    el.dispatchEvent(new PointerEvent("pointerdown", { bubbles: true }));
+    el.dispatchEvent(new PointerEvent("pointerup", { bubbles: true }));
+    el.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    (document.activeElement as HTMLElement).blur();
+  });
+  const lead = reply.getByRole("radio", { name: "Message task lead" });
+  assert.ok(
+    await reply.getByRole("radio", { name: "Comment on task" }).isVisible(),
+    "the radios stay visible after a non-focusing tap",
+  );
+  if (await lead.count()) {
+    await lead.click();
+    assert.ok(await lead.isChecked());
+  }
+  // A press inside a compact dock engages it though nothing takes focus, as in Safari and iOS.
+  // The events fire on the card itself, a target a real press reaches.
+  const dock = page.locator("section#reply");
+  await review.focus();
+  assert.equal(await dock.getAttribute("data-engaged"), null);
+  assert.equal(await dock.getAttribute("data-expanded"), null);
+  assert.ok((await box("section#reply")).height <= 0.12 * 844, "compact again");
+  await dock.evaluate((el) => {
+    el.dispatchEvent(new PointerEvent("pointerdown", { bubbles: true }));
+    el.dispatchEvent(new PointerEvent("pointerup", { bubbles: true }));
+    el.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+  });
+  assert.notEqual(await dock.getAttribute("data-engaged"), null);
+  assert.equal(
+    await dock.evaluate((el) => el.contains(document.activeElement)),
+    false,
+    "nothing in the dock took focus",
+  );
+  for (const shown of [
+    dock.getByRole("radio", { name: "Comment on task" }),
+    dock.getByRole("button", { name: "Send comment" }),
+  ])
+    assert.ok(
+      await shown.isVisible(),
+      "a press without focus shows the controls",
+    );
+  // A click outside an engaged dock still lands, then the dock compacts: it must not shrink
+  // between the pointerdown and the click and move the target. A viewport taller than the page,
+  // scrolled to the top, shows the shift: neither a scroll clamp nor scroll anchoring hides it.
+  await dock.locator("#workspace-reply").focus();
+  await page.setViewportSize({ width: 390, height: 4000 });
+  await page.evaluate(() => scrollTo(0, 0));
+  assert.notEqual(
+    await dock.getAttribute("data-engaged"),
+    null,
+    "the dock is engaged before the outside click",
+  );
+  const before = (await box("section#reply")).height;
+  // Pin the element: a lazy locator would resolve to another summary once the layout shifts.
+  const fold = await page
+    .locator('aside[aria-label="Task context"] details > summary:visible')
+    .last()
+    .elementHandle();
+  assert.ok(fold, "an outside control is visible");
+  const folded = () =>
+    fold.evaluate((el) => (el.parentElement as HTMLDetailsElement).open);
+  const wasOpen = await folded();
+  await fold.click();
+  assert.equal(await folded(), !wasOpen, "the outside control ran");
+  await page.waitForFunction(
+    () =>
+      document.querySelector("section#reply")?.hasAttribute("data-engaged") ===
+      false,
+  );
+  const after = (await box("section#reply")).height;
+  assert.ok(after < before, `the dock collapsed: ${before}px to ${after}px`);
+  await page.setViewportSize({ width: 390, height: 844 });
+  assert.ok(
+    (await box("section#reply")).height <= 0.12 * 844,
+    "compact after the click",
+  );
+  assert.equal(
+    await dock.locator("#workspace-reply").inputValue(),
+    "Keep this draft",
+  );
   await openOverviewCard(page, "assignments");
   for (const b of await table
     .locator(".assignment-row button")
@@ -2830,13 +3004,13 @@ const refreshTask = async (page: Page, taskId: string) => {
   );
   await reread;
 };
-/** The text of every paragraph between the destination buttons and the reply label. */
+/** The text of every paragraph between the destination radios and the reply label. */
 const sentencesAboveReply = (page: Page) =>
   page.evaluate(() => {
     const card = document.querySelector("#reply")!;
     const out: string[] = [];
     for (
-      let node = card.querySelector(".task-actions")!.nextElementSibling;
+      let node = card.querySelector(".reply-destination")!.nextElementSibling;
       node && node.tagName !== "LABEL";
       node = node.nextElementSibling
     )
@@ -2860,7 +3034,7 @@ test("A local task without a repository shows no GitHub reply or delivery lines"
     .waitFor();
   const inspector = page.locator('aside[aria-label="Task context"]');
   const delivery = inspector.locator("dt", { hasText: /^Delivery$/ });
-  const github = page.getByRole("button", { name: "Post GitHub comment" });
+  const github = page.getByRole("radio", { name: "Post GitHub comment" });
   const refreshDelivery = page.getByRole("button", {
     name: "Refresh delivery status",
   });
@@ -3030,7 +3204,7 @@ test("A project without a lead says so above the reply box", async (_t, j) => {
   // With no lead, nothing is selected: the comment is recorded for the task only.
   await page.getByText(recordOnlyText).waitFor();
   assert.equal(
-    await page.getByRole("button", { name: "Post GitHub comment" }).count(),
+    await page.getByRole("radio", { name: "Post GitHub comment" }).count(),
     0,
   );
 });
@@ -3041,7 +3215,27 @@ test("The GitHub reply says what posting does in one sentence and keeps its draf
   _t.after(a.restoreCredential);
   const { web, page, commands } = await fixture.launch();
   await signIn(page, web.origin, web.password, `/tasks/${a.taskId}`);
-  await page.getByRole("button", { name: "Post GitHub comment" }).click();
+  const group = page.getByRole("group", { name: "Send to" });
+  assert.equal(await group.getByRole("radio").count(), 2);
+  assert.equal(
+    await group.getByRole("radio", { name: "Comment on task" }).isChecked(),
+    true,
+  );
+  await group.getByRole("radio", { name: "Comment on task" }).focus();
+  await page.keyboard.press("ArrowRight");
+  assert.equal(
+    await group.getByRole("radio", { name: "Post GitHub comment" }).isChecked(),
+    true,
+  );
+  // Send is the only primary-styled button in Reply.
+  assert.equal(
+    await page
+      .locator("#reply button")
+      .evaluateAll(
+        (els) => els.filter((e) => e.className.includes("bg-primary")).length,
+      ),
+    1,
+  );
   await page.getByLabel("Editable reply").fill("Exact comment body");
   assert.deepEqual(await sentencesAboveReply(page), [
     "P:You review the exact comment before it posts to the GitHub issue.",
@@ -3062,7 +3256,7 @@ test("The GitHub reply says what posting does in one sentence and keeps its draf
   await refreshTask(page, a.taskId);
   await page.getByText(noGrant, { exact: true }).first().waitFor();
   assert.deepEqual(await sentencesAboveReply(page), [`P:${noGrant}`]);
-  const tab = page.getByRole("button", { name: "Post GitHub comment" });
+  const tab = page.getByRole("radio", { name: "Post GitHub comment" });
   assert.equal(
     await page
       .getByRole("button", { name: "Post comment", exact: true })
@@ -3137,7 +3331,7 @@ const unavailableComment = async (page: Page, sentence: string) => {
     (await inspector.innerText()).replace(/\s+/g, " "),
     /GitHub commenting unavailable/,
   );
-  const tab = page.getByRole("button", { name: "Post GitHub comment" });
+  const tab = page.getByRole("radio", { name: "Post GitHub comment" });
   assert.equal(await tab.getAttribute("aria-disabled"), "true");
   assert.equal(await tab.getAttribute("title"), sentence);
   const described = await tab.getAttribute("aria-describedby");
@@ -3149,19 +3343,55 @@ const unavailableComment = async (page: Page, sentence: string) => {
   return tab;
 };
 
+test("Reply destinations are 44px touch targets on phones and mark the checked one in forced colours", async (_t, j) => {
+  const fixture = await openFixture(j);
+  const a = await seedImportedCommentTask(fixture.f, "allow");
+  _t.after(a.restoreCredential);
+  const { web, page } = await fixture.launch();
+  await signIn(page, web.origin, web.password, `/tasks/${a.taskId}`);
+  const labels = page.locator(".reply-destination-option");
+  await labels.first().waitFor();
+  await page.setViewportSize({ width: 390, height: 844 });
+  // The phone Reply is compact until focused; focusing the box shows the destinations.
+  await page.getByLabel("Editable reply").focus();
+  const heights = await labels.evaluateAll((els) =>
+    els.map((e) => e.getBoundingClientRect().height),
+  );
+  assert.equal(heights.length, 2);
+  for (const h of heights) assert.ok(h >= 44, `option height ${h}`);
+
+  await page.setViewportSize({ width: 1366, height: 900 });
+  await page.emulateMedia({ forcedColors: "active" });
+  const outline = (checked: boolean) =>
+    labels
+      .filter({
+        has: page.locator(
+          `input:${checked ? "" : "not(:"}checked${checked ? "" : ")"}`,
+        ),
+      })
+      .first()
+      .evaluate((e) => {
+        const c = getComputedStyle(e);
+        return `${c.outlineStyle} ${c.outlineWidth}`;
+      });
+  const checkedOutline = await outline(true);
+  assert.notEqual(checkedOutline, await outline(false));
+  assert.doesNotMatch(checkedOutline, /^none/);
+});
+
 test("An unavailable GitHub comment gives its reason in the inspector and on a focusable tab that does nothing", async (_t, j) => {
   const fixture = await openFixture(j);
   const a = await seedImportedCommentTask(fixture.f, "allow");
   _t.after(a.restoreCredential);
   const { web, page, commands } = await fixture.launch();
   await signIn(page, web.origin, web.password, `/tasks/${a.taskId}`);
-  const lead = page.getByRole("button", { name: "Comment on task" });
+  const lead = page.getByRole("radio", { name: "Comment on task" });
   await lead.waitFor();
   const inspector = page.locator('aside[aria-label="Task context"]');
   await inspector.getByText("GitHub commenting permitted").waitFor();
   assert.equal(
     await page
-      .getByRole("button", { name: "Post GitHub comment" })
+      .getByRole("radio", { name: "Post GitHub comment" })
       .getAttribute("aria-disabled"),
     null,
   );
@@ -3174,19 +3404,23 @@ test("An unavailable GitHub comment gives its reason in the inspector and on a f
     page,
     commentReasonSentences["no-comment-grant"],
   );
-  // Tab from the sibling destination reaches it, so the reason is readable by keyboard.
+  // An arrow key from the sibling destination reaches it, so the reason is readable by keyboard.
   await lead.focus();
-  await page.keyboard.press("Tab");
+  await page.keyboard.press("ArrowRight");
   assert.equal(
-    await page.evaluate(() => document.activeElement?.textContent),
+    await page.evaluate(() =>
+      document.activeElement?.closest("label")?.textContent?.trim(),
+    ),
     "Post GitHub comment",
   );
+  assert.equal(await page.getByRole("group", { name: "Send to" }).count(), 1);
   // Neither Enter, Space nor a click selects it: the lead's sentence stays above the box.
   const before = await sentencesAboveReply(page);
   await page.keyboard.press("Enter");
   await page.keyboard.press("Space");
   await tab.click({ force: true });
   assert.deepEqual(await sentencesAboveReply(page), before);
+  assert.equal(await lead.isChecked(), true);
   assert.equal(
     await page
       .getByRole("button", { name: "Post comment", exact: true })
@@ -3294,7 +3528,7 @@ test("The meaningful outcome sentence stays in the header and the full brief sta
   await subtitle.waitFor();
   assert.equal(
     await subtitle.textContent(),
-    "Let keyboard users **open** the command menu.",
+    "Let keyboard users open the command menu.",
   );
   assert.equal(
     await page.locator("[data-task-strip] details.task-outcome").count(),
@@ -4033,7 +4267,7 @@ test("A task that loses its GitHub source mid-edit moves to the lead with the le
   await page.getByRole("button", { name: "Ask lead about brief" }).click();
   const leadText = await box.inputValue();
   assert.notEqual(leadText, "");
-  await page.getByRole("button", { name: "Post GitHub comment" }).click();
+  await page.getByRole("radio", { name: "Post GitHub comment" }).click();
   await box.fill("Original body");
   await page
     .getByRole("button", { name: "Review exact GitHub comment" })
@@ -4059,7 +4293,7 @@ test("A task that loses its GitHub source mid-edit moves to the lead with the le
   await refreshTask(page, a.taskId);
   await page.getByRole("button", { name: "Send to task lead" }).waitFor();
   assert.equal(
-    await page.getByRole("button", { name: "Post GitHub comment" }).count(),
+    await page.getByRole("radio", { name: "Post GitHub comment" }).count(),
     0,
   );
   assert.equal(await box.inputValue(), leadText);
@@ -4067,13 +4301,13 @@ test("A task that loses its GitHub source mid-edit moves to the lead with the le
     `P:${leadReceivesNotice("Task lead")}`,
   ]);
   // Choosing the destination that is already selected changes nothing.
-  await page.getByRole("button", { name: "Message task lead" }).click();
+  await page.getByRole("radio", { name: "Message task lead" }).click();
   assert.equal(await box.inputValue(), leadText);
 
   // The source returns: the GitHub draft is as it was, and editing it withdraws its approval.
   hasSource = true;
   await refreshTask(page, a.taskId);
-  await page.getByRole("button", { name: "Post GitHub comment" }).click();
+  await page.getByRole("radio", { name: "Post GitHub comment" }).click();
   assert.equal(await box.inputValue(), "Original body");
   assert.equal(await post.isEnabled(), true);
   await box.fill("Original body, edited");
@@ -4893,6 +5127,7 @@ test("Phone task header is Back, title, identity subtitle and one Task actions c
     "Stopped task",
     "One line outcome.",
   );
+  const question = await seedOwnQuestion(fixture.f);
   fixture.f.seedPersistedState((db) => {
     db.prepare(
       "UPDATE domain_tasks SET state = 'done', version = version + 1 WHERE id = ?",
@@ -4955,7 +5190,7 @@ test("Phone task header is Back, title, identity subtitle and one Task actions c
   const identity = header.locator(".page-subtitle-short");
   assert.equal(
     await identity.textContent(),
-    "Let keyboard users **open** the command menu.",
+    "Let keyboard users open the command menu.",
   );
   assert.ok(await identity.isVisible());
   assert.doesNotMatch(
@@ -4983,6 +5218,17 @@ test("Phone task header is Back, title, identity subtitle and one Task actions c
     await header.getByRole("button", { name: "Stop…" }).isVisible(),
     false,
   );
+  // One task menu on the page: the strip's options live in Task actions.
+  const menus = () =>
+    page.evaluate(
+      () =>
+        [...document.querySelectorAll("summary, button, a")].filter((e) =>
+          ["Task actions", "More task options"].includes(
+            (e.getAttribute("aria-label") ?? e.textContent ?? "").trim(),
+          ),
+        ).length,
+    );
+  assert.equal(await menus(), 1);
 
   // The keyboard opens it; Execution then Stop… follow in order; Stop… asks before it posts.
   await toggle.focus();
@@ -4992,6 +5238,8 @@ test("Phone task header is Back, title, identity subtitle and one Task actions c
   await activeIs("Execution");
   await page.keyboard.press("Tab");
   await activeIs("Edit task…");
+  await page.keyboard.press("Tab");
+  await activeIs("Publish to GitHub");
   await page.keyboard.press("Tab");
   await activeIs("Stop…");
   await page.keyboard.press("Enter");
@@ -5057,6 +5305,39 @@ test("Phone task header is Back, title, identity subtitle and one Task actions c
     await header.locator(".page-subtitle-short").textContent(),
     "Source-owned imported outcome",
   );
+  // Its source actions are in Task actions, and Refresh source still refreshes from there.
+  assert.equal(await menus(), 1);
+  await toggle.click();
+  const refreshed = page.waitForRequest(
+    (r) => new URL(r.url()).pathname === "/api/operator/source-refresh",
+  );
+  await header.getByRole("button", { name: "Refresh source" }).click();
+  await refreshed;
+  await page.mouse.click(4, 700);
+
+  // The state and the whole next step show; the identity follows, whole.
+  await page.goto(`${web.origin}/tasks/${question.taskId}`);
+  const strip = page.locator("[data-task-strip]");
+  await strip.locator(".task-next").waitFor();
+  for (const fact of [
+    strip.locator(".task-state"),
+    strip.locator(".task-next"),
+  ]) {
+    assert.ok(await fact.isVisible());
+    assert.deepEqual(
+      await fact.evaluate((e) => [
+        e.scrollWidth <= e.clientWidth,
+        getComputedStyle(e).textOverflow,
+      ]),
+      [true, "clip"],
+    );
+  }
+  assert.deepEqual(
+    await strip
+      .locator(".task-source-chip")
+      .evaluate((e) => [e.checkVisibility(), e.scrollWidth <= e.clientWidth]),
+    [true, true],
+  );
 
   // A finished task offers Execution and no Stop….
   await page.goto(`${web.origin}/tasks/${finished.taskId}`);
@@ -5068,6 +5349,7 @@ test("Phone task header is Back, title, identity subtitle and one Task actions c
     [
       ["A", "Execution"],
       ["BUTTON", "Edit task…"],
+      ["BUTTON", "Publish to GitHub"],
     ],
   );
 
@@ -5096,11 +5378,23 @@ test("Phone task header is Back, title, identity subtitle and one Task actions c
     await header.locator(".page-subtitle-short").textContent(),
     "One line outcome.",
   );
-  await page.setViewportSize({ width: 1366, height: 900 });
+  // Below 1121px the strip's options toggle is a 44px target, like the strip's other controls.
+  await page.setViewportSize({ width: 800, height: 768 });
+  await settle(page);
+  const touch = await page.getByLabel("More task options").boundingBox();
+  assert.ok(touch && touch.width >= 44 && touch.height >= 44);
+  await page.setViewportSize({ width: 1366, height: 850 });
   await settle(page);
   // From 760px the header keeps the recorded outcome and carries no phone identity line.
   assert.equal(await header.locator(".page-subtitle-short").isVisible(), false);
   assert.ok(await header.locator(".introduction").isVisible());
+  // The strip's options toggle is a compact icon button in line with the identity chip.
+  const middle = (box: { y: number; height: number } | null) =>
+    box ? box.y + box.height / 2 : Number.NaN;
+  const options = await page.getByLabel("More task options").boundingBox(),
+    chip = await page.locator(".task-strip .task-source-chip").boundingBox();
+  assert.ok(options && options.width <= 32 && options.height <= 32);
+  assert.ok(Math.abs(middle(options) - middle(chip)) <= 2);
   assert.deepEqual(stops, []);
 });
 

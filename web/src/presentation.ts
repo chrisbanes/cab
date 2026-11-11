@@ -102,6 +102,14 @@ export const codeSentence = (
 const lineMarkers =
   /^\s*(?:#{1,6}\s+|(?:[-*+]|\d+\.)\s+)?(?:\[[ xX]\](?:\s+|$))?/;
 
+/** Inline Markdown markers removed, keeping their text; intraword underscores and spaced `*` stay. */
+const plainInline = (line: string) =>
+  line
+    .replace(/\[([^\]]+)\]\([^)\s]*\)/g, "$1")
+    .replace(/`([^`]+)`/g, "$1")
+    .replace(/(\*\*|__)(?=\S)(.+?)(?<=\S)\1/g, "$2")
+    .replace(/(?<![\w*])([*_])(?=\S)([^*_]+?)(?<=\S)\1(?![\w*])/g, "$2");
+
 /**
  * The first meaningful outcome sentence, skipping headings, quoted context and source metadata.
  * `more` is true when meaningful text follows. A redacted outcome has no line.
@@ -114,6 +122,7 @@ export function outcomeLine(text: string | null): {
     .split("\n")
     .filter((raw) => !/^\s*(?:>|#{1,6}\s)/.test(raw))
     .map((raw) => raw.trim().replace(lineMarkers, "").trim())
+    .map(plainInline)
     .map((line) =>
       line.replace(/^(?:(?:Part of\s+#\d+|Blocked by\s+[^.]+)\.\s*)+/i, ""),
     )

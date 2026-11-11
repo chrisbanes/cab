@@ -41,8 +41,19 @@ import {
   DialogTrigger,
 } from "./ui/dialog.js";
 
-/** Plain data the task page reports to the shell header; the shell renders it. */
+/** A task option the page performs: in the strip's More task options, or on a phone in Task actions. */
+export interface TaskOption {
+  kind: "improve" | "refresh" | "publish";
+  label: string;
+  disabled: boolean;
+  /** Whether the option's panel is open, for the options that open one. */
+  expanded?: boolean | undefined;
+}
+
+/** What the task page reports to the shell header; the shell renders it. */
 export interface TaskHeaderReport {
+  /** Runs a task option on the task page, so its panel or outcome shows there. */
+  run?: ((kind: TaskOption["kind"]) => void) | undefined;
   taskId: string;
   title: string;
   subtitle?: string | undefined;
@@ -57,12 +68,15 @@ export interface TaskHeaderReport {
   } | null;
   /** Edit task…: a local task's editable values, null for an imported task (its text is the source's). */
   edit: TaskEditOffer | null;
+  /** The strip's options, which a phone shows in Task actions instead. */
+  options: TaskOption[];
 }
 
 export function taskHeaderReport(
   data: TaskRead["data"],
   projectName: string | null,
   origin: string | undefined,
+  options: TaskOption[],
 ): TaskHeaderReport {
   const title = data.task.title ?? "Title unavailable";
   const project = projectName ?? "project";
@@ -108,12 +122,13 @@ export function taskHeaderReport(
             version: data.task.version,
           }
         : null,
+    options,
   };
 }
 
 /**
  * Execution, Edit task…, Reset task…, Stop… and Resume…: from 760px they sit in the header; on a phone
- * the one "Task actions" disclosure holds them. It is one element at every width, forced open
+ * the one "Task actions" disclosure holds them, with the strip's task options. It is one element at every width, forced open
  * from 760px, so a resize never remounts a dialog. Stop and Resume confirm first, then send
  * `task.stop` or `task.resume` through the command flow.
  */
@@ -234,6 +249,25 @@ export function TaskHeaderActions({
               }
             />
           )}
+        {phone &&
+          report.options.map((option) => (
+            <Button
+              key={option.kind}
+              variant="secondary"
+              disabled={option.disabled}
+              aria-expanded={option.expanded}
+              onClick={(event) => {
+                report.run?.(option.kind);
+                // The option's panel or notice opens on the page: close the menu over it.
+                const details = event.currentTarget.closest("details");
+                if (details) details.open = false;
+                setMenuOpen(false);
+                details?.querySelector("summary")?.focus();
+              }}
+            >
+              {option.label}
+            </Button>
+          ))}
         {(["stop", "resume"] as const).map((kind) => (
           <HoldCommand
             key={kind}
@@ -256,7 +290,8 @@ export function TaskHeaderActions({
 
 /**
  * One line of state, one reason, the operator action and one identity chip.
- * Only a lead differing from the project default needs a name here.
+ * Only a lead differing from the project default needs a name here. A phone wraps it
+ * in reading order instead of truncating.
  */
 export function TaskStrip({
   data,
@@ -308,7 +343,9 @@ export function TaskStrip({
           <span className="task-source-chip">{identity.label}</span>
         )}
         {data.lead && data.lead.profileId !== data.project?.leadProfileId && (
-          <span>Lead · {data.lead?.name ?? "Unconfigured"}</span>
+          <span className="task-strip-lead">
+            Lead · {data.lead?.name ?? "Unconfigured"}
+          </span>
         )}
       </div>
       {children}

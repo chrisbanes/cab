@@ -122,7 +122,7 @@
     width: 44px;
     height: 44px;
     border: 1px solid var(--line-strong);
-    border-radius: 6px;
+    border-radius: var(--radius-md);
     color: var(--fg);
     cursor: pointer;
     list-style: none;
@@ -146,7 +146,7 @@
     min-width: 200px;
     padding: var(--space-8);
     border: 1px solid var(--line-strong);
-    border-radius: 8px;
+    border-radius: var(--radius-xl);
     background: var(--surface);
   }
 
@@ -358,7 +358,7 @@ a.task-source-chip:hover {
   margin: 0;
   padding: var(--space-12) var(--space-16);
   border: 1px solid var(--line);
-  border-radius: 8px;
+  border-radius: var(--radius-xl);
   background: var(--surface);
 }
 
@@ -427,7 +427,7 @@ a.task-source-chip:hover {
 .task-inspector {
   min-width: 0;
   border: 1px solid var(--line);
-  border-radius: 8px;
+  border-radius: var(--radius-xl);
   background: var(--surface);
   font-size: var(--type-xs);
 }
@@ -1006,14 +1006,14 @@ a.task-source-chip:hover {
 .conv-operator {
   padding: 10px var(--space-12);
   border: 1px solid var(--line-strong);
-  border-radius: 8px;
+  border-radius: var(--radius-xl);
   background: var(--raised);
 }
 
 .conv-request {
   padding: 10px var(--space-12);
   border: 1px solid var(--line);
-  border-radius: 8px;
+  border-radius: var(--radius-xl);
 }
 
 .conv-request[data-status="open"] {
@@ -1035,7 +1035,7 @@ a.task-source-chip:hover {
 
 .conv-raw {
   padding: var(--space-8);
-  border-radius: 6px;
+  border-radius: var(--radius-md);
   background: var(--raised);
   font-family: var(--font-mono);
   font-size: 12px;
@@ -1048,7 +1048,7 @@ a.task-source-chip:hover {
   align-items: center;
   gap: var(--space-8);
   padding: var(--space-8);
-  border-radius: 6px;
+  border-radius: var(--radius-md);
   background: var(--raised);
   color: var(--fg-2);
   font-size: var(--type-xs);
@@ -1117,7 +1117,7 @@ a.task-source-chip:hover {
 .conv-gap {
   padding: var(--space-8) var(--space-12);
   border: 1px dashed var(--line-strong);
-  border-radius: 6px;
+  border-radius: var(--radius-md);
   color: var(--fg-2);
   font-size: var(--type-xs);
 }
@@ -1142,7 +1142,7 @@ a.task-source-chip:hover {
 .conv-delegation {
   min-width: 0;
   border: 1px solid var(--line);
-  border-radius: 8px;
+  border-radius: var(--radius-xl);
   background: var(--surface);
 }
 
@@ -1315,7 +1315,7 @@ a.task-source-chip:hover {
   min-width: max-content;
   padding: var(--space-8);
   border: 1px solid var(--line-strong);
-  border-radius: 8px;
+  border-radius: var(--radius-xl);
   background: var(--raised);
   list-style: none;
 }
@@ -1336,13 +1336,37 @@ a.task-source-chip:hover {
   box-shadow: 0 -8px 16px var(--surface);
 }
 
-.task-tools {
+/* The strip's options are a menu, not a workspace disclosure: no frame, an icon toggle
+   (32px from 1121px, a 44px target below). */
+.task-workspace details.task-tools {
   position: relative;
+  margin: 0;
+  padding: 0;
+  border: 0;
 }
-.task-tools > summary {
-  cursor: pointer;
+.task-workspace .task-tools > summary {
+  justify-content: center;
+  width: 32px;
+  min-height: 0;
+  height: 32px;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-md);
+  color: var(--fg);
   list-style: none;
-  padding: 8px;
+}
+/* Below 1121px it is a 44px target like the strip's other controls. */
+@media (max-width: 1120px) {
+  .task-workspace .task-tools > summary {
+    width: 44px;
+    height: 44px;
+  }
+}
+.task-tools > summary::-webkit-details-marker {
+  display: none;
+}
+.task-tools > summary svg {
+  width: 18px;
+  height: 18px;
 }
 .task-tools > .task-actions {
   position: absolute;
@@ -1352,7 +1376,7 @@ a.task-source-chip:hover {
   padding: 8px;
   background: var(--surface);
   border: 1px solid var(--line);
-  border-radius: 8px;
+  border-radius: var(--radius-xl);
 }
 .task-strip a.task-next {
   color: var(--attn);
@@ -1374,23 +1398,7 @@ a.task-source-chip:hover {
 .task-strip-facts > .task-state {
   flex: none;
 }
-@media (max-width: 759px) {
-  .task-tools > summary {
-    min-width: 44px;
-    min-height: 44px;
-  }
-  .task-strip-facts {
-    gap: var(--space-8);
-  }
-  .task-strip-facts > [data-task-reason] {
-    max-width: 25%;
-  }
-  .task-strip-facts > .task-source-chip {
-    max-width: 35%;
-  }
-}
-
-/* Next text yields to the identity chip without making either action disappear on a phone. */
+/* Next text yields to the identity chip without making either action disappear. */
 .task-strip-facts > .task-next {
   flex: 1;
   min-width: 44px;
@@ -1399,6 +1407,25 @@ a.task-source-chip:hover {
   flex-shrink: 0;
   min-width: 44px;
   max-width: 35%;
+}
+/* Phone: the strip wraps instead of truncating, in its reading order. */
+@media (max-width: 759px) {
+  .task-strip-facts {
+    flex-wrap: wrap;
+    white-space: normal;
+    gap: var(--space-4) var(--space-8);
+  }
+  .task-strip-facts > [data-task-reason],
+  .task-strip-facts > .task-next,
+  .task-strip-facts > .task-source-chip,
+  .task-strip-facts > .task-strip-lead {
+    max-width: 100%;
+    text-overflow: clip;
+    overflow-wrap: anywhere;
+  }
+  .task-strip-facts > .task-source-chip {
+    height: auto;
+  }
 }
 
 /* A request owns the reading area while its form or recovery outcome is open. */
@@ -1409,4 +1436,108 @@ a.task-source-chip:hover {
 }
 .task-workspace .task-columns:has([data-request-active]) > section.reply-card {
   position: static;
+}
+
+/* On a phone, Reply docks as one textarea until the operator engages it (focus or a press
+   inside, set in task-workspace.tsx) or a send, notice or uncertain state needs its controls.
+   The root's scroll padding keeps a focused control clear of the dock. */
+@media (max-width: 759px) {
+  :root:has(.task-workspace .reply-card) {
+    --reply-dock-height: 62px;
+    scroll-padding-bottom: var(--reply-dock-height);
+  }
+  /* An engaged or forced-open dock can reach its 40dvh cap without holding focus. */
+  :root:has(.task-workspace .reply-card:is([data-expanded], [data-engaged])) {
+    scroll-padding-bottom: 40dvh;
+  }
+  .task-workspace
+    .task-columns
+    > section.reply-card:not(:focus-within, [data-expanded], [data-engaged]) {
+    padding: var(--space-8);
+    max-height: 12dvh;
+    overflow: hidden;
+  }
+  .reply-card:not(:focus-within, [data-expanded], [data-engaged])
+    > :not(textarea, label, h3) {
+    display: none;
+  }
+  .reply-card:not(:focus-within, [data-expanded], [data-engaged]) > label,
+  .reply-card:not(:focus-within, [data-expanded], [data-engaged]) > h3 {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+    white-space: nowrap;
+  }
+  .reply-card:not(:focus-within, [data-expanded], [data-engaged]) > textarea {
+    height: 44px;
+    min-height: 44px;
+    resize: none;
+  }
+}
+
+/* Reply destination: native radios drawn as a segmented control; Send stays the only primary. */
+.reply-destination {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-4);
+  margin: 0;
+  padding: 0;
+  border: 0;
+  min-width: 0;
+}
+
+.reply-destination-option {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  padding: var(--space-4) var(--space-12);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  cursor: pointer;
+}
+
+.reply-destination-option input {
+  position: absolute;
+  inset: 0;
+  margin: 0;
+  opacity: 0;
+  cursor: inherit;
+}
+
+.reply-destination-option:has(input:checked) {
+  background: var(--raised);
+  border-color: var(--foreground);
+  font-weight: var(--weight-semibold);
+}
+
+.reply-destination-option:has(input:focus-visible) {
+  outline: 2px solid var(--focus);
+  outline-offset: 2px;
+}
+
+.reply-destination-option:has(input:disabled),
+.reply-destination-option:has(input[aria-disabled="true"]) {
+  opacity: 0.5;
+  cursor: default;
+}
+
+@media (max-width: 759px) {
+  .reply-destination-option {
+    min-height: 44px;
+    justify-content: center;
+  }
+}
+
+/* Forced colours drop backgrounds and weight cues: mark the checked option with an outline. */
+@media (forced-colors: active) {
+  .reply-destination-option:has(input:checked) {
+    outline: 2px solid Highlight;
+    outline-offset: -2px;
+  }
+}
+
+[data-blocked-lead] {
+  margin-block-end: var(--space-12);
 }

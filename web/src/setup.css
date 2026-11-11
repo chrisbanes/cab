@@ -117,7 +117,7 @@
   padding: 4px;
   overflow-y: auto;
   border: 1px solid var(--border);
-  border-radius: var(--radius-lg, 8px);
+  border-radius: var(--radius-xl);
   list-style: none;
 }
 
@@ -134,7 +134,7 @@
   min-height: 44px;
   padding: var(--space-8, 8px) var(--space-12);
   border: 0;
-  border-radius: var(--radius-md, 6px);
+  border-radius: var(--radius-md);
   background: transparent;
   color: inherit;
   text-align: left;

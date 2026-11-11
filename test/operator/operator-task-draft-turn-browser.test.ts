@@ -81,8 +81,11 @@ for (const [name, viewport] of Object.entries(viewports)) {
       await page.getByRole("heading", { name: title, level: 1 }).waitFor();
     };
     // The shared comment is the default reply; a Draft task's draft turn is its own explicit choice.
-    const chooseDraftTurn = () =>
-      page.getByRole("button", { name: /^Draft turn with / }).click();
+    // The phone Reply is compact until focused, so focus the box before choosing.
+    const chooseDraftTurn = async () => {
+      await page.locator("#workspace-reply").focus();
+      await page.getByRole("radio", { name: /^Draft turn with / }).click();
+    };
     const startButton = () =>
       page.getByRole("button", { name: "Start draft turn", exact: true });
 
@@ -103,10 +106,12 @@ for (const [name, viewport] of Object.entries(viewports)) {
     }
     // A project without a lead keeps the ordinary reply.
     await visit(noLead.taskId, "No lead task");
+    await page.locator("#workspace-reply").focus();
     await page.getByRole("button", { name: "Send comment" }).waitFor();
     assert.equal(await startButton().count(), 0);
     // A Ready task keeps the ordinary reply.
     await visit(ready.taskId, "Ready task");
+    await page.locator("#workspace-reply").focus();
     await page.getByRole("button", { name: "Send comment" }).waitFor();
     assert.equal(await startButton().count(), 0);
     assert.deepEqual(commands, []);

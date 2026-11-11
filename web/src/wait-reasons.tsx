@@ -12,6 +12,10 @@ import {
   waitLabels,
 } from "../../src/operator/wait-reasons.js";
 import type { OperatorClient } from "./api.js";
+import {
+  recoveryEvidenceLabels,
+  type RecoveryAssignment,
+} from "./recovery-labels.js";
 import { ActionLink, Button, StatusBadge } from "./components.js";
 import { DraftMessage, key, useDraft } from "./settings.js";
 import type {
@@ -49,13 +53,6 @@ const linkHref = (link: WaitLink, taskId: string | null) =>
         : link.kind === "recovery"
           ? `/assignments/${link.assignmentId}/recovery`
           : "/tasks?state=Running&ready=any";
-
-/** An assignment whose recovery page a hold line links. */
-export interface RecoveryAssignment {
-  assignmentId: string;
-  /** Null when the profile name is withheld, as in Settings. */
-  name: string | null;
-}
 
 /** One wait's Fix, or the links to what blocks it; holds never get a Fix. */
 function WaitAction({
@@ -124,6 +121,7 @@ function HoldList({
   assignments: readonly RecoveryAssignment[];
   heading?: string | undefined;
 }) {
+  const labels = recoveryEvidenceLabels(assignments);
   return (
     <div className="wait-holds">
       {heading && <p className="metadata muted">{heading}</p>}
@@ -138,14 +136,12 @@ function HoldList({
             {assignments.length === 0 ? (
               <a href={href}>Execution details</a>
             ) : (
-              assignments.map((a) => (
+              assignments.map((a, i) => (
                 <a
                   key={a.assignmentId}
                   href={`/assignments/${a.assignmentId}/recovery`}
                 >
-                  {assignments.length === 1
-                    ? "Recovery evidence"
-                    : `${a.name ?? "Agent name unavailable"}: recovery evidence`}
+                  {assignments.length === 1 ? "Recovery evidence" : labels[i]}
                 </a>
               ))
             )}

@@ -792,17 +792,19 @@ export function TaskWorkspaceChanges({
             !unavailableEmptySnapshot && (
               <span>Current workspace snapshots stay fixed until Refresh.</span>
             )}
-          <OutcomeDetails fields={detailFields} />
           {snapshot?.truncated && (
             <span>Comparison output is bounded and truncated.</span>
           )}
-          <Button
-            variant="secondary"
-            onClick={refresh}
-            disabled={currentRequest?.pending}
-          >
-            Refresh comparison
-          </Button>
+          <div className="changes-observation-actions">
+            <OutcomeDetails fields={detailFields} />
+            <Button
+              variant="secondary"
+              onClick={refresh}
+              disabled={currentRequest?.pending}
+            >
+              Refresh comparison
+            </Button>
+          </div>
         </div>
       )}
       {state.refreshNotice?.key === key && (
