@@ -593,7 +593,6 @@ test("page-owned refresh replaces the shell Refresh and still re-reads the works
     ["/", "Refresh tasks"],
     ["/tasks", "Refresh tasks"],
     [`/projects/${projectId}`, "Refresh tasks"],
-    ["/search?query=Refresh", "Refresh results"],
   ];
   for (const [route, name] of owned) {
     await page.goto(web.origin + route);
@@ -614,6 +613,16 @@ test("page-owned refresh replaces the shell Refresh and still re-reads the works
     await workspace;
     await inbox;
   }
+  // Search has no refresh of its own: Search records re-reads, and the shell Refresh stays gone.
+  await page.goto(`${web.origin}/search?query=Refresh`);
+  await page
+    .getByRole("button", { name: "Search records", exact: true })
+    .waitFor();
+  assert.equal(
+    await page.getByRole("button", { name: /^Refresh/ }).count(),
+    0,
+    "/search has no Refresh button",
+  );
   for (const route of ["/inbox", "/settings"]) {
     await page.goto(web.origin + route);
     await page.locator("main.page h1").waitFor();
@@ -623,7 +632,12 @@ test("page-owned refresh replaces the shell Refresh and still re-reads the works
       `${route} keeps one Refresh`,
     );
   }
-  for (const route of [...owned.map(([r]) => r), "/inbox", "/settings"]) {
+  for (const route of [
+    ...owned.map(([r]) => r),
+    "/search?query=Refresh",
+    "/inbox",
+    "/settings",
+  ]) {
     await page.goto(web.origin + route);
     await page.locator("main.page h1").waitFor();
     await page.waitForLoadState("networkidle");

@@ -154,7 +154,7 @@ test("shared Search preserves exact historical target, dates, selected focus and
     }),
   );
   await page
-    .getByRole("button", { name: "Refresh results", exact: true })
+    .getByRole("button", { name: "Search records", exact: true })
     .click();
   await page.getByText(/Refresh failed\. Showing the last matches/).waitFor();
   assert.equal(
@@ -226,12 +226,12 @@ test("shared Search preserves exact historical target, dates, selected focus and
       );
   });
   await page
-    .getByRole("button", { name: "Refresh results", exact: true })
+    .getByRole("button", { name: "Search records", exact: true })
     .click();
   await entry;
   await page.context().clearCookies();
   await page
-    .getByRole("button", { name: "Refresh results", exact: true })
+    .getByRole("button", { name: "Search records", exact: true })
     .click();
   await page.getByLabel("Password").waitFor();
   assert.equal(new URL(page.url()).search, "");
@@ -342,7 +342,7 @@ test("shared Search preserves exact historical target, dates, selected focus and
         );
     });
     await page
-      .getByRole("button", { name: "Refresh results", exact: true })
+      .getByRole("button", { name: "Search records", exact: true })
       .click();
     await lateEntry;
     if (unknown)
@@ -918,7 +918,7 @@ test("Search leads with the field and shows filters beside the result count once
     });
   assert.equal(await oneLine(), true);
 
-  // After a query: every filter, the count and Refresh share the results header.
+  // After a query: every filter and the count share the results header.
   await searchRecords(page, "Leads");
   const header = page.locator("section.search-results .search-results-head");
   await page.locator("#search-count").waitFor();
@@ -926,10 +926,9 @@ test("Search leads with the field and shows filters beside the result count once
     assert.equal(await header.locator(control).count(), 1);
   assert.equal(await header.locator("#search-count").count(), 1);
   assert.equal(
-    await header
-      .getByRole("button", { name: "Refresh results", exact: true })
-      .count(),
-    1,
+    await header.getByRole("button").count(),
+    0,
+    "the results header holds no button",
   );
   assert.equal(await page.locator("form").getByLabel("Record type").count(), 0);
   assert.ok((await recordTypes()).includes("Task"));
@@ -1126,10 +1125,10 @@ test("Search leads with the field and shows filters beside the result count once
   await searchRecords(page, "Leads");
   const heights = await page
     .locator(
-      ".search-results-head select, .search-results-head input[type=date], .search-results-head .search-history, .search-results-head button",
+      ".search-results-head select, .search-results-head input[type=date], .search-results-head .search-history",
     )
     .evaluateAll((els) => els.map((e) => e.getBoundingClientRect().height));
-  assert.equal(heights.length, 6);
+  assert.equal(heights.length, 5);
   assert.ok(
     heights.every((h) => h >= 44),
     JSON.stringify(heights),
@@ -1141,6 +1140,58 @@ test("Search leads with the field and shows filters beside the result count once
     )) <= 1,
   );
   await captureBrowserEvidence(page, "390-search-header-filters");
+
+  // Typed dates are applied by the same button, in one search read.
+  const field = (name: string) => page.getByLabel(name, { exact: true });
+  const threeDaysAgo = new Date();
+  threeDaysAgo.setDate(threeDaysAgo.getDate() - 3);
+  const day3 = `${threeDaysAgo.getFullYear()}-${String(threeDaysAgo.getMonth() + 1).padStart(2, "0")}-${String(threeDaysAgo.getDate()).padStart(2, "0")}`;
+  await field("From date").fill(day3);
+  await page
+    .getByText(
+      "Dates not applied yet. Press Enter or Search records to apply them.",
+    )
+    .waitFor();
+  const dated: string[] = [];
+  const onSearch = (r: import("playwright").Request) => {
+    if (new URL(r.url()).pathname === "/api/operator/search")
+      dated.push(r.url());
+  };
+  page.on("request", onSearch);
+  await page
+    .getByRole("button", { name: "Search records", exact: true })
+    .click();
+  await page.waitForURL(
+    (url) => url.searchParams.get("after") === searchDayStart(day3),
+  );
+  await page.waitForLoadState("networkidle");
+  page.off("request", onSearch);
+  assert.equal(dated.length, 1);
+  assert.equal(
+    new URL(dated[0]!).searchParams.get("after"),
+    searchDayStart(day3),
+  );
+
+  // Result metadata: project and status in the sans face, the time in mono.
+  const fonts = await page
+    .locator(".search-provenance")
+    .first()
+    .evaluate((el) => {
+      const family = (e: Element) => getComputedStyle(e).fontFamily;
+      const probe = document.createElement("span");
+      probe.style.fontFamily = "var(--font-sans)";
+      document.body.append(probe);
+      const sans = family(probe);
+      probe.remove();
+      return {
+        sans,
+        text: family(el),
+        time: family(el.querySelector(".identifier")!),
+      };
+    });
+  assert.equal(fonts.text, fonts.sans);
+  assert.notEqual(fonts.time, fonts.sans);
+  assert.match(fonts.time, /mono/i);
 });
 
 test("Search keeps keyboard focus through every filter commit and reads in DOM order", async (_t, j) => {
@@ -1222,7 +1273,6 @@ test("Search keeps keyboard focus through every filter commit and reads in DOM o
   assert.deepEqual(walked, [
     "retained-query",
     "search-records",
-    "search-refresh",
     "search-project",
     "search-type",
     "search-from-date",
@@ -1277,18 +1327,35 @@ test("Search keeps keyboard focus through every filter commit and reads in DOM o
   );
   await waitActive("search-type");
 
-  // Refresh results keeps focus and does not replace the page.
+  // The one Search button re-reads an unchanged search, re-reads the workspace and the Inbox
+  // count, keeps focus and does not replace the page. There is no separate refresh button.
+  assert.equal(
+    await page.getByRole("button", { name: "Refresh results" }).count(),
+    0,
+  );
   await page
     .locator(".search-workspace")
     .evaluate((el) => el.setAttribute("data-replaced", ""));
-  await page.locator("#search-refresh").focus();
+  const reads: string[] = [];
+  const onRequest = (r: import("playwright").Request) => {
+    const pathname = new URL(r.url()).pathname;
+    if (pathname.startsWith("/api/operator/")) reads.push(pathname);
+  };
+  page.on("request", onRequest);
+  await page.locator("#search-records").focus();
   await Promise.all([
     page.waitForResponse(
-      (r) => new URL(r.url()).pathname === "/api/operator/search",
+      (r) => new URL(r.url()).pathname === "/api/operator/workspace",
+    ),
+    page.waitForResponse(
+      (r) => new URL(r.url()).pathname === "/api/operator/inbox",
     ),
     page.keyboard.press("Enter"),
   ]);
-  assert.equal(await activeId(), "search-refresh");
+  await page.waitForLoadState("networkidle");
+  page.off("request", onRequest);
+  assert.equal(reads.filter((r) => r.endsWith("/search")).length, 1);
+  assert.equal(await activeId(), "search-records");
   assert.equal(
     await page.locator(".search-workspace[data-replaced]").count(),
     1,
@@ -1453,14 +1520,6 @@ test("Search applies the whole header form in one navigation, whichever control 
         await page.keyboard.press("Enter");
       },
     },
-    "Refresh results": {
-      id: "search-refresh",
-      params: {},
-      act: () =>
-        page
-          .getByRole("button", { name: "Refresh results", exact: true })
-          .click(),
-    },
     "Enter in a date": {
       id: "",
       params: {},
@@ -1478,8 +1537,6 @@ test("Search applies the whole header form in one navigation, whichever control 
       if (pending.through) await field("Through date").fill(pending.through);
       if (dirty) await page.getByText("Dates not applied yet.").waitFor();
       const before = await entries();
-      // Refresh only re-reads when nothing is pending; typed dates are applied with it otherwise.
-      const navigates = !(control === "Refresh results" && !dirty);
       const expected: Record<string, string | null> = {
         query: "Matrix",
         historical: "false",
@@ -1489,28 +1546,17 @@ test("Search applies the whole header form in one navigation, whichever control 
         before: pending.through ? searchDayEnd(pending.through) : null,
         ...spec.params,
       };
-      if (navigates) {
-        await replaced(async () => {
-          await spec.act(pending);
-          await page.waitForURL((url) =>
-            Object.entries(expected).every(
-              ([name, value]) => url.searchParams.get(name) === value,
-            ),
-          );
-        });
-      } else {
-        await Promise.all([
-          page.waitForResponse(
-            (r) => new URL(r.url()).pathname === "/api/operator/search",
+      await replaced(async () => {
+        await spec.act(pending);
+        await page.waitForURL((url) =>
+          Object.entries(expected).every(
+            ([name, value]) => url.searchParams.get(name) === value,
           ),
-          spec.act(pending),
-        ]);
-      }
-      assert.equal(await entries(), before + (navigates ? 1 : 0), label);
-      if (navigates)
-        for (const [name, value] of Object.entries(expected))
-          assert.equal(searchParam(name), value, `${label}: ${name}`);
-      else assert.equal(page.url(), `${web.origin}/search?query=Matrix`);
+        );
+      });
+      assert.equal(await entries(), before + 1, label);
+      for (const [name, value] of Object.entries(expected))
+        assert.equal(searchParam(name), value, `${label}: ${name}`);
       assert.equal(
         await page.getByText("Dates not applied yet.").count(),
         0,
@@ -1541,7 +1587,7 @@ test("Search applies the whole header form in one navigation, whichever control 
         expected.projectId ?? "",
         label,
       );
-      if (navigates && spec.id) await waitActive(spec.id);
+      if (spec.id) await waitActive(spec.id);
       await page.locator("#search-count").waitFor();
       if (state === "From after Through") {
         // The range is applied as typed and reads as no match, not as an error.
