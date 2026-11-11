@@ -451,6 +451,7 @@ export class StackV2Authority implements GitHubDeliveryRequestBoundary {
   private lock: Awaited<ReturnType<typeof open>> | undefined;
   private queue = Promise.resolve();
   private fault = false;
+  private faultCause: unknown;
   private closing = false;
   private closePromise: Promise<void> | undefined;
   private readonly pinnedFiles = new StackPinnedFiles();
@@ -746,6 +747,11 @@ export class StackV2Authority implements GitHubDeliveryRequestBoundary {
   hold() {
     this.fault = true;
   }
+  /** The first rejection that closes the authority is the cause of every later closure. */
+  private latch(error: unknown) {
+    if (!this.fault) this.faultCause = error;
+    this.fault = true;
+  }
   current(teardown = false) {
     const deadline = teardown
       ? this.grant.teardownDeadline
@@ -761,7 +767,7 @@ export class StackV2Authority implements GitHubDeliveryRequestBoundary {
       this.now() >= Date.parse(deadline) ||
       (!teardown && this.now() >= Date.parse(this.readiness.expiresAt))
     )
-      throw Error("v2-authority-closed");
+      throw Error("v2-authority-closed", { cause: this.faultCause });
   }
   assertCurrent(request?: GitHubDeliveryRequest) {
     if (request) this.rule(request);
@@ -911,7 +917,7 @@ export class StackV2Authority implements GitHubDeliveryRequestBoundary {
       this.current();
       await this.save();
     } catch (e) {
-      this.fault = true;
+      this.latch(e);
       await this.lock?.close();
       this.lock = undefined;
       throw e;
@@ -939,9 +945,7 @@ export class StackV2Authority implements GitHubDeliveryRequestBoundary {
     const result = this.queue.then(run);
     this.queue = result.then(
       () => {},
-      () => {
-        this.fault = true;
-      },
+      (error: unknown) => this.latch(error),
     );
     return result;
   }
@@ -2185,9 +2189,7 @@ export class StackV2Authority implements GitHubDeliveryRequestBoundary {
     });
     this.queue = close.then(
       () => {},
-      () => {
-        this.fault = true;
-      },
+      (error: unknown) => this.latch(error),
     );
     await close;
   }
