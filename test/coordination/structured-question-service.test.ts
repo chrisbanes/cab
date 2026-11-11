@@ -1,8 +1,9 @@
-import { seedOwnQuestion } from "../fixtures/questions.js";
+import { seedOwnQuestion, startOwnWork } from "../fixtures/questions.js";
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import { test } from "node:test";
 import { createOperatorFixture } from "../fixtures/operator-web.js";
+import { OperatorApi } from "../../src/standalone/operator-api.js";
 import { seedReviewTask } from "../fixtures/task-review.js";
 import { mixedForm, mixedAnswers } from "../fixtures/question-data.js";
 import { QUIET_WINDOW_MS, until } from "../fixtures/until.js";
@@ -210,6 +211,297 @@ test("ordinary same-assignment continuation delivers before answer to original r
         .readTask(a.taskId)
         .messages.filter((m) => m.eventType === "question-answer").length,
       1,
+    );
+  } finally {
+    await f.close();
+  }
+});
+
+test("cab question and approval tools refuse unreadable headlines without writing and accept readable ones", async () => {
+  const f = await createOperatorFixture();
+  try {
+    const { a, work } = await startOwnWork(f, "Readable asks", "Readable");
+    const call = (tool: string, args: unknown, callId: string = randomUUID()) =>
+      f.runtime.callTool({
+        threadId: work.threadId!,
+        turnId: work.turnId!,
+        callId,
+        tool,
+        arguments: args as Record<string, unknown>,
+      });
+    const counts = () => {
+      const view = f.service.coordinationView().readTask(a.taskId);
+      return view.questions.length + view.approvals.length;
+    };
+    const choice = (label: string, description?: string) => ({
+      form: {
+        version: 1,
+        questions: [
+          {
+            id: "q",
+            kind: "single-choice",
+            label: "Which channel should the release use?",
+            required: true,
+            customAllowed: false,
+            options: [
+              {
+                id: "o",
+                label,
+                ...(description === undefined ? {} : { description }),
+              },
+            ],
+          },
+        ],
+      },
+    });
+    const labelled = (label: string) => ({
+      form: {
+        version: 1,
+        questions: [{ id: "q", kind: "free-text", label, required: true }],
+      },
+    });
+    const refused: Array<[string, string, unknown, RegExp]> = [
+      [
+        "cab_ask_question",
+        "long plain",
+        { question: "a".repeat(121) },
+        /`question` is 121 characters; the limit is 120/,
+      ],
+      [
+        "cab_ask_question",
+        "multi-line plain",
+        { question: "Ship it?\nBackground" },
+        /`question` contains a line break/,
+      ],
+      [
+        "cab_ask_question",
+        "carriage-return plain",
+        { question: "Ship it?\rBackground" },
+        /`question` contains a line break/,
+      ],
+      [
+        "cab_ask_question",
+        "line-separator plain",
+        { question: "Ship it?\u2028Background" },
+        /`question` contains a line break/,
+      ],
+      [
+        "cab_ask_question",
+        "paragraph-separator plain",
+        { question: "Ship it?\u2029Background" },
+        /`question` contains a line break/,
+      ],
+      [
+        "cab_ask_question",
+        "long label",
+        labelled("b".repeat(121)),
+        /`form\.questions\[0\]\.label` is 121 characters; the limit is 120/,
+      ],
+      [
+        "cab_ask_question",
+        "long option",
+        choice("c".repeat(81), "Causes it"),
+        /`form\.questions\[0\]\.options\[0\]\.label` is 81 characters; the limit is 80/,
+      ],
+      [
+        "cab_ask_question",
+        "multi-line option",
+        choice("Yes\nreally", "Causes it"),
+        /`form\.questions\[0\]\.options\[0\]\.label` contains a line break/,
+      ],
+      [
+        "cab_ask_question",
+        "UUID",
+        labelled("Retry operation 3ac791e2-d016-41c1-a71a-1e9414bc0831?"),
+        /`form\.questions\[0\]\.label` contains a UUID/,
+      ],
+      [
+        "cab_ask_question",
+        "SHA",
+        labelled("Push head 6d1dc6c2 again?"),
+        /contains a SHA \(a hex run of 7–40 characters with a digit\)/,
+      ],
+      [
+        "cab_ask_question",
+        "provider code",
+        labelled("Retry after provider-http-422?"),
+        /contains a provider failure code/,
+      ],
+      [
+        "cab_ask_question",
+        "node ID",
+        labelled("Use repository R_kgDORzdwYA?"),
+        /contains a GitHub node ID/,
+      ],
+      [
+        "cab_ask_question",
+        "Project item node ID",
+        labelled("Move PVTI_lAHOAAN4ns4BatgHzhHRUOE to Done?"),
+        /contains a GitHub node ID/,
+      ],
+      [
+        "cab_ask_question",
+        "issue node ID",
+        labelled("Close I_kwDOAbc123 now?"),
+        /contains a GitHub node ID/,
+      ],
+      [
+        "cab_ask_question",
+        "named provider code",
+        labelled("Retry after provider-head-changed?"),
+        /contains a provider failure code/,
+      ],
+      [
+        "cab_ask_question",
+        "single-word provider code",
+        labelled("Retry after provider-timeout?"),
+        /contains a provider failure code/,
+      ],
+      [
+        "cab_ask_question",
+        "missing description",
+        choice("Stable"),
+        /`form\.questions\[0\]\.options\[0\]\.description` is missing/,
+      ],
+      [
+        "cab_ask_question",
+        "blank description",
+        choice("Stable", "  "),
+        /`form\.questions\[0\]\.options\[0\]\.description` is missing/,
+      ],
+      [
+        "cab_request_approval",
+        "long action",
+        { action: "d".repeat(121), material: {} },
+        /`action` is 121 characters; the limit is 120/,
+      ],
+      [
+        "cab_request_approval",
+        "SHA action",
+        { action: "Force-push 6d1dc6c2e", material: {} },
+        /`action` contains a SHA/,
+      ],
+    ];
+    for (const [tool, name, args, message] of refused) {
+      const response = await call(tool, args, `refused-${name}`);
+      assert.equal(response.success, false, name);
+      assert.match(response.text, message, name);
+      assert.ok(response.text.length <= 1000, name);
+      assert.equal(counts(), 0, name);
+    }
+    const inbox = (await new OperatorApi(f.service, []).readInbox()).data.items;
+    assert.equal(
+      inbox.filter((i) => "taskId" in i && i.taskId === a.taskId).length,
+      0,
+    );
+    // A refusal caches no receipt, so the corrected retry under the same callId runs.
+    assert.equal(
+      (
+        await call(
+          "cab_ask_question",
+          { question: "Ship it?" },
+          "refused-long plain",
+        )
+      ).success,
+      true,
+    );
+    const accepted: Array<[string, unknown]> = [
+      ["120-character question", { question: "e".repeat(120) }],
+      ["80-character option", choice("f".repeat(80), "Causes it")],
+      [
+        "dotted action and hex word",
+        labelled("Should pr.create run after the facade change?"),
+      ],
+      [
+        "provider prose and constant names",
+        labelled(
+          "Keep the provider-neutral wording and GH_CONFIG_DIR as they are?",
+        ),
+      ],
+      [
+        "descriptions without recommended",
+        {
+          form: {
+            version: 1,
+            questions: [
+              {
+                id: "q",
+                kind: "multiple-choice",
+                label: "Which checks should block the merge?",
+                required: true,
+                customAllowed: false,
+                options: [
+                  {
+                    id: "lint",
+                    label: "Lint",
+                    description: "Lint failures block merging",
+                  },
+                  {
+                    id: "test",
+                    label: "Tests",
+                    description: "Test failures block merging",
+                  },
+                ],
+              },
+            ],
+          },
+        },
+      ],
+    ];
+    for (const [name, args] of accepted)
+      assert.equal((await call("cab_ask_question", args)).success, true, name);
+    const replayed = await call(
+      "cab_ask_question",
+      {
+        question: "Which release channel should we use?",
+        context: "Background: beta is behind.",
+      },
+      "readable-context",
+    );
+    assert.equal(replayed.success, true, replayed.text);
+    assert.deepEqual(
+      await call(
+        "cab_ask_question",
+        {
+          question: "Which release channel should we use?",
+          context: "Background: beta is behind.",
+        },
+        "readable-context",
+      ),
+      replayed,
+    );
+    const view = f.service.coordinationView().readTask(a.taskId);
+    assert.equal(view.questions.length, accepted.length + 2);
+    const forms = view.questions.map(
+      (q) => f.service.coordinationView().questionForm(q.interactionId)?.form,
+    );
+    assert.deepEqual(
+      forms.find(
+        (form) =>
+          form?.questions[0]?.description === "Background: beta is behind.",
+      ),
+      {
+        version: 1,
+        questions: [
+          {
+            id: "answer",
+            kind: "free-text",
+            label: "Which release channel should we use?",
+            description: "Background: beta is behind.",
+            required: true,
+            minLength: 1,
+          },
+        ],
+      },
+    );
+    assert.equal(
+      (
+        await call("cab_request_approval", {
+          action: "Publish the release notes",
+          material: {},
+        })
+      ).success,
+      true,
     );
   } finally {
     await f.close();

@@ -59,7 +59,9 @@ export function requestHeading(
   // A runtime problem names the runtime; the queue says only that retries ran out.
   if (item.kind === "runtime")
     return { title: item.headline, subtitle: null, reason: retriesExhausted };
-  const title = item.headline ?? item.taskTitle,
+  // Stored headlines may span lines; the queue shows one.
+  const title =
+      (item.headline ?? item.taskTitle)?.replace(/\s+/g, " ").trim() ?? null,
     subtitle = (
       item.headline ? [item.projectName, item.taskTitle] : [item.projectName]
     )

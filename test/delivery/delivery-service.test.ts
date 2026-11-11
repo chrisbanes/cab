@@ -219,6 +219,7 @@ test("bound service delivery refuses spoofing and a revoked policy during asynch
 });
 
 import { canonicalMaterial } from "../../src/core/delivery.js";
+import { OperatorApi } from "../../src/standalone/operator-api.js";
 test("actual operator approval authorizes only exact material on the next eligible bound lead turn", async () => {
   const f = await deliveryFixture();
   try {
@@ -251,6 +252,19 @@ test("actual operator approval authorizes only exact material on the next eligib
       if (Date.now() > deadline) throw new Error("terminal timeout");
       await new Promise<void>((r) => setImmediate(r));
     }
+    // The Inbox shows cab's wording for the known kind; the exact action stays for the decision.
+    const api = new OperatorApi(f.service, []);
+    const listed = (await api.readInbox()).data.items.find(
+      (i) => i.kind === "approval" && i.taskId === f.taskId,
+    );
+    assert.equal(
+      listed && "headline" in listed && listed.headline,
+      "Edit the issue",
+    );
+    assert.equal(
+      (await api.readTask(f.taskId)).data.approvals[0]?.action,
+      "issue.edit",
+    );
     await f.service.coordinationView().decideApproval({
       taskId: f.taskId,
       key: randomUUID(),

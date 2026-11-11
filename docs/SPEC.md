@@ -2672,7 +2672,22 @@ surface the question in the attention inbox and task detail.
 
 Direct agents to structured forms, one question per decision with options and a
 recommended option, for decisions with known alternatives; plain questions are for
-open-ended input.
+open-ended input. Each question and approval leads with a request headline: one
+plain-language line stating the decision. `cab_ask_question` refuses a form question
+label or plain question longer than 120 characters and an option label longer than
+80 characters. It also refuses any of these that contains a line break, a UUID, a SHA
+(a hex run of 7–40 characters with a digit), a `provider-<code>` failure code or a
+GitHub node ID.
+Every choice option needs a description stating what choosing it causes; a
+recommended option stays optional. A plain question may carry background as
+`context`. The refusal names each field and the limit or pattern so the agent can fix
+its input, and writes nothing. `cab_request_approval` applies the same rules to an
+`action` that is not a known delivery action kind; a known kind keeps its exact
+`action` for approval and shows a headline written by cab. Questions from the
+runtime's own question tool are not validated. Every Inbox and Overview headline is
+shown on one line with the full text in the request pane. Background in a cab form
+question's description or a plain question's context sits behind a collapsed Details
+disclosure; a native question's text and option descriptions stay visible.
 
 Support a single question or a related set, free-text answers, single-choice and
 multiple-choice answers. Preserve question text, option labels and descriptions,

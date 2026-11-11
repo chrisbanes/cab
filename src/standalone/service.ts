@@ -8606,7 +8606,7 @@ export class StandaloneService {
         : []),
       {
         name: "role",
-        text: `${roleContext}\nCurrent cab coordination context (JSON): ${coordinationContext}\nProfile summaries describe suitability, not authority. cab tools enforce current permissions. Ask operator questions through cab_ask_question, never native asynchronous input tools. For a decision with known alternatives, pass a form with one question per decision, concrete options and a recommended option; use a plain question only for open-ended input.${
+        text: `${roleContext}\nCurrent cab coordination context (JSON): ${coordinationContext}\nProfile summaries describe suitability, not authority. cab tools enforce current permissions. Ask operator questions through cab_ask_question, never native asynchronous input tools. For a decision with known alternatives, pass a form with one question per decision, concrete options and a recommended option; use a plain question only for open-ended input. Write each question for a person: one plain sentence without identifiers, background in context, and what each option causes. Do not ask the operator to diagnose cab refusals; fix the input from the refusal message.${
           leadBinding
             ? `\n${leadDeliveryGuidance(
                 deliveryPolicy,

@@ -188,6 +188,55 @@ test("queue rows are request cards with kind, action and relative age; filters a
   await captureBrowserEvidence(page, "1366-inbox-queue", { fullPage: false });
 });
 
+test("a long stored headline is one line in the Inbox row and Overview card, and in full in the pane", async (_t, j) => {
+  const long =
+    `Please provide the provider validation detail ${"for the failed pull request ".repeat(10)}`.trim();
+  assert.ok(long.length >= 300);
+  const { page, seeded } = await openInbox(
+    j,
+    1,
+    { width: 1366, height: 900 },
+    "/",
+    async (f) =>
+      f.seedPersistedState((db) =>
+        db
+          .prepare(
+            "UPDATE coordination_question_forms SET schemaJson=json_set(schemaJson,'$.questions[0].label',?)",
+          )
+          .run(long),
+      ),
+  );
+  const oneLine = (locator: ReturnType<Page["locator"]>) =>
+    locator.evaluate((el) => {
+      const style = getComputedStyle(el);
+      return {
+        height: el.clientHeight,
+        line:
+          Number.parseFloat(style.lineHeight) ||
+          Number.parseFloat(style.fontSize) * 1.5,
+        overflows: el.scrollWidth > el.clientWidth,
+      };
+    });
+  const card = page.locator(
+    `.overview-card[data-request-id="${seeded[0]!.interactionId}"] h3`,
+  );
+  await card.filter({ hasText: long }).waitFor();
+  const cardBox = await oneLine(card);
+  assert.ok(cardBox.height <= cardBox.line + 2, JSON.stringify(cardBox));
+  assert.ok(cardBox.overflows, JSON.stringify(cardBox));
+  await page.goto(new URL("/inbox", page.url()).href);
+  const row = page.locator(".inbox-row strong").first();
+  await row.filter({ hasText: long }).waitFor();
+  const rowBox = await oneLine(row);
+  assert.ok(rowBox.height <= rowBox.line + 2, JSON.stringify(rowBox));
+  assert.ok(rowBox.overflows, JSON.stringify(rowBox));
+  assert.equal(await row.getAttribute("title"), long);
+  await page.locator(".inbox-row").first().click();
+  const heading = page.locator(".inbox-detail-intro h2");
+  await heading.filter({ hasText: long }).waitFor();
+  assert.ok(await heading.evaluate((el) => el.scrollWidth <= el.clientWidth));
+});
+
 test("filtered-empty and all-empty states explain themselves and offer the way out (desktop)", async (_t, j) => {
   const { page } = await openInbox(j, 3, { width: 1366, height: 900 });
   await page.locator(".inbox-row").nth(2).waitFor();

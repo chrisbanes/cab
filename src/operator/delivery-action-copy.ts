@@ -87,6 +87,27 @@ export const deliveryActionCopy: Record<
   },
 };
 
+/** The Request headline cab writes for an approval of a known delivery action kind. */
+export const approvalHeadlines: Record<ActionKind, string> = {
+  "issue.comment": "Comment on the issue",
+  "issue.labels": "Change the issue's labels",
+  "issue.edit": "Edit the issue",
+  "issue.create": "Create an issue",
+  "project.item.add": "Add the issue to the Project",
+  "project.field": "Set a Project field on the issue",
+  "pr.create": "Open the pull request",
+  "pr.edit": "Edit the pull request",
+  "pr.ready": "Mark the pull request ready for review",
+  "pr.merge": "Merge the pull request",
+  "pr.update-branch": "Update the pull request branch from its base",
+  "issue.close": "Close the issue",
+  "pr.thread.reply": "Reply to a review thread",
+  "pr.thread.resolve": "Resolve a review thread",
+  "branch.push": "Push the task branch",
+  "branch.force-push": "Force-push the task branch",
+  "branch.adopt": "Adopt the existing branch",
+};
+
 /** The kinds in the core's order; the keys of the record above are the core's `actionKinds`, which a test pins. */
 export const deliveryActionKinds = Object.keys(
   deliveryActionCopy,

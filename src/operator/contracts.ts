@@ -4391,7 +4391,8 @@ export const taskInboxItemSchema = z
     requesterName: safeText,
     interactionId: uuid.nullable(),
     revision: revision.nullable(),
-    // The first question's label or the approval's exact action; null when withheld.
+    // The first question's label, cab's wording for a known delivery action kind or the
+    // approval's exact action; null when withheld.
     headline: safeText,
     reason: safeText,
     attentionCode: attentionCodeSchema.nullable(),

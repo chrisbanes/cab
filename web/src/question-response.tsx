@@ -384,9 +384,16 @@ export function QuestionResponse({
                       <p className="question-constraint metadata muted">
                         {constraintLine(q)}
                       </p>
-                      {q.description && (
-                        <p className="literal">{q.description}</p>
-                      )}
+                      {q.description &&
+                        // Plain and native descriptions are the question itself; only cab-form background is collapsed.
+                        (data?.source !== "cab" ? (
+                          <p className="literal">{q.description}</p>
+                        ) : (
+                          <details className="question-details">
+                            <summary>Details</summary>
+                            <p className="literal">{q.description}</p>
+                          </details>
+                        ))}
                       {q.kind === "free-text" ? (
                         <label
                           htmlFor={`${qid}-text`}

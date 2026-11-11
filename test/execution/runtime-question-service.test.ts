@@ -72,6 +72,7 @@ class NativeRuntime implements Runtime {
   receipt?: RuntimeReplyIntent;
   confirm = true;
   early = false;
+  questionText = "Where?";
   startResponse = deferred<string>();
   async start() {}
   async stop() {
@@ -140,7 +141,7 @@ class NativeRuntime implements Runtime {
           {
             id: "q",
             header: "Place",
-            question: "Where?",
+            question: this.questionText,
             isOther: true,
             isSecret: false,
             options: [{ label: "Local", description: "Here" }],
@@ -195,12 +196,14 @@ async function fixture(
   options: {
     early?: boolean;
     claude?: boolean;
+    questionText?: string;
     terminationVerifier?: StandaloneServiceOptions["terminationVerifier"];
   } = {},
 ) {
   const root = mkdtempSync(join(tmpdir(), "cab-native-service-"));
   const runtime = new NativeRuntime();
   runtime.early = options.early ?? false;
+  if (options.questionText) runtime.questionText = options.questionText;
   // With `claude`, the work runs on a Claude-bound runtime beside an idle Codex
   // runtime that exposes the same native generation token.
   const other = new NativeRuntime();
@@ -1111,6 +1114,24 @@ test("curated native form receipt retains unconfirmed Inbox attention and same-k
       (await api.readQuestion(f.taskId, q.interactionId)).data.status,
       "recorded",
     );
+  } finally {
+    await f.close();
+  }
+});
+
+test("a long native question is never refused and leads with its header, the question kept as its description", async () => {
+  const text = `${"Where should the build run? ".repeat(80)}\nBackground on 6d1dc6c2.`;
+  const f = await fixture({ questionText: text });
+  try {
+    const api = new OperatorApi(f.service, [f.root]),
+      q = runtimeQuestion(f.service, f.taskId);
+    const item = (await api.readInbox()).data.items.find(
+      (i) => i.id === q.interactionId,
+    );
+    assert.equal(item && "headline" in item && item.headline, "Place");
+    const read = (await api.readQuestion(f.taskId, q.interactionId)).data;
+    assert.equal(read.source, "native");
+    assert.equal(read.form?.questions[0]?.description, text);
   } finally {
     await f.close();
   }

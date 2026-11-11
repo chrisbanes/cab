@@ -9,6 +9,8 @@ import {
   questionFormSchema,
   questionAnswersSchema,
   validateQuestionAnswers,
+  questionToolRefusal,
+  approvalActionRefusal,
   type QuestionForm,
   type QuestionAnswers,
 } from "./question-forms.js";
@@ -1434,12 +1436,32 @@ export class CoordinationStore {
 
   requestQuestion(input: CoordinationCall): CoordinationToolResponse {
     const call = questionCallSchema.parse(input);
+    const args = call.arguments;
+    // A plain question with context is stored as a one-question cab form so the
+    // context reuses form storage, redaction and the collapsed Details view.
+    const form: QuestionForm | undefined =
+      "form" in args
+        ? args.form
+        : args.context
+          ? {
+              version: 1,
+              questions: [
+                {
+                  id: "answer",
+                  kind: "free-text",
+                  label: args.question,
+                  description: args.context,
+                  required: true,
+                  minLength: 1,
+                },
+              ],
+            }
+          : undefined;
     return this.requestInteraction(call, "question", {
+      refusal: questionToolRefusal(args),
       prompt:
-        "question" in call.arguments
-          ? call.arguments.question
-          : "Structured question",
-      ...("form" in call.arguments ? { form: call.arguments.form } : {}),
+        "question" in args && !form ? args.question : "Structured question",
+      ...(form ? { form } : {}),
       action: null,
       target: null,
       materialHash: null,
@@ -1453,6 +1475,9 @@ export class CoordinationStore {
     if (new TextEncoder().encode(materialJson).byteLength > 8192)
       throw new Error("Approval material exceeds the 8 KiB operator limit");
     return this.requestInteraction(call, "approval", {
+      refusal: actionKinds.some((kind) => kind === call.arguments.action)
+        ? null
+        : approvalActionRefusal(call.arguments.action),
       prompt: `Approval requested for ${call.arguments.action}`,
       action: call.arguments.action,
       target: call.arguments.target ?? null,
@@ -4663,6 +4688,7 @@ export class CoordinationStore {
     input: CoordinationCall,
     kind: "question" | "approval",
     value: {
+      refusal: string | null;
       prompt: string;
       action: string | null;
       target: string | null;
@@ -4679,6 +4705,8 @@ export class CoordinationStore {
       }
       const binding = this.currentBinding(call.threadId, call.turnId);
       if (!binding) throw new Error("Interaction is not bound to current work");
+      // Refusals write nothing, so a corrected retry with the same callId runs.
+      if (value.refusal) return { success: false, text: value.refusal };
       const interactionId = randomUUID();
       this.db
         .prepare(`INSERT INTO coordination_interactions
