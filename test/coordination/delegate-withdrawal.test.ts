@@ -612,3 +612,66 @@ test("the report refusal lists each blocking delegate, its state and its way out
     f.close();
   }
 });
+
+test("a completed child of a withdrawn delegate cannot be resumed, so no new result is addressed to it", () => {
+  const f = fixture();
+  try {
+    const parent = f.delegate(f.leadA);
+    const child = f.delegate(parent);
+    f.addWork(child, "child");
+    const { result } = f.coordination.recordResult(
+      f.call(
+        "cab_report_result",
+        { summary: "Child done" },
+        undefined,
+        "child",
+      ),
+    );
+    assert.equal(result.recipientAssignmentId, parent);
+    f.db
+      .prepare(
+        "UPDATE execution_intents SET state = 'completed' WHERE workId = ?",
+      )
+      .run("work-child");
+    f.db
+      .prepare(
+        "UPDATE execution_pending_effects SET state = 'settled' WHERE workId = ?",
+      )
+      .run("work-child");
+    f.db
+      .prepare("UPDATE domain_assignments SET state = 'completed' WHERE id = ?")
+      .run(child);
+    f.leadWithdraw(parent);
+    const before = f.domain.assignment(child);
+    const events = () =>
+      f.db
+        .prepare(
+          "SELECT COUNT(*) AS n FROM coordination_inbox_events WHERE recipientAssignmentId = ?",
+        )
+        .get(parent)?.n;
+    const eventCount = events();
+    assert.throws(
+      () =>
+        f.coordination.requestFollowUp(
+          f.call("cab_request_follow_up", {
+            resultId: result.resultId,
+            instructions: "Revise it",
+          }),
+        ),
+      /reports to a withdrawn delegate.*Delegate the work again/,
+    );
+    assert.deepEqual(f.domain.assignment(child), before);
+    assert.equal(events(), eventCount);
+    assert.equal(
+      f.db.prepare("SELECT COUNT(*) AS n FROM coordination_follow_ups").get()
+        ?.n,
+      0,
+    );
+    // An operator comment offers no resume to it either.
+    const recipient = f.coordination.taskCommentRecipient(taskA, child);
+    assert.equal(recipient?.mode, "unavailable");
+    assert.equal(recipient?.reason, "unresolved-destination");
+  } finally {
+    f.close();
+  }
+});

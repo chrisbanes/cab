@@ -218,6 +218,8 @@ const withdrawalInputSchema = z
     expectedVersion: z.number().int().positive().optional(),
   })
   .strict();
+const withdrawnRecipientRefusal =
+  "Follow-up unavailable: this assignment reports to a withdrawn delegate, so its next result would have nowhere to go. Delegate the work again.";
 /** Events addressed to a withdrawn delegate stay as history and no longer wait for delivery. */
 const deliverable = (alias: string) =>
   `NOT EXISTS (SELECT 1 FROM coordination_undeliverable_inbox_events undeliverable
@@ -5502,6 +5504,11 @@ export class CoordinationStore {
           "Follow-up unavailable: latest result is not the newest unambiguous work",
         code: "no-resumable-result",
       };
+    if (this.recipientWithdrawn(String(result.assignmentId)))
+      return {
+        refusal: withdrawnRecipientRefusal,
+        code: "unresolved-destination",
+      };
     // Defensive: a follow-up returns the assignment to pending; any turn that completes it again has newer work.
     if (
       this.one(
@@ -5570,6 +5577,18 @@ export class CoordinationStore {
   }
 
   /** Reopens a completed assignment at a new version with one follow-up event. */
+  /** Its next result would go to a withdrawn delegate, which takes no further results. */
+  private recipientWithdrawn(assignmentId: string): boolean {
+    return Boolean(
+      this.one(
+        `SELECT 1 FROM domain_assignments target
+        JOIN domain_assignments recipient ON recipient.id = target.resultRecipientAssignmentId
+        WHERE target.id = ? AND recipient.state = 'withdrawn'`,
+        assignmentId,
+      ),
+    );
+  }
+
   private resumeCompletedAssignment(
     result: Row,
     requester: "assignment" | "operator",
@@ -5577,6 +5596,9 @@ export class CoordinationStore {
     instructions: string,
     extraPayload: Record<string, unknown>,
   ): { followUpId: string; event: InboxEvent } {
+    // Every resume (follow-up, message or comment) passes here: refuse before any write.
+    if (this.recipientWithdrawn(String(result.assignmentId)))
+      throw new DomainConflictError(withdrawnRecipientRefusal);
     const nextVersion = Number(result.version) + 1;
     const updated = this.db
       .prepare(`UPDATE domain_assignments

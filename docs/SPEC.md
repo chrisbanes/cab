@@ -853,7 +853,9 @@ history, and any later callback from its conversation, including
 `cab_report_result`, is refused as not bound to current work.
 
 Withdrawal is intentionally irreversible: there is no restore and no follow-up on a
-withdrawn assignment. To redo the work, the lead delegates again.
+withdrawn assignment. A completed assignment whose results go to a withdrawn delegate
+cannot be followed up, messaged or resumed by a comment either, since its next result
+would have nowhere to go. To redo the work, the lead delegates again.
 
 A lead's report refused while delegates are unfinished lists each blocking
 delegate with its short ID, state and way out, saying "still running" only for one
