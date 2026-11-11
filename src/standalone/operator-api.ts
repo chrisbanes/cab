@@ -6633,9 +6633,67 @@ export class OperatorApi {
       observedAt: Date.now(),
     });
   }
+  /**
+   * Artifact bytes from the workspace or the recorded commit, under the policy the retained
+   * evidence read applied: the project's current repository links, path exclusions and control
+   * paths, the content's disclosure, and an unchanged policy across the read.
+   */
   async readArtifact(taskId: string, artifactId: string) {
     uuid.parse(artifactId);
     this.requireTask(taskId);
+    const location = await this.artifactLocation(taskId, artifactId);
+    if (!location) throw new OperatorApiError(404, "not-found");
+    const policy = await this.retainedEvidencePolicy(taskId);
+    if (
+      !policy ||
+      (await this.retainedPathUnavailable(
+        policy,
+        location.originRoot,
+        location.repositoryId,
+        location.path,
+      ))
+    )
+      throw new OperatorApiError(503, "unavailable");
+    const file = await this.readArtifactBytes(taskId, artifactId);
+    if (
+      (await this.retainedItemUnavailable(
+        { ...location, mime: file.type },
+        file.body,
+        location.originRoot,
+        policy,
+      )) ||
+      !this.sameRetainedPolicy(
+        await this.retainedEvidencePolicy(taskId),
+        policy,
+      )
+    )
+      throw new OperatorApiError(503, "unavailable");
+    return file;
+  }
+  /** The repository (null for the task root) and repository-relative path an artifact names. */
+  private async artifactLocation(taskId: string, artifactId: string) {
+    const file = this.service
+      .taskReview()
+      .artifactOwner(taskId, artifactId)
+      ?.metadata.artifacts.find((a) => a.artifactId === artifactId)?.file;
+    const workspace = await this.service.taskWorkspace(taskId);
+    if (!file || !workspace) return undefined;
+    const target = resolve(workspace.path, file.relativePath);
+    const repository = workspace.repositories.find(
+      (candidate) =>
+        target !== resolve(candidate.workspacePath) &&
+        isWithin(resolve(candidate.workspacePath), target),
+    );
+    const originRoot = resolve(repository?.workspacePath ?? workspace.path);
+    if (target === originRoot || !isWithin(originRoot, target))
+      return undefined;
+    return {
+      repositoryId: repository?.repositoryId ?? null,
+      path: relative(originRoot, target).split(sep).join("/"),
+      originRoot,
+    };
+  }
+  private async readArtifactBytes(taskId: string, artifactId: string) {
     try {
       const file = await previewRecordedArtifact(async () => {
         const visibility = this.visibilityToken();

@@ -2,9 +2,9 @@ import assert from "node:assert/strict";
 import { createHash, randomUUID } from "node:crypto";
 import { execFileSync } from "node:child_process";
 import { mkdtempSync } from "node:fs";
-import { writeFile } from "node:fs/promises";
+import { mkdir, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join, relative } from "node:path";
+import { dirname, join, relative } from "node:path";
 import type { createOperatorFixture } from "./operator-web.js";
 import { seedReviewTask } from "./task-review.js";
 
@@ -47,9 +47,37 @@ export function fixtureRepository(): string {
   return path;
 }
 
+/** Sets the project's repository links to exactly `repositoryIds` (verification skipped). */
+export function linkRepositories(
+  f: Awaited<ReturnType<typeof createOperatorFixture>>,
+  projectId: string,
+  repositoryIds: string[],
+) {
+  f.seedPersistedState((db) =>
+    db
+      .prepare(
+        "UPDATE project_repository_links SET version=version+1, links=? WHERE projectId=?",
+      )
+      .run(
+        JSON.stringify(
+          repositoryIds.map((repositoryId) => ({
+            codeHost: "github",
+            host: "github.com",
+            repositoryId,
+            path: `/fixture/${repositoryId}`,
+            ref: "main",
+            gitCommonDirectory: `/fixture/${repositoryId}/.git`,
+          })),
+        ),
+        projectId,
+      ),
+  );
+}
+
 /**
  * Drives a real native `cab_report_result`. With `repository`, the task has one Git repository
- * (R1) and the files are written in its worktree; `beforeReport` runs there just before the call.
+ * (R1), linked to the project, and the files are written in its worktree; `beforeReport` runs
+ * there just before the call. `artifactName` is the artifact's path in that tree.
  */
 export async function captureNativeResult(
   f: Awaited<ReturnType<typeof createOperatorFixture>>,
@@ -57,6 +85,7 @@ export async function captureNativeResult(
     withArtifact?: boolean;
     createArtifact?: boolean;
     repository?: boolean;
+    artifactName?: string;
     beforeReport?: (worktree: string) => Promise<void> | void;
   } = {},
 ) {
@@ -69,6 +98,7 @@ export async function captureNativeResult(
       ? [{ repositoryId: "R1", path: fixtureRepository() }]
       : [],
   );
+  if (options.repository) linkRepositories(f, seeded.projectId, ["R1"]);
   const domain = f.service.domain();
   domain.execute({
     type: "project.configure",
@@ -107,10 +137,13 @@ export async function captureNativeResult(
   ]);
   await writeFile(textPath, originalText);
   const artifactId = randomUUID();
-  const artifactPath = join(worktree, "retained-proof.png");
+  const artifactName = options.artifactName ?? "retained-proof.png";
+  const artifactPath = join(worktree, artifactName);
   const withArtifact = options.withArtifact ?? false;
   if (withArtifact && options.createArtifact !== false)
-    await writeFile(artifactPath, png);
+    await mkdir(dirname(artifactPath), { recursive: true }).then(() =>
+      writeFile(artifactPath, png),
+    );
   await options.beforeReport?.(worktree);
   const call = {
     threadId: work.threadId,
@@ -132,7 +165,7 @@ export async function captureNativeResult(
                   revision: 1,
                   availability: "available" as const,
                   file: {
-                    relativePath: relativePath("retained-proof.png"),
+                    relativePath: relativePath(artifactName),
                     sha256: digest(png),
                     mime: "image/png" as const,
                     size: png.byteLength,

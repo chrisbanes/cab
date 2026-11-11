@@ -7,6 +7,7 @@ import { startCliService } from "../fixtures/operator-cli.js";
 import {
   captureNativeResult,
   digest,
+  linkRepositories,
   png,
   worktreeGit,
 } from "../fixtures/native-result.js";
@@ -144,4 +145,53 @@ test("an artifact that was never committed is not served once it changes", async
   assert.equal(r.status, 409);
   assert.equal(r.headers.get("x-cab-evidence-source"), null);
   assert.equal(r.headers.get("x-cab-sha256"), null);
+});
+
+test("artifact reads apply current repository links and path exclusions on the workspace and recorded-commit reads", async (t) => {
+  const s = await startCliService(t);
+  const { token } = await s.issue("read");
+  const statuses = async (path: string) => {
+    const responses = [await s.bearer(token, path), await s.sessionGet(path)];
+    for (const r of responses)
+      if (r.status !== 200) assert.equal(r.headers.get("x-cab-sha256"), null);
+    return responses.map((r) => [
+      r.status,
+      r.headers.get("x-cab-evidence-source"),
+    ]);
+  };
+  const commit = (worktree: string) => {
+    worktreeGit(worktree, "add", "-A");
+    worktreeGit(worktree, "commit", "--quiet", "-m", "artifact");
+  };
+
+  // An unlinked repository withholds both reads; relinking restores them.
+  const linked = await captureNativeResult(s.f, {
+    withArtifact: true,
+    repository: true,
+    beforeReport: commit,
+  });
+  const path = `/api/operator/tasks/${linked.seeded.taskId}/artifacts/${linked.artifactId}`;
+  const both = (status: number, source: string | null) => [
+    [status, source],
+    [status, source],
+  ];
+  assert.deepEqual(await statuses(path), both(200, "recorded-workspace"));
+  linkRepositories(s.f, linked.seeded.projectId, []);
+  assert.deepEqual(await statuses(path), both(503, null));
+  await writeFile(linked.artifactPath!, flipped());
+  assert.deepEqual(await statuses(path), both(503, null));
+  linkRepositories(s.f, linked.seeded.projectId, ["R1"]);
+  assert.deepEqual(await statuses(path), both(200, "recorded-commit"));
+
+  // A path the current policy excludes is withheld from both reads.
+  const excluded = await captureNativeResult(s.f, {
+    withArtifact: true,
+    repository: true,
+    artifactName: ".env.shots/shot.png",
+    beforeReport: commit,
+  });
+  const excludedPath = `/api/operator/tasks/${excluded.seeded.taskId}/artifacts/${excluded.artifactId}`;
+  assert.deepEqual(await statuses(excludedPath), both(503, null));
+  await writeFile(excluded.artifactPath!, flipped());
+  assert.deepEqual(await statuses(excludedPath), both(503, null));
 });
