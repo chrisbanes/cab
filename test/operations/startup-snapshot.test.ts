@@ -943,7 +943,6 @@ test("reasoning migration protects the level 19 schema before adding either tabl
         .run(intentId);
       restoreRequestSchema21(before);
       restoreDraftingSchema23(before);
-      restoreDraftingSchema23(before);
       before.exec(
         `${undoLevel24}DROP TABLE inbox_lifecycle_receipts; DROP TABLE inbox_lifecycle; DROP TABLE project_reasoning_summaries; DROP TABLE execution_intent_reasoning_summaries; DROP TABLE execution_pre_turn_refusals`,
       );

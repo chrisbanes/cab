@@ -1,5 +1,6 @@
 import { randomUUID } from "./browser-crypto.js";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { z } from "zod";
 import {
   draftingRunReadSchema,
   type OperatorFeedbackItem,
@@ -26,16 +27,32 @@ import type { TabProps } from "./project-config.js";
 import { DraftOutcome, Panel, submitDraft, useDraft } from "./settings.js";
 import { NativeSelect } from "./ui/native-select.js";
 import { Textarea } from "./ui/textarea.js";
+import "./instruction-proposal.css";
 
-type Ref = { kind: OperatorFeedbackItem["kind"]; id: string; text: string };
-type Target = { kind: "project" } | { kind: "profile"; profileId: string };
-/** What survives a reload: the run being reviewed and the selection it was asked from. */
-type Stored = {
+/** What survives a reload: the run being reviewed, its start, and the selection it was asked from. */
+const storedSchema = z.object({
+  runId: z.string().uuid().optional(),
+  /** The start's key and project version, so an unconfirmed start is resent unchanged. */
+  startKey: z.string().uuid().optional(),
+  expectedProjectVersion: z.number().int().positive().optional(),
+  refs: z.array(
+    z.object({
+      kind: z.enum(["message", "follow-up", "comment"]),
+      id: z.string().uuid(),
+      text: z.string(),
+    }),
+  ),
+  target: z.discriminatedUnion("kind", [
+    z.object({ kind: z.literal("project") }),
+    z.object({ kind: z.literal("profile"), profileId: z.string().uuid() }),
+  ]),
+  note: z.string(),
+});
+type Parsed = z.infer<typeof storedSchema>;
+type Stored = Pick<Parsed, "refs" | "target" | "note"> & {
   runId?: string | undefined;
   startKey?: string | undefined;
-  refs: Ref[];
-  target: Target;
-  note: string;
+  expectedProjectVersion?: number | undefined;
 };
 
 const storageKey = (projectId: string) =>
@@ -44,7 +61,8 @@ const storageKey = (projectId: string) =>
 function readStored(projectId: string): Stored {
   try {
     const raw = sessionStorage.getItem(storageKey(projectId));
-    if (raw) return JSON.parse(raw) as Stored;
+    const parsed = raw ? storedSchema.safeParse(JSON.parse(raw)) : null;
+    if (parsed?.success) return parsed.data;
   } catch {}
   return { refs: [], target: { kind: "project" }, note: "" };
 }
@@ -112,6 +130,11 @@ export function InstructionProposalsTab(p: TabProps) {
   }, [loadPage]);
 
   const runId = stored.runId ?? null;
+  const latest = useRef(stored);
+  latest.current = stored;
+  const resent = useRef(new Set<string>());
+  const startingId = useRef<string | null>(null);
+  // biome-ignore lint/correctness/useExhaustiveDependencies: sendStart reads only refs and stable props, so it need not re-create the read.
   const readRun = useCallback(
     async (signal?: AbortSignal) => {
       if (!runId) return;
@@ -123,13 +146,37 @@ export function InstructionProposalsTab(p: TabProps) {
         );
         if (read.kind === "instruction") setRun(read);
       } catch (error) {
-        if (error instanceof ClientError && error.code === "not-found")
-          setMessage("The proposal is no longer available.");
+        if (!(error instanceof ClientError && error.code === "not-found"))
+          return;
+        if (startingId.current === runId) return;
+        // A start that may never have arrived is sent once more under its key and content.
+        const { startKey, expectedProjectVersion } = latest.current;
+        if (startKey && expectedProjectVersion && !resent.current.has(runId)) {
+          resent.current.add(runId);
+          await sendStart({
+            ...latest.current,
+            runId,
+            startKey,
+            expectedProjectVersion,
+          });
+          return;
+        }
+        change({
+          runId: undefined,
+          startKey: undefined,
+          expectedProjectVersion: undefined,
+        });
+        setMessage("The proposal is no longer available.");
       }
     },
-    [client, runId],
+    [client, runId, change],
   );
-  const polling = !run || run.runId !== runId || unsettled(run.state);
+  // A proposal is read again too, so a target changed elsewhere shows as changed.
+  const polling =
+    !run ||
+    run.runId !== runId ||
+    unsettled(run.state) ||
+    run.state === "proposed";
   useEffect(() => {
     if (!runId) return setRun(null);
     const abort = new AbortController();
@@ -172,33 +219,56 @@ export function InstructionProposalsTab(p: TabProps) {
   };
 
   const start = async (from: Stored) => {
-    const next = { ...from, runId: randomUUID(), startKey: randomUUID() };
-    setBusy(true);
-    setMessage("");
+    const next = {
+      ...from,
+      runId: randomUUID(),
+      startKey: randomUUID(),
+      expectedProjectVersion: data.project.version,
+    };
     setRun(null);
     setFinalText(null);
     setSaved(null);
     change(next);
-    const result = await client.command(
-      {
-        type: "instruction.draft.start",
-        key: next.startKey,
-        runId: next.runId,
-        projectId,
-        expectedProjectVersion: data.project.version,
-        target: next.target,
-        feedback: next.refs.map(({ kind, id }) => ({ kind, id })),
-        note: next.note,
-      },
-      session.csrfToken,
-    );
-    setBusy(false);
+    await sendStart(next);
+  };
+  async function sendStart(
+    next: Stored & {
+      runId: string;
+      startKey: string;
+      expectedProjectVersion: number;
+    },
+  ) {
+    setBusy(true);
+    setMessage("");
+    startingId.current = next.runId;
+    const result = await client
+      .command(
+        {
+          type: "instruction.draft.start",
+          key: next.startKey,
+          runId: next.runId,
+          projectId,
+          expectedProjectVersion: next.expectedProjectVersion,
+          target: next.target,
+          feedback: next.refs.map(({ kind, id }) => ({ kind, id })),
+          note: next.note,
+        },
+        session.csrfToken,
+      )
+      .finally(() => {
+        startingId.current = null;
+        setBusy(false);
+      });
     if (result.state === "recorded") return;
     if (result.state === "unknown")
       return setMessage(
-        "Couldn’t confirm the request. Reload to check whether it started.",
+        "Couldn’t confirm the request. It is checked again when the page reads it.",
       );
-    change({ runId: undefined, startKey: undefined });
+    change({
+      runId: undefined,
+      startKey: undefined,
+      expectedProjectVersion: undefined,
+    });
     setMessage(
       result.state === "conflict"
         ? "The project changed. Try again."
@@ -207,7 +277,7 @@ export function InstructionProposalsTab(p: TabProps) {
           : "Couldn’t request a proposal.",
     );
     if (result.state === "conflict") p.refreshConfiguration();
-  };
+  }
   const settle = async (disposition: "accept" | "discard") => {
     if (!runId) return false;
     const result = await client.command(
@@ -236,7 +306,11 @@ export function InstructionProposalsTab(p: TabProps) {
     } else setMessage("Couldn’t reject the proposal. Try again.");
   };
   const clear = () => {
-    change({ runId: undefined, startKey: undefined });
+    change({
+      runId: undefined,
+      startKey: undefined,
+      expectedProjectVersion: undefined,
+    });
     setRun(null);
     setFinalText(null);
   };
@@ -258,6 +332,7 @@ export function InstructionProposalsTab(p: TabProps) {
               await settle("accept");
               await readRun();
             }}
+            reread={() => void readRun()}
             stop={stop}
             reject={reject}
             redraft={() => void start(stored)}
@@ -409,6 +484,8 @@ function Review(
     setFinalText: (text: string) => void;
     saved: string | null;
     onSaved: (revision: number | null) => Promise<void>;
+    /** Reads the run again, so a conflicting save shows the target's current state. */
+    reread: () => void;
     stop: () => void;
     reject: () => void;
     redraft: () => void;
@@ -535,7 +612,7 @@ function Review(
               client,
               session,
               command(),
-              () => {},
+              p.reread,
               {},
               block !== null,
             )
@@ -627,7 +704,7 @@ function Review(
             session={session}
             label="Accept and save"
             saveDisabled={block !== null}
-            refresh={() => {}}
+            refresh={p.reread}
             success={p.saved}
           />
           {d.phase !== "recorded" &&

@@ -6,6 +6,8 @@ import {
 
 export { instructionFeedbackLimits };
 export const instructionNoteLimit = 16_000;
+/** The configure `instructions` limit. */
+export const instructionTextLimit = 16_000;
 export const instructionProposalPollMs = 2000;
 
 export type InstructionRun = DraftingRunRead["data"];
@@ -41,7 +43,7 @@ export function acceptBlock(
     return "The instructions changed since this proposal was drafted. Redraft to review it against the current text.";
   if (finalText === run.instructionTarget.observedInstructions)
     return "The text is the same as the current instructions.";
-  if (finalText.length > instructionNoteLimit)
+  if (finalText.length > instructionTextLimit)
     return "Instructions can be at most 16,000 characters.";
   return null;
 }

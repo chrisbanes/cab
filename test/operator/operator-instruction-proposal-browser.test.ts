@@ -221,7 +221,7 @@ test("instructions changed in another tab make Accept unavailable and send no co
     expectedVersion: Number(domain.project(projectId).version),
     instructions: "Changed in another tab.",
   });
-  await page.reload();
+  // No reload: the open review reads the run again and shows the change.
   await page
     .getByText(/The instructions changed since this proposal was drafted/)
     .waitFor();
