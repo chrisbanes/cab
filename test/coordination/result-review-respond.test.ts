@@ -214,3 +214,30 @@ test("a plain result-anchored message and viewing the review leave it pending", 
   assert.equal(after?.revision, review.revision);
   assert.equal(after?.lifecycle?.status, "actionable");
 });
+
+test("reviewed with a note delivers it to the lead as result-anchored feedback", async (t) => {
+  const { f, task, result, api, respond } = await reviewed();
+  t.after(() => f.close());
+  const receipt = await api.execute(
+    respond({ response: "reviewed", message: "Looks right; ship it" }),
+  );
+  assert.ok(receipt.kind === "result-review");
+  assert.equal(receipt.response, "reviewed");
+  assert.ok(receipt.eventId);
+  const read = (await api.readTask(task.taskId)).data;
+  const delivered = read.messages.find((m) => m.eventId === receipt.eventId);
+  assert.equal(delivered?.text, "Looks right; ship it");
+  assert.deepEqual(delivered?.reference, { resultId: result.resultId });
+  assert.equal(read.resultReviews![0]?.response?.response, "reviewed");
+});
+
+test("a review whose task closed refuses a response even before reconciliation", async (t) => {
+  const { f, task, api, respond } = await reviewed();
+  t.after(() => f.close());
+  f.seedPersistedState((db) =>
+    db
+      .prepare("UPDATE domain_tasks SET state='done' WHERE id=?")
+      .run(task.taskId),
+  );
+  await assert.rejects(api.execute(respond()), /conflict/);
+});

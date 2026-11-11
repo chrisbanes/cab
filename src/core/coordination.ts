@@ -1967,15 +1967,6 @@ export class CoordinationStore {
       response: command.response,
       ...(command.message === undefined ? {} : { message: command.message }),
     };
-    const event = (eventId: string | null) =>
-      eventId === null
-        ? null
-        : this.parseEvent(
-            this.required(
-              "SELECT sequence, eventId, taskId, recipientAssignmentId, eventType, resultId, interactionId, payload, createdAt FROM coordination_inbox_events WHERE eventId = ?",
-              eventId,
-            ),
-          );
     return transaction(this.db, () => {
       const prior = this.one(
         "SELECT payloadHash, result FROM coordination_operator_receipts WHERE scope = 'result-review-response' AND commandKey = ?",
@@ -1996,7 +1987,8 @@ export class CoordinationStore {
               receipt.reviewId,
             ),
           ),
-          event: event(receipt.eventId),
+          event:
+            receipt.eventId === null ? null : this.eventById(receipt.eventId),
         };
       }
       assertOwnedTaskWritable(this.db, command.taskId);
@@ -2028,12 +2020,20 @@ export class CoordinationStore {
           !this.feedbackRecipient(command.taskId, String(lead.assignmentId))
         )
           throw new DomainConflictError("The lead cannot receive feedback now");
-        delivered = this.deliverOperatorFeedback(
+        const { event, resumedLead } = this.deliverOperatorFeedback(
           command.taskId,
           String(lead.assignmentId),
           command.message,
           { resultId: String(row.resultId) },
-        ).event;
+        );
+        delivered = event;
+        // As an ordinary message does, input to a held lead continues its recovery.
+        if (!resumedLead)
+          this.recordRecoveryContinuation(
+            event,
+            command.key,
+            materialDigest(payload),
+          );
       }
       const eventId = delivered?.eventId ?? null;
       this.db
@@ -5847,10 +5847,14 @@ export class CoordinationStore {
     const receipt = z
       .object({ eventId: z.string().uuid() })
       .parse(JSON.parse(String(row.result)));
+    return this.eventById(receipt.eventId);
+  }
+
+  private eventById(eventId: string): InboxEvent {
     return this.parseEvent(
       this.required(
         "SELECT sequence, eventId, taskId, recipientAssignmentId, eventType, resultId, interactionId, payload, createdAt FROM coordination_inbox_events WHERE eventId = ?",
-        receipt.eventId,
+        eventId,
       ),
     );
   }
