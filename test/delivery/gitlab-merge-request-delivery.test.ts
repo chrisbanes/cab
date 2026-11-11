@@ -389,6 +389,46 @@ test("a merge request retargeted to another branch is held even when the lower o
   }
 });
 
+test("a retarget to the branch the workspace's remote base resolved to is accepted although the link saved another", async (t) => {
+  const w = await gitlabWorld(t);
+  try {
+    // The code host's default moved from the saved `main` to `release` before the workspace started.
+    git(w.source, "branch", "release", "main");
+    w.f.readDb((db) => {
+      const row = db
+        .prepare(
+          "SELECT repositories FROM task_workspace_bindings WHERE taskId = ?",
+        )
+        .get(w.f.taskId) as { repositories: string };
+      const repositories = JSON.parse(row.repositories) as Record<
+        string,
+        unknown
+      >[];
+      db.prepare(
+        "UPDATE task_workspace_bindings SET repositories = ? WHERE taskId = ?",
+      ).run(
+        JSON.stringify(
+          repositories.map((r) => ({
+            ...r,
+            base: { mode: "remote-default", fetch: true },
+            baseBranch: "release",
+          })),
+        ),
+        w.f.taskId,
+      );
+    });
+    const s = await stacked(w, "merged");
+    // The lower merge request merged into that default.
+    s.below.target_branch = "release";
+    s.mr.target_branch = "release";
+    await s.refresh();
+    assert.equal(s.delivery()?.acceptedBaseRef, "release");
+    assert.equal(s.delivery()?.baseChange, null);
+  } finally {
+    await w.f.close();
+  }
+});
+
 test("a merged request from another project, or into another branch, is not the merged base", async (t) => {
   for (const other of [
     { source_project_id: 99 },

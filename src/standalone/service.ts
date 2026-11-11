@@ -1538,6 +1538,11 @@ export class StandaloneService {
             return false;
           },
           taskWorkspace,
+          remoteBaseBranch: (taskId, repositoryId) =>
+            workspaceBindings
+              .get(taskId)
+              ?.repositories.find((r) => r.repositoryId === repositoryId)
+              ?.baseBranch ?? null,
           projectWrite: (taskId, run) =>
             this.withProjectWrite(
               taskProjectId(db, taskId),

@@ -179,6 +179,11 @@ export interface DeliveryCoordinatorOptions {
     blockerPrNumber?: number;
     blockerHeadSha?: string;
   } | null;
+  /**
+   * The branch a task's workspace resolved its remote base to, or null for an explicit ref; read
+   * synchronously so a stack retarget is judged against the base the work started from.
+   */
+  remoteBaseBranch?: (taskId: string, repositoryId: string) => string | null;
   /** The repository's task worktree and the base it was provisioned at; null when unavailable. */
   taskWorkspace?: (
     taskId: string,
@@ -341,6 +346,21 @@ export class DeliveryCoordinator {
             : "fetch-failed",
       };
     }
+  }
+  /**
+   * The repository base a stacked change request may be retargeted to: the branch the task's
+   * remote base resolved to (the code host's default may differ from the saved ref), else the
+   * repository link's ref.
+   */
+  private repositoryBase(
+    taskId: string,
+    projectId: string,
+    observation: { repositoryId: string },
+  ): string | null | undefined {
+    return (
+      this.options.remoteBaseBranch?.(taskId, observation.repositoryId) ??
+      this.codeHost(projectId, observation.repositoryId).ref
+    );
   }
   /**
    * The change request target a publication is checked against: the bound change request's
@@ -1435,7 +1455,7 @@ export class DeliveryCoordinator {
         caller,
         observation,
         lead,
-        this.codeHost(caller.projectId, observation.repositoryId).ref,
+        this.repositoryBase(caller.taskId, caller.projectId, observation),
       );
       this.failedBlockerCleared(caller.taskId, failedDependents);
       if (outside)
@@ -1612,7 +1632,7 @@ export class DeliveryCoordinator {
       const result = this.store.observePrWithinTransaction(
         taskId,
         observation,
-        this.codeHost(current.projectId, observation.repositoryId).ref,
+        this.repositoryBase(taskId, current.projectId, observation),
       );
       this.failedBlockerCleared(taskId, failedDependents);
       this.options.observedPr?.(taskId, observation);
