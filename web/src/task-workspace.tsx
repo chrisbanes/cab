@@ -2857,6 +2857,9 @@ export function TaskWorkspace({
                 conversation={columns}
                 pane={
                   <ChangesPane
+                    heading={
+                      deliveryApplies(data) ? "Changes and delivery" : "Changes"
+                    }
                     onClose={closePane}
                     onFullWidth={paneToFullWidth}
                   >
