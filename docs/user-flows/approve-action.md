@@ -37,6 +37,9 @@ material invalidates approval".
    submission; Deny is the alternative, and Leave pending keeps the request open.
 4. The recorded decision shows on the request, the task and the Inbox row, with any
    remaining hold stated beside it.
+5. Back from the approval review returns to the Inbox with the approval still
+   selected and the queue filters and position kept. When the decided approval has
+   left the queue, the pane offers Next request without opening it.
 
 Task-card budgets start at the explicit Decisions and holds target
 (`?section=decisions`). Untargeted task links open the latest conversation;

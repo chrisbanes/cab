@@ -30,7 +30,9 @@ import { useMediaQuery } from "./use-media-query.js";
 import {
   ageLabel,
   filterCounts,
+  type QueueAnchor,
   queueGroups,
+  queueSteps,
   requestActionLabel,
   requestHeading,
   requestIdentity,
@@ -49,6 +51,7 @@ import {
 import { InboxContext } from "./inbox-context.js";
 import { inboxSelectionHref } from "../../src/operator/attention.js";
 import { closeResolvedNotifications } from "./notifications.js";
+import { shortcutApplies } from "./focus-mode.js";
 import { QuestionResponse } from "./question-response.js";
 import type { QuestionResponseStates } from "./question-response-state.js";
 import "./inbox.css";
@@ -61,6 +64,8 @@ export class InboxState {
   auto: InboxItem | null = null;
   /** Where the phone detail came from, so Back can focus it without selecting anything. */
   returnFocus: { id: string; index: number } | null = null;
+  /** Where the selection last stood in the queue, so Previous/Next continue after it leaves. */
+  anchor: QueueAnchor | null = null;
   clear() {
     this.project = "";
     this.kind = "";
@@ -68,6 +73,7 @@ export class InboxState {
     this.selected = null;
     this.auto = null;
     this.returnFocus = null;
+    this.anchor = null;
   }
 }
 /** What the Inbox asks the shell header to show; the shell only merges it into its props. */
@@ -291,7 +297,15 @@ export function Inbox({
     if (row || resource.state.status === "fresh") state.returnFocus = null;
     row?.focus({ preventScroll: true });
   }, [single, urlId, state, resource.state.status]);
-  const position = selected ? rows.findIndex((r) => r.id === selected.id) : -1,
+  const position = selected ? rows.findIndex((r) => r.id === selected.id) : -1;
+  if (selected && position >= 0)
+    state.anchor = {
+      id: selected.id,
+      index: position,
+      previousId: rows[position - 1]?.id,
+      nextId: rows[position + 1]?.id,
+    };
+  const anchored = Boolean(selected && state.anchor?.id === selected.id),
     heading = selected
       ? `${requestKindLabel(selected.kind)}${position >= 0 ? ` · ${position + 1} of ${rows.length}` : ""}`
       : null,
@@ -452,8 +466,40 @@ export function Inbox({
       (!selected && !selectedId?.startsWith("intervention:") && !runtimeId),
     selectedHeading = selected ? requestHeading(selected) : null,
     KindIcon = selected ? requestKindIcons[selected.kind] : null,
-    previous = position > 0 ? rows[position - 1] : undefined,
-    next = position >= 0 ? rows[position + 1] : undefined;
+    { previous, next } = queueSteps(rows, selected?.id ?? null, state.anchor),
+    continuation = next ?? previous,
+    continuationHeading = continuation ? requestHeading(continuation) : null;
+  // J and K step like the wide layout's Previous/Next; the moved-to request's heading takes focus.
+  const steps = useRef({ previous, next, choose });
+  steps.current = { previous, next, choose };
+  const focusHeading = useRef(false),
+    detailHeading = useRef<HTMLHeadingElement>(null);
+  useEffect(() => {
+    if (single) return;
+    const onKey = (event: KeyboardEvent) => {
+      const target = event.target instanceof HTMLElement ? event.target : null,
+        { previous, next, choose } = steps.current,
+        item = shortcutApplies("j", event, target)
+          ? next
+          : shortcutApplies("k", event, target)
+            ? previous
+            : undefined;
+      if (!item) return;
+      event.preventDefault();
+      focusHeading.current = true;
+      choose(item);
+    };
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, [single]);
+  useEffect(() => {
+    if (!focusHeading.current || !detailHeading.current) return;
+    focusHeading.current = false;
+    detailHeading.current.focus();
+    [...(queue.current?.querySelectorAll<HTMLElement>(".inbox-row") ?? [])]
+      .find((el) => el.dataset.recordId === selectedId)
+      ?.scrollIntoView({ block: "nearest" });
+  }, [selectedId]);
   const meta = selected && selected.kind !== "runtime" && (
     <div className="inbox-detail-meta">
       {requestIdentity(selected) && (
@@ -619,6 +665,7 @@ export function Inbox({
           {status === "actionable"
             ? "Only items that need your decision or intervention. Routine progress stays in task views."
             : "Inbox history. Dismissed requests do not block completion; no answer, approval or execution release is implied."}
+          {!single && " J and K move between requests."}
         </p>
       </div>
       <section className="inbox-detail" aria-label="Selected request">
@@ -653,12 +700,14 @@ export function Inbox({
                         Open task
                       </a>
                     )}
-                    {position >= 0 && (
+                    {(position >= 0 || anchored) && (
                       <>
                         <Button
                           variant="secondary"
                           className="inbox-step"
                           aria-label="Previous request"
+                          aria-keyshortcuts="K"
+                          title="Previous request (K)"
                           disabled={!previous}
                           onClick={() => previous && choose(previous)}
                         >
@@ -668,6 +717,8 @@ export function Inbox({
                           variant="secondary"
                           className="inbox-step"
                           aria-label="Next request"
+                          aria-keyshortcuts="J"
+                          title="Next request (J)"
                           disabled={!next}
                           onClick={() => next && choose(next)}
                         >
@@ -687,7 +738,9 @@ export function Inbox({
                       {selectedHeading.subtitle}
                     </p>
                   )}
-                  <h2>{selectedHeading?.title ?? "Selected request"}</h2>
+                  <h2 ref={detailHeading} tabIndex={-1}>
+                    {selectedHeading?.title ?? "Selected request"}
+                  </h2>
                   {selectedHeading?.reason && selected.kind !== "runtime" && (
                     <p className="inbox-reason">{selectedHeading.reason}</p>
                   )}
@@ -697,6 +750,40 @@ export function Inbox({
                       remains selected.
                     </p>
                   )}
+                  {leftQueue &&
+                    (continuation && continuationHeading ? (
+                      <button
+                        type="button"
+                        className="inbox-continue"
+                        onClick={() => choose(continuation)}
+                      >
+                        <span className="inbox-continue-label">
+                          Next request <span aria-hidden="true">→</span>
+                        </span>
+                        <strong>
+                          {continuationHeading.title ?? "Unavailable task"}
+                        </strong>
+                        {continuationHeading.subtitle && (
+                          <span className="inbox-row-subtitle">
+                            {continuationHeading.subtitle}
+                          </span>
+                        )}
+                      </button>
+                    ) : filtered && loaded.length ? (
+                      <p className="inbox-continue-end">
+                        No more requests match these filters.{" "}
+                        <Button variant="secondary" onClick={clear}>
+                          Clear filters
+                        </Button>
+                      </p>
+                    ) : (
+                      <p className="inbox-continue-end">
+                        No actionable requests remain.{" "}
+                        <ActionLink variant="secondary" href="/">
+                          Back to overview
+                        </ActionLink>
+                      </p>
+                    ))}
                 </div>
               )}
               {!isQuestion && meta}

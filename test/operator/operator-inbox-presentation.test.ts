@@ -8,6 +8,7 @@ import {
   holdNotices,
   holdNoticesBesideRequests,
   queueGroups,
+  queueSteps,
   requestActionLabel,
   requestHeading,
   requestIdentity,
@@ -1281,4 +1282,50 @@ test("history actions name visibility rather than offering an obsolete response"
     }),
     "View dismissed item",
   );
+});
+
+test("Previous/Next continue from the selection's former place once it leaves the displayed queue", () => {
+  const rows = (...ids: string[]) => ids.map((id) => ({ id })),
+    anchor = (
+      id: string,
+      index: number,
+      previousId?: string,
+      nextId?: string,
+    ) => ({ id, index, previousId, nextId }),
+    ids = (steps: ReturnType<typeof queueSteps<{ id: string }>>) => [
+      steps.previous?.id,
+      steps.next?.id,
+    ];
+  // Displayed: its neighbours, whatever the anchor says.
+  assert.deepEqual(ids(queueSteps(rows("a", "b", "c"), "b", null)), ["a", "c"]);
+  // The middle row left: its former neighbours.
+  const middle = anchor("b", 1, "a", "c");
+  assert.deepEqual(ids(queueSteps(rows("a", "c"), "b", middle)), ["a", "c"]);
+  // Its former Next left too: the row now at its place.
+  assert.deepEqual(
+    ids(queueSteps(rows("a", "d"), "b", anchor("b", 1, "a", "c"))),
+    ["a", "d"],
+  );
+  // The last row left: no Next, and the new last row is Previous.
+  assert.deepEqual(
+    ids(queueSteps(rows("a", "b"), "c", anchor("c", 2, "b", undefined))),
+    ["b", undefined],
+  );
+  // Every row above it left: the row that slid into its place is only Next.
+  assert.deepEqual(ids(queueSteps(rows("c"), "b", middle)), [undefined, "c"]);
+  // Nothing left, or no anchor for this selection: no targets.
+  assert.deepEqual(ids(queueSteps([], "b", middle)), [undefined, undefined]);
+  assert.deepEqual(ids(queueSteps(rows("a", "c"), "x", middle)), [
+    undefined,
+    undefined,
+  ]);
+  // A row inserted above keeps the neighbour-id targets.
+  assert.deepEqual(ids(queueSteps(rows("new", "a", "c"), "b", middle)), [
+    "a",
+    "c",
+  ]);
+  // The selection itself is never a target, even when the queue repeats it at its old place.
+  for (const queue of [rows("a", "c"), rows("c"), rows("a"), []])
+    for (const step of Object.values(queueSteps(queue, "b", middle)))
+      assert.notEqual(step?.id, "b");
 });

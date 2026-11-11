@@ -520,3 +520,32 @@ export const taskContext = (
         ? (nextAttention([item.attentionCode])?.text ?? null)
         : `Next: you · ${midSentence(requestActionLabel(item))}`,
 });
+
+/** Where the selection last stood in the displayed queue, kept while it is shown there. */
+export interface QueueAnchor {
+  id: string;
+  index: number;
+  previousId: string | undefined;
+  nextId: string | undefined;
+}
+/**
+ * Previous/Next for a selection: its neighbours while it is displayed; once it has left the rows
+ * (answered, filtered out or omitted), its former neighbours if still shown, else the rows now
+ * either side of its former place. Never the selection itself, and nothing without its anchor.
+ */
+export function queueSteps<T extends { id: string }>(
+  rows: readonly T[],
+  selectedId: string | null,
+  anchor: QueueAnchor | null,
+): { previous?: T | undefined; next?: T | undefined } {
+  const position = rows.findIndex((row) => row.id === selectedId);
+  if (position >= 0)
+    return { previous: rows[position - 1], next: rows[position + 1] };
+  if (!anchor || anchor.id !== selectedId) return {};
+  const shown = (id: string | undefined) => rows.find((row) => row.id === id),
+    next = shown(anchor.nextId) ?? rows[anchor.index],
+    previous =
+      shown(anchor.previousId) ?? rows[Math.min(anchor.index, rows.length) - 1];
+  // With every row above it gone, the row that slid into its place is only Next.
+  return { previous: previous === next ? undefined : previous, next };
+}
