@@ -57,6 +57,8 @@ export async function boundWorld(
   seedConversation = false,
   options: {
     runtime?: BoundRuntime;
+    /** A runtime of the other harness, started beside the bound one. */
+    foreign?: BoundRuntime;
     mode?: "verified" | "unknown";
     heldTurnRelease?: HeldTurnReleaseOptions;
   } = {},
@@ -98,10 +100,16 @@ export async function boundWorld(
     },
   };
   const s = await startCliService(t, {
-    runtimeFactory: () => runtime,
+    // The service passes the harness; only a foreign runtime makes it matter.
+    runtimeFactory: ((_context: unknown, h: string) =>
+      h === harness
+        ? runtime
+        : (options.foreign ?? runtime)) as () => BoundRuntime,
     controlPaths: excluded,
     service: {
-      runtimeHarnesses: [harness],
+      runtimeHarnesses: options.foreign
+        ? [harness, harness === "codex" ? "claude" : "codex"]
+        : [harness],
       power: { enabled: false },
       routingClient: null,
       terminationVerifier: verifier,

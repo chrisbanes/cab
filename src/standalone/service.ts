@@ -2614,7 +2614,7 @@ export class StandaloneService {
         !this.runtimeUnavailableSince.has(harness));
     runtime.onUnexpectedRequest((request) => {
       if (!acceptsNew()) return;
-      this.noteTurnActivity(state, request.threadId, request.turnId);
+      this.noteTurnActivity(harness, state, request.threadId, request.turnId);
       const denied = `Unexpected runtime request denied: ${request.method}`;
       const active = state
         .activeExecutions()
@@ -2692,6 +2692,7 @@ export class StandaloneService {
     // Before publication no turn of this generation exists to bind a callback to.
     runtime.onUserInputRequest?.((request) => {
       this.noteTurnActivity(
+        harness,
         state,
         request.identity.threadId,
         request.identity.turnId,
@@ -2712,7 +2713,7 @@ export class StandaloneService {
         this.handleUserInputOutcome(outcome);
     });
     runtime.onToolCall?.((call) => {
-      this.noteTurnActivity(state, call.threadId, call.turnId);
+      this.noteTurnActivity(harness, state, call.threadId, call.turnId);
       return !this.current ||
         !acceptsNew() ||
         foreign(call.threadId, call.turnId)
@@ -2730,12 +2731,12 @@ export class StandaloneService {
         );
     });
     runtime.onConversationEvent?.((event) => {
-      this.noteTurnActivity(state, event.threadId, event.turnId);
+      this.noteTurnActivity(harness, state, event.threadId, event.turnId);
       if (acceptsNew() && !foreign(event.threadId, event.turnId))
         this.receiveConversationEvent(event, harness);
     });
     runtime.onDiagnosticEvent?.((event: RuntimeDiagnosticEvent) => {
-      this.noteTurnActivity(state, event.threadId, event.turnId);
+      this.noteTurnActivity(harness, state, event.threadId, event.turnId);
       if (acceptsNew() && !foreign(event.threadId, event.turnId))
         this.diagnosticCaptures
           .get(runtimeKey(harness, event.threadId))
@@ -2743,7 +2744,7 @@ export class StandaloneService {
     });
     runtime.onTerminalAnomaly?.((anomaly) => {
       if (!acceptsNew()) return;
-      this.noteTurnActivity(state, anomaly.threadId, anomaly.turnId);
+      this.noteTurnActivity(harness, state, anomaly.threadId, anomaly.turnId);
       const matched =
         anomaly.threadId && anomaly.turnId
           ? state
@@ -2763,10 +2764,11 @@ export class StandaloneService {
   }
 
   /**
-   * Runtime activity for an exact turn: a held turn's quiet period starts again, and a
-   * released turn is held again as a known survivor, which retracts its successors.
+   * Runtime activity for an exact turn of this harness: a held turn's quiet period starts
+   * again, and a released turn is held again as a known survivor, which retracts its successors.
    */
   private noteTurnActivity(
+    harness: ExecutionHarness,
     state: ExecutionState,
     threadId: string | undefined,
     turnId: string | undefined,
@@ -2777,6 +2779,8 @@ export class StandaloneService {
         threadId,
         turnId,
       )) {
+        // A runtime naming another harness's turn is refused; it is no activity of that turn.
+        if (state.workHarness(item.workId) !== harness) continue;
         this.heldTurns?.noteActivity(item.workId);
         // Only a released turn is resolved-failed with its request still held.
         if (

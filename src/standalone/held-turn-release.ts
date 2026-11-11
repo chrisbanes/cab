@@ -91,8 +91,12 @@ export class HeldTurnRelease {
   private nextWakeMs(): number {
     const now = this.clock.monotonicNow();
     let wake = this.pollMs;
-    for (const watch of this.watches.values())
-      wake = Math.min(wake, watch.quietFrom + this.quietMs - now);
+    // A turn whose ID was never saved has no quiet deadline, and a deadline a pass has
+    // already judged waits for the next poll, so an unreleased watch never spins the loop.
+    for (const watch of this.watches.values()) {
+      const left = watch.quietFrom + this.quietMs - now;
+      if (watch.interrupted !== null && left > 0) wake = Math.min(wake, left);
+    }
     return Math.max(1, Math.ceil(wake));
   }
 

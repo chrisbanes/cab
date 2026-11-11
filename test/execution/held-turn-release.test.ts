@@ -53,6 +53,7 @@ async function heldWorld(
   options: {
     harness?: "codex" | "claude";
     seedConversation?: boolean;
+    foreign?: HeldTurnRuntime;
   } = {},
 ) {
   const runtime = new HeldTurnRuntime();
@@ -66,6 +67,7 @@ async function heldWorld(
     options.seedConversation,
     {
       runtime,
+      ...(options.foreign ? { foreign: options.foreign } : {}),
       mode: "unknown",
       heldTurnRelease: { clock, wallNow: clock.wallNow },
     },
@@ -199,6 +201,8 @@ test("a held turn whose turn ID was never saved waits for a verified process exi
   await w.advance(minute);
   assert.equal(w.rows().release?.basis, null);
   assert.ok(w.rows().capacity);
+  // It has no quiet deadline, so the release loop keeps the normal poll interval.
+  assert.deepEqual(w.clock.requested.slice(-3), [minute, minute, minute]);
   await w.s.f.service.stop();
   w.setMode("verified");
   await w.s.f.service.start();
@@ -341,4 +345,33 @@ test("Start again continues a released turn's conversation; later activity for i
       .get(w.g.taskId),
   );
   assert.equal(service.startAgainAvailability(w.g.taskId).available, false);
+});
+
+test("activity another harness's runtime reports for a turn changes nothing", async (t) => {
+  const foreign = new HeldTurnRuntime();
+  const w = await heldWorld(t, { foreign });
+  await settle(() => w.rows().release !== null);
+  const claim = () =>
+    foreign.conversation?.({
+      threadId: w.g.threadId,
+      turnId: w.g.turnId,
+    } as RuntimeConversationEvent);
+  assert.ok(foreign.conversation, "the foreign runtime is attached");
+  // A Claude runtime naming the Codex turn does not restart its quiet period.
+  await w.advance(20 * minute);
+  claim();
+  await w.advance(10 * minute);
+  await w.released();
+  assert.equal(w.rows().release?.basis, "quiet-period");
+  // Nor does it re-hold the task once released.
+  claim();
+  await new Promise((resolve) => setTimeout(resolve, 50));
+  assert.equal(
+    w
+      .db()
+      .prepare("SELECT 1 FROM task_writer_ambiguity_holds WHERE taskId=?")
+      .get(w.g.taskId),
+    undefined,
+  );
+  assert.ok(w.s.f.service.heldTurnReleased(w.g.workId));
 });
