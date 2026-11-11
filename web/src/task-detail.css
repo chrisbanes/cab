@@ -1390,22 +1390,6 @@ a.task-source-chip:hover {
 .task-strip-facts > .task-state {
   flex: none;
 }
-/* Phone: the state and the whole next step; the header and decision card carry the rest. */
-@media (max-width: 759px) {
-  .task-strip-facts {
-    gap: var(--space-8);
-  }
-  .task-strip-facts > [data-task-reason],
-  .task-strip-facts > .task-source-chip,
-  .task-strip-facts > .task-strip-lead {
-    display: none;
-  }
-  .task-strip-facts > .task-next {
-    white-space: normal;
-    text-overflow: clip;
-  }
-}
-
 /* Next text yields to the identity chip without making either action disappear. */
 .task-strip-facts > .task-next {
   flex: 1;
@@ -1415,6 +1399,31 @@ a.task-source-chip:hover {
   flex-shrink: 0;
   min-width: 44px;
   max-width: 35%;
+}
+/* Phone: the strip wraps instead of truncating. The state and next step lead; the reason,
+   identity and lead follow on further lines as needed. */
+@media (max-width: 759px) {
+  .task-strip-facts {
+    flex-wrap: wrap;
+    white-space: normal;
+    gap: var(--space-4) var(--space-8);
+  }
+  .task-strip-facts > [data-task-reason],
+  .task-strip-facts > .task-next,
+  .task-strip-facts > .task-source-chip,
+  .task-strip-facts > .task-strip-lead {
+    max-width: 100%;
+    text-overflow: clip;
+    overflow-wrap: anywhere;
+  }
+  .task-strip-facts > [data-task-reason],
+  .task-strip-facts > .task-source-chip,
+  .task-strip-facts > .task-strip-lead {
+    order: 1;
+  }
+  .task-strip-facts > .task-source-chip {
+    height: auto;
+  }
 }
 
 /* A request owns the reading area while its form or recovery outcome is open. */

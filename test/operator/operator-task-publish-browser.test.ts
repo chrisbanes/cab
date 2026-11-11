@@ -175,9 +175,7 @@ for (const [name, viewport] of viewports) {
     assert.equal(commands("task.publish.send").length, 1);
     assert.equal(gh.posts, 1);
     // The task now is the issue: its identity and source link show and the task cannot be published again.
-    await page
-      .locator("[data-task-strip] a.task-source-chip")
-      .waitFor({ state: "attached" });
+    await page.locator("[data-task-strip] a.task-source-chip").waitFor();
     assert.equal(await header(page).count(), 0);
     assert.equal(f.service.domain().importedTask(taskId) !== undefined, true);
     await panel(page).getByRole("button", { name: "Done" }).click();

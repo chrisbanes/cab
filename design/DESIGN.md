@@ -244,14 +244,14 @@ Make the next decision obvious, and keep its evidence close:
   with Reply docked within its column; phone results and Details follow it. On a
   phone the docked Reply is one textarea (at most 12% of the viewport) until focus is
   inside it, a draft is unsent, or a send, notice or uncertain state shows, and the page's
-  `scroll-padding-bottom` keeps a focused control clear of it. The strip
-  stays on one line with one identity chip. Refresh source, Focus mode, Improve
-  with lead and Publish share More task options, a 32px icon toggle. On a phone the
-  strip shows only the state and the next step, which wraps rather than truncates; the
-  source identity stays in Details, and the strip's options join the header's Task
-  actions, so the page has one task menu. Focus mode is desktop-only. Delegations read as collapsible
-  sub-conversations in place, retaining the task's accountable lead and
-  assignment/conversation identities. Use recorded facts and attributed excerpts;
+  `scroll-padding-bottom` keeps a focused control clear of it. From 760px the strip
+  stays on one line with one identity chip; on a phone it wraps instead, leading with
+  the state and next step, and nothing in it is truncated. Refresh source, Focus mode,
+  Improve with lead and Publish share More task options, a 32px icon toggle; on a phone
+  they join the header's Task actions, so the page has one task menu. Focus mode is
+  desktop-only. Delegations read as collapsible sub-conversations in place,
+  retaining the task's accountable lead and assignment/conversation identities. Use
+  recorded facts and attributed excerpts;
   add no invented summary capability.
 - **Composer:** keep project, title and outcome prominent; disclose optional
   context, references, assignee and dependencies with a summary of supplied values.

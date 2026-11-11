@@ -839,15 +839,22 @@ test("The strip and decision card follow the server's attention codes, not a cli
     "Next: you · inspect execution",
   );
   await page.setViewportSize({ width: 390, height: 844 });
-  // A phone's strip is the state and the action: the identity chip is not drawn there.
-  const usable = await strip.evaluate((element) => ({
-    nextWidth: element.querySelector(".task-next")!.getBoundingClientRect()
-      .width,
-    chip: element.querySelector(".task-source-chip")!.checkVisibility(),
-    noOverflow: document.documentElement.scrollWidth <= innerWidth,
-  }));
-  assert.ok(usable.nextWidth >= 44, "the action stays usable on a phone");
-  assert.equal(usable.chip, false);
+  // A phone's strip wraps rather than truncating: the action and identity stay whole.
+  const usable = await strip.evaluate((element) => {
+    const next = element.querySelector(".task-next")!.getBoundingClientRect();
+    const chip = element
+      .querySelector(".task-source-chip")!
+      .getBoundingClientRect();
+    return {
+      nextWidth: next.width,
+      chipWidth: chip.width,
+      noOverflow: document.documentElement.scrollWidth <= innerWidth,
+    };
+  });
+  assert.ok(
+    usable.nextWidth >= 44 && usable.chipWidth >= 44,
+    "action and identity stay usable on a phone",
+  );
   assert.ok(usable.noOverflow, "the strip does not widen the phone");
   const card = page.locator("section#decisions");
   assert.equal(
@@ -860,7 +867,20 @@ test("The strip and decision card follow the server's attention codes, not a cli
   codes = ["lead-review"];
   await page.reload();
   await strip.waitFor();
-  await strip.locator("[data-task-reason]").waitFor({ state: "attached" }); // Not drawn on a phone.
+  await strip.locator("[data-task-reason]").waitFor();
+  // The reason and identity follow the next step on a phone, each shown whole.
+  for (const fact of ["[data-task-reason]", ".task-source-chip"])
+    assert.deepEqual(
+      await strip
+        .locator(fact)
+        .evaluate((e) => [
+          e.checkVisibility(),
+          e.scrollWidth <= e.clientWidth,
+          getComputedStyle(e).textOverflow,
+        ]),
+      [true, true, "clip"],
+      fact,
+    );
   assert.equal(
     await strip.locator("span.task-next").innerText(),
     "Next: cab · recording routing fallback",
@@ -5130,7 +5150,7 @@ test("Phone task header is Back, title, identity subtitle and one Task actions c
   await refreshed;
   await page.mouse.click(4, 700);
 
-  // The strip is the state and the whole next step; the identity is not repeated there.
+  // The strip leads with the state and the whole next step; the identity follows, whole.
   await page.goto(`${web.origin}/tasks/${question.taskId}`);
   const strip = page.locator("[data-task-strip]");
   await strip.locator(".task-next").waitFor();
@@ -5147,7 +5167,12 @@ test("Phone task header is Back, title, identity subtitle and one Task actions c
       [true, "clip"],
     );
   }
-  assert.equal(await strip.locator(".task-source-chip").isVisible(), false);
+  assert.deepEqual(
+    await strip
+      .locator(".task-source-chip")
+      .evaluate((e) => [e.checkVisibility(), e.scrollWidth <= e.clientWidth]),
+    [true, true],
+  );
 
   // A finished task offers Execution and no Stop….
   await page.goto(`${web.origin}/tasks/${finished.taskId}`);
@@ -5183,7 +5208,7 @@ test("Phone task header is Back, title, identity subtitle and one Task actions c
       !document.querySelector(".task-header-overflow")?.hasAttribute("open"),
   );
 
-  // The meaningful outcome is the phone subtitle.
+  // The meaningful outcome is the phone subtitle; source identity stays in the strip.
   assert.equal(
     await header.locator(".page-subtitle-short").textContent(),
     "One line outcome.",
