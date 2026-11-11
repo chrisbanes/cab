@@ -150,8 +150,31 @@ test("composer preselects its sole visible project", async (_t, journey) => {
     viewport: { width: 1366, height: 900 },
   });
   journey.observe(page);
-  await signIn(page, web.origin, web.password, "/tasks/new");
+  let releaseWorkspace!: () => void;
+  const workspaceHeld = new Promise<void>((resolve) => {
+    releaseWorkspace = resolve;
+  });
+  await page.route("**/api/operator/workspace", async (route) => {
+    await workspaceHeld;
+    await route.continue();
+  });
+  try {
+    await signIn(page, web.origin, web.password, "/tasks/new");
+    await page.getByLabel("Task title", { exact: true }).waitFor();
+    assert.equal(
+      await page.getByLabel("Project", { exact: true }).inputValue(),
+      "",
+    );
+  } finally {
+    releaseWorkspace();
+  }
   await page.getByLabel("Task title", { exact: true }).waitFor();
+  await page.waitForFunction(
+    (id) =>
+      document.querySelector<HTMLSelectElement>('[aria-label="Project"]')
+        ?.value === id,
+    projectId,
+  );
   assert.equal(
     await page.getByLabel("Project", { exact: true }).inputValue(),
     projectId,
@@ -162,6 +185,12 @@ test("composer preselects its sole visible project", async (_t, journey) => {
   );
   await page.reload();
   await page.getByLabel("Task title", { exact: true }).waitFor();
+  await page.waitForFunction(
+    (id) =>
+      document.querySelector<HTMLSelectElement>('[aria-label="Project"]')
+        ?.value === id,
+    projectId,
+  );
   assert.equal(
     await page.getByLabel("Project", { exact: true }).inputValue(),
     projectId,
@@ -213,6 +242,12 @@ test("composer preselects its sole visible project", async (_t, journey) => {
   });
   await page.goto(`${web.origin}/tasks/new?project=${explicitProject}`);
   await page.getByLabel("Task title", { exact: true }).waitFor();
+  await page.waitForFunction(
+    (id) =>
+      document.querySelector<HTMLSelectElement>('[aria-label="Project"]')
+        ?.value === id,
+    explicitProject,
+  );
   assert.equal(
     await page.getByLabel("Project", { exact: true }).inputValue(),
     explicitProject,
