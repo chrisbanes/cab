@@ -1563,6 +1563,8 @@ async function assertConversationViewport(page: Page) {
 async function assertReplyUsable(page: Page) {
   const reply = page.locator("#reply");
   const remove = reply.getByRole("button", { name: /^Remove @/ });
+  // A phone's docked Reply shows its recipients only once focus is inside it.
+  await reply.getByLabel("Editable reply", { exact: true }).focus();
   while (await remove.count()) {
     await remove.first().click();
     // Removal returns focus to the trigger on the next frame; settle it before typing.

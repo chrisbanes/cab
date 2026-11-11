@@ -2141,7 +2141,11 @@ export function TaskWorkspace({
               data.commentPolicy?.mode === "approval",
             ));
   const reply = (
-    <section id="reply" className="reply-card">
+    <section
+      id="reply"
+      className="reply-card"
+      data-expanded={pending || state.uncertain || outcome ? "" : undefined}
+    >
       <h3 className="section-heading">Reply</h3>
       <fieldset className="reply-destination">
         <legend className="sr-only">Send to</legend>

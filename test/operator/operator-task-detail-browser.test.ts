@@ -2517,6 +2517,40 @@ test("An open approval leads Overview and stays reachable from every tab in Deci
     "results and Details follow the conversation column",
   );
   assert.ok(phoneReply.y + phoneReply.height <= phoneAside.y);
+  // Reply docks compactly until focus enters it, and a focused control stays clear of it.
+  assert.ok(
+    phoneReply.height <= 0.12 * 844,
+    `compact Reply is ${phoneReply.height}px`,
+  );
+  const review = page
+    .locator(".decision")
+    .getByRole("link", { name: "Review material & decide" });
+  await review.focus();
+  const reviewBox = await box(".decision a[href*='request=']");
+  const dockBox = await box("section#reply");
+  assert.ok(
+    reviewBox.y >= 0 && reviewBox.y + reviewBox.height <= 844,
+    "the focused link is in the viewport",
+  );
+  assert.ok(
+    reviewBox.y + reviewBox.height <= dockBox.y ||
+      dockBox.y + dockBox.height <= reviewBox.y,
+    "the focused link is clear of Reply",
+  );
+  const reply = page.locator("section#reply");
+  await reply.locator("#workspace-reply").focus();
+  for (const shown of [
+    reply.getByRole("radio", { name: "Comment on task" }),
+    reply.locator(".comment-recipients"),
+    reply.getByRole("button", { name: "Send comment" }),
+  ])
+    assert.ok(await shown.isVisible(), "the focused Reply shows its controls");
+  await reply.locator("#workspace-reply").fill("Keep this draft");
+  await page.evaluate(() => (document.activeElement as HTMLElement).blur());
+  assert.equal(
+    await reply.locator("#workspace-reply").inputValue(),
+    "Keep this draft",
+  );
   await openOverviewCard(page, "assignments");
   for (const b of await table
     .locator(".assignment-row button")
