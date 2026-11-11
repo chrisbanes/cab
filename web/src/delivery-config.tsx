@@ -4,6 +4,7 @@ import {
   useReadinessDiscovery,
 } from "./readiness-picker.js";
 import { Button } from "./components.js";
+import { defaultGrantMode } from "../../src/core/delivery-levels.js";
 import type { TabProps } from "./project-config.js";
 import {
   applyRepositoryDeliveryLevel,
@@ -307,8 +308,10 @@ function DeliveryPolicyForm(p: TabProps) {
     for (const [field, value] of Object.entries(patch))
       if (value === undefined) delete row[field];
       else row[field] = value;
-    if (section === "grants" && patch.action === "branch.adopt")
-      row.mode = "approval";
+    if (section === "grants" && typeof patch.action === "string")
+      row.mode = defaultGrantMode(
+        patch.action as Parameters<typeof defaultGrantMode>[0],
+      );
     // An item-add grant has a Project only; a field or options left from a field grant would be hidden.
     if (section === "grants" && patch.action === "project.item.add") {
       delete row.fieldNodeId;
@@ -340,7 +343,7 @@ function DeliveryPolicyForm(p: TabProps) {
             rowKey,
             action: "issue.comment",
             repositoryId: "",
-            mode: "approval",
+            mode: defaultGrantMode("issue.comment"),
           }
         : { rowKey, name: "" },
     );

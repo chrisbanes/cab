@@ -2,7 +2,11 @@ import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import { DatabaseSync } from "node:sqlite";
 import { test } from "node:test";
-import { DeliveryStore } from "../../src/core/delivery.js";
+import { actionKinds, DeliveryStore } from "../../src/core/delivery.js";
+import {
+  defaultGrantModes,
+  repositoryLevelGrants,
+} from "../../src/core/delivery-levels.js";
 import { DomainStore } from "../../src/core/domain.js";
 import { Store } from "../../src/core/store.js";
 
@@ -108,4 +112,38 @@ test("a project item grant names its Project, like a project field grant", () =>
   } finally {
     db.close();
   }
+});
+
+test("each action kind's new-grant default follows ADR-1032, and presets agree", () => {
+  const allow = [
+    "branch.push",
+    "pr.create",
+    "pr.edit",
+    "pr.ready",
+    "pr.update-branch",
+    "pr.thread.reply",
+    "pr.thread.resolve",
+    "issue.comment",
+    "issue.labels",
+    "project.item.add",
+    "project.field",
+  ];
+  assert.deepEqual(
+    Object.keys(defaultGrantModes).sort(),
+    [...actionKinds].sort(),
+  );
+  for (const kind of actionKinds)
+    assert.equal(
+      defaultGrantModes[kind],
+      allow.includes(kind) ? "allow" : "approval",
+      kind,
+    );
+  for (const level of [
+    "open-prs",
+    "merge-with-approval",
+    "merge-when-ready",
+  ] as const)
+    for (const grant of repositoryLevelGrants("R", level))
+      if (defaultGrantModes[grant.action] === "allow")
+        assert.equal(grant.mode, "allow", `${level} ${grant.action}`);
 });
