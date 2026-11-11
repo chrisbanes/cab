@@ -312,14 +312,15 @@ The association between an assignment and its runtime-specific session or proces
 identity and validated execution settings.
 _Avoid_: Assignment identity when referring only to an execution session
 
-**Skip sandbox**:
-A per-project setting, `dangerouslySkipSandbox`, that the operator turns on so a project's task turns
-run without the harness sandbox and can launch host tools such as browsers and Android emulators.
-It is recorded when a turn is admitted and never applies to draft turns, drafting runs or turns
-without a task binding. Agents then act with the service user's full filesystem, process, network
-and credential access, and command network access and local listening are superseded while it is on.
-The planned sandbox level (ADR-1034) will replace it.
-_Avoid_: Sandbox bypass, unsandboxed mode, when referring to the setting
+**Sandbox level**:
+A per-project setting, `sandbox`, that the operator chooses for a project's task turns
+(ADR-1034). `strict`, the default, keeps the harness sandbox. `unsandboxed` runs task turns
+without it, so they can launch host tools such as browsers and Android emulators; agents then
+act with the service user's full filesystem, process, network and credential access, and
+command network access and local listening are superseded. The level is recorded when a turn
+is admitted; draft turns, drafting runs, read-only turns and turns without a task binding are
+always `strict`.
+_Avoid_: Skip sandbox, sandbox bypass, when referring to the setting
 
 **Task workspace**:
 The working files allocated to a task, retained independently of its conversations.

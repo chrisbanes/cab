@@ -1108,26 +1108,27 @@ whether it was admitted with local listening enabled.
 
 A project's verification can need host tools that a harness sandbox blocks: Chromium fails
 before opening a page and an Android emulator cannot reach the hypervisor, the adb sockets or
-the GPU. Turn on **Skip sandbox (dangerous)** in the project's Settings, General tab, and
-confirm the dialog, or run `cab project prepare PROJECT_ID --dangerously-skip-sandbox true` and
-apply the prepared file. Turn it off in Settings, which applies at once, or with
-`--dangerously-skip-sandbox false`. It is off by default and applies to task turns admitted
-after the change; a running turn keeps its policy.
-[ADR-1029](../adr/1029-skip-sandbox-for-host-tools.md) records the decision. The sandbox level of
-[ADR-1034](../adr/1034-harness-native-sandbox-escalation.md) will replace it.
+the GPU. Set **Sandbox level** to **Unsandboxed (dangerous)** in the project's Settings,
+General tab, and confirm the dialog, or run
+`cab project prepare PROJECT_ID --sandbox unsandboxed` and apply the prepared file. Return to
+**Strict** in Settings, which applies at once, or with `--sandbox strict`. The level is
+`strict` by default and applies to task turns admitted after the change; a running turn keeps
+its policy. [ADR-1034](../adr/1034-harness-native-sandbox-escalation.md) defines the level and
+[ADR-1029](../adr/1029-skip-sandbox-for-host-tools.md) records the unsandboxed grant.
 
 - **Codex.** A task turn runs with sandbox policy `dangerFullAccess`; the approval policy stays
   `never`.
 - **Claude Code.** A task turn runs with Claude Code's sandbox disabled. The tool policy is
   unchanged and cab's edit hook still confines Write and Edit to the task's writable roots, but
   that guards against accidental edits and does not confine commands.
-- Draft turns, drafting runs, read-only turns and turns without a task binding never skip the
-  sandbox.
-- While it is on, command network access and local listening are superseded: an unsandboxed
-  command can use the network and listen on ports. Their stored values return when it is off.
+- Draft turns, drafting runs, read-only turns and turns without a task binding are always
+  strict.
+- At the unsandboxed level, command network access and local listening are superseded: an
+  unsandboxed command can use the network and listen on ports. Their stored values return at
+  the strict level.
 
 An unsandboxed turn has the service user's full filesystem, process, network and credential
-access, and untrusted text such as issue and pull request bodies can drive it. Turn it on only
+access, and untrusted text such as issue and pull request bodies can drive it. Choose it only
 for a project whose task sources and repositories you trust with that access. Only macOS is
 qualified, and cab provides no independent sandbox to compensate.
 

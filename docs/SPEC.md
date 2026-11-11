@@ -1126,28 +1126,28 @@ only when command network access is on, and then on any interface, so local list
 never changes a Codex turn. Draft turns, drafting runs and turns without a task binding
 never listen. Every place the effective policy is shown states what local listening does
 in that harness and that other processes on the host can reach a listening port.
-Skipping the sandbox ([ADR-1029](adr/1029-skip-sandbox-for-host-tools.md)) lets a
-project's task turns run host tools that a harness sandbox blocks, such as browsers and
-Android emulators; the sandbox level of
-[ADR-1034](adr/1034-harness-native-sandbox-escalation.md) will replace it.
-A Codex task turn sends `sandboxPolicy: { type: "dangerFullAccess" }` with approval policy
+A project's sandbox level ([ADR-1034](adr/1034-harness-native-sandbox-escalation.md)) is
+`strict`, the default, or `unsandboxed`. At `unsandboxed` a project's task turns run host
+tools that a harness sandbox blocks, such as browsers and Android emulators
+([ADR-1029](adr/1029-skip-sandbox-for-host-tools.md)).
+A Codex task turn at `unsandboxed` sends `sandboxPolicy: { type: "dangerFullAccess" }` with approval policy
 still `never`. A Claude Code task turn runs with its sandbox disabled; its permission mode,
 tool allowlist and disallowed tools, and the cab tool checks do not change, and the
 PreToolUse hook still confines Write and Edit to the task's writable roots and refuses a
 Bash call that sets `dangerouslyDisableSandbox`. That confinement guards against accidental
-edits and is not a boundary, because commands are no longer confined. The value is recorded
+edits and is not a boundary, because commands are no longer confined. The level is recorded
 at admission and applies to task turns only: draft turns, drafting runs, read-only turns and
-turns without a task binding never skip the sandbox, and a change after admission does not
-reach a running turn. While it is on, it supersedes command network access and local
-listening, whose stored values are kept and apply again when it is off. An unsandboxed
+turns without a task binding are always `strict`, and a change after admission does not
+reach a running turn. At `unsandboxed` it supersedes command network access and local
+listening, whose stored values are kept and apply again at `strict`. An unsandboxed
 turn has the service user's full filesystem, process, network and credential access, and
 untrusted text such as issue and pull request bodies can drive it through prompt injection.
 Processes the agent starts, such as emulators and browsers, can outlive the turn and cab
 does not clean them up. The Claude subprocess environment scrub, confinement to the per-task
 temporary directory, whose qualification depended on the sandbox, no longer hold for an
-unsandboxed turn. The Claude sandbox self-test does not gate such a turn. Only macOS is qualified. Turning it on in Settings needs a
-confirmation that states the risk; turning it off applies at once. Every place the
-effective policy is shown states the grant and these risks in that harness.
+unsandboxed turn. The Claude sandbox self-test does not gate such a turn. Only macOS is qualified. Choosing `unsandboxed` in Settings
+needs a confirmation that states the risk; choosing `strict` applies at once. Every place the
+effective policy is shown states the level, its grant and these risks in that harness.
 cab enforces only what it sends the runtime; none of the three settings is an allow-list,
 a proxy or a host filter, and MCP and app tools, web tools and model transport are
 separate surfaces.
