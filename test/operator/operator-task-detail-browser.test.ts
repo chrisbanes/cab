@@ -868,7 +868,27 @@ test("The strip and decision card follow the server's attention codes, not a cli
   await page.reload();
   await strip.waitFor();
   await strip.locator("[data-task-reason]").waitFor();
-  // The reason and identity follow the next step on a phone, each shown whole.
+  // A phone wraps the strip in its reading order: each fact follows the one before it.
+  assert.deepEqual(
+    await strip.evaluate((element) => {
+      const facts = [...element.querySelectorAll(".task-strip-facts > *")]
+        .filter((e) => e.checkVisibility())
+        .map((e) => ({
+          name: e.className || "reason",
+          box: e.getBoundingClientRect(),
+        }));
+      return facts.every(
+        ({ box }, i) =>
+          i === 0 ||
+          box.left > facts[i - 1]!.box.left ||
+          box.top >= facts[i - 1]!.box.bottom - 1,
+      )
+        ? facts.map((f) => f.name)
+        : ["out of order", ...facts.map((f) => f.name)];
+    }),
+    ["task-state", "reason", "task-next", "task-source-chip"],
+  );
+  // The reason and identity are each shown whole.
   for (const fact of ["[data-task-reason]", ".task-source-chip"])
     assert.deepEqual(
       await strip
@@ -5150,7 +5170,7 @@ test("Phone task header is Back, title, identity subtitle and one Task actions c
   await refreshed;
   await page.mouse.click(4, 700);
 
-  // The strip leads with the state and the whole next step; the identity follows, whole.
+  // The state and the whole next step show; the identity follows, whole.
   await page.goto(`${web.origin}/tasks/${question.taskId}`);
   const strip = page.locator("[data-task-strip]");
   await strip.locator(".task-next").waitFor();
@@ -5213,6 +5233,11 @@ test("Phone task header is Back, title, identity subtitle and one Task actions c
     await header.locator(".page-subtitle-short").textContent(),
     "One line outcome.",
   );
+  // Below 1121px the strip's options toggle is a 44px target, like the strip's other controls.
+  await page.setViewportSize({ width: 800, height: 768 });
+  await settle(page);
+  const touch = await page.getByLabel("More task options").boundingBox();
+  assert.ok(touch && touch.width >= 44 && touch.height >= 44);
   await page.setViewportSize({ width: 1366, height: 850 });
   await settle(page);
   // From 760px the header keeps the recorded outcome and carries no phone identity line.

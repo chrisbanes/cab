@@ -1353,6 +1353,13 @@ a.task-source-chip:hover {
   color: var(--fg);
   list-style: none;
 }
+/* Below 1121px it is a 44px target like the strip's other controls. */
+@media (max-width: 1120px) {
+  .task-workspace .task-tools > summary {
+    width: 44px;
+    height: 44px;
+  }
+}
 .task-tools > summary::-webkit-details-marker {
   display: none;
 }
@@ -1400,8 +1407,7 @@ a.task-source-chip:hover {
   min-width: 44px;
   max-width: 35%;
 }
-/* Phone: the strip wraps instead of truncating. The state and next step lead; the reason,
-   identity and lead follow on further lines as needed. */
+/* Phone: the strip wraps instead of truncating, in its reading order. */
 @media (max-width: 759px) {
   .task-strip-facts {
     flex-wrap: wrap;
@@ -1417,10 +1423,6 @@ a.task-source-chip:hover {
     overflow-wrap: anywhere;
   }
   .task-strip-facts > [data-task-reason],
-  .task-strip-facts > .task-source-chip,
-  .task-strip-facts > .task-strip-lead {
-    order: 1;
-  }
   .task-strip-facts > .task-source-chip {
     height: auto;
   }
