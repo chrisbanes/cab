@@ -2389,7 +2389,9 @@ files and not ignored ones. Exact callback replay records nothing new. If the
 workspace cannot be observed, the result is still recorded with no workspace
 state, and its views say "Workspace state was not recorded"; results recorded
 before this existed read the same way and are never backfilled. The task read,
-the result page, `cab result get` and the task workspace show the same values.
+the result page, `cab result get` and the task workspace show the same values; a
+branch name is shown under the current disclosure exclusions, and withheld when they
+cannot be established.
 
 A linked artifact file is served from the workspace while its bytes still match
 the recorded size and SHA-256 (`x-cab-evidence-source: recorded-workspace`).

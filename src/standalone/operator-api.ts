@@ -4429,7 +4429,12 @@ export class OperatorApi {
           ({ repositoryId, headCommit, branch, dirty }) => ({
             repositoryId,
             headCommit,
-            branch,
+            // Agent-chosen text: disclosed under the exclusions, never mistaken for a detached HEAD.
+            branch:
+              branch === null
+                ? null
+                : (this.safe(branch, excluded, 1024) ??
+                  "[Content unavailable]"),
             dirty,
           }),
         ),

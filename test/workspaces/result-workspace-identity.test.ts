@@ -3,7 +3,9 @@ import { randomUUID } from "node:crypto";
 import { existsSync } from "node:fs";
 import { rm } from "node:fs/promises";
 import { test } from "node:test";
+import { OperatorApi } from "../../src/standalone/operator-api.js";
 import { WorkspaceManager } from "../../src/standalone/workspaces.js";
+import { wrapTaskExclusions } from "../fixtures/exclusions-hook.js";
 import {
   captureNativeResult,
   waitFor,
@@ -257,4 +259,36 @@ test("cleanup refuses an unsettled dirty result and allows it once committed, de
     (await f.service.archiveTask(lost.seeded.taskId, allEvidence)).outcome,
     "cleaned",
   );
+});
+
+test("a recorded branch name is disclosed only under the current exclusions", async (t) => {
+  const f = await createOperatorFixture();
+  t.after(() => f.close());
+  const native = await captureNativeResult(f, {
+    repository: true,
+    beforeReport: (worktree) => {
+      worktreeGit(worktree, "switch", "--quiet", "-c", "cb/leakedvalue");
+    },
+  });
+  const domain = f.service.domain();
+  domain.execute({
+    type: "profile.configure",
+    actor: "operator",
+    key: randomUUID(),
+    profileId: native.seeded.profileId,
+    expectedVersion: Number(domain.profile(native.seeded.profileId).version),
+    instructions: "leakedvalue",
+  });
+  const api = new OperatorApi(f.service, [f.directory]);
+  const branch = async () =>
+    (await api.readTask(native.seeded.taskId)).data.results.find(
+      (r) => r.resultId === native.resultId,
+    )?.workspace[0]?.branch;
+  const sanitized = await branch();
+  assert.ok(sanitized);
+  assert.ok(!sanitized.includes("leakedvalue"), sanitized);
+  // Without established exclusions the name is withheld, not shown as a detached HEAD.
+  const restore = wrapTaskExclusions(api, async () => undefined);
+  t.after(restore);
+  assert.equal(await branch(), "[Content unavailable]");
 });
