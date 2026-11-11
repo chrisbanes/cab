@@ -191,6 +191,13 @@ improved title and body for an imported issue from the text it was synced with.
 It changes nothing until the operator accepts and sends the result.
 _Avoid_: Draft task, which is an unready task
 
+**Instruction proposal**:
+A drafting run in which the project lead proposes a replacement for one project's or
+agent's instructions from operator feedback the operator selected, with how each item
+was used, the generalisation and any conflicts. Only the operator's explicit,
+version-fenced configure applies it.
+_Avoid_: Learned preference, memory
+
 **Draft turn**:
 A project-lead turn the operator starts on a task that is not Ready, limited to
 investigating and talking with the operator. It grants no readiness and carries

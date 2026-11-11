@@ -3,6 +3,8 @@
 // JSON only: states, counts and validity, never the model's text or any path.
 // `--issue` runs the issue-improvement kind against a seeded imported task whose
 // issue comes from an in-process fake GitHub source; it makes no network call.
+// `--instruction` runs the instruction-proposal kind for the project's own
+// instructions from two seeded operator messages.
 import { execFileSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import {
@@ -20,6 +22,8 @@ import { draftProposalSchema } from "../../../dist/src/operator/contracts.js";
 import { CodexRuntime } from "../../../dist/src/standalone/codex.js";
 import {
   draftingTimeLimitMs,
+  instructionProposalOf,
+  instructionProposalSchema,
   issueEditProposalOf,
   issueEditProposalSchema,
 } from "../../../dist/src/standalone/drafting.js";
@@ -41,6 +45,7 @@ if (
 }
 
 const issueMode = args.includes("--issue");
+const instructionMode = !issueMode && args.includes("--instruction");
 // A fixed thin issue, as a GitHub reader would list it.
 const thinIssue = {
   providerInstance: "github.com",
@@ -56,7 +61,7 @@ const thinIssue = {
 };
 
 const result = {
-  mode: issueMode ? "issue" : "brief",
+  mode: issueMode ? "issue" : instructionMode ? "instruction" : "brief",
   candidate: execFileSync("git", ["rev-parse", "HEAD"], {
     encoding: "utf8",
   }).trim(),
@@ -70,6 +75,10 @@ const result = {
   stateSequence: [],
   elapsedMs: null,
   proposal: { valid: false, titleLength: null, outcomeLength: null },
+  // Instruction mode only: whether the evidence names each selected item once, and the target is untouched.
+  evidenceCovered: null,
+  insufficientEvidence: null,
+  instructionsUnchanged: null,
   capacityAfter: null,
   worktreeRemoved: null,
   tasksCreated: null,
@@ -203,6 +212,38 @@ try {
   });
 
   let taskId;
+  const feedback = [];
+  if (instructionMode) {
+    stage = "feedback-seed";
+    command(domain, {
+      type: "project.configure",
+      projectId,
+      expectedVersion: Number(domain.project(projectId).version),
+      instructions: "Keep changes small and explain them in the pull request.",
+    });
+    taskId = randomUUID();
+    const assignmentId = randomUUID();
+    command(domain, {
+      type: "task.create",
+      projectId,
+      taskId,
+      title: "Greeter shout flag",
+      outcome: "Add a --shout flag.",
+      ready: false,
+      initialAssignment: { assignmentId, profileId },
+    });
+    // Two recorded operator corrections, as the inbox holds them.
+    const insert = service.db.prepare(`INSERT INTO coordination_inbox_events
+      (eventId, taskId, recipientAssignmentId, eventType, payload) VALUES (?, ?, ?, 'operator-message', ?)`);
+    for (const message of [
+      "Please add a usage example to the README for every new flag.",
+      "Again: document the new flag in the README with an example.",
+    ]) {
+      const id = randomUUID();
+      insert.run(id, taskId, assignmentId, JSON.stringify({ message }));
+      feedback.push({ kind: "message", id });
+    }
+  }
   if (issueMode) {
     stage = "issue-import";
     command(domain, {
@@ -221,6 +262,9 @@ try {
   const count = () => ({
     tasks: domain.tasks(projectId).length,
     assignments: taskId ? domain.assignments(taskId).length : 0,
+    instructionsRevision: Number(
+      domain.project(projectId).instructionsRevision,
+    ),
     deliveryRecords: service.delivery().actions().length,
   });
   const baseline = count();
@@ -229,6 +273,14 @@ try {
   const runId = randomUUID();
   const started = Date.now();
   if (issueMode) await service.startIssueDrafting({ runId, taskId, note: "" });
+  else if (instructionMode)
+    await service.startInstructionDrafting({
+      runId,
+      projectId,
+      target: { kind: "project" },
+      feedback,
+      note: "",
+    });
   else
     await service.startDrafting({
       runId,
@@ -250,9 +302,25 @@ try {
   result.elapsedMs = Date.now() - started;
   result.outcome = run.state;
   const issueProposal = issueMode ? issueEditProposalOf(run) : null;
+  let instructionProposal = null;
+  try {
+    instructionProposal = instructionMode ? instructionProposalOf(run) : null;
+  } catch {}
   const checked = issueMode
     ? issueEditProposalSchema.safeParse(issueProposal)
-    : draftProposalSchema.safeParse(run.proposal);
+    : instructionMode
+      ? instructionProposalSchema.safeParse(instructionProposal)
+      : draftProposalSchema.safeParse(run.proposal);
+  if (instructionMode) {
+    const cited = (instructionProposal?.evidence ?? [])
+      .map((entry) => entry.feedbackId)
+      .sort();
+    result.evidenceCovered =
+      JSON.stringify(cited) ===
+      JSON.stringify(feedback.map(({ id }) => id).sort());
+    result.insufficientEvidence =
+      instructionProposal?.insufficientEvidence ?? null;
+  }
   result.proposal = {
     valid: checked.success,
     titleLength: run.proposal?.title.length ?? null,
@@ -268,7 +336,12 @@ try {
   result.tasksCreated = after.tasks - baseline.tasks;
   result.assignmentsCreated = after.assignments - baseline.assignments;
   result.deliveryRecords = after.deliveryRecords - baseline.deliveryRecords;
+  if (instructionMode)
+    result.instructionsUnchanged =
+      after.instructionsRevision === baseline.instructionsRevision;
   if (
+    (instructionMode &&
+      (!result.evidenceCovered || !result.instructionsUnchanged)) ||
     run.state !== "proposed" ||
     !checked.success ||
     !result.stateSequence.includes("running") ||

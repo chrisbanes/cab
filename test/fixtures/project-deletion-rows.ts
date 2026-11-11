@@ -1800,6 +1800,12 @@ export function deletionOwnedSeedRows(i: DeletionSeedIdentity) {
         sourceNodeId: i.externalId,
         observedTitle: null,
         observedBody: null,
+        targetKind: null,
+        targetId: null,
+        observedVersion: null,
+        observedInstructionsRevision: null,
+        observedInstructions: null,
+        feedbackJson: null,
       },
     },
     {

@@ -9,6 +9,7 @@ import {
   draftingProposalTtlMs,
   issueDraftingRequest,
   issueEditProposalOf,
+  instructionProposalOf,
 } from "../../src/standalone/drafting.js";
 import { SchedulerStore } from "../../src/standalone/scheduler.js";
 
@@ -371,4 +372,125 @@ test("the issue request shows the observed text and the operator note", () => {
   assert.match(text, /Thin title/);
   assert.match(text, /Thin body/);
   assert.match(text, /mention the API/);
+});
+
+test("a table from before instruction runs is rebuilt keeping every row and then takes an instruction run", () => {
+  const db = new DatabaseSync(":memory:");
+  seedProject(db);
+  // The schema as it stood with brief and issue runs only.
+  db.exec(`CREATE TABLE drafting_runs (
+    runId TEXT PRIMARY KEY, projectId TEXT NOT NULL, idea TEXT NOT NULL,
+    harness TEXT NOT NULL, profileId TEXT NOT NULL, profileRevision INTEGER NOT NULL,
+    instructionsRevision INTEGER NOT NULL,
+    state TEXT NOT NULL CHECK(state IN ('queued','running','stopping','proposed','interrupted','failed','accepted','discarded','expired')),
+    reason TEXT, title TEXT, outcome TEXT, createdAt INTEGER NOT NULL, proposedAt INTEGER,
+    kind TEXT NOT NULL DEFAULT 'brief' CHECK(kind IN ('brief','issue')),
+    taskId TEXT, sourceNodeId TEXT, observedTitle TEXT, observedBody TEXT)`);
+  const insert = db.prepare(`INSERT INTO drafting_runs
+    (runId, projectId, idea, harness, profileId, profileRevision, instructionsRevision,
+      state, reason, title, outcome, createdAt, proposedAt, kind, taskId, sourceNodeId,
+      observedTitle, observedBody)
+    VALUES (?, ?, ?, 'codex', ?, 2, 3, ?, ?, ?, ?, 5, ?, ?, ?, ?, ?, ?)`);
+  insert.run(
+    randomUUID(),
+    fixtureProjectId,
+    "an idea",
+    randomUUID(),
+    "proposed",
+    null,
+    "T",
+    "O",
+    6,
+    "brief",
+    null,
+    null,
+    null,
+    null,
+  );
+  insert.run(
+    randomUUID(),
+    fixtureProjectId,
+    "",
+    randomUUID(),
+    "failed",
+    "boom",
+    null,
+    null,
+    null,
+    "issue",
+    randomUUID(),
+    "I_1",
+    "Old title",
+    "Old body",
+  );
+  const before = db.prepare("SELECT * FROM drafting_runs ORDER BY runId").all();
+  const store = new DraftingRunStore(db);
+  new DraftingRunStore(db); // idempotent
+  const after = db
+    .prepare("SELECT * FROM drafting_runs ORDER BY runId")
+    .all() as Record<string, unknown>[];
+  assert.deepEqual(
+    after.map((row) => {
+      const kept = { ...row };
+      for (const column of [
+        "targetKind",
+        "targetId",
+        "observedVersion",
+        "observedInstructionsRevision",
+        "observedInstructions",
+        "feedbackJson",
+      ]) {
+        assert.equal(kept[column], null);
+        delete kept[column];
+      }
+      return kept;
+    }),
+    before.map((row) => ({ ...row })),
+  );
+  const feedbackId = randomUUID();
+  const run = store.create({
+    runId: randomUUID(),
+    projectId: fixtureProjectId,
+    idea: "",
+    harness: "codex",
+    profileId: randomUUID(),
+    profileRevision: 1,
+    instructionsRevision: 1,
+    instruction: {
+      target: { kind: "project" },
+      observedVersion: 4,
+      observedInstructionsRevision: 1,
+      observedInstructions: "Be brief.",
+      feedback: [
+        {
+          kind: "message",
+          id: feedbackId,
+          taskId: randomUUID(),
+          taskTitle: "Task",
+          recipientName: "Mira",
+          createdAt: 7,
+          text: "Show keyboard evidence.",
+        },
+      ],
+    },
+  });
+  assert.equal(run.kind, "instruction");
+  assert.deepEqual(run.target, { kind: "project" });
+  assert.equal(run.feedback?.[0]?.id, feedbackId);
+  store.transition(run.runId, "running");
+  const instructionProposal = {
+    summary: "Ask for keyboard evidence",
+    instructions: "Be brief.\nShow keyboard evidence for UI changes.",
+    rationale: "Asked for it.",
+    generalisation: "Applies to UI changes.",
+    conflicts: "",
+    insufficientEvidence: false,
+    evidence: [{ feedbackId, use: "supports" as const, note: "" }],
+  };
+  store.recordProposal(run.runId, instructionProposal);
+  store.transition(run.runId, "proposed");
+  assert.deepEqual(
+    instructionProposalOf(store.require(run.runId)),
+    instructionProposal,
+  );
 });

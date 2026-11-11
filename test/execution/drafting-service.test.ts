@@ -31,6 +31,9 @@ import {
   issueDraftingInstruction,
   issueEditProposalOf,
   issueEditProposalToolName,
+  instructionDraftingInstruction,
+  instructionProposalOf,
+  instructionProposalToolName,
 } from "../../src/standalone/drafting.js";
 import type { ExecutionHarness } from "../../src/standalone/execution-harness.js";
 import {
@@ -45,6 +48,7 @@ import {
   unpublish,
 } from "../fixtures/service-internals.js";
 import { slashTmpDenied } from "../fixtures/host-access.js";
+import { seedOperatorFeedback } from "../fixtures/drafting.js";
 
 const processIdentity = {
   processId: "4242",
@@ -1984,4 +1988,266 @@ test("a start replayed after its run was created converges even when the task ha
     DomainConflictError,
   );
   assert.equal(w.tracked(service).runs().length, 1);
+});
+
+const projectInstructions = "Keep changes small.";
+
+/** A project with its own instructions and one task's worth of recorded operator feedback. */
+async function instructionWorld(
+  t: Parameters<typeof world>[0],
+  harness: ExecutionHarness,
+) {
+  const w = world(t);
+  const opened = w.open();
+  const { service } = opened;
+  await w.start(service, harness);
+  const { projectId, lead } = await w.project(service, harness);
+  w.execute(service, {
+    type: "project.configure",
+    projectId,
+    expectedVersion: Number(service.domain().project(projectId).version),
+    instructions: projectInstructions,
+  });
+  const seeded = seedOperatorFeedback(service, projectId, lead);
+  const refs = [
+    { kind: "message" as const, id: seeded.message.id },
+    { kind: "follow-up" as const, id: seeded.followUp.id },
+    { kind: "comment" as const, id: seeded.comment.id },
+  ];
+  return { w, opened, service, projectId, lead, seeded, refs };
+}
+
+const instructionProposalFor = (
+  refs: Array<{ id: string }>,
+  instructions = `${projectInstructions}\nShow keyboard evidence for UI changes.`,
+) => ({
+  summary: "Ask for keyboard evidence on UI changes",
+  instructions,
+  rationale: "Three corrections asked for it.",
+  generalisation: "Applies to every UI change, not only this dialog.",
+  conflicts: "",
+  insufficientEvidence: false,
+  evidence: refs.map(({ id }) => ({
+    feedbackId: id,
+    use: "supports",
+    note: "Asks for keyboard evidence.",
+  })),
+});
+
+for (const harness of harnesses) {
+  test(`${harness}: an instruction run proposes from the selected feedback only and changes no instructions`, {
+    skip: harness === "claude" && slashTmpDenied(),
+  }, async (t) => {
+    const { w, opened, service, projectId, seeded, refs } =
+      await instructionWorld(t, harness);
+    const watch = w.tracked(service);
+    const before = watch.counts();
+    const revision = Number(
+      service.domain().project(projectId).instructionsRevision,
+    );
+    const proposal = instructionProposalFor(refs);
+    script(w, harness, opened, async (api) => {
+      assert.equal(
+        (await api.callTool(instructionProposalToolName, proposal)).success,
+        true,
+      );
+    });
+    const runId = randomUUID();
+    const started = await service.startInstructionDrafting({
+      runId,
+      projectId,
+      target: { kind: "project" },
+      feedback: refs,
+      note: "Only UI work.",
+    });
+    assert.equal(started.kind, "instruction");
+    assert.equal(started.observedInstructions, projectInstructions);
+    assert.deepEqual(
+      started.feedback?.map(({ kind, text, recipientName, taskTitle }) => [
+        kind,
+        text,
+        recipientName,
+        taskTitle,
+      ]),
+      [
+        ["message", seeded.message.text, `${harness} lead`, "Settings dialog"],
+        [
+          "follow-up",
+          seeded.followUp.text,
+          `${harness} lead`,
+          "Settings dialog",
+        ],
+        [
+          "comment",
+          seeded.comment.text,
+          `${harness} lead, Rae`,
+          "Settings dialog",
+        ],
+      ],
+    );
+    await waitUntil(
+      () => service.readDrafting(runId)?.state === "proposed",
+      () => watch.runs(),
+    );
+    const run = service.readDrafting(runId);
+    assert.ok(run);
+    assert.deepEqual(instructionProposalOf(run), proposal);
+    // Nothing changed: instructions, tasks, assignments and workspaces are as they were.
+    assert.equal(
+      Number(service.domain().project(projectId).instructionsRevision),
+      revision,
+    );
+    assert.equal(
+      String(service.domain().project(projectId).instructions),
+      projectInstructions,
+    );
+    assert.deepEqual(watch.counts(), before);
+    const turn = firstTurn(harness, opened);
+    assert.ok(turn);
+    assert.deepEqual(turn.tools, [instructionProposalToolName]);
+    assert.ok(turn.prompt.includes(instructionDraftingInstruction));
+    assert.ok(
+      turn.prompt.includes(`Current instructions:\n${projectInstructions}`),
+    );
+    for (const item of [seeded.message, seeded.followUp, seeded.comment])
+      assert.ok(turn.prompt.includes(item.text));
+    assert.ok(turn.prompt.includes("Only UI work."));
+    assert.ok(!turn.prompt.includes("Lead follow-up."));
+  });
+}
+
+test("an instruction run refuses a selection that is not exactly this project's accessible operator feedback, creating no run", async (t) => {
+  const { w, service, projectId, lead, seeded, refs } = await instructionWorld(
+    t,
+    "codex",
+  );
+  const other = await w.project(service, "codex");
+  const foreign = seedOperatorFeedback(service, other.projectId, other.lead);
+  const db = (service as unknown as { db: DatabaseSync }).db;
+  const insert = (text: string) => {
+    const id = randomUUID();
+    db.prepare(
+      `INSERT INTO coordination_inbox_events (eventId, taskId, recipientAssignmentId, eventType, payload, createdAt)
+      SELECT ?, taskId, recipientAssignmentId, 'operator-message', ?, 600 FROM coordination_inbox_events WHERE eventId = ?`,
+    ).run(id, JSON.stringify({ message: text }), seeded.message.id);
+    return { kind: "message" as const, id };
+  };
+  const long = [insert("x".repeat(40_000)), insert("y".repeat(24_001))];
+  const leaking = insert(`See ${w.dataDir}`);
+  const stranger = randomUUID();
+  w.execute(service, {
+    type: "profile.create",
+    profileId: stranger,
+    name: "Stranger",
+    instructions: "Elsewhere.",
+    capabilities: "code",
+  });
+  w.execute(service, {
+    type: "profile.configure",
+    profileId: seeded.agentId,
+    expectedVersion: Number(service.domain().profile(seeded.agentId).version),
+    revoked: true,
+  });
+  const start = (
+    feedback: Array<{ kind: "message" | "follow-up" | "comment"; id: string }>,
+    target: { kind: "project" } | { kind: "profile"; profileId: string } = {
+      kind: "project",
+    },
+  ) =>
+    service.startInstructionDrafting({
+      runId: randomUUID(),
+      projectId,
+      target,
+      feedback,
+      note: "",
+    });
+  const refusals: Array<Promise<unknown>> = [
+    start(Array.from({ length: 21 }, () => refs[0] as never)),
+    start([]),
+    start(long),
+    start([refs[0] as never, refs[0] as never]),
+    start([{ kind: "message", id: foreign.message.id }]),
+    start([{ kind: "message", id: seeded.ineligible.result }]),
+    start([{ kind: "message", id: seeded.ineligible.answer }]),
+    start([{ kind: "message", id: seeded.ineligible.commentDelivery }]),
+    // A comment's id is not a message's.
+    start([{ kind: "message", id: seeded.comment.id }]),
+    start([leaking]),
+    start(refs, { kind: "profile", profileId: stranger }),
+    start(refs, { kind: "profile", profileId: seeded.agentId }),
+  ];
+  for (const refusal of refusals) await assert.rejects(refusal);
+  assert.deepEqual(w.tracked(service).runs(), []);
+  // The lead is a valid target.
+  await start(refs, { kind: "profile", profileId: lead });
+  assert.equal(w.tracked(service).runs().length, 1);
+});
+
+test("an instruction proposal must cover the selection exactly and change the text, and may hold its target's own text", async (t) => {
+  const { w, opened, service, projectId, refs } = await instructionWorld(
+    t,
+    "codex",
+  );
+  const results: boolean[] = [];
+  const valid = instructionProposalFor(refs);
+  const [first, second] = valid.evidence;
+  opened.codex.script(async (api) => {
+    const call = async (args: Record<string, unknown>) =>
+      (await api.callTool(instructionProposalToolName, args)).success;
+    results.push(
+      await call({ ...valid, evidence: [first, second] }),
+      await call({
+        ...valid,
+        evidence: [...valid.evidence, { ...first, feedbackId: randomUUID() }],
+      }),
+      await call({ ...valid, evidence: [first, first, second] }),
+      await call({ ...valid, instructions: projectInstructions }),
+      await call({ ...valid, instructions: "x".repeat(16_001) }),
+      await call({ ...valid, rationale: " " }),
+      await call({ ...valid, conflicts: `See ${w.dataDir}` }),
+      await call({
+        ...valid,
+        instructions: "Lead instructions: prefer small, reviewable tasks.",
+      }),
+      // The brief tool is not this run's tool.
+      (await api.callTool(draftProposalToolName, proposal)).success,
+      // Unchanged text is allowed when the evidence is declared insufficient.
+      await call({
+        ...valid,
+        instructions: projectInstructions,
+        insufficientEvidence: true,
+      }),
+      // The target's full current text plus one line: only the target's text is disclosed.
+      await call(valid),
+    );
+  });
+  const runId = randomUUID();
+  await service.startInstructionDrafting({
+    runId,
+    projectId,
+    target: { kind: "project" },
+    feedback: refs,
+    note: "",
+  });
+  await waitUntil(
+    () => service.readDrafting(runId)?.state === "proposed",
+    () => w.tracked(service).runs(),
+  );
+  assert.deepEqual(results, [
+    false,
+    false,
+    false,
+    false,
+    false,
+    false,
+    false,
+    false,
+    false,
+    true,
+    true,
+  ]);
+  assert.deepEqual(
+    instructionProposalOf(service.readDrafting(runId) as never),
+    valid,
+  );
 });

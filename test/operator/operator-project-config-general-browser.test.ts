@@ -142,7 +142,7 @@ test("General tab edits in place with Kept · Reveal instructions, a change list
   const tabs = page.getByRole("navigation", {
     name: "Project configuration sections",
   });
-  assert.equal(await tabs.getByRole("link").count(), 7);
+  assert.equal(await tabs.getByRole("link").count(), 8);
   assert.equal(
     await tabs
       .getByRole("link", { name: "General" })

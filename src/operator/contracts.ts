@@ -1276,6 +1276,67 @@ const currentIssueTextSchema = z
     body: z.string().max(issueCurrentBodyLimit),
   })
   .strict();
+/** Operator feedback a lead may be shown for an instruction proposal; see SPEC "Drafting runs". */
+export const operatorFeedbackKinds = [
+  "message",
+  "follow-up",
+  "comment",
+] as const;
+export const instructionFeedbackLimits = {
+  items: 20,
+  characters: 64_000,
+} as const;
+export const instructionTargetSchema = z.discriminatedUnion("kind", [
+  z.object({ kind: z.literal("project") }).strict(),
+  z.object({ kind: z.literal("profile"), profileId: uuid }).strict(),
+]);
+const operatorFeedbackItemSchema = z
+  .object({
+    kind: z.enum(operatorFeedbackKinds),
+    id: uuid,
+    taskId: uuid,
+    taskTitle: safeText,
+    /** The agent or agents it was sent to, as they are named now. */
+    recipientName: safeText,
+    createdAt: time,
+    /** Null when the text holds something the operator's reads withhold; it then cannot be used. */
+    text: z.string().max(16000).nullable(),
+    available: z.boolean(),
+  })
+  .strict();
+export const operatorFeedbackPageSchema = envelope(
+  z
+    .object({
+      items: z.array(operatorFeedbackItemSchema).max(50),
+      nextCursor: z.string().max(128).nullable(),
+    })
+    .strict(),
+);
+export type OperatorFeedbackItem = z.infer<typeof operatorFeedbackItemSchema>;
+const instructionProposalReadSchema = z
+  .object({
+    summary: z.string().max(512),
+    instructions: text,
+    rationale: z.string().max(4000),
+    generalisation: z.string().max(4000),
+    conflicts: z.string().max(4000),
+    insufficientEvidence: z.boolean(),
+    evidence: z
+      .array(
+        z
+          .object({
+            feedbackId: uuid,
+            use: z.enum(["supports", "conflicts", "not-used"]),
+            note: z.string().max(1000),
+          })
+          .strict(),
+      )
+      .max(instructionFeedbackLimits.items),
+  })
+  .strict();
+export type InstructionProposalRead = z.infer<
+  typeof instructionProposalReadSchema
+>;
 export const draftingRunReadSchema = envelope(
   z
     .object({
@@ -1283,13 +1344,59 @@ export const draftingRunReadSchema = envelope(
       projectId: uuid,
       state: draftingStateSchema,
       reason: safeText,
-      /** A brief run proposes `proposal`; an issue run proposes `issueProposal`. */
-      kind: z.enum(["brief", "issue"]),
+      /**
+       * A brief run proposes `proposal`; an issue run, `issueProposal`; an instruction run,
+       * `instructionProposal`.
+       */
+      kind: z.enum(["brief", "issue", "instruction"]),
       proposal: z
         .object({ title: z.string().max(512), outcome: text })
         .strict()
         .nullable(),
       issueProposal: issueTextSchema.nullable(),
+      instructionProposal: instructionProposalReadSchema.nullable(),
+      /** An instruction run's target and its text when the run started; null when withheld. */
+      instructionTarget: z
+        .object({
+          kind: z.enum(["project", "profile"]),
+          profileId: uuid.nullable(),
+          name: safeText,
+          observedVersion: revision,
+          observedInstructions: text.nullable(),
+        })
+        .strict()
+        .nullable(),
+      /** The feedback an instruction run was given, as recorded when it started. */
+      feedback: z
+        .array(operatorFeedbackItemSchema.omit({ available: true }))
+        .max(instructionFeedbackLimits.items)
+        .nullable(),
+      /**
+       * The target now. Accept is only offered while `unchanged`, sending configure with
+       * `version` as its expected version.
+       */
+      targetCurrent: z
+        .object({ version: revision, unchanged: z.boolean() })
+        .strict()
+        .nullable(),
+      /** Who saving reaches: projects using an agent target, and open-task assignments bound to it. */
+      impact: z
+        .object({
+          projects: z
+            .array(
+              z
+                .object({
+                  projectId: uuid,
+                  name: safeText,
+                  role: z.enum(["lead", "permitted"]),
+                })
+                .strict(),
+            )
+            .max(1000),
+          openAssignments: z.number().int().nonnegative().safe(),
+        })
+        .strict()
+        .nullable(),
       /** The lead the run captured when it started, not whoever leads the project now. */
       leadName: safeText,
       /** The run has a proposal that cannot be shown: it holds text the service withholds. */
@@ -3446,6 +3553,24 @@ export const operatorCommandSchema = z.discriminatedUnion("type", [
       expectedTaskVersion: revision,
       body: z.string().trim().min(1).max(16000),
       reviewId: uuid.optional(),
+    })
+    .strict(),
+  // An instruction proposal: a drafting run that proposes one target's instructions from selected feedback.
+  z
+    .object({
+      ...base,
+      type: z.literal("instruction.draft.start"),
+      runId: uuid,
+      projectId: uuid,
+      expectedProjectVersion: revision,
+      target: instructionTargetSchema,
+      feedback: z
+        .array(
+          z.object({ kind: z.enum(operatorFeedbackKinds), id: uuid }).strict(),
+        )
+        .min(1)
+        .max(instructionFeedbackLimits.items),
+      note: z.string().max(16000),
     })
     .strict(),
   // Improve with lead: a drafting run that proposes a better title and body for the task's issue.

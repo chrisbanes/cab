@@ -111,6 +111,14 @@ owns delivery scope and status.
   `issue.edit` grant. The edit is refused before any write if the issue changed on
   GitHub after the draft started. It cannot be undone from cab, and the
   operator CLI does not offer it.
+- **Instruction proposals.** In a project's Settings, the operator selects up to 20
+  recorded operator corrections, picks the project's instructions or one of its
+  agents, and asks the lead for a proposal. The operator sees each item's provenance
+  and use, the generalisation, any conflicts, the exact current and proposed text and,
+  for an agent, every project that uses it. Nothing changes until Accept, which saves
+  the reviewed text as the next revision through the ordinary configure and is
+  unavailable if the instructions changed meanwhile. Existing assignments keep their
+  revision. The operator CLI does not offer proposals.
 - **Status mapping.** A project can map four of cab's work events (first turn
   started, PR handed back, stopped or blocked, Done) to options of its linked GitHub
   Project's Status or to Jira status IDs, both set on the Task source tab. The

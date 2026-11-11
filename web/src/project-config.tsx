@@ -86,6 +86,7 @@ import {
   type SettingsProps,
 } from "./settings.js";
 import { DeliveryTab } from "./delivery-config.js";
+import { InstructionProposalsTab } from "./instruction-proposal.js";
 import { RepositoryTab } from "./repository-config.js";
 import { SourceTab } from "./source-config.js";
 import { readinessAnchor } from "./observation-counts.js";
@@ -250,6 +251,14 @@ export function ProjectConfiguration(
             />
           ) : tab === "delivery" ? (
             <DeliveryTab
+              {...tabProps}
+              data={data}
+              loadedAt={resource.state.fetchedAt}
+              refreshConfiguration={refreshConfiguration}
+            />
+          ) : tab === "instruction-proposals" ? (
+            <InstructionProposalsTab
+              key={projectId}
               {...tabProps}
               data={data}
               loadedAt={resource.state.fetchedAt}

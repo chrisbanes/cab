@@ -2132,6 +2132,52 @@ export class DomainStore {
     return { eligible: reasons.length === 0, reasons };
   }
 
+  /**
+   * Who an instruction edit reaches: for an agent, every project that uses it as lead or
+   * permitted agent; and how many open-task assignments are bound to the target.
+   */
+  instructionTargetImpact(
+    projectId: string,
+    target: { kind: "project" } | { kind: "profile"; profileId: string },
+  ): {
+    projects: { projectId: string; name: string; role: "lead" | "permitted" }[];
+    openAssignments: number;
+  } {
+    const open = (where: string, value: string) =>
+      Number(
+        (
+          this.db
+            .prepare(
+              `SELECT count(*) AS n FROM domain_assignments a JOIN domain_tasks t ON t.id = a.taskId WHERE t.state = 'open' AND ${where}`,
+            )
+            .get(id.parse(value)) as { n: number }
+        ).n,
+      );
+    if (target.kind === "project")
+      return {
+        projects: [],
+        openAssignments: open("a.projectId = ?", projectId),
+      };
+    const projects = this.db
+      .prepare(
+        `SELECT p.id AS projectId, p.name,
+          CASE WHEN p.leadProfileId = ?1 THEN 'lead' ELSE 'permitted' END AS role
+        FROM domain_projects p LEFT JOIN project_routing r ON r.projectId = p.id
+        WHERE p.leadProfileId = ?1
+          OR EXISTS (SELECT 1 FROM json_each(coalesce(r.candidateProfileIds, '[]')) WHERE value = ?1)
+        ORDER BY p.name, p.id`,
+      )
+      .all(id.parse(target.profileId)) as {
+      projectId: string;
+      name: string;
+      role: "lead" | "permitted";
+    }[];
+    return {
+      projects,
+      openAssignments: open("a.profileId = ?", target.profileId),
+    };
+  }
+
   routing(projectId: string): Row {
     const row = this.required(
       "SELECT projectId, version, enabled, guidance, credentialRef, candidateProfileIds FROM project_routing WHERE projectId = ?",

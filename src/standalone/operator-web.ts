@@ -379,6 +379,11 @@ export class OperatorWebBoundary {
     }
     if (path === "/api/operator/task-list")
       return this.api.readTaskListPage(query);
+    const operatorFeedback = path.match(
+      /^\/api\/operator\/projects\/([^/]+)\/operator-feedback$/,
+    );
+    if (operatorFeedback)
+      return this.api.readOperatorFeedback(operatorFeedback[1] ?? "", query);
     const history = path.match(
       /^\/api\/operator\/assignments\/([^/]+)\/history$/,
     );
