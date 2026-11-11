@@ -190,7 +190,7 @@ function repositoriesEditCommand(
   for (const id of unlink) diff.push(`− Repository access: ${id}`);
   for (const l of links)
     diff.push(
-      `+ Repository access: ${l.repositoryId} · ${describeLinkBase(l)}${
+      `+ Repository access: ${l.repositoryId} · ${l.baseMode === undefined || (l.baseMode === "ref" && !l.fetchBeforeProvisioning) ? l.ref : describeLinkBase(l)}${
         l.codeHost === "gitlab" ? ` · GitLab ${l.host}` : ""
       }`,
     );

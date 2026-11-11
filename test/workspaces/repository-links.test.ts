@@ -573,15 +573,14 @@ test("remote bases save with their fetch policy, a kept row keeps them, and inva
 test("a remote branch is verified at origin's tracking ref unless it is fetched", async (t) => {
   const home = await createSetupHome();
   t.after(() => home.close());
+  // The setup home's checkout has a local `main` and no `origin/release`.
   const path = join(home.home, "src", "atlas");
-  await checkout(path, "https://github.com/acme/atlas.git");
   const f = fixture(undefined, verifiedRepository);
   t.after(() => f.close());
   const release = {
     ...link("R_atlas", path, "release"),
     baseMode: "remote-branch",
   };
-  // The local `main` exists, but no `refs/remotes/origin/release` does.
   await assert.rejects(
     f.configure(1, [release]),
     (error) =>
