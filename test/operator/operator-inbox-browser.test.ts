@@ -2728,6 +2728,19 @@ test("work through the Inbox: drafts, filters and position survive key moves, ap
   await position.getByText(place, { exact: true }).waitFor();
   assert.equal(request(), a);
   assert.equal(await optional.inputValue(), draft);
+  // The key move keeps the heading focused over the draft's restored field, so J/K go on moving.
+  const heading = detail.getByRole("heading", { level: 2 });
+  await settle(page);
+  assert.equal(
+    await heading.evaluate((el) => document.activeElement === el),
+    true,
+  );
+  await page.keyboard.press(away!);
+  await page.waitForURL((url) => url.searchParams.get("request") !== a);
+  assert.equal(await optional.count(), 0);
+  await page.keyboard.press(back!);
+  await position.getByText(place, { exact: true }).waitFor();
+  assert.equal(await optional.inputValue(), draft);
   // (2) The task and Back: the filter, position, queue scroll and draft are as they were.
   const scrolled = await scrollQueue();
   assert.ok(scrolled > 0, "the queue scrolls");

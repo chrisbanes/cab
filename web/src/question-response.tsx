@@ -150,7 +150,11 @@ export function QuestionResponse({
     restore();
     if (restoring)
       observer.observe(content.current?.closest(".question-response") ?? owner);
-    if (state.focusId)
+    // An Inbox J/K move focuses the request heading before this read lands; that move wins.
+    if (
+      state.focusId &&
+      !document.activeElement?.matches(".inbox-detail-intro > h2")
+    )
       document.getElementById(state.focusId)?.focus({ preventScroll: true });
     owner.addEventListener("scroll", record);
     // Navigation can beat the final scroll event; teardown can already have removed content.
