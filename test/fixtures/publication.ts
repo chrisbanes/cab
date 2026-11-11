@@ -14,7 +14,10 @@ import {
 import { DomainStore } from "../../src/core/domain.js";
 import { GitHubSourceStore } from "../../src/core/github-source.js";
 import { Store } from "../../src/core/store.js";
-import { DeliveryCoordinator } from "../../src/standalone/delivery.js";
+import {
+  DeliveryCoordinator,
+  type DeliveryCoordinatorOptions,
+} from "../../src/standalone/delivery.js";
 import type { PushOutcome } from "../../src/standalone/git-push.js";
 import type { AdoptFunction } from "../../src/standalone/git-fetch.js";
 import {
@@ -265,6 +268,7 @@ export function publicationWorld(
   const coordinatorFor = (
     verify = true,
     approved = options.approved ?? false,
+    extra: Partial<DeliveryCoordinatorOptions> = {},
   ) => {
     const real = new GitHubHttpDeliveryProvider(
       "token",
@@ -304,6 +308,7 @@ export function publicationWorld(
               ),
           }
         : {}),
+      ...extra,
     });
   };
   const coordinator = coordinatorFor();

@@ -1,5 +1,9 @@
 import assert from "node:assert/strict";
+import { randomUUID } from "node:crypto";
+import { writeFileSync } from "node:fs";
+import { join } from "node:path";
 import { test } from "node:test";
+import { git } from "../fixtures/publication.js";
 import { OperatorApi } from "../../src/standalone/operator-api.js";
 import {
   assertNoToken,
@@ -7,6 +11,7 @@ import {
   gitlabWorld,
   host,
   projectPath,
+  repositoryId,
   token,
 } from "../fixtures/gitlab-delivery.js";
 
@@ -167,6 +172,69 @@ test("a host without a usable credential holds the push before any request or Gi
     assert.deepEqual(w.pushes, []);
     assert.equal(w.adopts.length, 0);
     assert.deepEqual(w.remote.requests, []);
+  } finally {
+    await w.f.close();
+  }
+});
+
+test("GitLab publication is checked against the fetched target, and a create against its actual requested base", async (t) => {
+  const w = await gitlabWorld(t);
+  try {
+    const repository = (await w.f.service.taskWorkspace(w.f.taskId))
+      ?.repositories[0];
+    assert.ok(repository?.gitCommonDir);
+    const editA = (dir: string, text: string, message: string) => {
+      writeFileSync(join(dir, "a.txt"), text);
+      git(dir, "commit", "-q", "-am", message);
+      return git(dir, "rev-parse", "HEAD");
+    };
+    const sha = editA(repository.workspacePath, "task\n", "task edit");
+    const pushed = await w.push(sha);
+    assert.equal(pushed.success, true, pushed.text);
+    // `release` changes the same line: a create against it is refused before any request.
+    git(w.source, "checkout", "-q", "-b", "release");
+    const release = editA(w.source, "release\n", "release edit");
+    git(w.source, "checkout", "-q", "main");
+    const create = (baseRef: string) =>
+      w.f.call("cab_external_action", {
+        operationId: randomUUID(),
+        action: {
+          kind: "pr.create",
+          target: {
+            repositoryId,
+            baseRef,
+            headRef: String(branchOf(w)?.branch),
+            expectedHeadSha: sha,
+          },
+          title: "Change",
+          body: "Body",
+          draft: true,
+        },
+      });
+    const refused = await create("release");
+    assert.equal(refused.success, false);
+    assert.match(refused.text, /publication-target-conflict/);
+    assert.match(
+      refused.text,
+      new RegExp(`conflicts with release at ${release} in: a\\.txt`),
+    );
+    assert.match(refused.text, /refs\/cab\/target\/release/);
+    assert.equal(w.remote.state.mergeRequests.length, 0);
+    assert.equal(
+      git(repository.gitCommonDir, "rev-parse", "refs/cab/target/release"),
+      release,
+    );
+    const created = await create("main");
+    assert.equal(created.success, true, created.text);
+    assert.equal(w.remote.state.mergeRequests.length, 1);
+    // The target advances into a conflict: the next update is refused unpushed.
+    editA(w.source, "advanced\n", "advance main");
+    const later = editA(repository.workspacePath, "task again\n", "more");
+    const update = await w.push(later);
+    assert.equal(update.success, false);
+    assert.match(update.text, /publication-target-conflict/);
+    assert.equal(w.pushes.length, 1);
+    assertNoToken(w);
   } finally {
     await w.f.close();
   }

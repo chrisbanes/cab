@@ -327,10 +327,20 @@ export class DeliveryCoordinator {
     repositoryId: string,
     request: BranchFetch,
   ): Promise<FetchBranchResult> {
-    const provider = this.provider(projectId, repositoryId);
-    return provider.fetchBranch
-      ? provider.fetchBranch(repositoryId, request)
-      : { kind: "not-attempted" };
+    try {
+      const provider = this.provider(projectId, repositoryId);
+      return provider.fetchBranch
+        ? await provider.fetchBranch(repositoryId, request)
+        : { kind: "not-attempted" };
+    } catch (error) {
+      // An unusable credential is the operator's to fix; any other failure is the fetch's.
+      return {
+        kind:
+          error instanceof Error && error.message.includes("credential")
+            ? "not-attempted"
+            : "fetch-failed",
+      };
+    }
   }
   /**
    * The change request target a publication is checked against: the bound change request's

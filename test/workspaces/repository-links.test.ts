@@ -11,6 +11,7 @@ import {
   RepositoryVerificationRefusedError,
 } from "../../src/core/domain-errors.js";
 import type { RepositoryVerifier } from "../../src/core/github-source.js";
+import { linkBase } from "../../src/core/repository-links.js";
 import { Store } from "../../src/core/store.js";
 import { verifiedRepository } from "../../src/standalone/repository-verification.js";
 import { restorePreviousSourceSchema } from "../fixtures/previous-source-schema.js";
@@ -487,4 +488,108 @@ test("GitLab links are recorded with their host and project path, and refused wi
   } finally {
     f.close();
   }
+});
+
+test("a link saved before base modes reads as an explicit ref without fetching, unchanged", () => {
+  const f = fixture();
+  try {
+    const saved = [
+      {
+        ...link("R_1", "/src/one"),
+        gitCommonDirectory: "/src/one/.git",
+      },
+    ];
+    f.db
+      .prepare(
+        "UPDATE project_repository_links SET version = 3, links = ? WHERE projectId = ?",
+      )
+      .run(JSON.stringify(saved), f.projectId);
+    const read = f.domain.repositoryLinks(f.projectId);
+    assert.deepEqual(linkBase(read.links[0]!), {
+      baseMode: "ref",
+      fetchBeforeProvisioning: false,
+    });
+    assert.deepEqual(read, { version: 3, links: saved });
+  } finally {
+    f.close();
+  }
+});
+
+test("remote bases save with their fetch policy, a kept row keeps them, and invalid combinations are refused", async () => {
+  const f = fixture();
+  try {
+    const first = await f.configure(1, [
+      { ...link("R_1", "/src/one", "release"), baseMode: "remote-branch" },
+      {
+        ...link("R_2", "/src/two"),
+        baseMode: "remote-default",
+        fetchBeforeProvisioning: true,
+      },
+    ]);
+    assert.equal(first.version, 2);
+    assert.deepEqual(
+      f.domain
+        .repositoryLinks(f.projectId)
+        .links.map((l) => [l.ref, l.baseMode, l.fetchBeforeProvisioning]),
+      [
+        ["release", "remote-branch", undefined],
+        ["main", "remote-default", true],
+      ],
+    );
+    // A row without base fields keeps the saved ones; an explicit change is recorded.
+    await f.configure(2, [
+      { ...link("R_1", "/src/one", "release"), fetchBeforeProvisioning: true },
+      link("R_2", "/src/two"),
+    ]);
+    assert.deepEqual(
+      f.domain.repositoryLinks(f.projectId).links.map((l) => linkBase(l)),
+      [
+        { baseMode: "remote-branch", fetchBeforeProvisioning: true },
+        { baseMode: "remote-default", fetchBeforeProvisioning: true },
+      ],
+    );
+    for (const row of [
+      {
+        ...link("R_1", "/src/one"),
+        fetchBeforeProvisioning: true,
+        baseMode: "ref",
+      },
+      { ...link("R_1", "/src/one", "refs/heads/x"), baseMode: "remote-branch" },
+      { ...link("R_1", "/src/one", "origin/x"), baseMode: "remote-branch" },
+    ])
+      await assert.rejects(
+        f.configure(3, [row]),
+        (error) =>
+          error instanceof DomainPolicyError &&
+          error.code === "invalid-input" &&
+          error.fieldPaths?.[0] === "repositories.0.baseMode",
+      );
+    assert.equal(f.domain.repositoryLinks(f.projectId).version, 3);
+  } finally {
+    f.close();
+  }
+});
+
+test("a remote branch is verified at origin's tracking ref unless it is fetched", async (t) => {
+  const home = await createSetupHome();
+  t.after(() => home.close());
+  const path = join(home.home, "src", "atlas");
+  await checkout(path, "https://github.com/acme/atlas.git");
+  const f = fixture(undefined, verifiedRepository);
+  t.after(() => f.close());
+  const release = {
+    ...link("R_atlas", path, "release"),
+    baseMode: "remote-branch",
+  };
+  // The local `main` exists, but no `refs/remotes/origin/release` does.
+  await assert.rejects(
+    f.configure(1, [release]),
+    (error) =>
+      error instanceof RepositoryVerificationRefusedError &&
+      error.reason === "ref-unavailable",
+  );
+  const saved = await f.configure(1, [
+    { ...release, fetchBeforeProvisioning: true },
+  ]);
+  assert.equal(saved.version, 2);
 });
