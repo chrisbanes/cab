@@ -762,8 +762,8 @@ function schemaDigest(data: string): string {
   }
 }
 
-/** Level 27 added result workspace state and dropped retained result evidence; the prior DDL verbatim. */
-const undoLevel27 = `DROP TABLE coordination_result_workspaces;
+/** Level 28 added result workspace state and dropped retained result evidence; the prior DDL verbatim. */
+const undoLevel28 = `DROP TABLE coordination_result_workspaces;
     CREATE TABLE IF NOT EXISTS retained_result_evidence (
       resultId TEXT PRIMARY KEY REFERENCES coordination_results(resultId) ON DELETE CASCADE,
       taskId TEXT NOT NULL REFERENCES domain_tasks(id),
@@ -880,7 +880,7 @@ function restoreRequestSchema21(db: DatabaseSync) {
 /** The schema digest each migration level created. Append an entry with every level bump. */
 const SCHEMA_PINS: Record<number, string> = {
   // Results record workspace state; retained result evidence tables are dropped.
-  28: "PENDING",
+  28: "7534f97c295597a77a9b7fd29640d7270581f03ba55d2def481937ad24aae8dd",
   // Data only: reversible delivery grants switch from approval to allow.
   27: "3731abbd6375466b3bb6401734f5df48be6339f2a21f35df6b3d3dcca8bb91c6",
   // Drafting runs admit instruction runs and record their target and feedback.
@@ -1007,7 +1007,7 @@ test("reasoning migration protects the level 19 schema before adding either tabl
       restoreRequestSchema21(before);
       restoreDraftingSchema25(before);
       before.exec(
-        `${undoLevel27}${undoLevel24}DROP TABLE inbox_lifecycle_receipts; DROP TABLE inbox_lifecycle; DROP TABLE project_reasoning_summaries; DROP TABLE execution_intent_reasoning_summaries; DROP TABLE execution_pre_turn_refusals`,
+        `${undoLevel28}${undoLevel24}DROP TABLE inbox_lifecycle_receipts; DROP TABLE inbox_lifecycle; DROP TABLE project_reasoning_summaries; DROP TABLE execution_intent_reasoning_summaries; DROP TABLE execution_pre_turn_refusals`,
       );
     } finally {
       before.close();
@@ -1119,7 +1119,7 @@ test("pre-turn refusal migration snapshots the level 20 schema and adds its tabl
     restoreRequestSchema21(before);
     restoreDraftingSchema25(before);
     before.exec(
-      `${undoLevel27}${undoLevel24}DROP TABLE inbox_lifecycle_receipts; DROP TABLE inbox_lifecycle; DROP TABLE execution_pre_turn_refusals`,
+      `${undoLevel28}${undoLevel24}DROP TABLE inbox_lifecycle_receipts; DROP TABLE inbox_lifecycle; DROP TABLE execution_pre_turn_refusals`,
     );
     before.close();
     assert.equal(schemaDigest(dirs.data), SCHEMA_PINS[20]);
@@ -1350,7 +1350,7 @@ test("Inbox lifecycle migration snapshots level 22 and initializes both tables w
     const database = join(dirs.data, "standalone.sqlite"),
       before = new DatabaseSync(database);
     before.exec(
-      `${undoLevel27}${undoLevel24}DROP TABLE inbox_lifecycle_receipts; DROP TABLE inbox_lifecycle`,
+      `${undoLevel28}${undoLevel24}DROP TABLE inbox_lifecycle_receipts; DROP TABLE inbox_lifecycle`,
     );
     restoreDraftingSchema25(before);
     before.close();
@@ -1385,7 +1385,7 @@ test("request-only refusal migration snapshots level 21 and preserves restart li
     restoreRequestSchema21(db);
     restoreDraftingSchema25(db);
     db.exec(
-      `${undoLevel27}${undoLevel24}DROP TABLE inbox_lifecycle_receipts; DROP TABLE inbox_lifecycle`,
+      `${undoLevel28}${undoLevel24}DROP TABLE inbox_lifecycle_receipts; DROP TABLE inbox_lifecycle`,
     );
     db.exec(`INSERT INTO execution_intents (id,workId,prompt,workspace,state,threadId,turnId,accountType,sandbox,approval)
       VALUES ('00000000-0000-4000-8000-000000000001','legacy-refused','p','/legacy','completed',NULL,NULL,'chatgpt','workspaceWrite','never');
