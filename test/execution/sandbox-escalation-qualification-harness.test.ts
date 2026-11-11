@@ -198,6 +198,30 @@ test("classification proves only from present evidence", async () => {
   assert.equal(timed.envClampsLargerRequest.outcome, "proved");
   assert.equal(timed.sixtyMinuteBoundary.outcome, "untested");
 
+  const deniedByMode = classify("claude-sandbox", {
+    events: [
+      {
+        t: 1,
+        kind: "hook",
+        event: "PreToolUse",
+        toolUseId: "e",
+        command: "node chromium.mjs escalated",
+        dangerouslyDisableSandbox: true,
+        decision: "allow",
+      },
+      {
+        t: 2,
+        kind: "toolResult",
+        toolUseId: "e",
+        isError: true,
+        text: "denied",
+      },
+    ],
+    results: { control: { chromium: "blocked" } },
+  });
+  assert.equal(deniedByMode.unsandboxedCommandRunsOutside.outcome, "refuted");
+  assert.equal(deniedByMode.hookSeesFlagFirst.outcome, "proved");
+
   for (const [group, outcome] of Object.entries(
     classify("claude-sandbox", { events: [], results: {}, deadline: true }),
   ))

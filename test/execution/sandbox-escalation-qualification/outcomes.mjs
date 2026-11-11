@@ -252,8 +252,16 @@ function claudeSandbox(trace) {
   const escalated = pre.find((e) => e.command?.includes("escalated"));
   if (escalated?.decision === "allow") {
     const legs = { control: results.control, escalated: results.escalated };
+    const denied = events.find(
+      (e) =>
+        e.kind === "toolResult" &&
+        e.toolUseId === escalated.toolUseId &&
+        e.isError,
+    );
     out.unsandboxedCommandRunsOutside = !results.escalated
-      ? untested("escalated call wrote no result", legs)
+      ? denied
+        ? refuted({ ...legs, toolResult: denied.text })
+        : untested("escalated call wrote no result", legs)
       : ran(results.control)
         ? untested("sandboxed control also launched Chromium", legs)
         : blocked(results.control) && ran(results.escalated)
