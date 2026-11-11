@@ -283,20 +283,6 @@ test("custom allow grants show mandatory adoption and recovery approval without 
   }
 });
 
-test("an allow issue.edit grant reads as always requiring approval", () => {
-  const lines = repositoryAuthorityGroups(
-    [{ action: "issue.edit", repositoryId: "R", mode: "allow" }],
-    "R",
-    "usable",
-  ).flatMap((group) => group.lines);
-  assert.ok(
-    lines.some((line) =>
-      /^Require approval: .*\(always requires approval\)$/.test(line),
-    ),
-    lines.join("\n"),
-  );
-});
-
 test("unmet delivery needs point to existing repair controls", () => {
   const policy = levelPolicy("merge-when-ready");
   policy.mode = "reviewable-pr";

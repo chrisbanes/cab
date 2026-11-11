@@ -491,8 +491,7 @@ export function repositoryAuthorityGroups(
       }
       if (seen.has(identity)) return [];
       seen.add(identity);
-      const alwaysApproval =
-        g.action === "branch.adopt" || g.action === "issue.edit";
+      const alwaysApproval = g.action === "branch.adopt";
       const configuredLine = sentences?.[i] ?? grantSentence(g);
       const line = alwaysApproval
         ? configuredLine.replace(/^Allow:/, "Require approval:")
