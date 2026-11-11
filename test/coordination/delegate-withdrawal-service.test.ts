@@ -6,6 +6,8 @@ import {
   OperatorApi,
   OperatorApiError,
 } from "../../src/standalone/operator-api.js";
+import { archiveBlockers } from "../../src/core/project-lifecycle.js";
+import { transaction } from "../../src/core/store.js";
 import { startedOf } from "../fixtures/service-internals.js";
 import { command, db, refusedInitial } from "../fixtures/refused-turn.js";
 
@@ -226,6 +228,11 @@ test("withdrawing a refused delegate retires its queued inbox batch so nothing w
       ),
     );
     refuseQueuedTurn(f, delegateId);
+    const drainedWork = () =>
+      transaction(db(f.service), () =>
+        archiveBlockers(db(f.service), f.projectId, () => []),
+      ).map((blocker) => ("workId" in blocker ? blocker.workId : undefined));
+    assert.ok(drainedWork().includes(workId));
     const queued = () =>
       Number(
         (
@@ -239,6 +246,8 @@ test("withdrawing a refused delegate retires its queued inbox batch so nothing w
     assert.equal(queued(), 1);
     await api.execute(withdraw(f, delegateId));
     assert.equal(queued(), 0);
+    // Its refused request stays as history and no longer holds the project's archive.
+    assert.ok(!drainedWork().includes(workId));
     assert.deepEqual(coordination.pendingEvents(delegateId), []);
     assert.equal(
       Number(

@@ -239,7 +239,12 @@ const owned = `WITH owner AS (SELECT ? AS id),
   owned_work AS (SELECT workId FROM turn_requests WHERE projectId = (SELECT id FROM owner)
     OR taskId IN (SELECT id FROM owned_tasks) OR taskId IN (SELECT id FROM owned_drafts)
     OR assignmentId IN (SELECT id FROM owned_assignments)
-    UNION SELECT workId FROM task_execution_bindings WHERE taskId IN (SELECT id FROM owned_tasks) OR assignmentId IN (SELECT id FROM owned_assignments))`;
+    UNION SELECT workId FROM task_execution_bindings WHERE taskId IN (SELECT id FROM owned_tasks) OR assignmentId IN (SELECT id FROM owned_assignments)),
+  -- A withdrawn delegate's leftover work is history: withdrawal refused anything live, held or uncertain.
+  withdrawn_work AS (SELECT workId FROM turn_requests WHERE assignmentId IN
+      (SELECT id FROM domain_assignments WHERE state = 'withdrawn' AND id IN (SELECT id FROM owned_assignments))
+    UNION SELECT workId FROM task_execution_bindings WHERE assignmentId IN
+      (SELECT id FROM domain_assignments WHERE state = 'withdrawn' AND id IN (SELECT id FROM owned_assignments)))`;
 const drainQueries: readonly [ArchiveBlocker["kind"], string, string][] = [
   [
     "assignment",
@@ -248,12 +253,12 @@ const drainQueries: readonly [ArchiveBlocker["kind"], string, string][] = [
   ],
   [
     "execution",
-    "SELECT workId, CASE WHEN taskId IN (SELECT id FROM owned_tasks) THEN taskId ELSE NULL END AS taskId FROM turn_requests r WHERE workId IN (SELECT workId FROM owned_work) AND (state IN ('queued','active') OR (state = 'held' AND NOT EXISTS (SELECT 1 FROM execution_intents i WHERE i.workId = r.workId AND i.state IN ('completed','reconciled','resolved-failed'))))",
+    "SELECT workId, CASE WHEN taskId IN (SELECT id FROM owned_tasks) THEN taskId ELSE NULL END AS taskId FROM turn_requests r WHERE workId IN (SELECT workId FROM owned_work) AND workId NOT IN (SELECT workId FROM withdrawn_work) AND (state IN ('queued','active') OR (state = 'held' AND NOT EXISTS (SELECT 1 FROM execution_intents i WHERE i.workId = r.workId AND i.state IN ('completed','reconciled','resolved-failed'))))",
     "A turn request remains unfinished",
   ],
   [
     "execution",
-    "SELECT workId FROM execution_intents WHERE workId IN (SELECT workId FROM owned_work) AND state NOT IN ('completed','reconciled','resolved-failed')",
+    "SELECT workId FROM execution_intents WHERE workId IN (SELECT workId FROM owned_work) AND workId NOT IN (SELECT workId FROM withdrawn_work) AND state NOT IN ('completed','reconciled','resolved-failed')",
     "An execution remains unfinished or uncertain",
   ],
   [
