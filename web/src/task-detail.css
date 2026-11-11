@@ -1522,6 +1522,21 @@ a.task-source-chip:hover {
   cursor: default;
 }
 
+@media (max-width: 759px) {
+  .reply-destination-option {
+    min-height: 44px;
+    justify-content: center;
+  }
+}
+
+/* Forced colours drop backgrounds and weight cues: mark the checked option with an outline. */
+@media (forced-colors: active) {
+  .reply-destination-option:has(input:checked) {
+    outline: 2px solid Highlight;
+    outline-offset: -2px;
+  }
+}
+
 [data-blocked-lead] {
   margin-block-end: var(--space-12);
 }

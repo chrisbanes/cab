@@ -3272,6 +3272,42 @@ const unavailableComment = async (page: Page, sentence: string) => {
   return tab;
 };
 
+test("Reply destinations are 44px touch targets on phones and mark the checked one in forced colours", async (_t, j) => {
+  const fixture = await openFixture(j);
+  const a = await seedImportedCommentTask(fixture.f, "allow");
+  _t.after(a.restoreCredential);
+  const { web, page } = await fixture.launch();
+  await signIn(page, web.origin, web.password, `/tasks/${a.taskId}`);
+  const labels = page.locator(".reply-destination-option");
+  await labels.first().waitFor();
+  await page.setViewportSize({ width: 390, height: 844 });
+  // The phone Reply is compact until focused; focusing the box shows the destinations.
+  await page.getByLabel("Editable reply").focus();
+  const heights = await labels.evaluateAll((els) =>
+    els.map((e) => e.getBoundingClientRect().height),
+  );
+  assert.equal(heights.length, 2);
+  for (const h of heights) assert.ok(h >= 44, `option height ${h}`);
+
+  await page.setViewportSize({ width: 1366, height: 900 });
+  await page.emulateMedia({ forcedColors: "active" });
+  const outline = (checked: boolean) =>
+    labels
+      .filter({
+        has: page.locator(
+          `input:${checked ? "" : "not(:"}checked${checked ? "" : ")"}`,
+        ),
+      })
+      .first()
+      .evaluate((e) => {
+        const c = getComputedStyle(e);
+        return `${c.outlineStyle} ${c.outlineWidth}`;
+      });
+  const checkedOutline = await outline(true);
+  assert.notEqual(checkedOutline, await outline(false));
+  assert.doesNotMatch(checkedOutline, /^none/);
+});
+
 test("An unavailable GitHub comment gives its reason in the inspector and on a focusable tab that does nothing", async (_t, j) => {
   const fixture = await openFixture(j);
   const a = await seedImportedCommentTask(fixture.f, "allow");
