@@ -710,7 +710,10 @@ history, and records the basis; the task then offers
 released turn records a known survivor and an uncertainty hold on the task and retracts
 admitted successors, as for a reconciled continuation; restarting does not clear it.
 While the release waits, the task reads `uncertain` with `turn-release-pending` and
-recovery reads name when its quiet period ends unless activity continues.
+recovery reads name when its quiet period ends unless activity continues. For a
+generation whose turn ID was never saved, `cab recovery get` and the recovery page instead
+explain that quiet time will not release it and name Stop or ending the runtime process as
+the recovery available.
 
 Browser recovery pending request state lasts only for the current page visit.
 Navigation, sign-out or a full reload discards request details; it does not erase a

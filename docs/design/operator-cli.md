@@ -704,6 +704,8 @@ nothing, and with `--yes` it sends the task's `task.start-again` exactly as `tas
 does. It adds no service command. Release is irreversible and resumes nothing; Start again
 continues the task. Operator Stop/Resume are unchanged and there is no force unlock: a held
 turn is released only by held-turn release (reported end, verified exit or the quiet period).
+When a held generation has a saved thread but no saved turn ID, `recovery get` says quiet time
+will not release it and names Stop or ending the runtime process as the recovery available.
 
 ## Acceptance scenarios
 

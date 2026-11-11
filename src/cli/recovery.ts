@@ -1,4 +1,7 @@
-import { requestRefusalText } from "../operator/task-restart-copy.js";
+import {
+  requestRefusalText,
+  unsavedTurnHoldText,
+} from "../operator/task-restart-copy.js";
 import type { z } from "zod";
 import { recoveryCommandTypes } from "../core/recovery-contracts.js";
 import { recoveryOptionsSchema } from "../operator/contracts.js";
@@ -118,6 +121,7 @@ const recoveryGet: BrowseCommand = {
     const id = uuidArg(ctx.positionals[2] ?? "", "ASSIGNMENT_ID");
     const read = await readOptions(await ctx.connect(), id);
     const d = read.data;
+    const unsavedTurn = unsavedTurnHoldText(d.records);
     return browseOutput(ctx, {
       data: d,
       observedAt: read.observedAt,
@@ -133,6 +137,7 @@ const recoveryGet: BrowseCommand = {
           ["Held", d.held ? `yes: ${holdsText(d.holds)}` : "no"],
           ["Start again", restartText(d.restart)],
         ]),
+        ...(unsavedTurn ? ["", unsavedTurn] : []),
         ...(d.requestRefusal
           ? [
               "",

@@ -1,4 +1,7 @@
-import { requestRefusalText } from "../../src/operator/task-restart-copy.js";
+import {
+  requestRefusalText,
+  unsavedTurnHoldText,
+} from "../../src/operator/task-restart-copy.js";
 import { randomUUID } from "./browser-crypto.js";
 import {
   Fragment,
@@ -992,13 +995,22 @@ function RestartRecovery(
   );
   const restart = p.resource.state.data?.data.restart;
   const offered = task.state.data?.data.startAgain;
-  if (!restart?.releasePending && !restart?.eligible && !offered?.available)
+  const unsavedTurn = unsavedTurnHoldText(
+    p.resource.state.data?.data.records ?? [],
+  );
+  if (
+    !restart?.releasePending &&
+    !restart?.eligible &&
+    !offered?.available &&
+    !unsavedTurn
+  )
     return null;
   return (
     <Panel
       title="Start again"
       description="cab interrupts a held turn and releases its writer and capacity when the runtime reports the turn ended, its process is verified to have exited, or 30 minutes pass with no event for it. Start again then continues the task's conversation."
     >
+      {unsavedTurn && <p className="body">{unsavedTurn}</p>}
       {restart?.releasePending ? (
         <p className="body" role="status">
           Interrupting the held turn; expected to be released by{" "}
