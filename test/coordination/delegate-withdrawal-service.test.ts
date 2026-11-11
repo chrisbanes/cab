@@ -200,3 +200,60 @@ test("a delegate whose request was refused before it started can be withdrawn; a
     rmSync(f.root, { recursive: true, force: true });
   }
 });
+
+test("withdrawing a refused delegate retires its queued inbox batch so nothing waits on it", async () => {
+  const f = await refusedInitial();
+  try {
+    const api = new OperatorApi(f.service);
+    const delegateId = delegate(f);
+    const workId = `assignment:${delegateId}:initial`;
+    const coordination = startedOf(f.service).coordination;
+    coordination.postOperatorMessage({
+      actor: "operator",
+      key: randomUUID(),
+      taskId: f.taskId,
+      recipientAssignmentId: delegateId,
+      expectedAssignmentVersion: Number(
+        f.service.domain().assignment(delegateId).version,
+      ),
+      message: "QUEUED_FOR_DELEGATE",
+    });
+    assert.ok(
+      coordination.bindDeliveryBatch(
+        delegateId,
+        workId,
+        Number(f.service.domain().assignment(delegateId).version),
+      ),
+    );
+    refuseQueuedTurn(f, delegateId);
+    const queued = () =>
+      Number(
+        (
+          db(f.service)
+            .prepare(
+              "SELECT COUNT(*) AS n FROM coordination_delivery_batches WHERE recipientAssignmentId = ? AND state = 'queued'",
+            )
+            .get(delegateId) as { n: number }
+        ).n,
+      );
+    assert.equal(queued(), 1);
+    await api.execute(withdraw(f, delegateId));
+    assert.equal(queued(), 0);
+    assert.deepEqual(coordination.pendingEvents(delegateId), []);
+    assert.equal(
+      Number(
+        (
+          db(f.service)
+            .prepare(
+              "SELECT COUNT(*) AS n FROM coordination_undeliverable_inbox_events WHERE assignmentId = ?",
+            )
+            .get(delegateId) as { n: number }
+        ).n,
+      ),
+      1,
+    );
+  } finally {
+    await f.service.stop();
+    rmSync(f.root, { recursive: true, force: true });
+  }
+});

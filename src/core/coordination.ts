@@ -1557,9 +1557,12 @@ export class CoordinationStore {
       id,
     );
     const taskId = String(assignment.taskId);
+    // A turn recovered with no successor is proved by its validated recovery receipt;
+    // the proof itself requires no writer holds, pending effects or live callbacks.
     const settled = (workId: string) =>
       this.isHistoricalWorkResolved(workId) ||
-      Boolean(this.refusedBeforeStart?.(workId));
+      Boolean(this.refusedBeforeStart?.(workId)) ||
+      Boolean(this.reconciledAssignmentProof?.(workId));
     const blockers = new Set<DelegateBlocker>();
     const intents = this.db
       .prepare(`SELECT intent.workId, intent.state,
@@ -1703,6 +1706,20 @@ export class CoordinationStore {
         withdrawal.reason,
         withdrawal.withdrawnAt,
       );
+    // A batch still queued for a request refused before it started will never be delivered:
+    // retire it, keeping its events, so they become undeliverable below.
+    for (const batch of this.db
+      .prepare(
+        "SELECT batchId, taskId, recipientAssignmentId, highWaterSequence FROM coordination_delivery_batches WHERE recipientAssignmentId = ? AND state = 'queued'",
+      )
+      .all(value.assignmentId) as Array<{
+      batchId: string;
+      taskId: string;
+      recipientAssignmentId: string;
+      highWaterSequence: number;
+    }>)
+      if (!this.deleteQueuedBatchKeepingEvents(batch))
+        throw new Error("Withdrawn delegate's queued delivery is inconsistent");
     this.db
       .prepare(`INSERT INTO coordination_undeliverable_inbox_events (eventId, assignmentId, reason)
         SELECT event.eventId, event.recipientAssignmentId, 'delegate-withdrawn'
