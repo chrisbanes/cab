@@ -1414,7 +1414,7 @@ a.task-source-chip:hover {
 /* On a phone, Reply docks as one textarea until focus enters it or a send, notice or uncertain
    state needs its controls. The root's scroll padding keeps a focused control clear of the dock. */
 @media (max-width: 759px) {
-  :root {
+  :root:has(.task-workspace .reply-card) {
     --reply-dock-height: 62px;
     scroll-padding-bottom: var(--reply-dock-height);
   }
@@ -1425,10 +1425,11 @@ a.task-source-chip:hover {
     max-height: 12dvh;
     overflow: hidden;
   }
-  .reply-card:not(:focus-within, [data-expanded]) > :not(textarea, label) {
+  .reply-card:not(:focus-within, [data-expanded]) > :not(textarea, label, h3) {
     display: none;
   }
-  .reply-card:not(:focus-within, [data-expanded]) > label {
+  .reply-card:not(:focus-within, [data-expanded]) > label,
+  .reply-card:not(:focus-within, [data-expanded]) > h3 {
     position: absolute;
     width: 1px;
     height: 1px;

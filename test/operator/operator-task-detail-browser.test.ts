@@ -2522,6 +2522,11 @@ test("An open approval leads Overview and stays reachable from every tab in Deci
     phoneReply.height <= 0.12 * 844,
     `compact Reply is ${phoneReply.height}px`,
   );
+  assert.equal(
+    await page.getByRole("heading", { name: "Reply" }).count(),
+    1,
+    "the compact Reply keeps its heading for assistive tech",
+  );
   const review = page
     .locator(".decision")
     .getByRole("link", { name: "Review material & decide" });
