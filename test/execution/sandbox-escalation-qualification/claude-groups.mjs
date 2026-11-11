@@ -15,7 +15,10 @@ const sandbox = (workspace, allowUnsandboxedCommands) => ({
   network: { allowedDomains: [] },
   filesystem: { allowWrite: [workspace] },
 });
-const sleepPrompt = (command, timeout) =>
+// Claude Code rejects `sleep N` chained with other commands, so the wait is a Node timer.
+const wait = (ms) =>
+  `node -e 'setTimeout(() => console.log("probe-exit=0"), ${ms})'`;
+const waitPrompt = (command, timeout) =>
   `${preamble} Use the Bash tool exactly once, in the foreground (not in the background), with timeout ${timeout}, to run \`${command}\`. Wait for it to finish, then reply done.`;
 
 export const CLAUDE_GROUPS = {
@@ -53,18 +56,18 @@ export const CLAUDE_GROUPS = {
         BASH_DEFAULT_TIMEOUT_MS: "600000",
         BASH_MAX_TIMEOUT_MS: "3600000",
       },
-      prompt: sleepPrompt("sleep 660; echo probe-exit=$?", 3_600_000),
+      prompt: waitPrompt(wait(660_000), 3_600_000),
       decide: (command, calls) =>
-        command.includes("sleep") && calls === 1 ? "allow" : "deny",
+        command.includes("setTimeout") && calls === 1 ? "allow" : "deny",
     },
     {
       permissionMode: "dontAsk",
       allowedTools: ["Bash"],
       allowUnsandboxedCommands: false,
       env: { BASH_MAX_TIMEOUT_MS: "120000" },
-      prompt: sleepPrompt("sleep 180; echo probe-exit=$?", 600_000),
+      prompt: waitPrompt(wait(180_000), 600_000),
       decide: (command, calls) =>
-        command.includes("sleep") && calls === 1 ? "allow" : "deny",
+        command.includes("setTimeout") && calls === 1 ? "allow" : "deny",
     },
   ],
 };
@@ -221,7 +224,9 @@ export async function runClaudeGroup(
             ...(message.subtype ? { subtype: message.subtype } : {}),
             ...(message.type === "system" && message.subtype === "init"
               ? { permissionMode: message.permissionMode, model: message.model }
-              : {}),
+              : message.type === "system"
+                ? { detail: short(JSON.stringify(message), 400) }
+                : {}),
           });
           if (message.type === "result") {
             q.done = true;

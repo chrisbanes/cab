@@ -164,7 +164,7 @@ test("classification proves only from present evidence", async () => {
         kind: "hook",
         event: "PreToolUse",
         toolUseId: "a",
-        command: "sleep 660; echo probe-exit=$?",
+        command: "node -e 'setTimeout(() => {}, 660000)'",
       },
       {
         t: 661_000,
@@ -180,7 +180,7 @@ test("classification proves only from present evidence", async () => {
         kind: "hook",
         event: "PreToolUse",
         toolUseId: "b",
-        command: "sleep 180; echo probe-exit=$?",
+        command: "node -e 'setTimeout(() => {}, 180000)'",
       },
       {
         t: 820_500,
@@ -221,6 +221,25 @@ test("classification proves only from present evidence", async () => {
   });
   assert.equal(deniedByMode.unsandboxedCommandRunsOutside.outcome, "refuted");
   assert.equal(deniedByMode.hookSeesFlagFirst.outcome, "proved");
+
+  const blockedWait = classify("claude-timing", {
+    events: [
+      {
+        t: 1,
+        query: 1,
+        kind: "toolResult",
+        toolUseId: "a",
+        isError: true,
+        text: "Blocked",
+      },
+    ],
+    queries: [],
+    results: {},
+  });
+  assert.equal(
+    blockedWait.ceilingAboveDefault.reason,
+    "tool call rejected before execution",
+  );
 
   for (const [group, outcome] of Object.entries(
     classify("claude-sandbox", { events: [], results: {}, deadline: true }),

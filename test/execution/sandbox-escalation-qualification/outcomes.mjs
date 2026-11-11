@@ -394,8 +394,10 @@ function claudeAuto(trace) {
   return out;
 }
 
-function sleepCall(events, query) {
-  const pre = preHooks(events, query).find((e) => e.command?.includes("sleep"));
+function waitCall(events, query) {
+  const pre = preHooks(events, query).find((e) =>
+    e.command?.includes("setTimeout"),
+  );
   if (!pre) return null;
   const post = events.find(
     (e) =>
@@ -423,13 +425,25 @@ function claudeTiming(trace) {
       "inferred from the two bounded parts; a full 60-minute wait is out of budget",
     ),
   };
-  const first = sleepCall(trace.events, 1);
+  const rejected = (query) =>
+    trace.events.find(
+      (e) => e.kind === "toolResult" && e.query === query && e.isError,
+    )?.text;
+  for (const [query, key] of [
+    [1, "ceilingAboveDefault"],
+    [2, "envClampsLargerRequest"],
+  ])
+    if (!waitCall(trace.events, query) && rejected(query))
+      out[key] = untested("tool call rejected before execution", {
+        toolResult: rejected(query),
+      });
+  const first = waitCall(trace.events, 1);
   if (first)
     out.ceilingAboveDefault =
       first.elapsedMs > 600_000 && first.exitedZero
         ? proved(first)
         : refuted(first);
-  const second = sleepCall(trace.events, 2);
+  const second = waitCall(trace.events, 2);
   if (second)
     out.envClampsLargerRequest =
       !second.exitedZero &&
