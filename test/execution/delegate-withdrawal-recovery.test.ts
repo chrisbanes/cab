@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import { test } from "node:test";
 import { OperatorApi } from "../../src/standalone/operator-api.js";
+import { startedOf } from "../fixtures/service-internals.js";
 import { until } from "../fixtures/until.js";
 import { boundWorld } from "./bound-turn-recovery-fixture.js";
 
@@ -105,4 +106,11 @@ test("a delegate whose interrupted turn was recovered with no successor, and its
   });
   assert.equal(receipt.kind, "assignment-withdraw");
   assert.equal(service.domain().assignment(delegateId).state, "withdrawn");
+  // Its recovered request stays held with no continuation, yet no longer counts as
+  // unfinished work for the lead's completion or Reset.
+  const { state, coordination } = startedOf(service);
+  assert.ok(state.unsettledTaskWorkIds(w.g.taskId).includes(workId));
+  assert.equal(coordination.isHistoricalWorkResolved(workId), false);
+  assert.equal(coordination.isWithdrawnWork(workId), true);
+  assert.equal(coordination.isWithdrawnWork(w.g.workId), false);
 });

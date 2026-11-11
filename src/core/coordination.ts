@@ -1557,8 +1557,9 @@ export class CoordinationStore {
       id,
     );
     const taskId = String(assignment.taskId);
-    // A turn recovered with no successor is proved by its validated recovery receipt;
-    // the proof itself requires no writer holds, pending effects or live callbacks.
+    // A turn recovered with no successor is proved by its validated recovery receipt; the
+    // proof itself requires no writer holds of any kind (an operator Stop included), no
+    // pending effects and no live callbacks.
     const settled = (workId: string) =>
       this.isHistoricalWorkResolved(workId) ||
       Boolean(this.refusedBeforeStart?.(workId)) ||
@@ -1740,6 +1741,28 @@ export class CoordinationStore {
         }),
       );
     return withdrawal;
+  }
+
+  /**
+   * A withdrawn delegate's leftover work is history: withdrawal refused anything live, held
+   * or uncertain, and a withdrawn assignment is never admitted again.
+   */
+  isWithdrawnWork(workId: string): boolean {
+    const id = z.string().min(1).max(512).parse(workId);
+    const requests = this.one(
+      "SELECT 1 FROM sqlite_master WHERE type='table' AND name='turn_requests'",
+    );
+    return Boolean(
+      this.one(
+        `SELECT 1 FROM domain_assignments assignment
+        WHERE assignment.state = 'withdrawn' AND (assignment.id IN
+          (SELECT assignmentId FROM task_execution_bindings WHERE workId = ?)
+          ${requests ? "OR assignment.id IN (SELECT assignmentId FROM turn_requests WHERE workId = ?)" : ""})
+        LIMIT 1`,
+        id,
+        ...(requests ? [id] : []),
+      ),
+    );
   }
 
   /** Whether the operator could withdraw this assignment now, and if not, why. */
@@ -5856,13 +5879,9 @@ export class CoordinationStore {
       )
     )
       reasons.push("queued-inbox-delivery");
-    // A withdrawn delegate's request refused before it started is history, not unfinished work.
-    const withdrawnRefusal = (item: {
-      workId: string;
-      assignmentState: string | null;
-    }) =>
-      item.assignmentState === "withdrawn" &&
-      Boolean(this.refusedBeforeStart?.(item.workId));
+    // Withdrawal proved a delegate's remaining work settled and no new turn can start for it.
+    const withdrawnRefusal = (item: { assignmentState: string | null }) =>
+      item.assignmentState === "withdrawn";
     const unfinishedWork = this.db
       .prepare(`SELECT intent.workId, assignment.state AS assignmentState
       FROM execution_intents intent

@@ -6061,7 +6061,11 @@ export class StandaloneService {
         schedulerStore.hasOrdinaryAssignmentWork(String(lead.assignmentId)),
       unresolvedExecution: state
         .unsettledTaskWorkIds(taskId)
-        .some((workId) => !coordination.isHistoricalWorkResolved(workId)),
+        .some(
+          (workId) =>
+            !coordination.isHistoricalWorkResolved(workId) &&
+            !coordination.isWithdrawnWork(workId),
+        ),
       held:
         Boolean(state.taskHold(taskId)) ||
         domain.admission(taskId).reasons.includes("source-hold") ||
