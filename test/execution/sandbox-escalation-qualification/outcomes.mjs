@@ -303,7 +303,7 @@ function codexTiming(trace) {
       answeredAt !== undefined &&
       e.t >= answeredAt,
   );
-  if (after && early.length === 0)
+  if (after && early.length === 0 && request.answer === "decline")
     out.turnContinuesAfterDecline =
       after.status === "completed"
         ? proved({ turnStatus: after.status })
@@ -323,7 +323,11 @@ function claudeSandbox(trace) {
   const { events, results } = trace;
   const out = {};
   const pre = preHooks(events);
-  const escalated = pre.find((e) => isCommand(e.command, STIMULI.escalated));
+  // The flagged escalated call's own hook: an unflagged run of the same command is not it.
+  const escalated = pre.find(
+    (e) =>
+      isCommand(e.command, STIMULI.escalated) && e.dangerouslyDisableSandbox,
+  );
   if (escalated?.decision === "allow") {
     const legs = { control: results.control, escalated: results.escalated };
     const denied = events.find(
@@ -353,24 +357,31 @@ function claudeSandbox(trace) {
             ? proved(legs)
             : refuted(legs);
   }
-  const flagged = events.find(
+  // Per call: every flagged escalated tool use must have its own hook, which saw the flag.
+  const flaggedUses = events.filter(
     (e) =>
       e.kind === "toolUse" &&
       e.dangerouslyDisableSandbox &&
       isCommand(e.command, STIMULI.escalated),
   );
-  if (escalated?.dangerouslyDisableSandbox)
+  const calls = flaggedUses.map((use) => ({
+    toolUseId: use.toolUseId,
+    hook: pre.find((h) => h.toolUseId === use.toolUseId) ?? null,
+  }));
+  if (calls.some((c) => !c.hook?.dangerouslyDisableSandbox))
+    out.hookSeesFlagFirst = refuted({
+      calls: calls.map((c) => ({
+        toolUseId: c.toolUseId,
+        hookSawFlag: c.hook?.dangerouslyDisableSandbox ?? null,
+      })),
+    });
+  else if (escalated)
     out.hookSeesFlagFirst = proved({
       hookInput: {
         command: escalated.command,
         dangerouslyDisableSandbox: true,
       },
       hookAtMs: escalated.t,
-    });
-  else if (escalated || flagged)
-    out.hookSeesFlagFirst = refuted({
-      hookSawFlag: escalated?.dangerouslyDisableSandbox ?? null,
-      toolUseHadFlag: Boolean(flagged),
     });
   const denied = pre.find(
     (e) => isCommand(e.command, STIMULI.hookDeny) && e.decision === "deny",
@@ -552,9 +563,14 @@ function claudeTiming(trace) {
       "inferred from the two bounded parts; a full 60-minute wait is out of budget",
     ),
   };
+  // Claude Code rejecting the call, not the probe hook denying a different command.
   const rejected = (query) =>
     trace.events.find(
-      (e) => e.kind === "toolResult" && e.query === query && e.isError,
+      (e) =>
+        e.kind === "toolResult" &&
+        e.query === query &&
+        e.isError &&
+        !hookDenied(e),
     )?.text;
   for (const [query, key] of [
     [1, "ceilingAboveDefault"],

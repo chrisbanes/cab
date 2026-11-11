@@ -474,6 +474,54 @@ test("classification proves only from present evidence", async () => {
     }).unsandboxedCommandRunsOutside.outcome;
   assert.equal(claudeLegs(false), "untested");
   assert.equal(claudeLegs(true), "proved");
+  // The flag check pairs each flagged call with its own hook, not an earlier unflagged run.
+  const pairing = classify("claude-sandbox", {
+    events: [
+      {
+        t: 1,
+        kind: "hook",
+        event: "PreToolUse",
+        toolUseId: "u1",
+        command: "node chromium.mjs escalated",
+        dangerouslyDisableSandbox: false,
+        decision: "allow",
+      },
+      {
+        t: 2,
+        kind: "toolUse",
+        toolUseId: "u2",
+        command: "node chromium.mjs escalated",
+        dangerouslyDisableSandbox: true,
+      },
+      {
+        t: 3,
+        kind: "hook",
+        event: "PreToolUse",
+        toolUseId: "u2",
+        command: "node chromium.mjs escalated",
+        dangerouslyDisableSandbox: true,
+        decision: "allow",
+      },
+    ],
+    results: {},
+  });
+  assert.equal(pairing.hookSeesFlagFirst.outcome, "proved");
+  // The probe hook denying a different command is not Claude Code rejecting the wait.
+  const wrongCommand = classify("claude-timing", {
+    events: [1, 2].map((query) => ({
+      t: query,
+      query,
+      kind: "toolResult",
+      toolUseId: `w${query}`,
+      isError: true,
+      text: "PreToolUse:Bash hook error: probe deny",
+    })),
+    queries: [],
+    options: timingOptions,
+    results: {},
+  });
+  assert.equal(wrongCommand.ceilingAboveDefault.reason, "not observed");
+  assert.equal(wrongCommand.envClampsLargerRequest.reason, "not observed");
   // A denied call that still reached canUseTool is not a winning deny.
   const leakedDeny = classify("claude-auto", {
     events: [
