@@ -20,6 +20,7 @@ import {
   type BranchRemotes,
   adoptBranchHead,
   branchPreflight,
+  checkPublicationTarget,
   isBranchAction,
   isBranchKind,
   inspectBranchHead,
@@ -32,12 +33,16 @@ import type {
 } from "./code-host.js";
 import {
   type AdoptFunction,
+  type BranchFetch,
+  type FetchBranchFunction,
   adoptOutsideHead,
+  fetchBranchHead,
   proveOutsideRebase,
 } from "./git-fetch.js";
 import { pushTaskCommit } from "./git-push.js";
 import {
   type AdoptionContext,
+  type CreateContext,
   type PrIdentity,
   type PublicationContext,
   type PushFunction,
@@ -218,6 +223,7 @@ export interface GitLabDeliveryOptions {
   fetcher?: typeof fetch | undefined;
   push?: PushFunction | undefined;
   adopt?: AdoptFunction | undefined;
+  fetchBranch?: FetchBranchFunction | undefined;
   /** Test-only: the unchanged-rebase proof over Git. */
   prove?: typeof proveOutsideRebase | undefined;
   /** How a request waits out a 429; see `RateLimitPolicy`. */
@@ -422,6 +428,18 @@ export class GitLabHttpDeliveryProvider implements CodeHostDeliveryProvider {
           this.options.reauthenticate?.();
         return outcome;
       },
+      fetchBranch: async (request) => {
+        const result = await (this.options.fetchBranch ?? fetchBranchHead)({
+          ...request,
+          host: this.options.host,
+          codeHost: "gitlab",
+          nameWithOwner: projectPath,
+          token: await this.transportToken(),
+        });
+        if (result.kind === "not-attempted" || result.kind === "fetch-failed")
+          this.options.reauthenticate?.();
+        return result;
+      },
       adopt: async (request) => {
         const outcome = await (this.options.adopt ?? adoptOutsideHead)({
           ...request,
@@ -452,6 +470,9 @@ export class GitLabHttpDeliveryProvider implements CodeHostDeliveryProvider {
     verified: async (repositoryId) =>
       this.remoteFor(repositoryId, await this.project(repositoryId)),
   };
+  async fetchBranch(repositoryId: string, request: BranchFetch) {
+    return (await this.remotes.verified(repositoryId)).fetchBranch(request);
+  }
   /** The merge request a target names: the same instance-wide ID and IID, and never a fork. */
   private async boundMergeRequest(target: {
     repositoryId: string;
@@ -510,7 +531,7 @@ export class GitLabHttpDeliveryProvider implements CodeHostDeliveryProvider {
   async preflight(
     action: ExternalAction,
     policy: DeliveryPolicy,
-    publication?: PublicationContext,
+    publication?: PublicationContext | CreateContext,
     adoption?: AdoptionContext,
     merge?: { removeSourceBranch: boolean },
   ): ReturnType<CodeHostDeliveryProvider["preflight"]> {
@@ -532,7 +553,7 @@ export class GitLabHttpDeliveryProvider implements CodeHostDeliveryProvider {
         ...(await branchPreflight(
           action,
           this.remoteFor(repositoryId, projectPath),
-          publication,
+          publication && "branch" in publication ? publication : undefined,
           adoption,
         )),
       };
@@ -564,7 +585,23 @@ export class GitLabHttpDeliveryProvider implements CodeHostDeliveryProvider {
         throw new Error("provider-ref-missing");
       if (head !== action.target.expectedHeadSha)
         throw new Error("provider-head-changed");
-      return { ...recorded, repositoryId, headSha: head };
+      // The actual requested base, so choosing another base cannot bypass the check.
+      const targetCheck = await checkPublicationTarget(
+        remote,
+        {
+          commonDirectory: null,
+          managed: false,
+          ...publication?.target,
+          branch: action.target.baseRef,
+        },
+        head,
+      );
+      return {
+        ...recorded,
+        repositoryId,
+        headSha: head,
+        targetCheck: { ...targetCheck },
+      };
     }
     if (
       action.kind === "pr.thread.reply" ||
@@ -1313,6 +1350,7 @@ export function gitLabDeliveryFactory(
     fetcher?: typeof fetch | undefined;
     push?: PushFunction | undefined;
     adopt?: AdoptFunction | undefined;
+    fetchBranch?: FetchBranchFunction | undefined;
     prove?: typeof proveOutsideRebase | undefined;
     rateLimit?: RateLimitPolicy | undefined;
     /** Test-only: the clock the service's GitLab reads are kept by. */
@@ -1357,6 +1395,7 @@ export function gitLabDeliveryFactory(
       fetcher: seams.fetcher,
       push: seams.push,
       adopt: seams.adopt,
+      fetchBranch: seams.fetchBranch,
       prove: seams.prove,
       rateLimit: seams.rateLimit,
       cache,

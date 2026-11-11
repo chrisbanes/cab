@@ -24,6 +24,7 @@ import {
 import type { z } from "zod";
 import { ActionLink, Button } from "./components.js";
 import { Input } from "./ui/input.js";
+import { LinkBaseFields } from "./link-base-fields.js";
 import { runtimeErrors } from "./execution-runtime.js";
 import { FolderPicker } from "./folder-picker.js";
 import {
@@ -1237,6 +1238,16 @@ export function ProjectSetup(
                                 )
                               }
                             </SetupField>
+                          )}
+                          {(source === "typed" || expected) && (
+                            <LinkBaseFields
+                              id={`setup-${row.id}`}
+                              value={row}
+                              disabled={disabled}
+                              onChange={(base) =>
+                                update(i, { ...row, ...base })
+                              }
+                            />
                           )}
                         </div>
                         {(source === "typed" || expected) && (

@@ -1110,6 +1110,8 @@ test("a GitLab link saves with a matching origin and a mismatch is refused with 
       codeHost: "gitlab",
       host: "gitlab.example.com",
       ref: "main",
+      baseMode: "ref",
+      fetchBeforeProvisioning: false,
     },
   ]);
 });

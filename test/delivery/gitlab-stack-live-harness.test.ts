@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { localBranchFetch } from "../fixtures/branch-fetch.js";
 import { spawnSync } from "node:child_process";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -42,6 +43,9 @@ function world(t: TestContext) {
       credentialRef: "glab:gitlab.com",
       glabExecutable: glab.executable,
       token: async () => glabToken,
+      fetchBranch: localBranchFetch(source, (branch) =>
+        remote.state.heads.get(branch),
+      ).fetchBranch,
       push: async (request) => {
         remote.state.heads.set(request.branch, request.commitSha);
         for (const mr of remote.state.mergeRequests)

@@ -28,7 +28,13 @@ import {
   unstackDispatchGuard,
 } from "./unstack.js";
 import { proveOutsideRebase } from "./git-fetch.js";
-import { type AdoptFunction, adoptOutsideHead } from "./git-fetch.js";
+import {
+  type AdoptFunction,
+  type BranchFetch,
+  type FetchBranchFunction,
+  adoptOutsideHead,
+  fetchBranchHead,
+} from "./git-fetch.js";
 import { type PushOutcome, pushTaskCommit } from "./git-push.js";
 import type {
   CodeHostDeliveryProvider,
@@ -39,8 +45,10 @@ import {
   type BranchRemote,
   type BranchRemotes,
   PublicationRefusal,
+  type PublicationTarget,
   adoptBranchHead,
   branchPreflight,
+  checkPublicationTarget,
   inspectBranchHead,
   publishBranch,
 } from "./branch-delivery.js";
@@ -97,6 +105,12 @@ export interface PublicationContext extends PushVerification {
   outsideHeadSha?: string;
   /** A later attempt of an operation whose earlier attempt may have landed late. */
   retry: boolean;
+  /** Where the proposed commit's merge with its change request target is checked. */
+  target: PublicationTarget;
+}
+/** A change request create's facts: where its head's merge with the requested base is checked. */
+export interface CreateContext {
+  target: Omit<PublicationTarget, "branch">;
 }
 /** Offline facts for adopting an outside head: the task's branch, last push, worktree and provisioned base. */
 export interface AdoptionContext {
@@ -328,6 +342,7 @@ export class GitHubHttpDeliveryProvider
     private readonly adopt: AdoptFunction = adoptOutsideHead,
     private readonly host = "github.com",
     private readonly requestBoundary?: GitHubDeliveryRequestBoundary,
+    private readonly fetchBranchFunction: FetchBranchFunction = fetchBranchHead,
   ) {
     this.resolveCredential =
       typeof credential === "string" ? async () => credential : credential;
@@ -2053,10 +2068,15 @@ export class GitHubHttpDeliveryProvider
     )
       throw new Error("provider-thread-mismatch");
   }
+  async fetchBranch(repositoryId: string, request: BranchFetch) {
+    return (await this.branchRemotes.verified(repositoryId)).fetchBranch(
+      request,
+    );
+  }
   async preflight(
     action: ExternalAction,
     policy: DeliveryPolicy,
-    publication?: PublicationContext,
+    publication?: PublicationContext | CreateContext,
     adoption?: AdoptionContext,
   ) {
     const repo = await this.repository(action.target.repositoryId);
@@ -2071,7 +2091,7 @@ export class GitHubHttpDeliveryProvider
         ...(await branchPreflight(
           action,
           this.remoteAt(repo.path),
-          publication,
+          publication && "branch" in publication ? publication : undefined,
           adoption,
         )),
       };
@@ -2080,10 +2100,22 @@ export class GitHubHttpDeliveryProvider
       await this.ref(repo.path, action.target.baseRef);
       if (head !== action.target.expectedHeadSha)
         throw new Error("provider-head-changed");
+      // The actual requested base, so choosing another base cannot bypass the check.
+      const targetCheck = await checkPublicationTarget(
+        this.remoteAt(repo.path),
+        {
+          commonDirectory: null,
+          managed: false,
+          ...publication?.target,
+          branch: action.target.baseRef,
+        },
+        head,
+      );
       return {
         repositoryPath: repo.path,
         repositoryId: action.target.repositoryId,
         headSha: head,
+        targetCheck: { ...targetCheck },
       };
     }
     if (
@@ -2390,6 +2422,16 @@ export class GitHubHttpDeliveryProvider
       push: async (request) => {
         if (this.requestBoundary) throw Error("fixture-git-publication-denied");
         return this.push({
+          ...request,
+          host: this.host,
+          nameWithOwner,
+          token: (await this.credential()) ?? "",
+        });
+      },
+      fetchBranch: async (request) => {
+        // Qualification fixtures grant no fetch scope; the check holds as unproved.
+        if (this.requestBoundary) return { kind: "not-attempted" };
+        return this.fetchBranchFunction({
           ...request,
           host: this.host,
           nameWithOwner,

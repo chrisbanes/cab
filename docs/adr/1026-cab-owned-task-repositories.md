@@ -20,8 +20,8 @@ sourceGitCommonDir)>`.
 - cab creates it with `git init --bare --template= --ref-format=reftable` and the source's object
   format in a temporary sibling, writes `objects/info/alternates` naming the source's `objects/`,
   sets `gc.auto=0`, `maintenance.auto=false` and `core.logAllRefUpdates=true`, and renames it into
-  place. A per-repository lock serializes creation and validation. No clone or fetch runs, so
-  cab's Git stays offline.
+  place. A per-repository lock serializes creation and validation. No clone runs, and the only
+  network Git is the bounded branch fetch below.
 - Each later use validates that it is a real directory, bare, reftable, with exactly that
   alternates line. A mismatch leaves the task provisioning with the reason; cab never repairs it.
 - A task turn may write, besides its workspace, the repository's `objects/` and `reftable/` and
@@ -34,9 +34,19 @@ sourceGitCommonDir)>`.
   directory), `sourceGitCommonDir` (the operator's, the repository link's identity) and
   `gitDirectory` (the admin directory). The workspace manager compares the worktree's common and
   admin directories with the binding before it runs status, add or remove, and runs
-  `worktree remove` in the managed repository, whose config agents cannot write. The base `ref`
-  resolves in the source; a stacked dependent's requested commit resolves in the managed
-  repository. Comparisons read base branches from the source checkout.
+  `worktree remove` in the managed repository, whose config agents cannot write. An explicit
+  base `ref` resolves in the source; a stacked dependent's requested commit resolves in the
+  managed repository and wins over every base mode. Comparisons read base branches from the
+  source checkout.
+- A repository link's base mode chooses where a new workspace starts: the explicit `ref`, the
+  `origin` branch `ref` names, or the code host's default branch. Without fetching, a remote
+  mode resolves the source checkout's `refs/remotes/origin/<branch>` (the default through
+  `refs/remotes/origin/HEAD`). With "fetch before workspace", cab fetches the branch through
+  ADR-1016's isolated transport into the managed repository and keeps it at
+  `refs/cab/remote/<branch>`; the default branch is read with `ls-remote --symref` over the same
+  transport. A missing ref, fetch failure or credential leaves the task provisioning with the
+  reason; cab never falls back to a local or other branch. The binding records the resolved
+  `baseBranch` and `commit`; retries and later setting changes never move them.
 - The worktree's index is agent-writable, so an agent can stage a submodule whose own
   configuration would run in cab's status and diff. cab passes `--ignore-submodules=dirty` to
   its worktree status and diff reads, which a `.gitmodules` file cannot override, and sets
@@ -53,7 +63,10 @@ sourceGitCommonDir)>`.
 - **The files ref backend in the managed repository.** The planning probe showed branch
   deletion, tag deletion and rebase lock `<common>/packed-refs.lock` at the root. Reftable keeps
   refs and reflogs in `reftable/`.
-- **A clone or fetch of the source.** It needs a transport, which cab's offline Git refuses.
+- **A clone or fetch of the source.** A clone needs a transport and duplicates the source's
+  objects; the bounded branch fetch reads them through the alternate instead.
+- **Pulling or fetching in the operator's checkout.** It would move the operator's branches and
+  objects, which cab never writes.
 - **cab-mediated Git.** Keeping metadata read-only and committing through a cab tool conflicts
   with agents' normal Git use.
 
@@ -69,4 +82,6 @@ sourceGitCommonDir)>`.
   root. Git LFS content is not available in a task worktree, and submodule metadata is not
   writable. Reftable needs Git 2.45 or later.
 - Existing workspaces are not migrated and have no Git write access.
+- A fetched base is as fresh as the fetch: the remote can move again before the task publishes,
+  which ADR-1016's publication check addresses.
 - Managed repositories are kept after their project is deleted; the operator can remove them.

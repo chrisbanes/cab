@@ -8,6 +8,11 @@ import { parseFilterDriverNames } from "./workspace-comparison.js";
 export interface PushWorkspace {
   workspacePath: string;
   baseCommit: string | null;
+  /** The worktree's common directory, and whether it is cab's managed repository. */
+  commonDirectory: string | null;
+  managed: boolean;
+  /** The branch a remote base resolved to when the workspace was created. */
+  baseBranch: string | null;
 }
 
 const bounds = {
@@ -153,7 +158,7 @@ export function verifierGit(
  * only counted; they are never pushed.
  */
 export async function verifyTaskPush(
-  workspace: PushWorkspace,
+  workspace: Pick<PushWorkspace, "workspacePath" | "baseCommit">,
   commitSha: string,
   lastPushedSha: string | null,
   signal?: AbortSignal,

@@ -988,8 +988,14 @@ admitted writer generation at a time under the cooperative rule below. Independe
 tasks can proceed concurrently; parallel reviews
 reference a fixed revision. Repository-free tasks need no Git worktree.
 A local task's workspace is created at its first admitted turn and holds every
-repository link of its project, for every code host, at its configured ref; each is
-verified then, and the turn waits without a workspace if one has changed. A project
+repository link of its project, for every code host, at its configured base; each is
+verified then, and the turn waits without a workspace if one has changed. A remote base
+resolves the checkout's `origin` tracking branch or, with fetching on, the code host's branch
+fetched into the managed repository (`refs/cab/remote/<branch>`); a fetch failure, missing
+branch or unusable credential leaves the workspace provisioning with its reason and never falls
+back to a local branch. The workspace records the resolved branch and commit, which retries and
+later setting changes never move, and the operator's checkout is never written. A stacked
+dependent still starts at its blocker's last pushed commit. A project
 with no links gives a repository-free workspace. An imported task's is created then
 too, holding only its issue's source repository at the project's
 linked path and ref, and only once the turn is otherwise admissible, so a held or
@@ -1522,7 +1528,17 @@ link's path keeps the saved path. Settings, `project prepare-repositories`
 and the API each add GitHub and GitLab links, change a link's ref (and, in Settings, its
 local path) and remove links through that command; a saved link's code host, host, project
 path and project ID are its identity, so changing one means removing the link and adding
-another. A GitHub link's `repositoryId` is the repository's node ID; a new link with an
+another. Each link also has a base mode and a fetch policy, set in guided setup, Settings,
+`project prepare-repositories` (`setBases`) and the API and shown by the configuration read and
+`project get`: **Explicit ref** starts new workspaces at `ref`; **Remote branch** at the `origin`
+branch `ref` names (a bare branch name, never `refs/…` or `origin/…`); **Remote default branch**
+at the code host's current default branch, with `ref` recording the default known when saved.
+**Fetch latest before creating workspace** is available only for the remote modes and fetches
+that branch through cab's isolated transport first; without it a remote mode needs the
+checkout's `refs/remotes/origin/<branch>`, which saving verifies. Links saved before base modes
+read as an explicit ref without fetching. A base change previews "Applies to workspaces
+created after saving; existing workspaces keep their recorded base." A GitHub link's
+`repositoryId` is the repository's node ID; a new link with an
 `owner/name` ID is refused with the `gh api` command that prints the node ID, while a saved
 link keeps its ID (guided setup's provisional `github.com/owner/name` links re-save). The
 configuration read names each GitHub link with a verified `owner/name`, the newest one an imported
@@ -3204,6 +3220,21 @@ against that observed head (creation expects the branch to be absent), so a bran
 created or moved after the read rejects the push and is an outside change. `branch.push` also
 refuses a commit that does not descend from the last pushed commit; `branch.force-push` needs a
 recorded last push, which is its lease.
+
+Before each push, force-push and `pr.create`, cab fetches the change request target afresh and
+checks that the exact commit merges cleanly into it with `git merge-tree`, which writes no
+worktree, `HEAD` or index ([ADR-1016](adr/1016-ensemble-owned-commit-publication.md)). The
+target is the bound change request's accepted base, else the stacked blocker's branch, else the
+branch the workspace started from; `pr.create` checks its requested
+base. A demonstrated conflict refuses the write as `publication-target-conflict`, and the lead's
+result names the target branch and commit, the head commit and the conflicting paths (at most
+50), and where the fetched target is kept (`refs/cab/target/<branch>` in the workspace
+repository). The lead integrates it locally, validates, and sends a new request, which needs its
+usual approval and is checked again. A check that cannot be made is held as
+`publication-conflict-unproved` with its reason (`target-unavailable`, `target-unidentified`,
+`fetch-failed`, `too-large`, `credential-unavailable` or `computation-failed`),
+never reported as a conflict. The target can move after the check; the merge-time gate remains
+the code host's.
 
 On a GitLab link all three branch actions (these two and `branch.adopt`) follow the same
 lifecycle. Before any push or fetch cab reads the project by its numeric ID and requires the

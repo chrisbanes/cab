@@ -8,6 +8,7 @@ import {
   RepositoryVerificationError,
   type RepositoryVerifier,
 } from "../core/github-source.js";
+import { localBaseRev } from "../core/repository-links.js";
 import { runGit } from "./git-process.js";
 
 /** Trimmed stdout of one bounded Git call, or null when it did not exit 0. */
@@ -82,18 +83,22 @@ export const verifiedRepository: RepositoryVerifier = async (
   );
   if (common === null) throw new RepositoryVerificationError("not-checkout");
   if (expectedOrigin) await assertOrigin(path, expectedOrigin);
-  const ref = await gitOutput(
-    // Setup requires the ref to name a commit; configured links keep their check.
-    [
-      "-C",
-      path,
-      "rev-parse",
-      "--verify",
-      expectedOrigin ? `${input.ref}^{commit}` : input.ref,
-    ],
-    5000,
-  );
-  if (ref === null || !/^[0-9a-f]{40,64}$/.test(ref))
-    throw new RepositoryVerificationError("ref-unavailable");
+  // A fetched base is resolved on the code host when a workspace is created, not here.
+  const rev = localBaseRev(input);
+  if (rev !== null) {
+    const ref = await gitOutput(
+      // Setup and remote bases require a commit; configured explicit refs keep their check.
+      [
+        "-C",
+        path,
+        "rev-parse",
+        "--verify",
+        expectedOrigin || rev !== input.ref ? `${rev}^{commit}` : rev,
+      ],
+      5000,
+    );
+    if (ref === null || !/^[0-9a-f]{40,64}$/.test(ref))
+      throw new RepositoryVerificationError("ref-unavailable");
+  }
   return { ...input, path, gitCommonDirectory: await realpath(common) };
 };

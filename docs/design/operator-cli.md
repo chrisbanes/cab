@@ -595,7 +595,9 @@ name. Any save bumps the source version, so every selection is inactive until
 previewed again, and marks observations incomplete; removing a selection discards its
 definition. `project prepare-repositories` writes a `repositories.configure` change
 document the same way: kept links are sent as `{codeHost, host, repositoryId, ref}`
-without their path, and a link change leaves the source version and selections alone.
+without their path, plus `baseMode` and `fetchBeforeProvisioning` when `setBases` changes them
+(omitted base fields keep the saved ones), and a link change leaves the source version and
+selections alone.
 `delivery configure` writes a `delivery.configure` change document the same way,
 from the Delivery tab's own level and merge-mode rules, keeping every saved row it is
 not asked to change; `project apply` sends it.

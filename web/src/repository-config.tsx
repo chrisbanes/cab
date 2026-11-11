@@ -44,6 +44,7 @@ import { useReadinessDiscovery } from "./readiness-picker.js";
 import { discoveryReasonCopy } from "./setup-model.js";
 import { Alert } from "./ui/alert.js";
 import { NativeSelect } from "./ui/native-select.js";
+import { type LinkBase, LinkBaseFields } from "./link-base-fields.js";
 import { codeHostName, type CodeHost } from "./delivery-presentation.js";
 import { repositoryLabel } from "./presentation.js";
 import { FolderPicker } from "./folder-picker.js";
@@ -493,6 +494,14 @@ export function RepositoryTab(p: TabProps) {
                             "ref",
                             "Linked repository ref",
                           )}
+                        />
+                        <LinkBaseFields
+                          id={`repository-${i}`}
+                          value={r as LinkBase}
+                          disabled={isLocked}
+                          onChange={(base) =>
+                            edit.update("repositories", i, base)
+                          }
                         />
                         {r.keep
                           ? edit.savedValue(

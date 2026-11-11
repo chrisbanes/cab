@@ -627,3 +627,172 @@ test("a complete branch name longer than the prefix cap is valid", async (t) => 
   assert.ok(branch.length > 64 && branch.length <= 160, String(branch.length));
   assert.ok(branch.startsWith(prefix));
 });
+
+/** Rewrites `a.txt` on the code host's target branch (the source checkout's `main`). */
+function advanceTarget(
+  world: ReturnType<typeof publicationWorld>,
+  text: string,
+) {
+  writeFileSync(resolve(world.source, "a.txt"), text);
+  git(world.source, "commit", "-q", "-am", `target ${text.trim()}`);
+  return git(world.source, "rev-parse", "HEAD");
+}
+
+test("a push that conflicts with the freshly fetched target is refused before the push, then a repaired commit publishes", async (t) => {
+  const world = publicationWorld(t);
+  // The task edits the line the target changes after the task started.
+  writeFileSync(resolve(world.workspace, "a.txt"), "task\n");
+  git(world.workspace, "commit", "-q", "-am", "task edit");
+  const conflicting = git(world.workspace, "rev-parse", "HEAD");
+  const targetSha = advanceTarget(world, "target\n");
+  const refused = await world.submit("branch.push", conflicting);
+  assert.equal(refused.state, "confirmed-failure");
+  assert.equal(refused.observation?.reason, "publication-target-conflict");
+  assert.deepEqual(refused.observation?.conflict, {
+    targetBranch: "main",
+    targetSha,
+    headSha: conflicting,
+    paths: ["a.txt"],
+    truncated: false,
+    // A legacy binding's source is the operator's: nothing is kept there.
+    targetRetained: false,
+  });
+  assert.deepEqual(world.pushes, []);
+  assert.equal(world.targetFetches.at(-1)?.branch, "main");
+  assert.equal(
+    git(world.source, "for-each-ref", "refs/cab"),
+    "",
+    "the operator's repository gets no cab ref",
+  );
+
+  // The lead integrates the target, and the merged commit passes a fresh check.
+  assert.throws(() => git(world.workspace, "merge", "-q", targetSha));
+  writeFileSync(resolve(world.workspace, "a.txt"), "task and target\n");
+  git(world.workspace, "add", "a.txt");
+  git(world.workspace, "commit", "-q", "--no-edit");
+  const repaired = git(world.workspace, "rev-parse", "HEAD");
+  const published = await world.submit("branch.push", repaired);
+  assert.equal(published.state, "confirmed-success");
+  assert.equal(world.pushes.length, 1);
+});
+
+test("a later update and a force-push are checked against the target as it is at publication", async (t) => {
+  const world = publicationWorld(t);
+  const first = world.commit();
+  assert.equal(
+    (await world.submit("branch.push", first)).state,
+    "confirmed-success",
+  );
+  writeFileSync(resolve(world.workspace, "a.txt"), "task\n");
+  git(world.workspace, "commit", "-q", "-am", "task edit");
+  const second = git(world.workspace, "rev-parse", "HEAD");
+  advanceTarget(world, "target\n");
+  const update = await world.submit("branch.push", second);
+  assert.equal(update.observation?.reason, "publication-target-conflict");
+  const rewritten = world.amend();
+  const forced = await world.submit("branch.force-push", rewritten);
+  assert.equal(forced.observation?.reason, "publication-target-conflict");
+  assert.equal(world.pushes.length, 1);
+});
+
+test("a check that cannot be made holds the push as unproved, never as a conflict", async (t) => {
+  const world = publicationWorld(t);
+  const sha = world.commit();
+  // The target branch is gone from the code host.
+  git(world.source, "branch", "-m", "main", "renamed");
+  const missing = await world.submit("branch.push", sha);
+  assert.equal(missing.observation?.reason, "publication-conflict-unproved");
+  assert.equal(missing.observation?.conflictCheck, "target-unavailable");
+  assert.equal(missing.observation?.conflict, undefined);
+  git(world.source, "branch", "-m", "renamed", "main");
+  // Each failure is reported as its own reason; only Git's conflict exit is a conflict.
+  for (const [fetched, reason] of [
+    [{ kind: "fetch-failed" }, "fetch-failed"],
+    [{ kind: "too-large" }, "too-large"],
+    [{ kind: "not-attempted" }, "credential-unavailable"],
+    // A target commit the repository lacks makes merge-tree fail, which is not a conflict.
+    [
+      { kind: "fetched", branch: "main", commit: "e".repeat(40) },
+      "computation-failed",
+    ],
+  ] as const) {
+    world.setTargetFetch(async () => fetched);
+    const held = await world.submit("branch.push", sha);
+    assert.equal(held.observation?.conflictCheck, reason, reason);
+    assert.equal(held.observation?.conflict, undefined);
+  }
+  world.setTargetFetch(undefined);
+  // A workspace started at an explicit commit names no target branch to check.
+  const unnamed = await world.submit(
+    "branch.push",
+    sha,
+    world.coordinatorFor(true, false, {
+      taskWorkspace: async () => ({
+        workspacePath: world.workspace,
+        baseCommit: world.base,
+        commonDirectory: resolve(world.source, ".git"),
+        managed: false,
+        baseBranch: null,
+      }),
+    }),
+  );
+  assert.equal(unnamed.observation?.conflictCheck, "target-unidentified");
+  assert.deepEqual(world.pushes, []);
+});
+
+test("a GitHub pull request create is checked against its requested base before it is sent", async (t) => {
+  const world = publicationWorld(t, { grants: ["branch.push", "pr.create"] });
+  writeFileSync(resolve(world.workspace, "a.txt"), "task\n");
+  git(world.workspace, "commit", "-q", "-am", "task edit");
+  const sha = git(world.workspace, "rev-parse", "HEAD");
+  assert.equal(
+    (await world.submit("branch.push", sha)).state,
+    "confirmed-success",
+  );
+  git(world.source, "checkout", "-q", "-b", "release");
+  const release = advanceTarget(world, "release\n");
+  git(world.source, "checkout", "-q", "main");
+  const branch = String(
+    world.store.taskBranch(world.taskId, repositoryId)?.branch,
+  );
+  const refused = await world.coordinator.submit(
+    {
+      operationId: randomUUID(),
+      action: {
+        ...prCreate(branch, sha),
+        target: { ...prCreate(branch, sha).target, baseRef: "release" },
+      },
+    },
+    world.caller,
+  );
+  assert.equal(refused.observation?.reason, "publication-target-conflict");
+  assert.equal(refused.observation?.conflict?.targetSha, release);
+  assert.equal(
+    world.requests.some((r) => r.startsWith("POST") && r.endsWith("/pulls")),
+    false,
+  );
+});
+
+test("a stacked dependent's push is checked against its blocker's branch, not the repository's", async (t) => {
+  const world = publicationWorld(t);
+  git(world.source, "checkout", "-q", "-b", "cab/blocker");
+  const blocker = advanceTarget(world, "blocker\n");
+  git(world.source, "checkout", "-q", "main");
+  const coordinator = world.coordinatorFor(true, false, {
+    stackedPrBase: () => ({
+      blockerTaskId: randomUUID(),
+      repositoryId,
+      branch: "cab/blocker",
+    }),
+  });
+  writeFileSync(resolve(world.workspace, "a.txt"), "task\n");
+  git(world.workspace, "commit", "-q", "-am", "task edit");
+  const refused = await world.submit(
+    "branch.push",
+    git(world.workspace, "rev-parse", "HEAD"),
+    coordinator,
+  );
+  assert.equal(refused.observation?.conflict?.targetBranch, "cab/blocker");
+  assert.equal(refused.observation?.conflict?.targetSha, blocker);
+  assert.deepEqual(world.pushes, []);
+});

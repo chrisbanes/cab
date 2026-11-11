@@ -18,7 +18,10 @@ import {
 } from "../core/unstack.js";
 import type { CodeHostDeliveryProvider } from "./code-host.js";
 import { UnstackAuthorityChangedError, UnstackCoordinator } from "./unstack.js";
-import type { SqliteWorkspaceBindingStore } from "./workspaces.js";
+import {
+  type SqliteWorkspaceBindingStore,
+  taskRepositoryBase,
+} from "./workspaces.js";
 
 /** Optional provider preview failure; local storage/lifecycle failures retain their original type. */
 export class UnstackPreviewUnavailableError extends DomainConflictError {}
@@ -60,7 +63,15 @@ export class TaskUnstack {
     const link = domain
       .repositoryLinks(projectId)
       .links.find((r) => r.repositoryId === edge.repositoryId);
-    const targetBaseRef = acceptableBaseRefs(link?.ref)[0];
+    const targetBaseRef = acceptableBaseRefs(
+      taskRepositoryBase(
+        workspaces,
+        (id) => domain.stackedDependency(id),
+        taskId,
+        edge.repositoryId,
+        link?.ref,
+      ),
+    )[0];
     if (
       !link ||
       !targetBaseRef ||

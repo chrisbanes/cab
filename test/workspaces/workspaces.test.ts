@@ -38,6 +38,7 @@ import {
   SqliteWorkspaceBindingStore,
   WorkspaceManager,
   type TaskWorkspaceBinding,
+  taskRepositoryBase,
   type TaskWorkspaceRepositoryInput,
   type WorkspaceCleanupEvidence,
   type WorkspaceBindingStore,
@@ -1822,4 +1823,39 @@ test("existing identity-read holds become releasable once, when the column is ad
     db.close();
     rmSync(root, { recursive: true, force: true });
   }
+});
+
+test("a task's repository base is its resolved remote base, its stack's, or the link ref", () => {
+  const bindings = new Map<string, string | undefined>([
+    ["root", "release"],
+    ["middle", undefined],
+    ["top", undefined],
+    ["plain", undefined],
+  ]);
+  const store = {
+    get: (taskId: string) =>
+      bindings.has(taskId)
+        ? ({
+            repositories: [
+              { repositoryId: "R1", baseBranch: bindings.get(taskId) },
+            ],
+          } as unknown as TaskWorkspaceBinding)
+        : undefined,
+  };
+  const edges: Record<string, { blockerTaskId: string; repositoryId: string }> =
+    {
+      top: { blockerTaskId: "middle", repositoryId: "R1" },
+      middle: { blockerTaskId: "root", repositoryId: "R1" },
+      loop: { blockerTaskId: "loop", repositoryId: "R1" },
+      elsewhere: { blockerTaskId: "root", repositoryId: "R2" },
+    };
+  const base = (taskId: string) =>
+    taskRepositoryBase(store, (id) => edges[id] ?? null, taskId, "R1", "main");
+  // A stacked dependent starts at its blocker's head, so it takes the bottom's resolved branch.
+  assert.equal(base("top"), "release");
+  assert.equal(base("root"), "release");
+  // No remote base, a cycle or another repository's edge falls back to the link ref.
+  assert.equal(base("plain"), "main");
+  assert.equal(base("loop"), "main");
+  assert.equal(base("elsewhere"), "main");
 });

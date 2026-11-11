@@ -1,12 +1,81 @@
 import { z } from "zod";
+import { safeBranchName } from "./delivery.js";
 import {
   isGitLabProjectPath,
   linkedRepositorySchema,
 } from "./github-source.js";
 import {
+  type RepositoryBaseMode,
   repositoryLinkInputSchema,
   setupRepositorySchema,
 } from "./github-source-contracts.js";
+
+type LinkBase = {
+  ref: string;
+  baseMode?: RepositoryBaseMode | undefined;
+  fetchBeforeProvisioning?: boolean | undefined;
+};
+
+/** A link's base mode and fetch policy; a link saved before them is an explicit ref without fetching. */
+export const linkBase = (link: Omit<LinkBase, "ref">) => ({
+  baseMode: link.baseMode ?? "ref",
+  fetchBeforeProvisioning: link.fetchBeforeProvisioning ?? false,
+});
+
+/** A link's base fields as given; absent ones stay absent, so stored links keep their shape. */
+export const linkBaseFields = (link: Omit<LinkBase, "ref">) => ({
+  ...(link.baseMode === undefined ? {} : { baseMode: link.baseMode }),
+  ...(link.fetchBeforeProvisioning === undefined
+    ? {}
+    : { fetchBeforeProvisioning: link.fetchBeforeProvisioning }),
+});
+
+/** Why a link's base setting is invalid, or null. Setup, settings and the CLI share this rule. */
+export function linkBaseIssue(link: LinkBase): string | null {
+  const { baseMode, fetchBeforeProvisioning } = linkBase(link);
+  if (baseMode === "ref")
+    return fetchBeforeProvisioning
+      ? "Fetching before a workspace needs a remote branch or the remote default"
+      : null;
+  // A remote mode names a code-host branch, never a local or remote-tracking ref.
+  return /^(?:refs\/|origin\/)/.test(link.ref) ||
+    link.ref === "HEAD" ||
+    !safeBranchName(link.ref)
+    ? "A remote base names a branch without refs/ or origin/"
+    : null;
+}
+
+/**
+ * The rev a link's checkout must resolve when no fetch supplies the base: the explicit ref, or
+ * the checkout's `origin` remote-tracking branch. Null when the base is fetched.
+ */
+export function localBaseRev(link: LinkBase): string | null {
+  const { baseMode, fetchBeforeProvisioning } = linkBase(link);
+  if (fetchBeforeProvisioning) return null;
+  if (baseMode === "remote-branch") return `refs/remotes/origin/${link.ref}`;
+  if (baseMode === "remote-default") return "refs/remotes/origin/HEAD";
+  return link.ref;
+}
+
+const baseIssues = (
+  values: LinkBase[],
+  context: {
+    addIssue(issue: {
+      code: "custom";
+      message: string;
+      path: (string | number)[];
+    }): void;
+  },
+) =>
+  values.forEach((value, index) => {
+    const issue = linkBaseIssue(value);
+    if (issue)
+      context.addIssue({
+        code: "custom",
+        message: issue,
+        path: [index, "baseMode"],
+      });
+  });
 
 /** A DNS hostname without port or userinfo. `github.com` belongs to GitHub links only. */
 export const gitLabHostSchema = z
@@ -133,6 +202,7 @@ export const setupRepositoriesSchema = z
     ]),
   )
   .max(20)
+  .superRefine(baseIssues)
   .refine(
     (values) =>
       new Set(values.map((value) => value.repositoryId)).size === values.length,

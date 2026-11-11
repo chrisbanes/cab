@@ -1744,3 +1744,73 @@ test("opaque saved rows support keyboard remove undo and discard while a visible
   );
   assert.equal(await showsText(page, hidden.id), false);
 });
+
+test("a repository's base and fetch policy save, reload, and change back", async (_t, journey) => {
+  const { f, ids, page } = await startSettings(
+    journey,
+    "/projects/:atlas/settings?tab=repositories",
+  );
+  const base = page.getByLabel("Base", { exact: true });
+  const fetch = page.getByLabel("Fetch latest before creating workspace", {
+    exact: true,
+  });
+  const save = page.getByRole("button", { name: "Save changes", exact: true });
+  await base.waitFor();
+  assert.equal(await base.inputValue(), "ref");
+  assert.equal(
+    await fetch.isDisabled(),
+    true,
+    "an explicit ref fetches nothing",
+  );
+  // The changed control keeps focus through the re-render.
+  await base.focus();
+  await base.selectOption("remote-branch");
+  assert.equal(
+    await page.evaluate(() => document.activeElement?.id),
+    await base.getAttribute("id"),
+  );
+  await page
+    .getByLabel("Linked repository ref", { exact: true })
+    .fill("release");
+  await fetch.check();
+  await changes(page)
+    .getByText(
+      "Base for acme/atlas: Explicit ref main → Remote branch release · fetch before workspace",
+    )
+    .waitFor();
+  await changes(page)
+    .getByText(
+      "Applies to workspaces created after saving; existing workspaces keep their recorded base.",
+    )
+    .waitFor();
+  await save.click();
+  await savedOutcome(page);
+  assert.deepEqual(
+    f.service
+      .domain()
+      .repositoryLinks(ids.atlas)
+      .links.map((l) => [l.ref, l.baseMode, l.fetchBeforeProvisioning]),
+    [["release", "remote-branch", true]],
+  );
+  await page.reload();
+  await base.waitFor();
+  assert.equal(await base.inputValue(), "remote-branch");
+  assert.equal(await fetch.isChecked(), true);
+
+  await base.selectOption("ref");
+  assert.equal(await fetch.isChecked(), false);
+  assert.equal(await fetch.isDisabled(), true);
+  await page.getByLabel("Linked repository ref", { exact: true }).fill("main");
+  await save.click();
+  await savedOutcome(page);
+  assert.deepEqual(
+    f.service
+      .domain()
+      .repositoryLinks(ids.atlas)
+      .links.map((l) => [l.ref, l.baseMode, l.fetchBeforeProvisioning]),
+    [["main", "ref", false]],
+  );
+  await page.reload();
+  await base.waitFor();
+  assert.equal(await base.inputValue(), "ref");
+});

@@ -984,3 +984,35 @@ test("Create is held or actionable by one function of the project and the lead a
     "Check whether the project was created first.",
   );
 });
+
+test("a setup row's chosen base and fetch policy go into the create command; a default row sends neither", () => {
+  const row = {
+    ...emptyRow("discovered"),
+    repositoryId: "R_atlas",
+    owner: "acme",
+    name: "atlas",
+    path: "~/atlas",
+    ref: "main",
+  };
+  const create = (rows: (typeof row)[]) => {
+    const { command } = buildProjectCreate(values, rows, "");
+    assert.equal(operatorCommandSchema.safeParse(command).success, true);
+    return command.type === "project.create" ? command.repositories?.[0] : null;
+  };
+  assert.deepEqual(
+    create([
+      { ...row, baseMode: "remote-default", fetchBeforeProvisioning: true },
+    ]),
+    {
+      repositoryId: "R_atlas",
+      owner: "acme",
+      name: "atlas",
+      path: "~/atlas",
+      ref: "main",
+      baseMode: "remote-default",
+      fetchBeforeProvisioning: true,
+    },
+  );
+  const plain = create([row]);
+  assert.equal(plain && "baseMode" in plain, false);
+});

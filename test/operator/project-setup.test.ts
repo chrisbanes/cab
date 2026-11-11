@@ -869,3 +869,73 @@ test("CLI prepare-repositories applies a home-relative GitHub checkout as an abs
     await realpath(join(home.home, "src", "atlas")),
   );
 });
+
+test("CLI setBases previews a base change with the new-workspaces note, applies it, and project get shows it", async (t) => {
+  const { f, home } = await setupWorld(t);
+  const projectId = randomUUID();
+  f.service.domain().execute({
+    type: "project.create",
+    actor: "operator",
+    key: randomUUID(),
+    projectId,
+    name: "CLI repository bases",
+    leadProfileId: null,
+  });
+  const served = await serveCli(t, f, { setup: { home: home.home } });
+  const { cli, file, h } = await loginCli(t, served);
+  const prepareAndApply = async (name: string, edit: unknown) => {
+    const prepared = join(h.dir, `${name}.json`);
+    const preparation = await cli("rw", [
+      "project",
+      "prepare-repositories",
+      projectId,
+      "--edit-file",
+      file(`${name}-edit.json`, JSON.stringify(edit)),
+      "--out",
+      prepared,
+    ]);
+    if (preparation.code !== 0) return { preparation };
+    const applied = await cli("rw", ["project", "apply", "--file", prepared]);
+    assert.equal(applied.code, 0, applied.err);
+    return { preparation };
+  };
+  await prepareAndApply("link", {
+    linkRepositories: [
+      { repositoryId: "R_atlas", path: "~/src/atlas", ref: "main" },
+    ],
+  });
+  const { preparation } = await prepareAndApply("base", {
+    setBases: {
+      R_atlas: { baseMode: "remote-default", fetchBeforeProvisioning: true },
+    },
+  });
+  assert.equal(preparation.code, 0, preparation.err);
+  const shown = preparation.out + preparation.err;
+  assert.match(
+    shown,
+    /Base for R_atlas: Explicit ref main → Remote default branch · fetch before workspace/,
+  );
+  assert.match(
+    shown,
+    /Applies to workspaces created after saving; existing workspaces keep their recorded base\./,
+  );
+  const saved = f.service.domain().repositoryLinks(projectId).links[0];
+  assert.equal(saved?.baseMode, "remote-default");
+  assert.equal(saved?.fetchBeforeProvisioning, true);
+  const got = await cli("rw", ["project", "get", projectId]);
+  assert.equal(got.code, 0, got.err);
+  assert.deepEqual(
+    JSON.parse(got.out).data.repositories.links.map(
+      (l: Record<string, unknown>) => [l.baseMode, l.fetchBeforeProvisioning],
+    ),
+    [["remote-default", true]],
+  );
+  const refused = await prepareAndApply("invalid", {
+    setBases: { R_atlas: { baseMode: "ref", fetchBeforeProvisioning: true } },
+  });
+  assert.notEqual(refused.preparation.code, 0);
+  assert.match(
+    refused.preparation.out + refused.preparation.err,
+    /needs a remote branch/,
+  );
+});

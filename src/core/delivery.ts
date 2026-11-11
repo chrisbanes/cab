@@ -669,6 +669,30 @@ export const actionObservationSchema = z
     outsideHeadSha: commitSha.optional(),
     /** The branch was deleted by another writer after cab's push. */
     outsideDeleted: z.boolean().optional(),
+    /** The checked pair of commits and the paths a refused publication conflicts on. */
+    conflict: z
+      .object({
+        targetBranch: identity,
+        targetSha: commitSha,
+        headSha: commitSha,
+        paths: z.array(z.string().min(1).max(512)).max(50),
+        truncated: z.boolean(),
+        /** Whether the workspace repository keeps the target at `refs/cab/target/<branch>`. */
+        targetRetained: z.boolean(),
+      })
+      .strict()
+      .optional(),
+    /** Why a publication's merge with its target could not be checked. */
+    conflictCheck: z
+      .enum([
+        "target-unavailable",
+        "target-unidentified",
+        "fetch-failed",
+        "too-large",
+        "credential-unavailable",
+        "computation-failed",
+      ])
+      .optional(),
     /** Epoch ms before which a retryable failure is not re-attempted. */
     resumeAt: z.number().int().positive().optional(),
     /** The code host's asynchronous merge request and the last status read for it; the id is present while the request is pending. */

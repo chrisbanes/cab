@@ -1,9 +1,16 @@
 import { z } from "zod";
-import { repositoryLinkSchema } from "../core/github-source-contracts.js";
+import {
+  describeLinkBase,
+  linkBaseChangeNote,
+  repositoryBaseModeSchema,
+  repositoryLinkSchema,
+} from "../core/github-source-contracts.js";
 import {
   gitLabHostSchema,
   gitLabProjectPathSchema,
   gitLabRepositoryId,
+  linkBaseFields,
+  linkBaseIssue,
 } from "../core/repository-links.js";
 import { uuidArg } from "./browse.js";
 import {
@@ -41,6 +48,19 @@ const editSchema = z
     linkRepositories: z.array(linkRowSchema).max(20).optional(),
     unlinkRepositories: z.array(z.string().min(1).max(512)).max(20).optional(),
     setRefs: z.record(z.string(), z.string().trim().min(1).max(512)).optional(),
+    /** A kept link's base mode, its branch (`ref`) and fetch policy; omitted fields keep the saved ones. */
+    setBases: z
+      .record(
+        z.string(),
+        z
+          .object({
+            baseMode: repositoryBaseModeSchema,
+            ref: z.string().trim().min(1).max(512).optional(),
+            fetchBeforeProvisioning: z.boolean().optional(),
+          })
+          .strict(),
+      )
+      .optional(),
     confirmUnlinkAll: z.literal(true).optional(),
   })
   .strict();
@@ -66,6 +86,7 @@ function repositoriesEditCommand(
   const unlink = edit.unlinkRepositories ?? [];
   const links = edit.linkRepositories ?? [];
   const refs = edit.setRefs ?? {};
+  const bases = edit.setBases ?? {};
   const linked = saved.links.map((r) => String(r.repositoryId));
   for (const [what, list] of [
     ["unlinkRepositories", unlink],
@@ -81,20 +102,53 @@ function repositoriesEditCommand(
       throw bad(
         `linkRepositories: ${repositoryId} is already linked; use setRefs to change its ref.`,
       );
-  for (const id of Object.keys(refs))
-    if (!linked.includes(id) || unlink.includes(id))
-      throw bad(`setRefs: ${id} is not a kept linked repository.`);
+  for (const [what, ids] of [
+    ["setRefs", Object.keys(refs)],
+    ["setBases", Object.keys(bases)],
+  ] as const)
+    for (const id of ids)
+      if (!linked.includes(id) || unlink.includes(id))
+        throw bad(`${what}: ${id} is not a kept linked repository.`);
+  for (const [id, base] of Object.entries(bases))
+    if (base.ref !== undefined && refs[id] !== undefined)
+      throw bad(`setBases: ${id} names its ref there and in setRefs.`);
+  // Each kept link's new base, checked by the rule the service applies.
+  const based = new Map(
+    saved.links.map((r) => {
+      const id = String(r.repositoryId);
+      const base = bases[id];
+      const next = {
+        ref: base?.ref ?? refs[id] ?? String(r.ref),
+        baseMode: base?.baseMode ?? r.baseMode,
+        fetchBeforeProvisioning:
+          base?.fetchBeforeProvisioning ?? r.fetchBeforeProvisioning,
+      };
+      const issue = base ? linkBaseIssue(next) : null;
+      if (issue) throw bad(`setBases: ${id}: ${issue}.`);
+      return [id, next] as const;
+    }),
+  );
+  for (const l of links) {
+    const issue = linkBaseIssue(l);
+    if (issue) throw bad(`linkRepositories: ${l.repositoryId}: ${issue}.`);
+  }
 
   // A kept link is sent with its saved code host but without its private path.
   const repositories = [
     ...saved.links
       .filter((r) => !unlink.includes(String(r.repositoryId)))
-      .map((r) => ({
-        codeHost: r.codeHost,
-        host: r.host,
-        repositoryId: String(r.repositoryId),
-        ref: refs[String(r.repositoryId)] ?? String(r.ref),
-      })),
+      .map((r) => {
+        const id = String(r.repositoryId);
+        // Only a changed base is sent; the service keeps omitted base fields.
+        const base = bases[id] ? linkBaseFields(based.get(id)!) : {};
+        return {
+          codeHost: r.codeHost,
+          host: r.host,
+          repositoryId: id,
+          ref: based.get(id)!.ref,
+          ...base,
+        };
+      }),
     ...links.map((l) =>
       l.codeHost === "gitlab"
         ? {
@@ -104,6 +158,7 @@ function repositoriesEditCommand(
             repositoryId: l.repositoryId,
             path: l.path,
             ref: l.ref,
+            ...linkBaseFields(l),
           }
         : {
             codeHost: "github",
@@ -111,6 +166,7 @@ function repositoriesEditCommand(
             repositoryId: l.repositoryId,
             path: l.path,
             ref: l.ref,
+            ...linkBaseFields(l),
           },
     ),
   ];
@@ -134,7 +190,7 @@ function repositoriesEditCommand(
   for (const id of unlink) diff.push(`− Repository access: ${id}`);
   for (const l of links)
     diff.push(
-      `+ Repository access: ${l.repositoryId} · ${l.ref}${
+      `+ Repository access: ${l.repositoryId} · ${l.baseMode === undefined || (l.baseMode === "ref" && !l.fetchBeforeProvisioning) ? l.ref : describeLinkBase(l)}${
         l.codeHost === "gitlab" ? ` · GitLab ${l.host}` : ""
       }`,
     );
@@ -145,11 +201,20 @@ function repositoriesEditCommand(
       from: linked.join(",") || "none",
       to: repositories.map((r) => r.repositoryId).join(",") || "none",
     });
+  let baseChanged = false;
   for (const r of saved.links) {
-    const ref = refs[String(r.repositoryId)];
+    const id = String(r.repositoryId);
+    const ref = refs[id];
     if (ref !== undefined && ref !== r.ref) {
       diff.push(`Ref for ${r.repositoryId}: ${r.ref} → ${ref}`);
       changes.push({ field: `ref ${r.repositoryId}`, from: r.ref, to: ref });
+    }
+    const from = describeLinkBase({ ...r, ref: String(r.ref) });
+    const to = describeLinkBase(based.get(id)!);
+    if (bases[id] && from !== to) {
+      baseChanged = true;
+      diff.push(`Base for ${r.repositoryId}: ${from} → ${to}`);
+      changes.push({ field: `base ${r.repositoryId}`, from, to });
     }
   }
   const notes = [
@@ -159,6 +224,7 @@ function repositoriesEditCommand(
           "Unlinking discards the saved local path; linking again needs the path.",
         ]
       : []),
+    ...(baseChanged ? [linkBaseChangeNote] : []),
   ];
   return { command, changes, diff, notes };
 }

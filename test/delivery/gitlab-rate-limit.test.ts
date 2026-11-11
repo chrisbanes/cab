@@ -1,4 +1,8 @@
 import assert from "node:assert/strict";
+import {
+  syntheticWorkspace,
+  unchangedTargetFetch,
+} from "../fixtures/branch-fetch.js";
 import { test } from "node:test";
 import type { DeliveryPolicy } from "../../src/core/delivery.js";
 import { GitLabDiscoveryReader } from "../../src/standalone/gitlab-discovery.js";
@@ -182,6 +186,7 @@ function provider(rateLimit: RateLimitPolicy) {
       link: (id) => (id === "42" ? { projectPath: "group/sub/app" } : null),
       token: async () => "glpat-synthetic-rate-limit-token",
       fetcher: remote.fetcher,
+      fetchBranch: unchangedTargetFetch,
       rateLimit,
     }),
   };
@@ -230,7 +235,9 @@ test("a write answered 429 is sent again once, and the merge request exists once
     body: "Body",
     draft: false,
   } as never;
-  const before = await w.provider.preflight(action, policy);
+  const before = await w.provider.preflight(action, policy, {
+    target: syntheticWorkspace,
+  });
   const done = await w.provider.performAction({
     operationId: "11111111-1111-4111-8111-111111111111",
     request: { operationId: "11111111-1111-4111-8111-111111111111", action },

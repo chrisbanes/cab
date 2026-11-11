@@ -23,6 +23,11 @@ import {
 } from "../../src/operator/closed-issue-copy.js";
 import { runtimeCommand, runtimeSummary } from "./execution-runtime.js";
 import { repositoryLabel } from "./presentation.js";
+import {
+  describeLinkBase,
+  linkBaseChangeNote,
+  type RepositoryBaseMode,
+} from "../../src/core/github-source-contracts.js";
 import { diagnosticCaptureLabels, plural } from "./settings-view.js";
 
 export type Values = Record<string, string | boolean | string[]>;
@@ -330,6 +335,13 @@ export function repositoryRowsFrom(saved: Repositories) {
             repositoryId: r.repositoryId ?? "",
             ref: r.ref ?? "",
             savedRef: r.ref ?? "",
+            // Only a non-default base is carried, so an untouched default row sends none.
+            ...((r.baseMode ?? "ref") !== "ref" || r.fetchBeforeProvisioning
+              ? {
+                  baseMode: r.baseMode ?? "ref",
+                  fetchBeforeProvisioning: r.fetchBeforeProvisioning === true,
+                }
+              : {}),
             keep: true,
           },
     ),
@@ -440,6 +452,7 @@ export function repositoryChanges(
   known?: RepositoryPrivate,
 ) {
   const lines: string[] = [];
+  let baseChanged = false;
   const repositories = parseRows(v.repositories);
   for (const r of repositories) {
     if (r.unavailable) {
@@ -448,11 +461,12 @@ export function repositoryChanges(
       lines.push(
         `− Repository access: ${repositoryLabel(String(r.repositoryId), saved.links)}`,
       );
-    else if (!r.keep && !r.removed)
+    else if (!r.keep && !r.removed) {
       lines.push(
-        `+ Repository access: ${r.repositoryId} · ${r.ref}${r.codeHost === "gitlab" ? ` · GitLab ${r.host}` : ""}`,
+        `+ Repository access: ${r.repositoryId} · ${plainRef(r) ? r.ref : describeLinkBase(rowBase(r))}${r.codeHost === "gitlab" ? ` · GitLab ${r.host}` : ""}`,
       );
-    else if (r.keep) {
+      if (!plainRef(r)) baseChanged = true;
+    } else if (r.keep) {
       const current = saved.links.find(
         (s) => s.repositoryId === r.repositoryId,
       );
@@ -460,6 +474,18 @@ export function repositoryChanges(
         lines.push(
           `Ref for ${repositoryLabel(String(r.repositoryId), saved.links)}: ${current.ref} → ${r.ref}`,
         );
+      const from =
+        current && describeLinkBase({ ...current, ref: String(current.ref) });
+      const to = describeLinkBase(rowBase(r));
+      if (
+        current &&
+        from !== describeLinkBase({ ...rowBase(r), ref: String(current.ref) })
+      ) {
+        lines.push(
+          `Base for ${repositoryLabel(String(r.repositoryId), saved.links)}: ${from} → ${to}`,
+        );
+        baseChanged = true;
+      }
       if (pathEdited(r, known))
         lines.push(
           `Local path changed for ${repositoryLabel(String(r.repositoryId), saved.links)}`,
@@ -484,8 +510,18 @@ export function repositoryChanges(
       lines.push(
         "− Unavailable saved repository link (saved since this form loaded)",
       );
+  if (baseChanged) lines.push(linkBaseChangeNote);
   return lines;
 }
+
+/** A form row's base fields; an unset mode is an explicit ref. */
+const rowBase = (r: Record<string, unknown>) => ({
+  ref: String(r.ref ?? ""),
+  baseMode: (r.baseMode ?? "ref") as RepositoryBaseMode,
+  fetchBeforeProvisioning: r.fetchBeforeProvisioning === true,
+});
+const plainRef = (r: Record<string, unknown>) =>
+  rowBase(r).baseMode === "ref" && !rowBase(r).fetchBeforeProvisioning;
 
 /**
  * Kept rows that are no longer saved (removed elsewhere). A save cannot keep them, so the
@@ -721,6 +757,12 @@ export function repositoryCommand(
             host: r.host ?? "github.com",
             repositoryId: r.repositoryId,
             ref: r.ref,
+            ...(r.baseMode === undefined
+              ? {}
+              : {
+                  baseMode: r.baseMode,
+                  fetchBeforeProvisioning: r.fetchBeforeProvisioning === true,
+                }),
             ...(r.keep
               ? pathEdited(r, known)
                 ? { path: r.path }

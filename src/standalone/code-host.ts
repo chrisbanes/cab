@@ -11,9 +11,11 @@ import type {
 import type { StoredRepositoryLink } from "../core/repository-links.js";
 import type {
   AdoptionContext,
+  CreateContext,
   PrIdentity,
   PublicationContext,
 } from "./github-delivery.js";
+import type { BranchFetch, FetchBranchResult } from "./git-fetch.js";
 
 export type CodeHost = StoredRepositoryLink["codeHost"];
 
@@ -43,10 +45,16 @@ export interface CodeHostDeliveryProvider {
   inspectAction(
     record: DeliveryActionRecord,
   ): Promise<ProviderActionObservation>;
+  /** Fetches a branch of the repository into a cab-owned store through the isolated transport. */
+  fetchBranch?(
+    repositoryId: string,
+    request: BranchFetch,
+  ): Promise<FetchBranchResult>;
   preflight(
     action: ExternalAction,
     policy: DeliveryPolicy,
-    publication?: PublicationContext,
+    /** A branch push's facts, or a change request create's target-check location. */
+    publication?: PublicationContext | CreateContext,
     adoption?: AdoptionContext,
     /** For a merge: whether to ask the host to remove the source branch, for a stacked blocker. */
     merge?: { removeSourceBranch: boolean },

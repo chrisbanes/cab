@@ -14,14 +14,21 @@ import {
 import { DomainStore } from "../../src/core/domain.js";
 import { GitHubSourceStore } from "../../src/core/github-source.js";
 import { Store } from "../../src/core/store.js";
-import { DeliveryCoordinator } from "../../src/standalone/delivery.js";
+import {
+  DeliveryCoordinator,
+  type DeliveryCoordinatorOptions,
+} from "../../src/standalone/delivery.js";
 import type { PushOutcome } from "../../src/standalone/git-push.js";
-import type { AdoptFunction } from "../../src/standalone/git-fetch.js";
+import type {
+  AdoptFunction,
+  FetchBranchFunction,
+} from "../../src/standalone/git-fetch.js";
 import {
   GitHubHttpDeliveryProvider,
   type PushFunction,
 } from "../../src/standalone/github-delivery.js";
 import { verifyTaskPush } from "../../src/standalone/push-verification.js";
+import { localBranchFetch } from "./branch-fetch.js";
 
 export function git(cwd: string, ...args: string[]): string {
   return execFileSync(
@@ -247,6 +254,9 @@ export function publicationWorld(
     return adoptBehaviour(request);
   };
 
+  // The task's target branch is the source checkout's `main`, fetched as from the code host.
+  const target = localBranchFetch(tree.source);
+  let targetOverride: FetchBranchFunction | undefined;
   let observed: PrDeliveryObservation | undefined;
   const wakes: Array<{ reason: string; identity: string }> = [];
   const caller: DeliveryCaller = {
@@ -262,8 +272,17 @@ export function publicationWorld(
   const coordinatorFor = (
     verify = true,
     approved = options.approved ?? false,
+    extra: Partial<DeliveryCoordinatorOptions> = {},
   ) => {
-    const real = new GitHubHttpDeliveryProvider("token", fetcher, push, adopt);
+    const real = new GitHubHttpDeliveryProvider(
+      "token",
+      fetcher,
+      push,
+      adopt,
+      "github.com",
+      undefined,
+      (request) => (targetOverride ?? target.fetchBranch)(request),
+    );
     const provider = Object.assign(Object.create(real), {
       async inspectPr() {
         if (!observed) throw new Error("no PR");
@@ -278,6 +297,9 @@ export function publicationWorld(
       taskWorkspace: async () => ({
         workspacePath: tree.workspace,
         baseCommit: tree.base,
+        commonDirectory: join(tree.source, ".git"),
+        managed: false,
+        baseBranch: "main",
       }),
       feedback: (_task, reason, identity) => wakes.push({ reason, identity }),
       ...(verify
@@ -290,6 +312,7 @@ export function publicationWorld(
               ),
           }
         : {}),
+      ...extra,
     });
   };
   const coordinator = coordinatorFor();
@@ -346,6 +369,11 @@ export function publicationWorld(
     );
   return {
     ...tree,
+    targetFetches: target.requests,
+    /** Replaces the code host's fetch of the target branch; undefined restores it. */
+    setTargetFetch: (fetchBranch: FetchBranchFunction | undefined) => {
+      targetOverride = fetchBranch;
+    },
     outsideMaterial,
     overwrite,
     adoptOutside,

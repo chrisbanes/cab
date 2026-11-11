@@ -23,6 +23,7 @@ import { setImmediate as yieldTraversal } from "node:timers/promises";
 import { z } from "zod";
 import {
   gitLabHostSchema,
+  linkBase,
   repositoriesConfigurationCommandSchema,
 } from "../core/repository-links.js";
 import {
@@ -7602,6 +7603,7 @@ export class OperatorApi {
               codeHost: r.codeHost,
               host: available ? r.host : null,
               ref: available ? r.ref : null,
+              ...linkBase(r),
               ...(r.codeHost === "github"
                 ? { name: (available && names.get(r.repositoryId)) || null }
                 : {}),

@@ -1,4 +1,5 @@
 import { execFileSync } from "node:child_process";
+import type { FetchBranchFunction } from "../../../src/standalone/git-fetch.js";
 import { randomBytes, randomUUID } from "node:crypto";
 import {
   mkdirSync,
@@ -44,6 +45,8 @@ export interface PublicationJourneyOptions {
   push?: PushFunction;
   /** The HTTPS fetch of an adopted head; tests pass a fake. */
   adopt?: AdoptFunction;
+  /** The HTTPS fetch of a publication's target branch; tests pass a fake. */
+  fetchBranch?: FetchBranchFunction;
   /** Independent readbacks of the remote branch head and the PR head (production uses the `gh` CLI). */
   readRef(branch: string): string | null;
   readPrHead(number: number): string;
@@ -256,6 +259,9 @@ export async function runPublicationJourney(
       guardedFetch,
       push,
       adopt,
+      "github.com",
+      undefined,
+      options.fetchBranch,
     );
     const provider = options.inspectPr
       ? Object.assign(Object.create(real), { inspectPr: options.inspectPr })
@@ -269,6 +275,9 @@ export async function runPublicationJourney(
       taskWorkspace: async () => ({
         workspacePath: workspace,
         baseCommit: base,
+        commonDirectory: join(clone, ".git"),
+        managed: false,
+        baseBranch: manifest.repository.defaultBranch,
       }),
       leadAssignmentId: () => caller.assignmentId,
       feedback: (_task, _reason, identity) => wakes.push(identity),

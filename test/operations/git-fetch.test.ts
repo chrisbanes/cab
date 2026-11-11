@@ -17,6 +17,7 @@ import { test, type TestContext } from "node:test";
 import { forgeCommitGraphParent } from "../fixtures/forged-commit-graph.js";
 import {
   adoptOutsideHead,
+  fetchBranchHead,
   proveOutsideRebase,
 } from "../../src/standalone/git-fetch.js";
 
@@ -105,6 +106,16 @@ function shim(
 const { spawnSync } = require("node:child_process");
 const { writeFileSync } = require("node:fs");
 const args = process.argv.slice(2);
+if (args.includes("ls-remote")) {
+  // A listing reads the local bare repository in place of github.com, as a fetch does.
+  const at = args.indexOf("ls-remote");
+  const kept = [];
+  for (let i = 0; i < at; i += 2)
+    if (!/^(protocol|credential)\\./.test(args[i + 1])) kept.push(args[i], args[i + 1]);
+  const rest = args.slice(at).map((a) => a.startsWith("https://") && a.endsWith(".git") ? ${JSON.stringify(remote)} : a);
+  const r = spawnSync(${JSON.stringify(realGit)}, [...kept, "-c", "protocol.file.allow=always", ...rest], { stdio: "inherit", env: { ...process.env, GIT_ALLOW_PROTOCOL: "file" } });
+  process.exit(r.status ?? 1);
+}
 if (!args.includes("fetch")) {
   const r = spawnSync(${JSON.stringify(realGit)}, args, { stdio: "inherit" });
   process.exit(r.status ?? 1);
@@ -645,4 +656,140 @@ test("unchanged rebase fetch imports only a proved outside head and preserves ta
     git(repo.workspace, "rev-parse", `refs/cab/adopted/${branch}`),
     head,
   );
+});
+
+/** A bare destination reading the source's objects through an alternate, as cab's managed repository does. */
+function destination(repo: ReturnType<typeof repository>) {
+  const dir = join(repo.root, "managed.git");
+  git(repo.root, "init", "-q", "--bare", dir);
+  writeFileSync(
+    join(dir, "objects", "info", "alternates"),
+    `${join(repo.source, ".git", "objects")}\n`,
+  );
+  return dir;
+}
+const sourceState = (repo: ReturnType<typeof repository>) => ({
+  refs: git(repo.source, "for-each-ref"),
+  head: git(repo.source, "rev-parse", "HEAD"),
+  status: git(repo.source, "status", "--porcelain"),
+  objects: readdirSync(join(repo.source, ".git", "objects"), {
+    recursive: true,
+  }).sort(),
+});
+const branchRequest = (
+  repo: ReturnType<typeof repository>,
+  executable: string,
+  commonDirectory: string,
+  branchName: string | null,
+) => ({
+  commonDirectory,
+  branch: branchName,
+  retainPrefix: "refs/cab/remote" as const,
+  have: repo.base,
+  host: "github.com",
+  nameWithOwner: "octo/fixture",
+  token,
+  executable,
+});
+
+test("a branch fetch keeps the remote tip under a cab ref and leaves the source checkout as it was", async (t) => {
+  const repo = repository(t);
+  const tip = repo.commitOutside();
+  git(repo.remote, "update-ref", "refs/heads/release", tip);
+  const fake = shim(t, repo.remote);
+  const managed = destination(repo);
+  const before = sourceState(repo);
+  assert.deepEqual(
+    await fetchBranchHead(
+      branchRequest(repo, fake.executable, managed, "release"),
+    ),
+    { kind: "fetched", branch: "release", commit: tip },
+  );
+  assert.equal(git(managed, "rev-parse", "refs/cab/remote/release"), tip);
+  assert.equal(git(managed, "cat-file", "-t", tip), "commit");
+  assert.deepEqual(sourceState(repo), before);
+  // The token reaches only the fetch child's environment.
+  const seen = fake.recorded();
+  assert.equal(seen.env.CAB_PUSH_TOKEN, token);
+  assert.equal(
+    seen.args.some((a) => a.includes(token)),
+    false,
+  );
+  assert.deepEqual(filesContaining(repo.root, token), []);
+  assert.deepEqual(seen.args.slice(-2), [
+    "https://github.com/octo/fixture.git",
+    "+refs/heads/release:refs/cab/fetch",
+  ]);
+});
+
+test("a default-branch fetch names the remote's HEAD branch, and a missing branch imports nothing", async (t) => {
+  const repo = repository(t);
+  const fake = shim(t, repo.remote);
+  const managed = destination(repo);
+  assert.deepEqual(
+    await fetchBranchHead(branchRequest(repo, fake.executable, managed, null)),
+    { kind: "fetched", branch: "main", commit: repo.base },
+  );
+  assert.deepEqual(
+    await fetchBranchHead(
+      branchRequest(repo, fake.executable, managed, "absent"),
+    ),
+    { kind: "unavailable" },
+  );
+  assert.equal(
+    spawnSync(
+      "git",
+      ["rev-parse", "--verify", "--quiet", "refs/cab/remote/absent"],
+      {
+        cwd: managed,
+      },
+    ).status,
+    1,
+  );
+});
+
+test("a failed, oversized or unauthenticated branch fetch imports nothing, and GitLab fetches as oauth2", async (t) => {
+  const repo = repository(t);
+  const tip = repo.commitOutside(repo.base, 64 * 1024);
+  git(repo.remote, "update-ref", "refs/heads/release", tip);
+  const managed = destination(repo);
+  const retained = () =>
+    spawnSync(
+      "git",
+      ["rev-parse", "--verify", "--quiet", "refs/cab/remote/release"],
+      {
+        cwd: managed,
+      },
+    ).status === 0;
+  const failing = shim(t, repo.remote, { exit: 128 });
+  assert.deepEqual(
+    await fetchBranchHead(
+      branchRequest(repo, failing.executable, managed, "release"),
+    ),
+    { kind: "fetch-failed" },
+  );
+  const fake = shim(t, repo.remote);
+  assert.deepEqual(
+    await fetchBranchHead({
+      ...branchRequest(repo, fake.executable, managed, "release"),
+      maxFetchBytes: 1024,
+    }),
+    { kind: "too-large" },
+  );
+  assert.deepEqual(
+    await fetchBranchHead({
+      ...branchRequest(repo, fake.executable, managed, "release"),
+      token: "",
+    }),
+    { kind: "not-attempted" },
+  );
+  assert.equal(retained(), false);
+  const gitlab = await fetchBranchHead({
+    ...branchRequest(repo, fake.executable, managed, "release"),
+    host: "gitlab.example.com",
+    codeHost: "gitlab",
+    nameWithOwner: "group/sub/app",
+  });
+  assert.deepEqual(gitlab, { kind: "fetched", branch: "release", commit: tip });
+  assert.equal(fake.recorded().env.CAB_PUSH_USERNAME, "oauth2");
 });

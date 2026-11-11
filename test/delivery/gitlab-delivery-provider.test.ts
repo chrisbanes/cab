@@ -31,6 +31,13 @@ const branch = "cab/abcd1234-task";
 const old = "1".repeat(40);
 const commit = "2".repeat(40);
 const outside = "3".repeat(40);
+// The fake fetch reports the target at the proposed commit itself, which merges trivially.
+const target = {
+  branch: "main",
+  commonDirectory: "/work/.git",
+  managed: false,
+};
+const createContext = { target };
 const policy = { requiredChecks: [] } as unknown as DeliveryPolicy;
 
 function world(options: { token?: string | null } = {}) {
@@ -68,6 +75,11 @@ function world(options: { token?: string | null } = {}) {
       adopts.push({ ...request });
       return outcomes.adopt;
     },
+    fetchBranch: async (request) => ({
+      kind: "fetched",
+      branch: request.branch ?? "main",
+      commit: request.have ?? "",
+    }),
   });
   return {
     state,
@@ -91,6 +103,7 @@ const publication = (
   branch,
   lastPushedSha: old,
   retry: false,
+  target,
   ...extra,
 });
 
@@ -715,7 +728,7 @@ test("a merge request is created as a draft by title and settles only on the exa
   const w = world();
   w.state.head = commit;
   const action = created({ draft: true });
-  const before = await w.provider.preflight(action, policy);
+  const before = await w.provider.preflight(action, policy, createContext);
   assert.equal(before.headSha, commit);
   const done = await w.provider.performAction(record(action, before));
   assert.equal(done.state, "confirmed-success");
@@ -754,7 +767,7 @@ test("a created merge request that is duplicated, by another author or on anothe
     const w = world();
     w.state.head = commit;
     const action = created();
-    const before = await w.provider.preflight(action, policy);
+    const before = await w.provider.preflight(action, policy, createContext);
     const r = record(action, before);
     // The first answer is the write; the change then lands before the independent read.
     w.state.intercept = (method) => {
@@ -774,7 +787,7 @@ test("a rejected create is a definitive failure and a lost one is unproved and n
   const w = world();
   w.state.head = commit;
   const action = created();
-  const before = await w.provider.preflight(action, policy);
+  const before = await w.provider.preflight(action, policy, createContext);
   w.state.intercept = (method) =>
     method === "POST" ? new Response("{}", { status: 409 }) : undefined;
   const rejected = await w.provider.performAction(record(action, before));
@@ -801,13 +814,17 @@ test("create is held when the branch moved, the base is missing or the title alr
   const moved = world();
   moved.state.head = old;
   await assert.rejects(
-    moved.provider.preflight(created(), policy),
+    moved.provider.preflight(created(), policy, createContext),
     /provider-head-changed/,
   );
   const prefixed = world();
   prefixed.state.head = commit;
   await assert.rejects(
-    prefixed.provider.preflight(created({ title: "draft: Change" }), policy),
+    prefixed.provider.preflight(
+      created({ title: "draft: Change" }),
+      policy,
+      createContext,
+    ),
     /provider-title-draft-prefix/,
   );
 });
@@ -823,7 +840,7 @@ test("an edit keeps the merge request's draft status and settles on the written 
       target: prTarget,
       fields: { title: "Renamed", body: "New body" },
     } as ExternalAction;
-    const before = await w.provider.preflight(action, policy);
+    const before = await w.provider.preflight(action, policy, createContext);
     assert.equal(before.draft, draft);
     const done = await w.provider.performAction(record(action, before));
     assert.equal(done.state, "confirmed-success");
@@ -839,7 +856,7 @@ test("an edit keeps the merge request's draft status and settles on the written 
 test("ready clears the draft with GraphQL on the verified project path and settles on the re-read", async () => {
   const w = mergeRequestWorld({ draft: true, title: "Draft: Change" });
   const action = { kind: "pr.ready", target: prTarget } as ExternalAction;
-  const before = await w.provider.preflight(action, policy);
+  const before = await w.provider.preflight(action, policy, createContext);
   const done = await w.provider.performAction(record(action, before));
   assert.equal(done.state, "confirmed-success");
   const graphql = w.requests.filter((r) => r.url.endsWith("/api/graphql"));
@@ -854,7 +871,7 @@ test("ready clears the draft with GraphQL on the verified project path and settl
   );
   // A mutation that reports success but changed nothing is not success.
   const w2 = mergeRequestWorld({ draft: true, title: "Draft: Change" });
-  const before2 = await w2.provider.preflight(action, policy);
+  const before2 = await w2.provider.preflight(action, policy, createContext);
   w2.state.intercept = (_m, path) =>
     path === "/api/graphql"
       ? new Response('{"errors":[{"message":"no"}]}', { status: 200 })
@@ -889,7 +906,7 @@ test("a thread reply settles on exactly one marker note by the credential user",
     target: threadTarget,
     body: "Fixed",
   } as ExternalAction;
-  const before = await w.provider.preflight(action, policy);
+  const before = await w.provider.preflight(action, policy, createContext);
   const r = record(action, before);
   const done = await w.provider.performAction(r);
   assert.equal(done.state, "confirmed-success");
@@ -932,7 +949,7 @@ test("a resolve is refused without a write when the thread is resolved or has a 
   );
   const done = open();
   const action = resolve(latest);
-  const before = await done.provider.preflight(action, policy);
+  const before = await done.provider.preflight(action, policy, createContext);
   const settled = await done.provider.performAction(record(action, before));
   assert.equal(settled.state, "confirmed-success");
   assert.deepEqual(settled.receipt, { nodeId: "abc" });
@@ -942,7 +959,7 @@ test("a resolve is refused without a write when the thread is resolved or has a 
     done.requests.filter((r) => r.init.method === "PUT").length;
   const written = puts();
   await assert.rejects(
-    done.provider.preflight(action, policy),
+    done.provider.preflight(action, policy, createContext),
     /provider-thread-resolve-held/,
   );
   assert.equal(puts(), written);
@@ -999,7 +1016,7 @@ test("text GitLab would run as a quick action is held before any write", async (
       } as ExternalAction,
     ])
       await assert.rejects(
-        w.provider.preflight(action, policy),
+        w.provider.preflight(action, policy, createContext),
         /provider-quick-action-held/,
         `${action.kind} ${JSON.stringify(text)}`,
       );
@@ -1032,7 +1049,7 @@ test("a redirect on a write or the GraphQL route is refused and never followed",
           ? { kind, target: prTarget }
           : { kind, target: threadTarget, body: "B" }
     ) as ExternalAction;
-    const before = await w.provider.preflight(action, policy);
+    const before = await w.provider.preflight(action, policy, createContext);
     w.state.intercept = (method, requestPath) =>
       method !== "GET" && requestPath.endsWith(path)
         ? new Response(null, {
@@ -1071,7 +1088,7 @@ test("a resolve settles on the latest resolution even when the last note was res
     target: threadTarget,
     expectedLatestCommentNodeId: String(0xabc * 10 + 1),
   } as ExternalAction;
-  const before = await w.provider.preflight(action, policy);
+  const before = await w.provider.preflight(action, policy, createContext);
   const done = await w.provider.performAction(record(action, before));
   assert.equal(done.state, "confirmed-success");
   assert.deepEqual(done.receipt, { nodeId: "abc" });
@@ -1085,7 +1102,7 @@ test("a reply that GitLab normalizes on save still settles on its marker note", 
     target: threadTarget,
     body: "First  \r\nSecond  ",
   } as ExternalAction;
-  const before = await w.provider.preflight(action, policy);
+  const before = await w.provider.preflight(action, policy, createContext);
   const done = await w.provider.performAction(record(action, before));
   assert.equal(done.state, "confirmed-success");
   assert.doesNotMatch(w.state.discussions[0]?.notes[1]?.body ?? "", /\r/);
@@ -1096,7 +1113,7 @@ test("a create and an edit that GitLab normalizes on save still settle", async (
   w.state.head = commit;
   const create = created({ body: "First  \r\nSecond\n" });
   const made = await w.provider.performAction(
-    record(create, await w.provider.preflight(create, policy)),
+    record(create, await w.provider.preflight(create, policy, createContext)),
   );
   assert.equal(made.state, "confirmed-success");
   assert.equal(w.state.mergeRequests[0]?.description?.includes("\r"), false);
@@ -1110,7 +1127,7 @@ test("a create and an edit that GitLab normalizes on save still settle", async (
     fields: { body: "Third \r\nFourth\n" },
   } as ExternalAction;
   const edited = await w.provider.performAction(
-    record(edit, await w.provider.preflight(edit, policy)),
+    record(edit, await w.provider.preflight(edit, policy, createContext)),
   );
   assert.equal(edited.state, "confirmed-success");
 });

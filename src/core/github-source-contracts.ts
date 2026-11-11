@@ -225,11 +225,47 @@ export function evaluateReadiness(
 /** How a GitHub source treats issues closed on GitHub. */
 export const closedIssuesSchema = z.enum(["skip", "done"]);
 
+/**
+ * Where a new workspace starts: the explicit `ref`, the `origin` branch named by `ref`, or the
+ * code host's current default branch (`ref` then records the default known when it was saved).
+ */
+export const repositoryBaseModeSchema = z.enum([
+  "ref",
+  "remote-branch",
+  "remote-default",
+]);
+export type RepositoryBaseMode = z.output<typeof repositoryBaseModeSchema>;
+
+/** A link's saved base for display: "Remote branch release · fetch before workspace". */
+export function describeLinkBase(link: {
+  ref: string;
+  baseMode?: RepositoryBaseMode | undefined;
+  fetchBeforeProvisioning?: boolean | undefined;
+}): string {
+  const mode = link.baseMode ?? "ref";
+  const base =
+    mode === "remote-branch"
+      ? `Remote branch ${link.ref}`
+      : mode === "remote-default"
+        ? "Remote default branch"
+        : `Explicit ref ${link.ref}`;
+  return link.fetchBeforeProvisioning
+    ? `${base} · fetch before workspace`
+    : base;
+}
+/** Every base change applies to new workspaces only. */
+export const linkBaseChangeNote =
+  "Applies to workspaces created after saving; existing workspaces keep their recorded base.";
+
 export const repositoryLinkSchema = z
   .object({
     repositoryId: nonempty,
     path: z.string().trim().min(1),
     ref: nonempty,
+    /** Absent in links saved before base modes, and read as `ref`. */
+    baseMode: repositoryBaseModeSchema.optional(),
+    /** Fetch the remote base into cab's repository before a workspace is created; absent is off. */
+    fetchBeforeProvisioning: z.boolean().optional(),
   })
   .strict();
 
