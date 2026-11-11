@@ -1881,6 +1881,85 @@ test("An approval request opens the approval review, not the question form", asy
   );
 });
 
+test("An issue edit approval shows its current and proposed text as a diff before its version and hash", async (_t, j) => {
+  const f = await j.start("fixture.create", () =>
+    createOperatorFixture(null, undefined, undefined, j.fixtureOptions),
+  );
+  let browser: Browser | undefined;
+  j.cleanup(
+    (primary) => f.close(browser, primary),
+    "fixture.close",
+    () => f.lifecycle.steps,
+  );
+  const material = {
+    kind: "issue.edit",
+    target: { repositoryId: "R1", nodeId: "I1", number: 1 },
+    fields: { title: "New title", body: "a\nc\n\n**Proposed** body" },
+    expected: { title: "Old title", body: "a\nb\n\n**Proposed** body" },
+  };
+  const a = await seedOwnApproval(
+    f,
+    undefined,
+    undefined,
+    { action: "Edit issue #1", target: "acme/atlas#1" },
+    material,
+  );
+  const web = await j.start("fixture.web", () => f.startWeb());
+  browser = await j.start("browser.launch", () => chromium.launch());
+  const page = await browser.newPage({
+    viewport: { width: 1366, height: 900 },
+  });
+  j.observe(page);
+  page.setDefaultTimeout(5000);
+  const commands: Record<string, unknown>[] = [];
+  page.on("request", (request) => {
+    if (
+      request.method() === "POST" &&
+      request.url().endsWith("/api/operator/commands")
+    )
+      commands.push(request.postDataJSON());
+  });
+  await signIn(page, web.origin, web.password, `/tasks/${a.taskId}`);
+  await page.goto(`${web.origin}/tasks/${a.taskId}?request=${a.interactionId}`);
+  const panel = page.locator(
+    `.approval-review[data-record-id="${a.interactionId}"]`,
+  );
+  const body = panel.locator(".issue-improve-compare", { hasText: "Body" });
+  await body.getByText("Current", { exact: true }).waitFor();
+  await body.getByText("Proposed", { exact: true }).waitFor();
+  assert.match(
+    (await body.locator('[data-kind="removed"]').textContent()) ?? "",
+    /Removed: b$/,
+  );
+  assert.match(
+    (await body.locator('[data-kind="added"]').textContent()) ?? "",
+    /Added: c$/,
+  );
+  const json = panel.locator("details.approval-material-json");
+  assert.equal(await json.getAttribute("open"), null);
+  assert.ok(
+    await panel.evaluate((root) => {
+      const diff = root.querySelector(".issue-improve-compare");
+      const version = root.querySelector(".approval-review-version");
+      return Boolean(
+        diff &&
+          version &&
+          diff.compareDocumentPosition(version) &
+            Node.DOCUMENT_POSITION_FOLLOWING,
+      );
+    }),
+  );
+  await panel
+    .getByRole("button", { name: "Approve this exact material" })
+    .click();
+  await panel.getByText(/^Approved\. The action is allowed/).waitFor();
+  assert.deepEqual(commands.at(-1)?.material, material);
+  assert.equal(
+    f.service.coordinationView().readTask(a.taskId).approvals[0]!.status,
+    "approved",
+  );
+});
+
 test("A recovery approval shows its exact material and a compare link on its code host, and never a foreign link", async (_t, j) => {
   const f = await j.start("fixture.create", () =>
     createOperatorFixture(null, undefined, undefined, j.fixtureOptions),
@@ -1933,8 +2012,8 @@ test("A recovery approval shows its exact material and a compare link on its cod
   assert.equal(await anchor.getAttribute("href"), compare);
   assert.equal(await anchor.getAttribute("rel"), "noopener noreferrer");
   assert.deepEqual(
-    await panel.locator(".approval-material-fields dt").allInnerTexts(),
-    ["kind", "target", "branch", "outsideHeadSha", "lastPushedSha"],
+    await panel.locator(".approval-material-facts dt").allInnerTexts(),
+    ["Branch", "Outside head", "Last pushed"],
   );
   // A GitLab link is named for GitLab, whatever its host.
   link = gitlabCompare;

@@ -790,6 +790,13 @@ a.task-source-chip:hover {
   flex-direction: column;
   gap: var(--space-8);
 }
+.approval-material-text {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
 .approval-material-json > summary {
   cursor: pointer;
   color: var(--fg-2);

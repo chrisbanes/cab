@@ -5,6 +5,7 @@ import { ExecutionState } from "../../src/standalone/state.js";
 import { seedReviewTask } from "./task-review.js";
 import { mixedForm } from "./question-data.js";
 import type { QuestionForm } from "../../src/core/question-forms.js";
+import type { JsonValue } from "../../src/operator/contracts.js";
 import type { TaskWorkspaceRepositoryInput } from "../../src/standalone/workspaces.js";
 import { until } from "./until.js";
 export { until };
@@ -132,6 +133,7 @@ export async function seedOwnApproval(
     action: "Create a pull request. No merge or deployment.",
     target: "acme/atlas · main ← command-menu",
   },
+  material: JsonValue = { scope: "fixture" },
 ) {
   const started = await startOwnWork(f, title, projectName),
     { a, work } = started;
@@ -140,7 +142,7 @@ export async function seedOwnApproval(
     turnId: work.turnId!,
     callId: randomUUID(),
     tool: "cab_request_approval",
-    arguments: { ...request, material: { scope: "fixture" } },
+    arguments: { ...request, material },
   });
   assert.equal(call.success, true, call.text);
   const approval = f.service.coordinationView().readTask(a.taskId)

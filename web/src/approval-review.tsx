@@ -16,6 +16,10 @@ import {
   safeCompareUrl,
 } from "./delivery-presentation.js";
 import { failureCause } from "./outcome-copy.js";
+import { approvalMaterialView } from "../../src/operator/approval-material.js";
+import { type DiffRow, lineDiff } from "./issue-improve-model.js";
+import { MarkdownPreview } from "./task-files.js";
+import "./issue-improve.css";
 
 type Approval = TaskRead["data"]["approvals"][number];
 type Decision = "approved" | "denied";
@@ -154,16 +158,6 @@ export function ApprovalReview({
         )}
         <dt>Target</dt>
         <dd className="literal identifier">{approval.target ?? "None"}</dd>
-        <dt>Version</dt>
-        <dd>
-          v{approval.revision}
-          {approval.materialHash && (
-            <>
-              {" · material "}
-              <ShortId value={approval.materialHash} />
-            </>
-          )}
-        </dd>
       </dl>
       {compareUrl && (
         <p className="body">
@@ -175,6 +169,23 @@ export function ApprovalReview({
         </p>
       )}
       {!approval.materialUnavailable && <Material value={approval.material} />}
+      <p className="metadata muted approval-review-version">
+        Version v{approval.revision}
+        {approval.materialHash && (
+          <>
+            {" · material "}
+            <ShortId value={approval.materialHash} />
+          </>
+        )}
+      </p>
+      {!approval.materialUnavailable && (
+        <details className="approval-material-json">
+          <summary>Exact JSON</summary>
+          <pre className="literal-text">
+            {JSON.stringify(approval.material, null, 2)}
+          </pre>
+        </details>
+      )}
       <SendFeedback
         entry={entry}
         outcome={outcome}
@@ -232,20 +243,47 @@ export function ApprovalReview({
   );
 }
 
-/** Top-level fields as a key/value list; nested values and the exact JSON stay literal. */
+/** The bound material as readable text, diffs and facts; unrecognized material lists its fields. */
 function Material({ value }: { value: JsonValue }) {
+  const view = approvalMaterialView(value);
   const fields =
-    value !== null && typeof value === "object" && !Array.isArray(value)
+    view.unrecognized &&
+    value !== null &&
+    typeof value === "object" &&
+    !Array.isArray(value)
       ? Object.entries(value)
       : null;
   return (
     <div className="approval-material">
-      <h4 className="metadata muted">
-        Material to approve
-        {fields
-          ? ` · ${fields.length} field${fields.length === 1 ? "" : "s"}`
-          : ""}
-      </h4>
+      <h4 className="metadata muted">Material to approve</h4>
+      {view.facts.length > 0 && (
+        <dl className="approval-material-fields approval-material-facts">
+          {view.facts.map(({ label, value }) => (
+            <div key={label}>
+              <dt>{label}</dt>
+              <dd className="literal">{value}</dd>
+            </div>
+          ))}
+        </dl>
+      )}
+      {view.texts.map(({ label, text }) => (
+        <div key={label} className="approval-material-text">
+          <span className="metadata muted">{label}</span>
+          <MarkdownPreview text={text} />
+        </div>
+      ))}
+      {view.diffs.map(({ label, before, after }) => {
+        const diff = lineDiff(before, after);
+        return (
+          <div key={label} className="issue-improve-compare">
+            <span className="body issue-improve-strong">{label}</span>
+            <div className="issue-improve-diff">
+              <DiffColumn label="Current" rows={diff.current} />
+              <DiffColumn label="Proposed" rows={diff.proposed} />
+            </div>
+          </div>
+        );
+      })}
       {fields && (
         <dl className="approval-material-fields">
           {fields.map(([key, field]) => (
@@ -264,10 +302,36 @@ function Material({ value }: { value: JsonValue }) {
           ))}
         </dl>
       )}
-      <details className="approval-material-json" open={!fields}>
-        <summary>Exact JSON</summary>
-        <pre className="literal-text">{JSON.stringify(value, null, 2)}</pre>
-      </details>
+    </div>
+  );
+}
+
+function DiffColumn({ label, rows }: { label: string; rows: DiffRow[] }) {
+  return (
+    <div className="issue-improve-diff-column">
+      <span className="metadata muted issue-improve-diff-label">{label}</span>
+      <div className="issue-improve-diff-rows">
+        {rows.map((row, index) => (
+          <div
+            // biome-ignore lint/suspicious/noArrayIndexKey: rows are positional and never reordered.
+            key={index}
+            className="issue-improve-diff-row"
+            data-kind={row.kind}
+          >
+            <span aria-hidden="true" className="issue-improve-diff-mark">
+              {row.kind === "removed" ? "−" : row.kind === "added" ? "+" : ""}
+            </span>
+            <span className="issue-improve-diff-text">
+              {row.kind !== "same" && (
+                <span className="issue-improve-sr">
+                  {row.kind === "removed" ? "Removed: " : "Added: "}
+                </span>
+              )}
+              {row.text || " "}
+            </span>
+          </div>
+        ))}
+      </div>
     </div>
   );
 }

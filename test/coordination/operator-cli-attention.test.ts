@@ -526,6 +526,42 @@ test("approval get lists task holds in the UI's words", async (t) => {
   ]);
 });
 
+test("approval get shows an issue edit's text as a diff before its hash, and JSON keeps the exact material", async (t) => {
+  const o = await startCliOperator(t);
+  const material = {
+    kind: "issue.edit",
+    target: { repositoryId: "R1", nodeId: "I1", number: 1 },
+    fields: { title: "New", body: "a\nc" },
+    expected: { title: "Old", body: "a\nb" },
+  };
+  const ap = await seedOwnApproval(
+    o.s.f,
+    undefined,
+    undefined,
+    undefined,
+    material,
+  );
+  const r = await o.h.run([
+    "approval",
+    "get",
+    ap.taskId,
+    ap.interactionId,
+    "--connection",
+    "ro",
+  ]);
+  assert.equal(r.code, 0, r.err);
+  assert.match(r.out, /- b/);
+  assert.match(r.out, /\+ c/);
+  assert.ok(r.out.indexOf("+ c") < r.out.indexOf("Material hash:"), r.out);
+  const json = await o.cli("ro", [
+    "approval",
+    "get",
+    ap.taskId,
+    ap.interactionId,
+  ]);
+  assert.deepEqual(json.json().data.approval.material, material);
+});
+
 test("approval get and decide bind the exact action, revision and material", async (t) => {
   const o = await startCliOperator(t);
   const { cli, s, d } = o;
@@ -540,7 +576,8 @@ test("approval get and decide bind the exact action, revision and material", asy
   ]);
   assert.equal(r.code, 0, r.err);
   assert.match(r.out, /Action:\s+Create a pull request/);
-  assert.match(r.out, /Material:\s+\{"scope":"fixture"\}/);
+  assert.match(r.out, /scope:\s+fixture/);
+  assert.match(r.out, /Material hash:/);
   r = await cli("ro", ["approval", "get", ap.taskId, ap.interactionId]);
   const approval = r.json().data.approval;
   const hash = approval.materialHash as string;

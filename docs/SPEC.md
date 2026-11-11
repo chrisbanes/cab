@@ -2791,7 +2791,11 @@ retained limits.
 Questions and approvals are durable and scoped. Approval includes the action,
 target, requester and reviewed material; changed material invalidates approval.
 Approval decisions retain and compare exact canonical material; legacy records
-without retained material are deny-only. Answers do not grant unrelated permission.
+without retained material are deny-only. The task's approval review and `cab approval get`
+present the bound material readably before its version and hash: rendered text, current and
+proposed text as a diff for an edit that names the text it replaces, and named facts such as a
+merge's method or a recovery's commits. Material that is not an action's lists its fields, and
+the exact JSON stays available. Answers do not grant unrelated permission.
 Denial persists. Replayed requests or responses cannot duplicate effects. Controls
 acknowledge persisted outcomes.
 
