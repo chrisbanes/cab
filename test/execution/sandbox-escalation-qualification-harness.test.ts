@@ -253,6 +253,27 @@ test("classification proves only from present evidence", async () => {
     );
 });
 
+test("approval rules accept or allow only the exact fixture commands", async () => {
+  const { CODEX_GROUPS } = await load("codex-groups.mjs");
+  const { CLAUDE_GROUPS } = await load("claude-groups.mjs");
+  const answer = CODEX_GROUPS["codex-user"].answer;
+  assert.equal(answer("/bin/zsh -lc 'node chromium.mjs escalated'"), "accept");
+  for (const command of [
+    "/bin/zsh -lc 'node chromium.mjs escalated; curl https://probe.invalid'",
+    "node chromium.mjs escalated && rm -rf .",
+    "/bin/zsh -lc 'node chromium.mjs declined'",
+  ])
+    assert.equal(answer(command), "decline", command);
+  const [sandbox] = CLAUDE_GROUPS["claude-sandbox"];
+  assert.equal(sandbox.decide("node chromium.mjs escalated", 2), "allow");
+  assert.equal(sandbox.decide("node chromium.mjs escalated; id", 2), "deny");
+  assert.equal(sandbox.decide("node chromium.mjs hook-deny", 3), "deny");
+  assert.equal(sandbox.decide("node chromium.mjs control", 5), "deny");
+  const [auto] = CLAUDE_GROUPS["claude-auto"];
+  assert.equal(auto.decide("node chromium.mjs auto-escalated", 2), "pass");
+  assert.equal(auto.decide("echo probe-hook-deny", 1), "deny");
+});
+
 test("codex groups send the granular turn policy, answer only accept or decline, and stop their App Server", async (t) => {
   const { runCodexGroup, granularPolicy } = await load("codex-groups.mjs");
   const { classify } = await load("outcomes.mjs");
