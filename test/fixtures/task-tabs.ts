@@ -43,3 +43,23 @@ export async function openOverviewCard(page: Page, name: OverviewCardName) {
     await card.locator("> summary").click();
   await card.and(page.locator("[open]")).waitFor();
 }
+
+/** A phone keeps the task options in the header's Task actions; wider, in the strip's menu. */
+const onPhone = (page: Page) => (page.viewportSize()?.width ?? 0) < 760;
+
+/** A task option's button, read even while its closed menu hides it. */
+export const taskOptionButton = (page: Page, name: string) =>
+  page
+    .locator(onPhone(page) ? ".task-header-actions" : ".task-tools")
+    .getByRole("button", { name, includeHidden: true });
+
+/** Opens the menu that holds the task options, unless the named option already shows. */
+export async function openTaskOptions(page: Page, name: string) {
+  if (await taskOptionButton(page, name).isVisible()) return;
+  await page
+    .locator(
+      onPhone(page) ? ".task-header-overflow-toggle" : ".task-tools > summary",
+    )
+    .click();
+  await taskOptionButton(page, name).waitFor();
+}

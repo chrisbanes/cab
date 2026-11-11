@@ -144,11 +144,9 @@ import { Ellipsis } from "lucide-react";
 import {
   type TaskHeaderReport,
   type TaskOption,
-  type TaskOptionRequest,
   TaskStrip,
   TaskTabs,
   taskHeaderReport,
-  taskOptionEvent,
 } from "./task-header.js";
 import {
   type ConversationTarget,
@@ -494,7 +492,8 @@ export function TaskWorkspace({
     };
     const onClick = (e: Event) => {
       if (inside(e)) engage(true);
-      else {
+      // Most clicks land while the dock is already compact: nothing to collapse.
+      else if (dock()?.hasAttribute("data-engaged")) {
         const seen = engagements;
         requestAnimationFrame(() => {
           if (engagements === seen) engage(false);
@@ -733,14 +732,11 @@ export function TaskWorkspace({
     else if (kind === "publish") setPublishOpen(!publishShown);
     else void refreshSource();
   };
-  useEffect(() => {
-    const run = (event: Event) => {
-      const { detail } = event as CustomEvent<TaskOptionRequest>;
-      if (detail.taskId === taskId) runOption.current(detail.kind);
-    };
-    addEventListener(taskOptionEvent, run);
-    return () => removeEventListener(taskOptionEvent, run);
-  }, [taskId]);
+  // Stable, so the shell header re-renders only when the reported data changes.
+  const runTaskOption = useCallback(
+    (kind: TaskOption["kind"]) => runOption.current(kind),
+    [],
+  );
   const headerReport =
     data &&
     JSON.stringify(
@@ -752,8 +748,9 @@ export function TaskWorkspace({
       ),
     );
   useEffect(() => {
-    if (headerReport) onHeader?.(JSON.parse(headerReport));
-  }, [headerReport, onHeader]);
+    if (headerReport)
+      onHeader?.({ ...JSON.parse(headerReport), run: runTaskOption });
+  }, [headerReport, onHeader, runTaskOption]);
   useEffect(() => () => onHeader?.(null), [onHeader]);
   // The answer to a send or a check has had its turn at the focus.
   useEffect(() => {

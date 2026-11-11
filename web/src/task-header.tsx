@@ -50,12 +50,10 @@ export interface TaskOption {
   expanded?: boolean | undefined;
 }
 
-/** Sent by a phone's Task actions; the task page runs the option, so its outcome shows there. */
-export const taskOptionEvent = "cab-task-option";
-export type TaskOptionRequest = { taskId: string; kind: TaskOption["kind"] };
-
-/** Plain data the task page reports to the shell header; the shell renders it. */
+/** What the task page reports to the shell header; the shell renders it. */
 export interface TaskHeaderReport {
+  /** Runs a task option on the task page, so its panel or outcome shows there. */
+  run?: ((kind: TaskOption["kind"]) => void) | undefined;
   taskId: string;
   title: string;
   subtitle?: string | undefined;
@@ -259,11 +257,7 @@ export function TaskHeaderActions({
               disabled={option.disabled}
               aria-expanded={option.expanded}
               onClick={(event) => {
-                window.dispatchEvent(
-                  new CustomEvent<TaskOptionRequest>(taskOptionEvent, {
-                    detail: { taskId: report.taskId, kind: option.kind },
-                  }),
-                );
+                report.run?.(option.kind);
                 // The option's panel or notice opens on the page: close the menu over it.
                 const details = event.currentTarget.closest("details");
                 if (details) details.open = false;

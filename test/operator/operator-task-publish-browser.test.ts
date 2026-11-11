@@ -10,6 +10,7 @@ import {
 } from "../fixtures/browser-diagnostics.js";
 import { desktop, phone } from "../fixtures/operator-settings.js";
 import { createOperatorFixture } from "../fixtures/operator-web.js";
+import { openTaskOptions, taskOptionButton } from "../fixtures/task-tabs.js";
 import {
   FakeGitHub,
   type PublicationFixtureOptions,
@@ -87,22 +88,8 @@ async function launch(
 
 const panel = (page: Page) =>
   page.locator("section.task-publish", { hasText: "Publish to GitHub" });
-/** A phone keeps the task options in the header's Task actions; wider, in the strip's menu. */
-const onPhone = (page: Page) => (page.viewportSize()?.width ?? 0) < 760;
-const header = (page: Page) =>
-  page
-    .locator(onPhone(page) ? ".task-header-actions" : ".task-tools")
-    // A phone's closed menu hides its buttons; their state is still read.
-    .getByRole("button", { name: "Publish to GitHub", includeHidden: true });
-async function openOptions(page: Page) {
-  if (await header(page).isVisible()) return;
-  await page
-    .locator(
-      onPhone(page) ? ".task-header-overflow-toggle" : ".task-tools > summary",
-    )
-    .click();
-  await header(page).waitFor();
-}
+const header = (page: Page) => taskOptionButton(page, "Publish to GitHub");
+const openOptions = (page: Page) => openTaskOptions(page, "Publish to GitHub");
 async function openPanel(page: Page) {
   if ((await header(page).getAttribute("aria-expanded")) !== "true") {
     await openOptions(page);
