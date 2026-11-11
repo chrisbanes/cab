@@ -2630,12 +2630,13 @@ test("An open approval leads Overview and stays reachable from every tab in Deci
     assert.ok(await lead.isChecked());
   }
   // A press inside a compact dock engages it though nothing takes focus, as in Safari and iOS.
+  // The events fire on the card itself, a target a real press reaches.
   const dock = page.locator("section#reply");
   await review.focus();
   assert.equal(await dock.getAttribute("data-engaged"), null);
   assert.equal(await dock.getAttribute("data-expanded"), null);
   assert.ok((await box("section#reply")).height <= 0.12 * 844, "compact again");
-  await dock.locator("h3").evaluate((el) => {
+  await dock.evaluate((el) => {
     el.dispatchEvent(new PointerEvent("pointerdown", { bubbles: true }));
     el.dispatchEvent(new PointerEvent("pointerup", { bubbles: true }));
     el.dispatchEvent(new MouseEvent("click", { bubbles: true }));
@@ -2660,6 +2661,12 @@ test("An open approval leads Overview and stays reachable from every tab in Deci
   await dock.locator("#workspace-reply").focus();
   await page.setViewportSize({ width: 390, height: 4000 });
   await page.evaluate(() => scrollTo(0, 0));
+  assert.notEqual(
+    await dock.getAttribute("data-engaged"),
+    null,
+    "the dock is engaged before the outside click",
+  );
+  const before = (await box("section#reply")).height;
   // Pin the element: a lazy locator would resolve to another summary once the layout shifts.
   const fold = await page
     .locator('aside[aria-label="Task context"] details > summary:visible')
@@ -2676,6 +2683,8 @@ test("An open approval leads Overview and stays reachable from every tab in Deci
       document.querySelector("section#reply")?.hasAttribute("data-engaged") ===
       false,
   );
+  const after = (await box("section#reply")).height;
+  assert.ok(after < before, `the dock collapsed: ${before}px to ${after}px`);
   await page.setViewportSize({ width: 390, height: 844 });
   assert.ok(
     (await box("section#reply")).height <= 0.12 * 844,

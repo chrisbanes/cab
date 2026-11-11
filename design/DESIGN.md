@@ -245,18 +245,20 @@ Make the next decision obvious, and keep its evidence close:
   meaning, state, next actor and decision; Details holds identifiers, revisions,
   provenance and contract caveats. First arrival shows the latest conversation entry
   with Reply docked within its column; phone results and Details follow it. On a
-  phone the docked Reply is one textarea (at most 12% of the viewport) until the
-  operator engages it (focus or a press inside it) and until they move outside, or
-  while a send, notice or uncertain state shows; an unsent draft alone stays compact.
-  The page's `scroll-padding-bottom` keeps a focused control clear of it. From 760px the strip
-  stays on one line with one identity chip; on a phone it wraps instead, in strip
-  order, and nothing in it is truncated. Refresh source, Focus mode, Improve with
-  lead and Publish share More task options, an icon toggle (32px from 1121px, a 44px
-  target below); on a phone they join the header's Task actions, so the page has one
-  task menu. Focus mode is desktop-only. Delegations read as collapsible sub-conversations in place,
-  retaining the task's accountable lead and assignment/conversation identities. Use
-  recorded facts and attributed excerpts;
-  add no invented summary capability.
+  phone the docked Reply is one textarea (at most 12% of the viewport); it expands
+  while the operator engages it (from focus or a press inside it until they move
+  outside) or while a send, notice or uncertain state shows. An unsent draft alone
+  stays compact. The page's `scroll-padding-bottom` is 62px while the dock is
+  compact and 40dvh while it is engaged or expanded, so a focused control clears
+  it. From 760px the strip stays on one line with one identity chip; on a phone
+  it wraps instead, in strip order, and nothing in it is truncated. Refresh
+  source, Focus mode, Improve with lead and Publish share More task options, an
+  icon toggle (32px from 1121px, a 44px target below); on a phone they join the
+  header's Task actions, so the page has one task menu. Focus mode is
+  desktop-only. Delegations read as collapsible sub-conversations in place,
+  retaining the task's accountable lead and assignment/conversation identities.
+  Use recorded facts and attributed excerpts; add no invented summary
+  capability.
 - **Composer:** keep project, title and outcome prominent; disclose optional
   context, references, assignee and dependencies with a summary of supplied values.
   Preserve validation, drafts and truthful creation/admission feedback.
