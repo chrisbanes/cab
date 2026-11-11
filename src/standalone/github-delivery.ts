@@ -2100,11 +2100,15 @@ export class GitHubHttpDeliveryProvider
       await this.ref(repo.path, action.target.baseRef);
       if (head !== action.target.expectedHeadSha)
         throw new Error("provider-head-changed");
-      if (!publication) throw new Error("provider-publication-unverified");
       // The actual requested base, so choosing another base cannot bypass the check.
       const targetCheck = await checkPublicationTarget(
         this.remoteAt(repo.path),
-        { ...publication.target, branch: action.target.baseRef },
+        {
+          commonDirectory: null,
+          managed: false,
+          ...publication?.target,
+          branch: action.target.baseRef,
+        },
         head,
       );
       return {

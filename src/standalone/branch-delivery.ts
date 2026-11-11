@@ -81,8 +81,8 @@ export class PublicationConflictUnproved extends Error {
 export interface PublicationTarget {
   /** The change request target branch; null when none can be identified. */
   branch: string | null;
-  /** The worktree's common directory. */
-  commonDirectory: string;
+  /** The worktree's common directory; null when the task has no ready workspace. */
+  commonDirectory: string | null;
   /** Whether that is cab's managed repository, which keeps the fetched target for the lead. */
   managed: boolean;
 }
@@ -108,6 +108,8 @@ export async function checkPublicationTarget(
   outcome: "clean";
   targetRetained: boolean;
 }> {
+  if (target.commonDirectory === null)
+    throw new PublicationConflictUnproved("target-unavailable");
   if (target.branch === null)
     throw new PublicationConflictUnproved("target-unidentified");
   const branch = target.branch;

@@ -68,6 +68,7 @@ import {
 } from "../core/task-publication-contracts.js";
 import { TaskPublicationDriver } from "./task-publication.js";
 import {
+  acceptableBaseRefs,
   canonicalMaterial,
   type DeliveryActionRecord,
   type DeliveryCaller,
@@ -1362,7 +1363,13 @@ export class StandaloneService {
               commonDirectory: repository.gitCommonDir,
               // A legacy binding's common directory is the operator's source: never written.
               managed: !!repository.sourceGitCommonDir,
-              baseBranch: repository.baseBranch ?? null,
+              // The branch the workspace started from; a later link change never moves it.
+              baseBranch:
+                repository.baseBranch ??
+                acceptableBaseRefs(repository.ref).find(
+                  (ref) => ref !== "HEAD",
+                ) ??
+                null,
             }
           : null;
       };

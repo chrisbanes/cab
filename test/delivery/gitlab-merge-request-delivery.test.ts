@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { git } from "../fixtures/publication.js";
 import { test } from "node:test";
 import { canonicalMaterial } from "../../src/core/delivery.js";
 import { OperatorApi } from "../../src/standalone/operator-api.js";
@@ -287,6 +288,8 @@ test("the delivery and approval reads name the GitLab merge request, its link an
 /** A draft merge request bound while it targets `stack-lower`, with the merge request from that branch scripted as `lower`. */
 async function stacked(w: World, lower: "merged" | "opened") {
   w.f.grant(...allow("branch.push", "pr.create", "pr.ready"));
+  // The lower merge request's branch, which the target check fetches.
+  git(w.source, "branch", "stack-lower", "main");
   const m = await opened(w, true, "stack-lower");
   const below = gitLabMergeRequest({
     id: 8000,

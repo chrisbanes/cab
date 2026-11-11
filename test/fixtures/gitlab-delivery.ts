@@ -4,6 +4,7 @@ import type { AdoptOutcome } from "../../src/standalone/git-fetch.js";
 import type { PushOutcome } from "../../src/standalone/git-push.js";
 import { publicationWorld } from "./delivery-integration.js";
 import { scriptedGitLabRemote } from "./gitlab-remote.js";
+import { localBranchFetch } from "./branch-fetch.js";
 
 export const host = "gitlab.example.com";
 export const projectPath = "group/sub/app";
@@ -38,6 +39,13 @@ export async function gitlabWorld(
     origin: `https://${host}/${projectPath}.git`,
     delivery: {
       fetcher: remote.fetcher,
+      // The scripted instance has every branch the fixture pushed, and the checkout's others.
+      fetchBranch: (request) =>
+        localBranchFetch(world.source, (branch) =>
+          pushes.findLast((p) => p.branch === branch)?.commitSha as
+            | string
+            | undefined,
+        ).fetchBranch(request),
       push: async (request) => {
         pushes.push({ ...request });
         if (script.push === "pushed") remote.state.head = request.commitSha;

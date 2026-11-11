@@ -341,7 +341,7 @@ export class DeliveryCoordinator {
     taskId: string,
     projectId: string,
     repositoryId: string,
-    workspace: PushWorkspace,
+    baseBranch: string | null,
   ): string | null {
     const bound = this.store.delivery(taskId);
     if (bound?.observation.repositoryId === repositoryId)
@@ -349,8 +349,10 @@ export class DeliveryCoordinator {
     const stacked = this.options.stackedPrBase?.(taskId, repositoryId);
     if (stacked?.repositoryId === repositoryId) return stacked.branch;
     return (
-      workspace.baseBranch ??
-      acceptableBaseRefs(this.codeHost(projectId, repositoryId).ref)[0] ??
+      baseBranch ??
+      acceptableBaseRefs(this.codeHost(projectId, repositoryId).ref).find(
+        (ref) => ref !== "HEAD",
+      ) ??
       null
     );
   }
@@ -919,13 +921,6 @@ export class DeliveryCoordinator {
       const workspace = await this.options
         .taskWorkspace?.(caller.taskId, action.target.repositoryId)
         .catch(() => null);
-      if (!workspace?.commonDirectory)
-        return this.store.recordObservation(record.operationId, {
-          state: "confirmed-failure",
-          reason: "publication-conflict-unproved",
-          receipt: null,
-          conflictCheck: "target-unavailable",
-        });
       publication = {
         ...verified,
         branch: assigned.branch,
@@ -936,15 +931,18 @@ export class DeliveryCoordinator {
           : {}),
         // Only an earlier attempt that may have pushed can have landed late.
         retry: this.store.mayHaveLanded(record.operationId),
+        // Without a workspace the provider's check holds as `target-unavailable`.
         target: {
-          branch: this.publicationTargetBranch(
-            caller.taskId,
-            caller.projectId,
-            action.target.repositoryId,
-            workspace,
-          ),
-          commonDirectory: workspace.commonDirectory,
-          managed: workspace.managed,
+          branch: workspace
+            ? this.publicationTargetBranch(
+                caller.taskId,
+                caller.projectId,
+                action.target.repositoryId,
+                workspace.baseBranch,
+              )
+            : null,
+          commonDirectory: workspace?.commonDirectory ?? null,
+          managed: workspace?.managed ?? false,
         },
       };
     }
@@ -953,17 +951,10 @@ export class DeliveryCoordinator {
       const workspace = await this.options
         .taskWorkspace?.(caller.taskId, action.target.repositoryId)
         .catch(() => null);
-      if (!workspace?.commonDirectory)
-        return this.store.recordObservation(record.operationId, {
-          state: "confirmed-failure",
-          reason: "publication-conflict-unproved",
-          receipt: null,
-          conflictCheck: "target-unavailable",
-        });
       create = {
         target: {
-          commonDirectory: workspace.commonDirectory,
-          managed: workspace.managed,
+          commonDirectory: workspace?.commonDirectory ?? null,
+          managed: workspace?.managed ?? false,
         },
       };
     }

@@ -585,11 +585,15 @@ export class GitLabHttpDeliveryProvider implements CodeHostDeliveryProvider {
         throw new Error("provider-ref-missing");
       if (head !== action.target.expectedHeadSha)
         throw new Error("provider-head-changed");
-      if (!publication) throw new Error("provider-publication-unverified");
       // The actual requested base, so choosing another base cannot bypass the check.
       const targetCheck = await checkPublicationTarget(
         remote,
-        { ...publication.target, branch: action.target.baseRef },
+        {
+          commonDirectory: null,
+          managed: false,
+          ...publication?.target,
+          branch: action.target.baseRef,
+        },
         head,
       );
       return {

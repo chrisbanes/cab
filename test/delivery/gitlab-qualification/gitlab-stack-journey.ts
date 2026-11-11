@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import type { FetchBranchFunction } from "../../../src/standalone/git-fetch.js";
 import { randomBytes, randomUUID } from "node:crypto";
 import {
   mkdirSync,
@@ -40,6 +41,8 @@ export interface GitLabStackQualificationOptions {
   glabExecutable?: string;
   push?: PushFunction;
   adopt?: AdoptFunction;
+  /** The HTTPS fetch of a publication's target branch; tests pass a fake. */
+  fetchBranch?: FetchBranchFunction;
   /** Waits between polls; tests advance their scripted host here. */
   pause?: () => Promise<void>;
   maxPolls?: number;
@@ -205,6 +208,7 @@ export async function runGitLabStackQualification(
           fetcher,
           push: guard.guardPush(options.push ?? pushTaskCommit),
           adopt: guard.guardAdopt(options.adopt ?? adoptOutsideHead),
+          ...(options.fetchBranch ? { fetchBranch: options.fetchBranch } : {}),
           credentialRef: options.credentialRef,
           ...(options.glabExecutable
             ? { glabExecutable: options.glabExecutable }

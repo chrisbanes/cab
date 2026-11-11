@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { localBranchFetch } from "../fixtures/branch-fetch.js";
 import { createHash } from "node:crypto";
 import { spawnSync } from "node:child_process";
 import {
@@ -474,6 +475,8 @@ function fakeWorld(t: TestContext) {
         fetcher,
         push: push(outcome),
         adopt,
+        fetchBranch: localBranchFetch(remote, (branch) => refs[branch])
+          .fetchBranch,
         readRef: (branch: string) => refs[branch] ?? null,
         readPrHead: () => refs[pull?.head ?? ""] ?? "",
         inspectPr: async () => ({

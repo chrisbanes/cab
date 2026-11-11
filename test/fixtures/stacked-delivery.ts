@@ -2,6 +2,8 @@ import type {
   UnstackMaterial,
   UnstackProvider,
 } from "../../src/standalone/unstack.js";
+import type { FetchBranchFunction } from "../../src/standalone/git-fetch.js";
+import { localBranchFetch } from "./branch-fetch.js";
 import { proveUnchangedRebase } from "../../src/standalone/rebase-proof.js";
 import { verifierGit } from "../../src/standalone/push-verification.js";
 import assert from "node:assert/strict";
@@ -89,6 +91,7 @@ export async function stackedDeliveryFixture(
       fetcher: typeof fetch;
       push: PushFunction;
       adopt: AdoptFunction;
+      fetchBranch?: FetchBranchFunction;
       credentialRef: string;
       glabExecutable?: string;
       rateLimit?: RateLimitPolicy;
@@ -298,6 +301,7 @@ export async function stackedDeliveryFixture(
       live
         ? {
             fetcher: live.fetcher,
+            fetchBranch: live.fetchBranch,
             push: live.push,
             adopt: live.adopt,
             glabExecutable: live.glabExecutable,
@@ -305,6 +309,8 @@ export async function stackedDeliveryFixture(
           }
         : {
             fetcher: gitlab.fetcher,
+            fetchBranch: localBranchFetch(source, (branch) => remote[branch])
+              .fetchBranch,
             push: async (request) => {
               gitlab.state.heads.set(request.branch, request.commitSha);
               remote[request.branch] = request.commitSha;

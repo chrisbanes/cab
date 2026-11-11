@@ -11,6 +11,7 @@ import { Store } from "../../src/core/store.js";
 import { DeliveryCoordinator } from "../../src/standalone/delivery.js";
 import { scriptedStackDeliveryProvider } from "../fixtures/delivery-integration.js";
 import { stackedDeliveryFixture } from "../fixtures/stacked-delivery.js";
+import { syntheticWorkspace } from "../fixtures/branch-fetch.js";
 
 function fixture(databasePath = ":memory:") {
   const db = new DatabaseSync(databasePath);
@@ -252,6 +253,7 @@ function stackWorld(stacked = true) {
           }
         : null,
     providerFactories: { github: () => scripted.provider },
+    taskWorkspace: async () => syntheticWorkspace,
   };
   let coordinator = new DeliveryCoordinator(f.store, options);
   return {

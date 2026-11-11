@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
-import { localBranchFetch } from "./branch-fetch.js";
+import { localBranchFetch, unchangedTargetFetch } from "./branch-fetch.js";
+import type { FetchBranchFunction } from "../../src/standalone/git-fetch.js";
 import { randomUUID } from "node:crypto";
 import { DatabaseSync } from "node:sqlite";
 import { join } from "node:path";
@@ -86,7 +87,9 @@ class ReleaseRuntime extends OperatorFixtureRuntime {
 }
 
 /** Closed dispatcher: these synthetic responses can never reach external fetch. */
-export function scriptedDeliveryProvider() {
+export function scriptedDeliveryProvider(
+  fetchBranch: FetchBranchFunction = unchangedTargetFetch,
+) {
   const state = {
     head: "1".repeat(40),
     base: "2".repeat(40),
@@ -618,6 +621,9 @@ export function scriptedDeliveryProvider() {
         });
         return "adopted";
       },
+      undefined,
+      undefined,
+      fetchBranch,
     ),
   };
 }
@@ -655,7 +661,9 @@ export async function createReleaseDeliveryFixture(
   gitlab?: GitLabLink,
   jira?: JiraSource,
 ) {
-  const scripted = scriptedDeliveryProvider();
+  // The repository's `main` stands in for the code host's branch a publication is checked against.
+  const target = repositoryPath ? localBranchFetch(repositoryPath) : undefined;
+  const scripted = scriptedDeliveryProvider(target?.fetchBranch);
   const readerFactory: GitHubReaderFactory = () => ({
     async readSelection() {
       scripted.state.sourceReads++;
@@ -694,10 +702,7 @@ export async function createReleaseDeliveryFixture(
     {
       providerFactories: { github: () => scripted.provider },
       issueTrackerFactories: { github: () => scripted.provider },
-      // The repository's `main` stands in for the code host's branch a publication is checked against.
-      ...(repositoryPath
-        ? { fetchBranch: localBranchFetch(repositoryPath).fetchBranch }
-        : {}),
+      ...(target ? { fetchBranch: target.fetchBranch } : {}),
       ...gitlab?.delivery,
     },
     lifecycleOptions,
@@ -833,7 +838,7 @@ export async function createReleaseDeliveryFixture(
           {
             repositoryId: gitlab?.repositoryId ?? "R1",
             path: repositoryPath,
-            ...(gitlab ? { ref: "main" } : {}),
+            ref: "main",
           },
         ]
       : [],
@@ -1160,7 +1165,7 @@ export async function publicationWorld(
     await f.waitTurn(turn + 1);
     return { interactionId: interaction.interactionId, expectedRevision: 2 };
   };
-  return { f, commit, push, createPr, action, recover, approve };
+  return { f, source, commit, push, createPr, action, recover, approve };
 }
 
 /** Closed HTTP dispatcher for the two effects of a stacked create; never reaches GitHub. */
@@ -1353,6 +1358,14 @@ export function scriptedStackDeliveryProvider(
   return {
     state,
     blockerSha,
-    provider: new GitHubHttpDeliveryProvider("synthetic", fetcher),
+    provider: new GitHubHttpDeliveryProvider(
+      "synthetic",
+      fetcher,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      unchangedTargetFetch,
+    ),
   };
 }
