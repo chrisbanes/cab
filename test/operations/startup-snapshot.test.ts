@@ -918,7 +918,7 @@ function restoreRequestSchema21(db: DatabaseSync) {
 /** The schema digest each migration level created. Append an entry with every level bump. */
 const SCHEMA_PINS: Record<number, string> = {
   // Assignments may be withdrawn; withdrawal records and undeliverable inbox events.
-  29: "PENDING",
+  29: "54aa9d42e9f21c6ac971dad9cbfac5b7a18404eaab06cc85bb85e365ecd57318",
   // Results record workspace state; retained result evidence tables are dropped.
   28: "7534f97c295597a77a9b7fd29640d7270581f03ba55d2def481937ad24aae8dd",
   // Data only: reversible delivery grants switch from approval to allow.

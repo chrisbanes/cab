@@ -753,3 +753,47 @@ test("a withdrawn delegate's completed grandchildren cannot be resumed and their
     f.close();
   }
 });
+
+test("a delegate with any unfinished descendant cannot be withdrawn, even several levels down", () => {
+  const f = fixture();
+  try {
+    const parent = f.delegate(f.leadA);
+    const child = f.delegate(parent);
+    const grandchild = f.delegate(child);
+    f.addWork(grandchild, "deep");
+    const { result } = f.coordination.recordResult(
+      f.call("cab_report_result", { summary: "Deep done" }, undefined, "deep"),
+    );
+    f.db
+      .prepare(
+        "UPDATE execution_intents SET state = 'completed' WHERE workId = ?",
+      )
+      .run("work-deep");
+    f.db
+      .prepare(
+        "UPDATE execution_pending_effects SET state = 'settled' WHERE workId = ?",
+      )
+      .run("work-deep");
+    f.db
+      .prepare(
+        "UPDATE domain_assignments SET state = 'completed' WHERE id IN (?, ?)",
+      )
+      .run(child, grandchild);
+    // The lead follows up the grandchild, which is pending again.
+    f.coordination.requestFollowUp(
+      f.call("cab_request_follow_up", {
+        resultId: result.resultId,
+        instructions: "Revise it",
+      }),
+    );
+    assert.equal(f.domain.assignment(grandchild).state, "pending");
+    const before = f.domain.assignment(parent);
+    assert.throws(
+      () => f.leadWithdraw(parent),
+      refusedWith("unfinished-delegates", /unfinished delegates of its own/),
+    );
+    assert.deepEqual(f.domain.assignment(parent), before);
+  } finally {
+    f.close();
+  }
+});

@@ -1625,10 +1625,17 @@ export class CoordinationStore {
       )
     )
       blockers.add("open-request");
+    // The whole subtree, not only direct delegates: withdrawal retires its waiting events.
     if (
       this.one(
-        `SELECT 1 FROM domain_assignments
-        WHERE requesterAssignmentId = ? AND state NOT IN ('completed','withdrawn') LIMIT 1`,
+        `WITH RECURSIVE subtree(id) AS (
+          SELECT id FROM domain_assignments WHERE requesterAssignmentId = ?1
+            OR resultRecipientAssignmentId = ?1
+          UNION SELECT child.id FROM domain_assignments child
+          JOIN subtree ON child.requesterAssignmentId = subtree.id
+            OR child.resultRecipientAssignmentId = subtree.id
+        ) SELECT 1 FROM domain_assignments WHERE id IN (SELECT id FROM subtree)
+          AND id <> ?1 AND state NOT IN ('completed','withdrawn') LIMIT 1`,
         id,
       )
     )
