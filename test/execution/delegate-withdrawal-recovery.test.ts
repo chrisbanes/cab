@@ -205,15 +205,12 @@ test("another turn a Stop interrupted only holds a recovered delegate's withdraw
     );
   const blockers = () =>
     startedOf(service).coordination.delegateStatus(delegateId).blockers;
+  const recovered = service
+    .turnRequests()
+    .find((r) => r.assignmentId === delegateId && r.state === "held");
+  assert.ok(recovered, "the delegate's recovered request is held");
   const strict = () =>
-    startedOf(service).state.reconciledAssignmentProof(
-      String(
-        service
-          .turnRequests()
-          .find((r) => r.assignmentId === delegateId && r.state === "held")
-          ?.workId,
-      ),
-    );
+    startedOf(service).state.reconciledAssignmentProof(recovered.workId);
   target("unknown");
   assert.ok(blockers().includes("held-execution"), String(blockers()));
   target("failed");
