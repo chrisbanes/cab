@@ -77,6 +77,8 @@ import {
 } from "./github-source-contracts.js";
 import {
   gitLabHostSchema,
+  linkBaseFields,
+  linkBaseIssue,
   repositoriesConfigurationCommandSchema,
   repositoryLinkListSchema,
   setupRepositoriesSchema,
@@ -685,7 +687,11 @@ function resolvedLink(
   link: LinkRow,
   saved: StoredRepositoryLink[],
   index: number,
-): { path: string | undefined; projectPath: string | undefined } {
+): {
+  path: string | undefined;
+  projectPath: string | undefined;
+  base: Pick<StoredRepositoryLink, "baseMode" | "fetchBeforeProvisioning">;
+} {
   const kept = saved.find((item) => item.repositoryId === link.repositoryId);
   const keptSameHost =
     kept && kept.codeHost === link.codeHost && kept.host === link.host
@@ -710,7 +716,20 @@ function resolvedLink(
       "A new GitLab repository link needs its project path",
       [`repositories.${index}.projectPath`],
     );
-  return { path: link.path ?? kept?.path, projectPath };
+  // Omitted base fields keep the saved ones, so older clients and replays cannot reset them.
+  const baseMode = link.baseMode ?? keptSameHost?.baseMode;
+  const fetchBeforeProvisioning =
+    link.fetchBeforeProvisioning ?? keptSameHost?.fetchBeforeProvisioning;
+  return {
+    path: link.path ?? kept?.path,
+    projectPath,
+    base: {
+      ...(baseMode === undefined ? {} : { baseMode }),
+      ...(fetchBeforeProvisioning === undefined
+        ? {}
+        : { fetchBeforeProvisioning }),
+    },
+  };
 }
 
 /** Fail closed: the host injects the verifier that touches the filesystem and Git. */
@@ -1133,6 +1152,13 @@ export class DomainStore {
       ...resolvedLink(link, saved, index),
     }));
     const seen = new Set<string>();
+    for (const { link, index, base } of rows) {
+      const issue = linkBaseIssue({ ref: link.ref, ...base });
+      if (issue)
+        throw new DomainPolicyError("invalid-input", issue, [
+          `repositories.${index}.baseMode`,
+        ]);
+    }
     for (const { link, index, projectPath } of rows) {
       // A saved ID is kept: guided setup's provisional `github.com/owner/name` links re-save.
       if (
@@ -1156,12 +1182,12 @@ export class DomainStore {
       const settled = await Promise.allSettled(
         // Async, so a missing saved path rejects like a failed verification instead of
         // throwing past `Promise.all` and leaving earlier verifications unhandled.
-        rows.map(async ({ link, index, path, projectPath }) => {
+        rows.map(async ({ link, index, path, projectPath, base }) => {
           if (path === undefined) throw new Error("No saved repository path");
           try {
             return parseLinkedRepositoryResult(
               await this.verifyRepository(
-                { repositoryId: link.repositoryId, path, ref: link.ref },
+                { repositoryId: link.repositoryId, path, ref: link.ref, ...base },
                 link.codeHost === "gitlab" && projectPath !== undefined
                   ? { codeHost: "gitlab", host: link.host, projectPath }
                   : undefined,
@@ -1236,6 +1262,7 @@ export class DomainStore {
                 repositoryId: link.repositoryId,
                 path: link.path,
                 ref: link.ref,
+                ...linkBaseFields(link),
               },
               link.codeHost === "gitlab"
                 ? {
@@ -1250,6 +1277,7 @@ export class DomainStore {
             repositoryId: repository.repositoryId,
             path: repository.path,
             ref: repository.ref,
+            ...linkBaseFields(link),
             gitCommonDirectory: repository.gitCommonDirectory,
           });
         } catch (error) {

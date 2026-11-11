@@ -214,7 +214,7 @@ export async function stackedDeliveryFixture(
         nextPreflight = undefined;
         hook();
       }
-      return publication
+      return publication && "branch" in publication
         ? {
             branch: publication.branch,
             beforeHead: remote[publication.branch] ?? null,

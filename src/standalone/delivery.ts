@@ -45,10 +45,20 @@ import {
   IssueChangedRefusal,
   ProjectFieldChangedRefusal,
   PublicationRefusal,
+  type CreateContext,
   type PublicationContext,
   type PushFunction,
   type PushVerification,
 } from "./github-delivery.js";
+import {
+  PublicationConflictRefusal,
+  PublicationConflictUnproved,
+} from "./branch-delivery.js";
+import type {
+  BranchFetch,
+  FetchBranchFunction,
+  FetchBranchResult,
+} from "./git-fetch.js";
 import type {
   CodeHost,
   CodeHostDeliveryProvider,
@@ -178,6 +188,8 @@ export interface DeliveryCoordinatorOptions {
   push?: PushFunction;
   /** Test seam for the HTTPS fetch of an adopted head; production uses `adoptOutsideHead`. */
   adopt?: AdoptFunction;
+  /** Test seam for the HTTPS fetch of a branch; production uses `fetchBranchHead`. */
+  fetchBranch?: FetchBranchFunction;
   activationAllowed?: (policy: DeliveryPolicy) => boolean;
   /** How long a status-mapping write's provider call may take before it is given up as unproved. */
   statusWriteTimeoutMs?: number;
@@ -302,6 +314,44 @@ export class DeliveryCoordinator {
       this.options.push,
       this.options.adopt,
       host,
+      undefined,
+      this.options.fetchBranch,
+    );
+  }
+  /**
+   * Fetches a repository's branch through its code host's isolated transport, for a workspace's
+   * remote base; a code host without the fetch is not attempted.
+   */
+  async fetchBranch(
+    projectId: string,
+    repositoryId: string,
+    request: BranchFetch,
+  ): Promise<FetchBranchResult> {
+    const provider = this.provider(projectId, repositoryId);
+    return provider.fetchBranch
+      ? provider.fetchBranch(repositoryId, request)
+      : { kind: "not-attempted" };
+  }
+  /**
+   * The change request target a publication is checked against: the bound change request's
+   * accepted base, else the stacked blocker's branch, else the workspace's resolved remote base,
+   * else the repository link's branch. Null when none names a branch, such as an explicit commit.
+   */
+  private publicationTargetBranch(
+    taskId: string,
+    projectId: string,
+    repositoryId: string,
+    workspace: PushWorkspace,
+  ): string | null {
+    const bound = this.store.delivery(taskId);
+    if (bound?.observation.repositoryId === repositoryId)
+      return bound.acceptedBaseRef;
+    const stacked = this.options.stackedPrBase?.(taskId, repositoryId);
+    if (stacked?.repositoryId === repositoryId) return stacked.branch;
+    return (
+      workspace.baseBranch ??
+      acceptableBaseRefs(this.codeHost(projectId, repositoryId).ref)[0] ??
+      null
     );
   }
   /** Internal service wiring; the operator journal owns Unstack authority and every send. */
@@ -866,6 +916,16 @@ export class DeliveryCoordinator {
           reason: "push-commit-not-verified",
           receipt: null,
         });
+      const workspace = await this.options
+        .taskWorkspace?.(caller.taskId, action.target.repositoryId)
+        .catch(() => null);
+      if (!workspace?.commonDirectory)
+        return this.store.recordObservation(record.operationId, {
+          state: "confirmed-failure",
+          reason: "publication-conflict-unproved",
+          receipt: null,
+          conflictCheck: "target-unavailable",
+        });
       publication = {
         ...verified,
         branch: assigned.branch,
@@ -876,6 +936,35 @@ export class DeliveryCoordinator {
           : {}),
         // Only an earlier attempt that may have pushed can have landed late.
         retry: this.store.mayHaveLanded(record.operationId),
+        target: {
+          branch: this.publicationTargetBranch(
+            caller.taskId,
+            caller.projectId,
+            action.target.repositoryId,
+            workspace,
+          ),
+          commonDirectory: workspace.commonDirectory,
+          managed: workspace.managed,
+        },
+      };
+    }
+    let create: CreateContext | undefined;
+    if (action.kind === "pr.create" && !reused) {
+      const workspace = await this.options
+        .taskWorkspace?.(caller.taskId, action.target.repositoryId)
+        .catch(() => null);
+      if (!workspace?.commonDirectory)
+        return this.store.recordObservation(record.operationId, {
+          state: "confirmed-failure",
+          reason: "publication-conflict-unproved",
+          receipt: null,
+          conflictCheck: "target-unavailable",
+        });
+      create = {
+        target: {
+          commonDirectory: workspace.commonDirectory,
+          managed: workspace.managed,
+        },
       };
     }
     let before: Record<string, z.output<ReturnType<typeof z.json>>>;
@@ -887,7 +976,7 @@ export class DeliveryCoordinator {
             provider.preflight(
               action,
               policy,
-              publication,
+              publication ?? create,
               adoption,
               stackedDependent ? { removeSourceBranch: true } : undefined,
             ),
@@ -904,6 +993,21 @@ export class DeliveryCoordinator {
           state: "confirmed-failure",
           reason: error.reason,
           receipt: null,
+        });
+      // Both are refused before any external write; the lead integrates the target and retries.
+      if (error instanceof PublicationConflictRefusal)
+        return this.store.recordObservation(record.operationId, {
+          state: "confirmed-failure",
+          reason: error.reason,
+          receipt: null,
+          conflict: error.conflict,
+        });
+      if (error instanceof PublicationConflictUnproved)
+        return this.store.recordObservation(record.operationId, {
+          state: "confirmed-failure",
+          reason: error.reason,
+          receipt: null,
+          conflictCheck: error.conflictCheck,
         });
       if (error instanceof PublicationRefusal) {
         const outside = error.reason === "branch-outside-change";

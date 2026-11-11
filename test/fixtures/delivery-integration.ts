@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { localBranchFetch } from "./branch-fetch.js";
 import { randomUUID } from "node:crypto";
 import { DatabaseSync } from "node:sqlite";
 import { join } from "node:path";
@@ -693,6 +694,10 @@ export async function createReleaseDeliveryFixture(
     {
       providerFactories: { github: () => scripted.provider },
       issueTrackerFactories: { github: () => scripted.provider },
+      // The repository's `main` stands in for the code host's branch a publication is checked against.
+      ...(repositoryPath
+        ? { fetchBranch: localBranchFetch(repositoryPath).fetchBranch }
+        : {}),
       ...gitlab?.delivery,
     },
     lifecycleOptions,

@@ -27,6 +27,8 @@ import { realpathSync } from "node:fs";
 import { z } from "zod";
 import { transaction, type Database } from "../core/store.js";
 import { runGit } from "./git-process.js";
+import { safeBranchName } from "../core/delivery.js";
+import type { BranchFetch, FetchBranchResult } from "./git-fetch.js";
 import { maxErrorMessageBytes } from "./service-log.js";
 
 const maxGitOutputBytes = 1024 * 1024;
@@ -75,6 +77,16 @@ export const repositoryBindingSchema = z.object({
   sourceGitCommonDir: z.string().nullable().optional(),
   /** The worktree's admin directory in the managed repository. */
   gitDirectory: z.string().nullable().optional(),
+  /** A remote base chosen when the binding was created: `ref` names the branch for `remote-branch`. */
+  base: z
+    .object({
+      mode: z.enum(["remote-branch", "remote-default"]),
+      fetch: z.boolean(),
+    })
+    .strict()
+    .optional(),
+  /** The branch a remote base resolved to; `commit` is its retained tip. */
+  baseBranch: z.string().min(1).max(512).optional(),
 });
 
 export const taskWorkspaceSchema = z.object({
@@ -113,6 +125,8 @@ const repositoryInputSchema = z.object({
     .string()
     .regex(/^[0-9a-f]{40}$/)
     .optional(),
+  /** Starts from the `origin` branch `ref` names, or the remote default, instead of `ref` itself. */
+  base: repositoryBindingSchema.shape.base,
 });
 
 export type TaskWorkspaceRepositoryInput = z.infer<
@@ -216,6 +230,15 @@ export type WorkspaceManagerOptions = {
   managedRepositories?: { root: string; scopeOf(taskId: string): string };
   /** Narrow path-access observer used to prove restored-root identity ordering. */
   beforePathAccess?: (path: string) => void;
+  /**
+   * Fetches a remote base into the managed repository through the code host's isolated transport;
+   * without it a fetched base holds provisioning.
+   */
+  remoteBase?: (
+    taskId: string,
+    repositoryId: string,
+    request: BranchFetch,
+  ) => Promise<FetchBranchResult>;
   /** Test-only executable override; production always resolves the `git` command. */
   gitExecutable?: string;
   /** Test-only captured-cleanup child runner; never used by ordinary workspace operations. */
@@ -272,6 +295,7 @@ export interface WorkspaceBindingStore {
     gitCommonDir: string,
     commit: string,
     sourceGitCommonDir?: string,
+    baseBranch?: string,
   ): TaskWorkspaceBinding;
   /** Records a managed worktree's admin directory once Git has created it. */
   recordGitDirectory(
@@ -457,6 +481,7 @@ export class SqliteWorkspaceBindingStore implements WorkspaceBindingStore {
     gitCommonDir: string,
     commit: string,
     sourceGitCommonDir?: string,
+    baseBranch?: string,
   ): TaskWorkspaceBinding {
     return transaction(this.db, () => {
       assertOwnedTaskWritable(this.db, taskId);
@@ -482,6 +507,7 @@ export class SqliteWorkspaceBindingStore implements WorkspaceBindingStore {
         gitCommonDir,
         commit,
         ...(sourceGitCommonDir ? { sourceGitCommonDir } : {}),
+        ...(baseBranch ? { baseBranch } : {}),
       };
       assertCapturedWorkspaceAvailable(this.db, { ...binding, repositories });
       this.db
@@ -692,6 +718,7 @@ export class WorkspaceManager implements TaskWorkspaceLifecycle {
           ref: repository.ref,
           gitCommonDir: null,
           commit: repository.commit ?? null,
+          ...(repository.base ? { base: repository.base } : {}),
         }));
         binding = this.store.createOrGet(id, workspaceId, path, allocated);
       }
@@ -1281,18 +1308,35 @@ export class WorkspaceManager implements TaskWorkspaceLifecycle {
             : undefined;
           // A requested commit must already be in the repository: it never falls back to `ref`.
           // A stacked dependent's requested commit is its blocker's, in the managed repository.
-          const commit = repository.commit
-            ? await this.resolveCommit(
-                managed ?? repository.sourcePath,
-                repository.commit,
-              )
-            : await this.resolveCommit(repository.sourcePath, repository.ref);
+          const { commit, branch } = repository.commit
+            ? {
+                commit: await this.resolveCommit(
+                  managed ?? repository.sourcePath,
+                  repository.commit,
+                ),
+                branch: undefined,
+              }
+            : repository.base
+              ? await this.remoteBaseCommit(
+                  binding.taskId,
+                  repository,
+                  repository.base,
+                  managed,
+                )
+              : {
+                  commit: await this.resolveCommit(
+                    repository.sourcePath,
+                    repository.ref,
+                  ),
+                  branch: undefined,
+                };
           binding = this.store.bindRepository(
             binding.taskId,
             repository.repositoryId,
             managed ?? source.gitCommonDir,
             commit,
             managed && source.gitCommonDir,
+            branch,
           );
           repository = binding.repositories.find(
             (candidate) =>
@@ -1438,6 +1482,68 @@ export class WorkspaceManager implements TaskWorkspaceLifecycle {
       throw new Error(
         `Repository identity changed for ${repository.repositoryId}`,
       );
+  }
+
+  /**
+   * A remote base's branch and commit: the source checkout's `origin` remote-tracking branch, or,
+   * when fetched, the code host's branch imported into the managed repository. It never falls back
+   * to a local branch or to another branch.
+   */
+  private async remoteBaseCommit(
+    taskId: string,
+    repository: TaskWorkspaceRepository,
+    base: NonNullable<TaskWorkspaceRepository["base"]>,
+    managed: string | undefined,
+  ): Promise<{ commit: string; branch: string }> {
+    if (!base.fetch) {
+      const branch =
+        base.mode === "remote-branch"
+          ? repository.ref
+          : (
+              await this.git(
+                repository.sourcePath,
+                "ref-resolution",
+                "symbolic-ref",
+                "--quiet",
+                "refs/remotes/origin/HEAD",
+              ).catch(rethrowUncertain(() => ""))
+            ).replace(/^refs\/remotes\/origin\//, "");
+      if (!safeBranchName(branch))
+        throw new Error("remote base unavailable: origin default branch");
+      const commit = await this.resolveCommit(
+        repository.sourcePath,
+        `refs/remotes/origin/${branch}`,
+      ).catch(rethrowUncertain(() => null));
+      if (!commit) throw new Error(`remote base unavailable: ${branch}`);
+      return { commit, branch };
+    }
+    if (!managed)
+      throw new Error("remote base fetch needs cab's managed repository");
+    if (!this.options.remoteBase)
+      throw new Error("remote base credential unavailable");
+    const requested = base.mode === "remote-branch" ? repository.ref : null;
+    const have = await this.resolveCommit(repository.sourcePath, "HEAD").catch(
+      rethrowUncertain(() => null),
+    );
+    const fetched = await this.options.remoteBase(
+      taskId,
+      repository.repositoryId,
+      {
+        commonDirectory: managed,
+        branch: requested,
+        retainPrefix: "refs/cab/remote",
+        have,
+      },
+    );
+    if (fetched.kind === "fetched")
+      return { commit: fetched.commit, branch: fetched.branch };
+    if (fetched.kind === "unavailable")
+      throw new Error(
+        `remote base unavailable: ${requested ?? "default branch"}`,
+      );
+    if (fetched.kind === "not-attempted")
+      throw new Error("remote base credential unavailable");
+    throw new Error(`remote base fetch failed (${fetched.kind})`);
   }
 
   private resolveCommit(path: string, ref: string): Promise<string> {
@@ -1780,6 +1886,7 @@ export class WorkspaceManager implements TaskWorkspaceLifecycle {
     path: string;
     ref: string;
     commit?: string;
+    base?: TaskWorkspaceRepository["base"];
   }> {
     const parsed = z.array(repositoryInputSchema).parse(repositories);
     const normalized = parsed
@@ -1791,6 +1898,7 @@ export class WorkspaceManager implements TaskWorkspaceLifecycle {
           path: resolve(repository.path),
           ref: repository.ref ?? "HEAD",
           ...(repository.commit ? { commit: repository.commit } : {}),
+          ...(repository.base ? { base: repository.base } : {}),
         };
       })
       .sort((a, b) =>
@@ -1877,6 +1985,14 @@ export class WorkspaceManager implements TaskWorkspaceLifecycle {
 function isUncertainGitError(error: unknown): error is WorkspaceGitError {
   return error instanceof WorkspaceGitError && error.uncertain;
 }
+
+/** A failed read gives the fallback; an uncertain Git child still propagates. */
+const rethrowUncertain =
+  <T>(fallback: () => T) =>
+  (error: unknown): T => {
+    if (isUncertainGitError(error)) throw error;
+    return fallback();
+  };
 
 function reportGitFailure(
   observer: WorkspaceManagerOptions["gitFailureObserver"],

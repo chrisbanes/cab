@@ -225,11 +225,26 @@ export function evaluateReadiness(
 /** How a GitHub source treats issues closed on GitHub. */
 export const closedIssuesSchema = z.enum(["skip", "done"]);
 
+/**
+ * Where a new workspace starts: the explicit `ref`, the `origin` branch named by `ref`, or the
+ * code host's current default branch (`ref` then records the default known when it was saved).
+ */
+export const repositoryBaseModeSchema = z.enum([
+  "ref",
+  "remote-branch",
+  "remote-default",
+]);
+export type RepositoryBaseMode = z.output<typeof repositoryBaseModeSchema>;
+
 export const repositoryLinkSchema = z
   .object({
     repositoryId: nonempty,
     path: z.string().trim().min(1),
     ref: nonempty,
+    /** Absent in links saved before base modes, and read as `ref`. */
+    baseMode: repositoryBaseModeSchema.optional(),
+    /** Fetch the remote base into cab's repository before a workspace is created; absent is off. */
+    fetchBeforeProvisioning: z.boolean().optional(),
   })
   .strict();
 

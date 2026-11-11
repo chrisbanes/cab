@@ -269,6 +269,9 @@ export async function runPublicationJourney(
       taskWorkspace: async () => ({
         workspacePath: workspace,
         baseCommit: base,
+        commonDirectory: join(clone, ".git"),
+        managed: false,
+        baseBranch: manifest.repository.defaultBranch,
       }),
       leadAssignmentId: () => caller.assignmentId,
       feedback: (_task, _reason, identity) => wakes.push(identity),

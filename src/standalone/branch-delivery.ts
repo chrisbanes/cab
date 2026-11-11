@@ -5,7 +5,15 @@ import {
   type ExternalAction,
   type ProviderActionObservation,
 } from "../core/delivery.js";
-import type { AdoptOutcome } from "./git-fetch.js";
+import { rm } from "node:fs/promises";
+import { join } from "node:path";
+import {
+  type AdoptOutcome,
+  type BranchFetch,
+  type FetchBranchResult,
+  temporaryRepository,
+  withScratchGit,
+} from "./git-fetch.js";
 import type { PushOutcome } from "./git-push.js";
 import type { AdoptionContext, PublicationContext } from "./github-delivery.js";
 
@@ -33,6 +41,154 @@ export class PublicationRefusal extends Error {
   }
 }
 
+/** Why a publication's merge with its target could not be proved either way. */
+export type ConflictCheckFailure =
+  | "target-unavailable"
+  | "target-unidentified"
+  | "fetch-failed"
+  | "too-large"
+  | "credential-unavailable"
+  | "computation-failed"
+  | "cancelled";
+
+/** What a demonstrated conflict names: the checked pair of commits and the conflicting paths. */
+export interface PublicationConflict {
+  targetBranch: string;
+  targetSha: string;
+  headSha: string;
+  paths: string[];
+  truncated: boolean;
+  targetRetained: boolean;
+}
+
+/** The proposed commit does not merge cleanly into the freshly fetched target; nothing was written. */
+export class PublicationConflictRefusal extends Error {
+  readonly reason = "publication-target-conflict";
+  constructor(readonly conflict: PublicationConflict) {
+    super("publication-target-conflict");
+  }
+}
+
+/** The merge with the target could not be checked; publication holds rather than guessing. */
+export class PublicationConflictUnproved extends Error {
+  readonly reason = "publication-conflict-unproved";
+  constructor(readonly conflictCheck: ConflictCheckFailure) {
+    super("publication-conflict-unproved");
+  }
+}
+
+/** Where a publication's target check runs; see `checkPublicationTarget`. */
+export interface PublicationTarget {
+  /** The change request target branch; null when none can be identified. */
+  branch: string | null;
+  /** The worktree's common directory. */
+  commonDirectory: string;
+  /** Whether that is cab's managed repository, which keeps the fetched target for the lead. */
+  managed: boolean;
+}
+
+const maxConflictPaths = 50;
+const maxConflictPathBytes = 512;
+
+/**
+ * Fetches the target branch afresh and computes the merge of `commitSha` into it with
+ * `git merge-tree`, which writes only objects, in a scratch repository. A managed repository keeps
+ * the target at `refs/cab/target/<branch>` so the lead can integrate it locally; a legacy binding's
+ * source repository is never written. Exit 1 is a conflict; anything else unproved is a hold.
+ */
+export async function checkPublicationTarget(
+  remote: BranchRemote,
+  target: PublicationTarget,
+  commitSha: string,
+  signal?: AbortSignal,
+): Promise<{
+  targetBranch: string;
+  targetSha: string;
+  headSha: string;
+  outcome: "clean";
+  targetRetained: boolean;
+}> {
+  if (target.branch === null)
+    throw new PublicationConflictUnproved("target-unidentified");
+  const branch = target.branch;
+  const destination = target.managed
+    ? target.commonDirectory
+    : await temporaryRepository(join(target.commonDirectory, "objects"));
+  try {
+    const fetched: FetchBranchResult = await remote
+      .fetchBranch({
+        commonDirectory: destination,
+        branch,
+        retainPrefix: "refs/cab/target",
+        have: commitSha,
+      })
+      .catch(() => ({ kind: "fetch-failed" }) as const);
+    if (signal?.aborted) throw new PublicationConflictUnproved("cancelled");
+    if (fetched.kind !== "fetched")
+      throw new PublicationConflictUnproved(
+        fetched.kind === "unavailable"
+          ? "target-unavailable"
+          : fetched.kind === "too-large"
+            ? "too-large"
+            : fetched.kind === "not-attempted"
+              ? "credential-unavailable"
+              : "fetch-failed",
+      );
+    // Identical commits merge trivially.
+    if (fetched.commit === commitSha)
+      return {
+        targetBranch: branch,
+        targetSha: fetched.commit,
+        headSha: commitSha,
+        outcome: "clean",
+        targetRetained: target.managed,
+      };
+    const merged = await withScratchGit(
+      destination,
+      (git) =>
+        git([
+          "merge-tree",
+          "--write-tree",
+          "--name-only",
+          "-z",
+          "--no-messages",
+          fetched.commit,
+          commitSha,
+        ]),
+      signal ? { signal } : {},
+    ).catch(() => null);
+    if (signal?.aborted) throw new PublicationConflictUnproved("cancelled");
+    if (merged?.status === "ok")
+      return {
+        targetBranch: branch,
+        targetSha: fetched.commit,
+        headSha: commitSha,
+        outcome: "clean",
+        targetRetained: target.managed,
+      };
+    // Only Git's "conflicts" exit with the listed paths is a conflict; any other failure is unproved.
+    if (merged?.status !== "exit" || merged.exitCode !== 1)
+      throw new PublicationConflictUnproved("computation-failed");
+    const [, ...entries] = merged.stdout.toString("utf8").split("\0");
+    const paths = [...new Set(entries.filter(Boolean))];
+    if (paths.length === 0)
+      throw new PublicationConflictUnproved("computation-failed");
+    const kept = paths
+      .slice(0, maxConflictPaths)
+      .filter((path) => Buffer.byteLength(path) <= maxConflictPathBytes);
+    throw new PublicationConflictRefusal({
+      targetBranch: branch,
+      targetSha: fetched.commit,
+      headSha: commitSha,
+      paths: kept,
+      truncated: kept.length < paths.length,
+      targetRetained: target.managed,
+    });
+  } finally {
+    if (!target.managed) await rm(destination, { recursive: true, force: true });
+  }
+}
+
 /** One verified repository on a code host. */
 export interface BranchRemote {
   /** The branch's head, or null when the branch does not exist. */
@@ -49,6 +205,8 @@ export interface BranchRemote {
     commitSha: string;
     branch: string;
   }): Promise<AdoptOutcome>;
+  /** Fetches a branch, or the default branch, through the code host's isolated transport. */
+  fetchBranch(request: BranchFetch): Promise<FetchBranchResult>;
 }
 
 /** How a code host binds a `BranchRemote` to a repository. */
@@ -137,6 +295,15 @@ export async function branchPreflight(
       throw new PublicationRefusal("branch-force-push-needs-lease");
   } else if (publication.descendsFromLastPushed === false)
     throw new PublicationRefusal("branch-not-fast-forward");
+  // A branch already at the commit (a retry whose push landed) needs no write, so no check.
+  const targetCheck =
+    head === action.commitSha
+      ? undefined
+      : await checkPublicationTarget(
+          remote,
+          publication.target,
+          action.commitSha,
+        );
   return {
     repositoryId: action.target.repositoryId,
     branch: publication.branch,
@@ -145,6 +312,7 @@ export async function branchPreflight(
     workspacePath: publication.workspacePath,
     uncommittedEntries: publication.uncommittedEntries,
     retry: publication.retry,
+    ...(targetCheck ? { targetCheck: { ...targetCheck } } : {}),
   };
 }
 

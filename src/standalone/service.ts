@@ -214,7 +214,13 @@ import {
   ghToken,
 } from "./gh-credential.js";
 import type { CodeHostProviderFactories } from "./code-host.js";
-import type { AdoptFunction } from "./git-fetch.js";
+import type { AdoptFunction, FetchBranchFunction } from "./git-fetch.js";
+import {
+  linkBase,
+  linkBaseFields,
+  type StoredRepositoryLink,
+} from "../core/repository-links.js";
+
 import type { PushFunction } from "./github-delivery.js";
 import { gitLabDeliveryFactory } from "./gitlab-delivery.js";
 import type { RateLimitPolicy } from "./gitlab-http.js";
@@ -599,9 +605,10 @@ export interface StandaloneServiceOptions {
     fetcher?: typeof fetch;
     providerFactories?: CodeHostProviderFactories;
     issueTrackerFactories?: IssueTrackerWriterFactories;
-    /** Test-only: the HTTPS push and the fetch of an adopted head, in place of Git. */
+    /** Test-only: the HTTPS push, the fetch of an adopted head and of a branch, in place of Git. */
     push?: PushFunction;
     adopt?: AdoptFunction;
+    fetchBranch?: FetchBranchFunction;
     /** Test-only: the clock and waits a GitLab 429 is retried with. */
     rateLimit?: RateLimitPolicy;
     /** Test-only: how long a status-mapping write's provider call may take. */
@@ -856,7 +863,26 @@ export interface RoutingAvailability {
   available: boolean;
   reason: RoutingAvailabilityReason;
 }
+/** What a lead needs to act on a publication refused or held by its target check. */
+function publicationCheckText(
+  observation: DeliveryActionRecord["observation"] | undefined,
+): string {
+  const conflict = observation?.conflict;
+  if (conflict)
+    return `\nThe commit ${conflict.headSha} conflicts with ${conflict.targetBranch} at ${conflict.targetSha} in: ${conflict.paths.join(", ")}${conflict.truncated ? " (more paths omitted)" : ""}. Nothing was published. ${conflict.targetRetained ? `The target is at refs/cab/target/${conflict.targetBranch} in the workspace repository; merge or rebase onto it` : "This legacy workspace keeps no copy of the target; integrate it"}, validate, and send a new request.`;
+  if (observation?.conflictCheck)
+    return `\nThe merge with the change request target could not be checked (${observation.conflictCheck}). Nothing was published; this is not a conflict. Send a new request once it clears.`;
+  return "";
+}
+/** A link's remote base as a workspace input; an explicit ref adds nothing. */
+function workspaceBase(link: StoredRepositoryLink) {
+  const { baseMode, fetchBeforeProvisioning } = linkBase(link);
+  return baseMode === "ref"
+    ? {}
+    : { base: { mode: baseMode, fetch: fetchBeforeProvisioning } };
+}
 /** Owns only standalone.sqlite in a marked data directory. No import or attach path exists. */
+
 export class StandaloneService {
   private owner: StandaloneDataDirectory | undefined;
   private db: DatabaseSync | undefined;
@@ -1158,6 +1184,16 @@ export class StandaloneService {
         "workspaces",
         new WorkspaceManager(workspaceBindings, workspacePath, {
           ...this.options.workspaceManager,
+          // Late-bound: the coordinator is built after the workspaces it reads.
+          remoteBase: (taskId, repositoryId, request) => {
+            const projectId = taskProjectId(db, taskId);
+            if (!projectId) throw new Error(`Task ${taskId} has no project`);
+            return deliveryCoordinator.fetchBranch(
+              projectId,
+              repositoryId,
+              request,
+            );
+          },
           managedRepositories: {
             root: repositoryPath,
             scopeOf: (taskId) => {
@@ -1323,6 +1359,10 @@ export class StandaloneService {
                 stacked?.repositoryId === repositoryId
                   ? stacked.parentHead
                   : repository.commit,
+              commonDirectory: repository.gitCommonDir,
+              // A legacy binding's common directory is the operator's source: never written.
+              managed: !!repository.sourceGitCommonDir,
+              baseBranch: repository.baseBranch ?? null,
             }
           : null;
       };
@@ -1344,6 +1384,9 @@ export class StandaloneService {
           ...(this.options.delivery?.adopt
             ? { adopt: this.options.delivery.adopt }
             : {}),
+          ...(this.options.delivery?.fetchBranch
+            ? { fetchBranch: this.options.delivery.fetchBranch }
+            : {}),
           issueTrackerFactories: {
             jira: (projectId, _policy, instance) =>
               new JiraIssueTrackerWriter(
@@ -1364,6 +1407,7 @@ export class StandaloneService {
               fetcher: this.options.delivery?.fetcher,
               push: this.options.delivery?.push,
               adopt: this.options.delivery?.adopt,
+              fetchBranch: this.options.delivery?.fetchBranch,
               // A stopping service ends the waits of requests it would retry.
               rateLimit: {
                 ...this.options.delivery?.rateLimit,
@@ -5251,6 +5295,7 @@ export class StandaloneService {
               repositoryId: match.repositoryId,
               path: match.path,
               ref: match.ref,
+              ...linkBaseFields(match),
             });
             if (
               current.gitCommonDirectory !== match.gitCommonDirectory ||
@@ -6572,7 +6617,7 @@ export class StandaloneService {
             call as CoordinationCall,
             caller,
             {
-              text: `External action ${result.operationId}: ${result.state}${result.observation?.reason ? ` (${result.observation.reason})` : ""}${result.observation?.receipt ? `; confirmed provider receipt ${JSON.stringify(result.observation.receipt)}` : ""}${refusal ? `. ${refusal}` : ""}${result.request.action.kind === "pr.create" && result.state === "confirmed-success" ? `\n${this.delivery().unregisteredPr(caller.taskId) ?? ""}` : ""}`,
+              text: `External action ${result.operationId}: ${result.state}${result.observation?.reason ? ` (${result.observation.reason})` : ""}${result.observation?.receipt ? `; confirmed provider receipt ${JSON.stringify(result.observation.receipt)}` : ""}${refusal ? `. ${refusal}` : ""}${publicationCheckText(result.observation)}${result.request.action.kind === "pr.create" && result.state === "confirmed-success" ? `\n${this.delivery().unregisteredPr(caller.taskId) ?? ""}` : ""}`,
               success: result.state === "confirmed-success",
             },
           );
@@ -7475,7 +7520,12 @@ export class StandaloneService {
           if (drafting.get(runId)?.state !== "queued") return undefined;
           const binding = await draftingWorkspaces.provision(
             runId,
-            repositories,
+            // A drafting copy has no managed repository, so it never fetches.
+            repositories.map((repository) =>
+              repository.base
+                ? { ...repository, base: { ...repository.base, fetch: false } }
+                : repository,
+            ),
           );
           if (binding.state !== "ready")
             throw new Error(binding.reason ?? "Working copy is not ready");
@@ -7511,6 +7561,7 @@ export class StandaloneService {
         repositoryId: match.repositoryId,
         path: match.path,
         ref: match.ref,
+        ...linkBaseFields(match),
       });
       if (
         current.gitCommonDirectory !== match.gitCommonDirectory ||
@@ -7521,6 +7572,7 @@ export class StandaloneService {
         repositoryId: match.repositoryId,
         path: match.path,
         ref: match.ref,
+        ...workspaceBase(match),
       });
     }
     return { grant: StandaloneService.grantOf(links), repositories };
@@ -8738,7 +8790,12 @@ export class StandaloneService {
     if (!linked)
       throw new Error("Imported task's source repository is not linked");
     return [
-      { repositoryId: linked.repositoryId, path: linked.path, ref: linked.ref },
+      {
+        repositoryId: linked.repositoryId,
+        path: linked.path,
+        ref: linked.ref,
+        ...workspaceBase(linked),
+      },
     ];
   }
 

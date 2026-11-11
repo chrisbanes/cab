@@ -22,6 +22,7 @@ import {
   type PushFunction,
 } from "../../src/standalone/github-delivery.js";
 import { verifyTaskPush } from "../../src/standalone/push-verification.js";
+import { localBranchFetch } from "./branch-fetch.js";
 
 export function git(cwd: string, ...args: string[]): string {
   return execFileSync(
@@ -247,6 +248,8 @@ export function publicationWorld(
     return adoptBehaviour(request);
   };
 
+  // The task's target branch is the source checkout's `main`, fetched as from the code host.
+  const target = localBranchFetch(tree.source);
   let observed: PrDeliveryObservation | undefined;
   const wakes: Array<{ reason: string; identity: string }> = [];
   const caller: DeliveryCaller = {
@@ -263,7 +266,15 @@ export function publicationWorld(
     verify = true,
     approved = options.approved ?? false,
   ) => {
-    const real = new GitHubHttpDeliveryProvider("token", fetcher, push, adopt);
+    const real = new GitHubHttpDeliveryProvider(
+      "token",
+      fetcher,
+      push,
+      adopt,
+      "github.com",
+      undefined,
+      target.fetchBranch,
+    );
     const provider = Object.assign(Object.create(real), {
       async inspectPr() {
         if (!observed) throw new Error("no PR");
@@ -278,6 +289,9 @@ export function publicationWorld(
       taskWorkspace: async () => ({
         workspacePath: tree.workspace,
         baseCommit: tree.base,
+        commonDirectory: join(tree.source, ".git"),
+        managed: false,
+        baseBranch: "main",
       }),
       feedback: (_task, reason, identity) => wakes.push({ reason, identity }),
       ...(verify
@@ -346,6 +360,7 @@ export function publicationWorld(
     );
   return {
     ...tree,
+    targetFetches: target.requests,
     outsideMaterial,
     overwrite,
     adoptOutside,
