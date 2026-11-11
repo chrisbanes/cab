@@ -6636,7 +6636,7 @@ export class OperatorApi {
   /**
    * Artifact bytes from the workspace or the recorded commit, under the policy the retained
    * evidence read applied: the project's current repository links, path exclusions and control
-   * paths, and an unchanged policy across the read.
+   * paths, text content disclosure, and an unchanged policy across the read.
    */
   async readArtifact(taskId: string, artifactId: string) {
     uuid.parse(artifactId);
