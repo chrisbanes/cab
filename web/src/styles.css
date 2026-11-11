@@ -1116,8 +1116,6 @@ nav {
 .changes-workbench-split {
   min-height: 360px;
   max-height: 75vh;
-  border-radius: var(--radius-xl);
-  background: var(--color-card);
   overflow: hidden;
 }
 .changes-workbench-split .changes-tree {

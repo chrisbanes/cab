@@ -34,7 +34,7 @@
 
 .changes-pane-actions h3 {
   margin: 0 auto 0 0;
-  font-size: var(--type-md, 1rem);
+  font-size: var(--type-md);
 }
 
 /* The pane is the one card: the comparison content inside it is hairline sections. */
