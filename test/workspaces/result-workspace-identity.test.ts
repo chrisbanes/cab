@@ -287,6 +287,8 @@ test("a recorded branch name is disclosed only under the current exclusions", as
   const sanitized = await branch();
   assert.ok(sanitized);
   assert.ok(!sanitized.includes("leakedvalue"), sanitized);
+  assert.notEqual(sanitized, "[Content unavailable]");
+  assert.match(sanitized, /^cb\//);
   // Without established exclusions the name is withheld, not shown as a detached HEAD.
   const restore = wrapTaskExclusions(api, async () => undefined);
   t.after(restore);
