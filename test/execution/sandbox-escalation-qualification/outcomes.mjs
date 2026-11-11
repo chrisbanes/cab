@@ -475,13 +475,18 @@ export function classify(group, trace) {
   );
 }
 
-/** JSON with the token, fixture root and home directory replaced, in that order. */
+/** Claude Code's per-directory form of a path, as in its task-output directories. */
+export const mangle = (path) => path?.replace(/[/.]/g, "-");
+
+/** JSON with the token, fixture root and home directory (plain and mangled) replaced. */
 export function sanitize(value, { token, root, home }) {
   let text = JSON.stringify(value, null, 2);
   for (const [needle, replacement] of [
     [token, "<redacted-token>"],
     [root, "<fixture>"],
+    [mangle(root), "<fixture>"],
     [home, "~"],
+    [mangle(home), "~"],
   ])
     if (needle) text = text.replaceAll(needle, replacement);
   return text;

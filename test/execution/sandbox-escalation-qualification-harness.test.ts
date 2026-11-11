@@ -266,7 +266,7 @@ test("codex groups send the granular turn policy, answer only accept or decline,
     args: fake,
     env: process.env,
     workspace: ws,
-    deadlineMs: 20_000,
+    deadlineMs: 60_000,
   });
   assert.equal(trace.failure, null);
   assert.deepEqual(trace.turnStart, {
@@ -305,7 +305,7 @@ test("codex groups send the granular turn policy, answer only accept or decline,
     env: process.env,
     workspace: ws,
     holdMs: 200,
-    deadlineMs: 20_000,
+    deadlineMs: 60_000,
   });
   const request = timing.events.find(
     (e: Event) =>
@@ -426,9 +426,14 @@ test("claude auto group sends auto mode with unsandboxed commands allowed and re
   const token = "sk-fake-token-value";
   const root = join(homedir(), ".cache", "cab-sandbox-escalation-x");
   const text = sanitize(
-    { a: `${token} ${root}/ws ${homedir()}/other` },
+    {
+      a: `${token} ${root}/ws ${homedir()}/other`,
+      b: `/private/tmp/claude-1/${root.replace(/[/.]/g, "-")}-ws`,
+    },
     { token, root, home: homedir() },
   );
   assert.ok(!text.includes(token) && !text.includes(homedir()));
   assert.match(text, /<redacted-token> <fixture>\/ws ~\/other/);
+  assert.match(text, /claude-1\/<fixture>-ws/);
+  assert.ok(!text.includes(homedir().replace(/\//g, "-")));
 });

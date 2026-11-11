@@ -18,7 +18,7 @@ import {
 import { arch, homedir, release } from "node:os";
 import { join } from "node:path";
 import { chromiumScript } from "./chromium-script.mjs";
-import { classify, SUB_CONTRACTS, sanitize } from "./outcomes.mjs";
+import { classify, mangle, SUB_CONTRACTS, sanitize } from "./outcomes.mjs";
 
 const deadlines = {
   "codex-user": 15,
@@ -168,7 +168,18 @@ try {
 } finally {
   rmSync(root, { recursive: true, force: true });
 }
-const cleanup = { fixtureRemoved: !existsSync(root), ...trace.cleanup };
+// shortcut: Claude Code's undocumented task-output directory for the workspace; recheck on upgrade.
+const claudeTasks = join(
+  "/private/tmp",
+  `claude-${process.getuid()}`,
+  mangle(workspace),
+);
+if (!codex) rmSync(claudeTasks, { recursive: true, force: true });
+const cleanup = {
+  fixtureRemoved: !existsSync(root),
+  ...(codex ? {} : { claudeTasksRemoved: !existsSync(claudeTasks) }),
+  ...trace.cleanup,
+};
 if (trace.prerequisite) {
   process.stderr.write(
     `Refusing sandbox escalation probe: ${trace.prerequisite}.\n`,
