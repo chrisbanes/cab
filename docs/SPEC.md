@@ -2397,9 +2397,9 @@ Once the workspace copy has moved on or the workspace is cleaned, it is read fro
 the commit its result recorded, in the repository that owns the worktree
 (`recorded-commit`), with the same size, hash and image checks. A file that was
 never committed and has changed since is not served. Both reads apply the current
-policy first and again after reading: a repository the project no longer links,
-an excluded or control path, or excluded text content is withheld, and a policy
-change during the read withholds the bytes.
+policy first and again after reading: a repository the project no longer links
+or an excluded or control path is withheld, and a policy change during the read
+withholds the bytes.
 
 Workspace cleanup refuses while a result recorded uncommitted changes in a
 repository and that work is neither committed nor delivered, naming the result:

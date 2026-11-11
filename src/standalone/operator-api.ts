@@ -6636,14 +6636,15 @@ export class OperatorApi {
   /**
    * Artifact bytes from the workspace or the recorded commit, under the policy the retained
    * evidence read applied: the project's current repository links, path exclusions and control
-   * paths, the content's disclosure, and an unchanged policy across the read.
+   * paths, and an unchanged policy across the read.
    */
   async readArtifact(taskId: string, artifactId: string) {
     uuid.parse(artifactId);
     this.requireTask(taskId);
+    // Policy first: its fence then also covers a binding change while the location is resolved.
+    const policy = await this.retainedEvidencePolicy(taskId);
     const location = await this.artifactLocation(taskId, artifactId);
     if (!location) throw new OperatorApiError(404, "not-found");
-    const policy = await this.retainedEvidencePolicy(taskId);
     if (
       !policy ||
       (await this.retainedPathUnavailable(
