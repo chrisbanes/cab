@@ -174,7 +174,7 @@ function ProjectNavigation({
       trailing?: ReactNode;
       className?: string;
       describedBy?: string;
-      title?: string;
+      title?: string | undefined;
     } = {},
   ) => (
     <RouteLink
