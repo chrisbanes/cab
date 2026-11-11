@@ -335,3 +335,80 @@ test("an archived project's proposal is read-only: no Accept, Reject, Redraft or
   assert.equal(commands("profile.configure").length, 0);
   assert.equal(commands("project.configure").length, 0);
 });
+
+test("a selection that becomes withheld or a target that is no longer permitted never blocks a request", async (_t, j) => {
+  const { f, page, projectId, open } = await launch(j, desktop);
+  await open();
+  await select(page, /keyboard navigation evidence/);
+  await page.getByLabel("Target").selectOption({ label: "Agent Rae" });
+  const domain = f.service.domain();
+  // Another project's instructions now appear in the selected message, so it is withheld.
+  domain.execute({
+    type: "project.create",
+    actor: "operator",
+    key: randomUUID(),
+    projectId: randomUUID(),
+    name: "Gamma",
+    leadProfileId: null,
+    instructions: "keyboard navigation evidence",
+  });
+  // And Rae is no longer a permitted agent of this project.
+  domain.execute({
+    type: "routing.configure",
+    actor: "operator",
+    key: randomUUID(),
+    projectId,
+    expectedVersion: Number(domain.routing(projectId).version),
+    enabled: false,
+    candidateProfileIds: [],
+  });
+  await page.reload();
+  await page
+    .getByText(
+      "Selected feedback that is now withheld was removed from the selection.",
+    )
+    .waitFor();
+  await page.getByText("0 of 20 selected").waitFor();
+  await page
+    .getByText(/no longer this project.s lead or a permitted agent/)
+    .waitFor();
+  // The remaining items still work once a valid target is chosen.
+  await select(page, /keyboard evidence\./);
+  const request = page.getByRole("button", { name: "Request proposal" });
+  assert.equal(await request.isDisabled(), true);
+  await page
+    .getByLabel("Target")
+    .selectOption({ label: "Project instructions" });
+  assert.equal(await request.isDisabled(), false);
+});
+
+test("a proposal withheld on read can be rejected", async (_t, j) => {
+  const { f, page, open } = await launch(j, desktop);
+  await open();
+  await select(page, /keyboard evidence\./);
+  await page.getByRole("button", { name: "Request proposal" }).click();
+  const runId = await runningRun(f, new Set());
+  await answer(f, runId, "Keep it simple.\nWithheld line for review.");
+  await page.locator("#instruction-final").waitFor();
+  f.service.domain().execute({
+    type: "project.create",
+    actor: "operator",
+    key: randomUUID(),
+    projectId: randomUUID(),
+    name: "Delta",
+    leadProfileId: null,
+    instructions: "Withheld line for review.",
+  });
+  await page.reload();
+  await page
+    .getByText(/This proposal holds text that cannot be shown/)
+    .waitFor();
+  await page.getByRole("button", { name: "Reject" }).click();
+  await page
+    .getByText("Rejected the proposal. The instructions are unchanged.")
+    .waitFor();
+  await until(
+    () => f.service.readDrafting(runId)?.state === "discarded",
+    "the discarded run",
+  );
+});

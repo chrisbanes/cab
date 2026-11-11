@@ -103,6 +103,8 @@ export function InstructionProposalsTab(p: TabProps) {
   const [saved, setSaved] = useState<string | null>(null);
   // An archived project's proposals are read-only, like the rest of its settings.
   const readOnly = Boolean(p.readOnly);
+  const latest = useRef(stored);
+  latest.current = stored;
 
   const loadPage = useCallback(
     async (after: string | null, signal?: AbortSignal) => {
@@ -117,13 +119,24 @@ export function InstructionProposalsTab(p: TabProps) {
         setItems((current) =>
           after ? [...current, ...page.items] : page.items,
         );
+        // A selected item that is withheld now can no longer be sent, so it leaves the selection.
+        const withheld = new Set(
+          page.items.filter((item) => !item.available).map((item) => item.id),
+        );
+        const kept = latest.current.refs.filter((r) => !withheld.has(r.id));
+        if (kept.length !== latest.current.refs.length) {
+          change({ refs: kept });
+          setMessage(
+            "Selected feedback that is now withheld was removed from the selection.",
+          );
+        }
         setCursor(page.nextCursor);
         setListError(false);
       } catch {
         if (!signal?.aborted) setListError(true);
       }
     },
-    [client, projectId],
+    [client, projectId, change],
   );
   useEffect(() => {
     const abort = new AbortController();
@@ -132,10 +145,10 @@ export function InstructionProposalsTab(p: TabProps) {
   }, [loadPage]);
 
   const runId = stored.runId ?? null;
-  const latest = useRef(stored);
-  latest.current = stored;
   const resent = useRef(new Set<string>());
   const startingId = useRef<string | null>(null);
+  const readOnlyRef = useRef(readOnly);
+  readOnlyRef.current = readOnly;
   // The latest render's sender, so a resend uses the current session.
   const sendStartRef = useRef<typeof sendStart>(async () => {});
   const readRun = useCallback(
@@ -151,7 +164,7 @@ export function InstructionProposalsTab(p: TabProps) {
       } catch (error) {
         if (!(error instanceof ClientError && error.code === "not-found"))
           return;
-        if (startingId.current === runId) return;
+        if (startingId.current === runId || readOnlyRef.current) return;
         // A start that may never have arrived is sent once more under its key and content.
         const { startKey, expectedProjectVersion } = latest.current;
         if (startKey && expectedProjectVersion && !resent.current.has(runId)) {
@@ -205,6 +218,15 @@ export function InstructionProposalsTab(p: TabProps) {
       (profile.id === data.project.leadProfileId ||
         permitted.includes(profile.id)),
   );
+  // A stored agent that is no longer the lead or permitted is shown as such, never silently swapped.
+  const targetValid =
+    stored.target.kind === "project" ||
+    targets.some(
+      (profile) =>
+        stored.target.kind === "profile" &&
+        profile.id === stored.target.profileId,
+    );
+  const sendable = selection.sendable && targetValid;
   const toggle = (item: OperatorFeedbackItem) => {
     const selected = stored.refs.some((r) => r.id === item.id);
     change({
@@ -299,14 +321,25 @@ export function InstructionProposalsTab(p: TabProps) {
         expectedProjectVersion: undefined,
       },
     );
+    const fields = result.state === "rejected" ? (result.fieldPaths ?? []) : [];
     setMessage(
       result.state === "conflict"
         ? "The project changed. Try again."
-        : result.code === "forbidden"
-          ? "The selection holds text that cannot be sent to the lead."
-          : "Couldn’t request a proposal.",
+        : result.state === "rejected" && result.code === "forbidden"
+          ? "The selection or note holds text that cannot be sent to the lead. The feedback list was read again."
+          : fields.includes("target")
+            ? "The target is no longer available. Choose another target."
+            : fields.includes("feedback")
+              ? "Some selected feedback can no longer be used. The feedback list was read again."
+              : "Couldn’t request a proposal.",
     );
     if (result.state === "conflict") p.refreshConfiguration();
+    // A refusal may mean the feedback changed, so the list shows what is available now.
+    if (
+      result.state === "rejected" &&
+      (result.code === "forbidden" || fields.includes("feedback"))
+    )
+      void loadPage(null);
   }
   const settle = async (disposition: "accept" | "discard") => {
     if (!runId) return false;
@@ -319,15 +352,19 @@ export function InstructionProposalsTab(p: TabProps) {
   const stop = async () => {
     if (!runId) return;
     setBusy(true);
-    await client.command(
+    setMessage("");
+    const result = await client.command(
       { type: "drafting.stop", key: randomUUID(), runId },
       session.csrfToken,
     );
     setBusy(false);
+    if (result.state !== "recorded")
+      setMessage("Couldn’t stop the proposal. Try again.");
     await readRun();
   };
   const reject = async () => {
     setBusy(true);
+    setMessage("");
     const done = await settle("discard");
     setBusy(false);
     if (done) {
@@ -347,7 +384,23 @@ export function InstructionProposalsTab(p: TabProps) {
   return (
     <div className="settings-split instruction-proposals">
       <div className="settings-column">
-        {run?.runId === runId && run ? (
+        {runId && run?.runId !== runId ? (
+          <Panel
+            title="Instruction proposal"
+            description="Checking the request…"
+          >
+            <div className="settings-actions">
+              <Button
+                type="button"
+                variant="secondary"
+                disabled={busy}
+                onClick={clear}
+              >
+                New selection
+              </Button>
+            </div>
+          </Panel>
+        ) : run?.runId === runId && run ? (
           <Review
             {...p}
             run={run}
@@ -357,7 +410,10 @@ export function InstructionProposalsTab(p: TabProps) {
               setSaved(savedLine(revision));
               p.refreshConfiguration();
               // The target has changed now, so Accept is not offered again even if this fails.
-              await settle("accept");
+              if (!(await settle("accept")))
+                setMessage(
+                  "Saved. The proposal could not be closed; it expires on its own. Choose New selection to continue.",
+                );
               await readRun();
             }}
             reread={() => void readRun()}
@@ -374,8 +430,7 @@ export function InstructionProposalsTab(p: TabProps) {
             <form
               onSubmit={(e) => {
                 e.preventDefault();
-                if (selection.sendable && !busy && !readOnly)
-                  void start(stored);
+                if (sendable && !busy && !readOnly) void start(stored);
               }}
             >
               <fieldset className="settings-fields">
@@ -406,7 +461,11 @@ export function InstructionProposalsTab(p: TabProps) {
                       <label className="instruction-feedback-item">
                         <input
                           type="checkbox"
-                          disabled={!item.available}
+                          // A selected item stays clearable even once it is withheld.
+                          disabled={
+                            !item.available &&
+                            !stored.refs.some((r) => r.id === item.id)
+                          }
                           checked={stored.refs.some((r) => r.id === item.id)}
                           onChange={() => toggle(item)}
                         />
@@ -456,6 +515,11 @@ export function InstructionProposalsTab(p: TabProps) {
                   }
                 >
                   <option value="">Project instructions</option>
+                  {!targetValid && stored.target.kind === "profile" && (
+                    <option value={stored.target.profileId} disabled>
+                      Agent no longer available
+                    </option>
+                  )}
                   {targets.map((profile) => (
                     <option key={profile.id} value={profile.id}>
                       Agent {profile.name ?? "(name withheld)"}
@@ -465,7 +529,13 @@ export function InstructionProposalsTab(p: TabProps) {
                     </option>
                   ))}
                 </NativeSelect>
-                {stored.target.kind === "profile" && (
+                {!targetValid && (
+                  <p className="body" role="status">
+                    The chosen agent is no longer this project&rsquo;s lead or a
+                    permitted agent. Choose another target.
+                  </p>
+                )}
+                {stored.target.kind === "profile" && targetValid && (
                   <p className="metadata muted">
                     An agent’s instructions are shared by every project that
                     uses it. The proposal lists those projects before you
@@ -483,10 +553,7 @@ export function InstructionProposalsTab(p: TabProps) {
                 />
               </div>
               <div className="settings-actions">
-                <Button
-                  type="submit"
-                  disabled={!selection.sendable || busy || readOnly}
-                >
+                <Button type="submit" disabled={!sendable || busy || readOnly}>
                   {busy ? "Requesting…" : "Request proposal"}
                 </Button>
               </div>
@@ -616,10 +683,10 @@ function Review(
           <Button
             type="button"
             variant="secondary"
-            disabled={readOnly || p.busy || run.state === "stopping"}
+            disabled={readOnly || p.busy}
             onClick={p.stop}
           >
-            Stop
+            {run.state === "stopping" ? "Stop again" : "Stop"}
           </Button>
         </div>
       )}
@@ -651,18 +718,30 @@ function Review(
         </div>
       )}
       {run.state === "proposed" && run.proposalWithheld && (
-        <p className="body" role="alert">
-          This proposal holds text that cannot be shown, so it cannot be
-          accepted.{" "}
-          <Button
-            type="button"
-            variant="secondary"
-            disabled={readOnly || p.busy}
-            onClick={p.redraft}
-          >
-            Redraft
-          </Button>
-        </p>
+        <>
+          <p className="body" role="alert">
+            This proposal holds text that cannot be shown, so it cannot be
+            accepted.
+          </p>
+          <div className="settings-actions">
+            <Button
+              type="button"
+              variant="secondary"
+              disabled={readOnly || p.busy}
+              onClick={p.reject}
+            >
+              Reject
+            </Button>
+            <Button
+              type="button"
+              variant="secondary"
+              disabled={readOnly || p.busy}
+              onClick={p.redraft}
+            >
+              Redraft
+            </Button>
+          </div>
+        </>
       )}
       {run.state === "proposed" && proposal && (
         <form
@@ -675,7 +754,7 @@ function Review(
               command(),
               p.reread,
               {},
-              block !== null,
+              block !== null || p.busy,
             )
           }
         >
@@ -755,20 +834,35 @@ function Review(
               {restoreLine(target?.kind === "profile" ? "profile" : "project")}
             </p>
           </section>
-          {block && d.phase === "editing" && (
-            <p className="body" role="status">
-              {block}
-            </p>
-          )}
+          {block &&
+            (d.phase === "editing" ||
+              d.phase === "conflict" ||
+              d.phase === "rejected") && (
+              <p className="body" role="status">
+                {block}
+              </p>
+            )}
           <DraftOutcome
             draft={d}
             client={client}
             session={session}
             label="Accept and save"
-            saveDisabled={block !== null}
+            saveDisabled={block !== null || p.busy}
             refresh={p.reread}
             success={p.saved}
           />
+          {d.phase === "recorded" && (
+            <div className="settings-actions">
+              <Button
+                type="button"
+                variant="secondary"
+                disabled={p.busy}
+                onClick={p.clear}
+              >
+                New selection
+              </Button>
+            </div>
+          )}
           {d.phase !== "recorded" &&
             d.phase !== "pending" &&
             d.phase !== "unknown" && (
