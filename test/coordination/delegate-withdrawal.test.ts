@@ -670,7 +670,85 @@ test("a completed child of a withdrawn delegate cannot be resumed, so no new res
     // An operator comment offers no resume to it either.
     const recipient = f.coordination.taskCommentRecipient(taskA, child);
     assert.equal(recipient?.mode, "unavailable");
-    assert.equal(recipient?.reason, "unresolved-destination");
+    assert.equal(recipient?.reason, "recipient-withdrawn");
+  } finally {
+    f.close();
+  }
+});
+
+test("a withdrawn delegate's completed grandchildren cannot be resumed and their waiting events stop counting", () => {
+  const f = fixture();
+  try {
+    const parent = f.delegate(f.leadA);
+    const child = f.delegate(parent);
+    const grandchild = f.delegate(child);
+    f.addWork(grandchild, "grandchild");
+    const { result } = f.coordination.recordResult(
+      f.call(
+        "cab_report_result",
+        { summary: "Grandchild done" },
+        undefined,
+        "grandchild",
+      ),
+    );
+    assert.equal(result.recipientAssignmentId, child);
+    f.db
+      .prepare(
+        "UPDATE execution_intents SET state = 'completed' WHERE workId = ?",
+      )
+      .run("work-grandchild");
+    f.db
+      .prepare(
+        "UPDATE execution_pending_effects SET state = 'settled' WHERE workId = ?",
+      )
+      .run("work-grandchild");
+    f.db
+      .prepare(
+        "UPDATE domain_assignments SET state = 'completed' WHERE id IN (?, ?)",
+      )
+      .run(child, grandchild);
+    // The grandchild's result waits in the completed child's inbox.
+    assert.equal(f.coordination.pendingEvents(child).length, 1);
+    f.leadWithdraw(parent);
+    assert.deepEqual(f.coordination.pendingEvents(child), []);
+    assert.ok(!f.coordination.pendingEventRecipients().includes(child));
+    assert.throws(
+      () =>
+        f.coordination.requestFollowUp(
+          f.call("cab_request_follow_up", {
+            resultId: result.resultId,
+            instructions: "Revise it",
+          }),
+        ),
+      /reports to a withdrawn delegate/,
+    );
+    assert.equal(f.domain.assignment(grandchild).state, "completed");
+    const blockers = (
+      f.coordination as unknown as {
+        completionBlockers(
+          request: TaskCompletionRequest,
+          terminal: "completed",
+        ): string[];
+      }
+    ).completionBlockers(
+      {
+        requestId: nextId(),
+        taskId: taskA,
+        leadAssignmentId: f.leadA,
+        leadWorkId: f.leadWork,
+        leadWorkRevision: 1,
+        taskVersion: Number(f.domain.task(taskA).version),
+        reviewedResultIds: [],
+        status: "pending",
+        rejectionReasons: [],
+        revision: 1,
+        createdAt: 0,
+        finalizedAt: null,
+      },
+      "completed",
+    );
+    assert.ok(!blockers.includes("pending-inbox-event"), String(blockers));
+    assert.ok(!blockers.includes("assignments-not-complete"), String(blockers));
   } finally {
     f.close();
   }

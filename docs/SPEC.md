@@ -853,9 +853,11 @@ history, and any later callback from its conversation, including
 `cab_report_result`, is refused as not bound to current work.
 
 Withdrawal is intentionally irreversible: there is no restore and no follow-up on a
-withdrawn assignment. A completed assignment whose results go to a withdrawn delegate
-cannot be followed up, messaged or resumed by a comment either, since its next result
-would have nowhere to go. To redo the work, the lead delegates again.
+withdrawn assignment. A completed assignment whose results go, directly or through
+its requesters, to a withdrawn delegate cannot be followed up or resumed by a comment
+either, since its next result would have nowhere to go; inbox events already waiting
+for that subtree become undeliverable at withdrawal. To redo the work, the lead
+delegates again.
 
 A lead's report refused while delegates are unfinished lists each blocking
 delegate with its short ID, state and way out, saying "still running" only for one
@@ -2673,7 +2675,8 @@ exact references and anchors.
   on its next eligible turn), `resume` (a completed assignment resumes as the same
   assignment through an operator follow-up) or `unavailable` with a bounded reason
   code (`task-closed`, `held`, `cancelled`, `no-resumable-result`,
-  `already-followed-up`, `unresolved-destination`). A completed delegate also needs
+  `already-followed-up`, `unresolved-destination`, `recipient-withdrawn`). A completed
+  delegate also needs
   a resolved result destination, as an agent follow-up does. The preview is
   advisory; the service decides again at commit. Absent `commentRecipients` means the
   service has no shared comments, and a client must not fall back to another send.

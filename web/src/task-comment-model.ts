@@ -18,6 +18,7 @@ export type CommentRecipientFact = {
     | "no-resumable-result"
     | "already-followed-up"
     | "unresolved-destination"
+    | "recipient-withdrawn"
     | null;
 };
 
@@ -101,6 +102,8 @@ const reasonText: Record<
   "already-followed-up": "its latest result already has a follow-up",
   "unresolved-destination":
     "its result destination is unresolved, so it can't be resumed",
+  "recipient-withdrawn":
+    "it reports to a withdrawn delegate, so it can't be resumed",
 };
 
 export const unavailableText = (fact: CommentRecipientFact) =>

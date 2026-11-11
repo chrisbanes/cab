@@ -1724,11 +1724,17 @@ export class CoordinationStore {
       if (!this.deleteQueuedBatchKeepingEvents(batch))
         throw new Error("Withdrawn delegate's queued delivery is inconsistent");
     this.db
-      .prepare(`INSERT INTO coordination_undeliverable_inbox_events (eventId, assignmentId, reason)
+      // Its completed subtree can never resume, so their waiting events go nowhere too.
+      .prepare(`WITH RECURSIVE subtree(id) AS (
+          SELECT ? UNION SELECT child.id FROM domain_assignments child
+          JOIN subtree ON child.resultRecipientAssignmentId = subtree.id
+        )
+        INSERT INTO coordination_undeliverable_inbox_events (eventId, assignmentId, reason)
         SELECT event.eventId, event.recipientAssignmentId, 'delegate-withdrawn'
         FROM coordination_inbox_events event
         LEFT JOIN coordination_delivery_events delivery ON delivery.eventId = event.eventId
-        WHERE event.recipientAssignmentId = ? AND delivery.eventId IS NULL`)
+        WHERE event.recipientAssignmentId IN (SELECT id FROM subtree)
+          AND delivery.eventId IS NULL AND ${deliverable("event")}`)
       .run(value.assignmentId);
     if (value.actor === "operator")
       this.newEvent(
@@ -5507,7 +5513,7 @@ export class CoordinationStore {
     if (this.recipientWithdrawn(String(result.assignmentId)))
       return {
         refusal: withdrawnRecipientRefusal,
-        code: "unresolved-destination",
+        code: "recipient-withdrawn",
       };
     // Defensive: a follow-up returns the assignment to pending; any turn that completes it again has newer work.
     if (
@@ -5576,19 +5582,26 @@ export class CoordinationStore {
     );
   }
 
-  /** Reopens a completed assignment at a new version with one follow-up event. */
-  /** Its next result would go to a withdrawn delegate, which takes no further results. */
+  /**
+   * Its next result would reach a withdrawn delegate, directly or by being reported on up
+   * the chain of result recipients; a withdrawn delegate takes no further results.
+   */
   private recipientWithdrawn(assignmentId: string): boolean {
     return Boolean(
       this.one(
-        `SELECT 1 FROM domain_assignments target
-        JOIN domain_assignments recipient ON recipient.id = target.resultRecipientAssignmentId
-        WHERE target.id = ? AND recipient.state = 'withdrawn'`,
+        `WITH RECURSIVE chain(id) AS (
+          SELECT resultRecipientAssignmentId FROM domain_assignments WHERE id = ?
+          UNION SELECT next.resultRecipientAssignmentId FROM chain
+          JOIN domain_assignments next ON next.id = chain.id
+          WHERE next.resultRecipientAssignmentId IS NOT NULL
+        ) SELECT 1 FROM chain JOIN domain_assignments recipient ON recipient.id = chain.id
+        WHERE recipient.state = 'withdrawn' LIMIT 1`,
         assignmentId,
       ),
     );
   }
 
+  /** Reopens a completed assignment at a new version with one follow-up event. */
   private resumeCompletedAssignment(
     result: Row,
     requester: "assignment" | "operator",
