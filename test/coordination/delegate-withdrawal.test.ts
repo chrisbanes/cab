@@ -892,6 +892,31 @@ test("an operator withdrawal with a completed requester and lead records its not
       1,
       "the notice is kept as history",
     );
+    const blockers = (
+      f.coordination as unknown as {
+        completionBlockers(
+          request: TaskCompletionRequest,
+          terminal: "completed",
+        ): string[];
+      }
+    ).completionBlockers(
+      {
+        requestId: nextId(),
+        taskId: taskA,
+        leadAssignmentId: f.leadA,
+        leadWorkId: f.leadWork,
+        leadWorkRevision: 1,
+        taskVersion: Number(f.domain.task(taskA).version),
+        reviewedResultIds: [],
+        status: "pending",
+        rejectionReasons: [],
+        revision: 1,
+        createdAt: 0,
+        finalizedAt: null,
+      },
+      "completed",
+    );
+    assert.ok(!blockers.includes("pending-inbox-event"), String(blockers));
   } finally {
     f.close();
   }
