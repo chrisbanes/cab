@@ -231,9 +231,8 @@
   font-size: var(--type-sm);
   font-weight: var(--weight-medium);
 }
-.inbox-open-task svg {
-  width: 14px;
-  height: 14px;
+.inbox-nowrap {
+  white-space: nowrap;
 }
 .inbox-detail-body {
   display: flex;

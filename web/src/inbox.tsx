@@ -22,7 +22,7 @@ import {
   workspaceLabels,
 } from "../../src/operator/project-labels.js";
 import type { OperatorClient } from "./api.js";
-import { ArrowUpRight, ChevronDown, ChevronUp } from "lucide-react";
+import { ChevronDown, ChevronUp } from "lucide-react";
 import { ActionLink, Button, ResourceStatus } from "./components.js";
 import { Badge } from "./ui/badge.js";
 import { useMediaQuery } from "./use-media-query.js";
@@ -650,7 +650,6 @@ export function Inbox({
                         href={`/tasks/${selected.taskId}`}
                       >
                         Open task
-                        <ArrowUpRight aria-hidden="true" />
                       </a>
                     )}
                     {position >= 0 && (
@@ -700,7 +699,7 @@ export function Inbox({
                 </div>
               )}
               {!isQuestion && meta}
-              {selected && (
+              {selected && !isQuestion && (
                 <InboxVisibility
                   key={`${selected.id}:${selected.lifecycle?.status}`}
                   item={selected}
@@ -757,6 +756,15 @@ export function Inbox({
               ) : (
                 <p>Selected request is unavailable.</p>
               )}
+              {selected && isQuestion && (
+                <InboxVisibility
+                  key={`${selected.id}:${selected.lifecycle?.status}`}
+                  item={selected}
+                  client={client}
+                  session={session}
+                  onChanged={resource.refresh}
+                />
+              )}
               {isQuestion && meta}
             </div>
           </>
@@ -790,7 +798,9 @@ function InboxVisibility({
     [pending, setPending] = useState<OperatorCommand | null>(null),
     [message, setMessage] = useState(""),
     [busy, setBusy] = useState(false),
-    [recorded, setRecorded] = useState(false);
+    [recorded, setRecorded] = useState(false),
+    [revealed, setRevealed] = useState(false),
+    refocus = useRef(false);
   const lifecycle = item.lifecycle;
   if (!lifecycle) return null;
   const action = lifecycle.status === "dismissed" ? "restore" : "dismiss";
@@ -844,30 +854,59 @@ function InboxVisibility({
       {message && <p role="status">{message}</p>}
       {!recorded &&
         lifecycle.status !== "resolved" &&
-        (action === "restore" || item.dismissible) && (
+        (action === "restore" || item.dismissible) &&
+        (action === "restore" ? (
+          <Button
+            variant="secondary"
+            disabled={busy}
+            onClick={() => void run()}
+          >
+            {pending ? "Retry visibility change" : "Restore"}
+          </Button>
+        ) : revealed || pending ? (
           <>
-            {action === "dismiss" && (
-              <Textarea
-                aria-label="Dismissal note (optional)"
-                maxLength={4096}
-                value={note}
-                disabled={busy || !!pending}
-                onChange={(e) => setNote(e.target.value)}
-              />
-            )}
+            <Textarea
+              aria-label="Dismissal note (optional)"
+              maxLength={4096}
+              value={note}
+              disabled={busy || !!pending}
+              onChange={(e) => setNote(e.target.value)}
+            />
             <Button
               variant="secondary"
               disabled={busy}
               onClick={() => void run()}
             >
-              {pending
-                ? "Retry visibility change"
-                : action === "dismiss"
-                  ? "Dismiss"
-                  : "Restore"}
+              {pending ? "Retry visibility change" : "Dismiss request"}
             </Button>
+            {!pending && (
+              <Button
+                variant="secondary"
+                disabled={busy}
+                onClick={() => {
+                  setRevealed(false);
+                  setNote("");
+                  refocus.current = true;
+                }}
+              >
+                Cancel
+              </Button>
+            )}
           </>
-        )}
+        ) : (
+          <Button
+            ref={(el) => {
+              if (el && refocus.current) {
+                refocus.current = false;
+                el.focus();
+              }
+            }}
+            variant="secondary"
+            onClick={() => setRevealed(true)}
+          >
+            Dismiss
+          </Button>
+        ))}
     </div>
   );
 }

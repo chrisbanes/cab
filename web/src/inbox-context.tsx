@@ -89,13 +89,18 @@ export function InboxContext({
           <h3>Evidence</h3>
           {item.evidence && (
             <a href={item.evidence}>
-              Task evidence <ArrowUpRight aria-hidden="true" size={12} />
+              Task{" "}
+              <span className="inbox-nowrap">
+                evidence <ArrowUpRight aria-hidden="true" size={12} />
+              </span>
             </a>
           )}
           {item.conversation && (
             <a href={item.conversation}>
-              Requesting conversation{" "}
-              <ArrowUpRight aria-hidden="true" size={12} />
+              Requesting{" "}
+              <span className="inbox-nowrap">
+                conversation <ArrowUpRight aria-hidden="true" size={12} />
+              </span>
             </a>
           )}
         </section>
