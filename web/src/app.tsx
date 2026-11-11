@@ -109,7 +109,7 @@ function RouteLink({
   trailing?: ReactNode;
   className?: string;
   describedBy?: string;
-  title?: string;
+  title?: string | undefined;
   children: ReactNode;
 }) {
   return (
