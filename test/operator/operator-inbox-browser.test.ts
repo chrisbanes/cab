@@ -2678,14 +2678,14 @@ test("work through the Inbox: drafts, filters and position survive key moves, ap
     "/inbox",
     async (f) => {
       const a = await seedOwnQuestion(f, mixedForm, "Request 1", "Atlas");
-      const [b, c, d] = await seedChoices(f, 3, 2);
+      // Seven questions and an approval overflow the queue, so its scroll is a real offset.
+      const [b, ...others] = await seedChoices(f, 6, 2);
       const approval = await seedOwnApproval(f);
-      return { a, b: b!, c: c!, d: d!, approval };
+      return { a, b: b!, others, approval };
     },
   );
   const posts = commandPosts(page);
-  const rows = page.locator(".inbox-row"),
-    detail = page.getByRole("region", { name: "Selected request" }),
+  const detail = page.getByRole("region", { name: "Selected request" }),
     form = page.getByRole("region", { name: "Exact question response" }),
     position = detail.locator(".inbox-position"),
     kind = page.getByLabel("Request kind", { exact: true }),
@@ -2693,6 +2693,12 @@ test("work through the Inbox: drafts, filters and position survive key moves, ap
     queue = page.locator(".inbox-rows"),
     request = () => new URL(page.url()).searchParams.get("request"),
     rowOf = (id: string) => page.locator(`.inbox-row[data-record-id="${id}"]`),
+    scrollQueue = () =>
+      queue.evaluate((e) => {
+        e.scrollTop = 120;
+        e.dispatchEvent(new Event("scroll"));
+        return e.scrollTop;
+      }),
     count = (n: number) =>
       page.waitForFunction(
         (n) => document.querySelectorAll(".inbox-row").length === n,
@@ -2704,18 +2710,18 @@ test("work through the Inbox: drafts, filters and position survive key moves, ap
     }),
     draft = "Draft kept across the session";
   const a = more.a.interactionId;
-  await count(5);
+  await count(8);
   // (1) Under a filter, a draft survives J and K.
   await kind.selectOption("question");
-  await count(4);
+  await count(7);
   await rowOf(a).click();
   await detail.getByRole("heading", { level: 2 }).waitFor();
   const at = (await displayed(page)).indexOf(a),
-    place = `${at + 1} of 4`;
+    place = `${at + 1} of 7`;
   await position.getByText(place, { exact: true }).waitFor();
   await optional.fill(draft);
   await detail.getByRole("heading", { level: 2 }).focus();
-  const [away, back] = at < 3 ? ["j", "k"] : ["k", "j"];
+  const [away, back] = at < 6 ? ["j", "k"] : ["k", "j"];
   await page.keyboard.press(away!);
   await page.waitForURL((url) => url.searchParams.get("request") !== a);
   await page.keyboard.press(back!);
@@ -2723,7 +2729,8 @@ test("work through the Inbox: drafts, filters and position survive key moves, ap
   assert.equal(request(), a);
   assert.equal(await optional.inputValue(), draft);
   // (2) The task and Back: the filter, position, queue scroll and draft are as they were.
-  const scrolled = await queue.evaluate((e) => e.scrollTop);
+  const scrolled = await scrollQueue();
+  assert.ok(scrolled > 0, "the queue scrolls");
   await detail.getByRole("link", { name: "Open task", exact: true }).click();
   await page.waitForURL((url) => url.pathname === `/tasks/${more.a.taskId}`);
   await page.goBack();
@@ -2732,13 +2739,13 @@ test("work through the Inbox: drafts, filters and position survive key moves, ap
   assert.equal(await kind.inputValue(), "question");
   assert.equal(await optional.inputValue(), draft);
   assert.equal(await queue.evaluate((e) => e.scrollTop), scrolled);
-  // (3) The approval decides only at its review route; Back returns to it under its filter.
+  // (3) The approval decides only at its review route; Back returns to it, its place and scroll.
   await kind.selectOption("");
-  await project.selectOption(more.approval.projectId);
-  await count(1);
-  await rows.first().click();
-  await position.getByText("1 of 1", { exact: true }).waitFor();
-  assert.equal(request(), more.approval.interactionId);
+  await count(8);
+  await rowOf(more.approval.interactionId).click();
+  const approvalPlace = `${(await displayed(page)).indexOf(more.approval.interactionId) + 1} of 8`;
+  await position.getByText(approvalPlace, { exact: true }).waitFor();
+  const approvalScroll = await scrollQueue();
   assert.equal(
     await page.getByRole("button", { name: /^(approve|deny)\b/i }).count(),
     0,
@@ -2750,13 +2757,14 @@ test("work through the Inbox: drafts, filters and position survive key moves, ap
     (url) => url.pathname === `/tasks/${more.approval.taskId}`,
   );
   await page.goBack();
-  await position.getByText("1 of 1", { exact: true }).waitFor();
+  await position.getByText(approvalPlace, { exact: true }).waitFor();
   assert.equal(request(), more.approval.interactionId);
-  assert.equal(await project.inputValue(), more.approval.projectId);
+  assert.equal(await kind.inputValue(), "");
+  assert.equal(await project.inputValue(), "");
+  assert.equal(await queue.evaluate((e) => e.scrollTop), approvalScroll);
   // (4) The queue changes under the selection: B is answered elsewhere and E arrives.
-  await project.selectOption("");
   await kind.selectOption("question");
-  await count(4);
+  await count(7);
   await rowOf(a).click();
   await position.getByText(place, { exact: true }).waitFor();
   assert.equal(await optional.inputValue(), draft);
@@ -2769,21 +2777,21 @@ test("work through the Inbox: drafts, filters and position survive key moves, ap
     answers: { choice: { optionIds: ["members"], text: "" } },
   });
   assert.equal(receipt.kind, "coordination");
-  const e = await seedOwnQuestion(f, choiceForm, "Request 5", "Relay");
+  const e = await seedOwnQuestion(f, choiceForm, "Request 8", "Relay");
   await page.getByRole("button", { name: "Refresh", exact: true }).click();
   await rowOf(e.interactionId).waitFor();
   await rowOf(more.b.interactionId).waitFor({ state: "detached" });
   const after = await displayed(page);
-  assert.equal(after.length, 4);
+  assert.equal(after.length, 7);
   await position
-    .getByText(`${after.indexOf(a) + 1} of 4`, { exact: true })
+    .getByText(`${after.indexOf(a) + 1} of 7`, { exact: true })
     .waitFor();
   assert.equal(request(), a);
   assert.equal(await optional.inputValue(), draft);
   // (5) A's answer, then each further question: Next request, choose, Submit.
   const titles = new Map(
-      [more.c, more.d].map((s) => [s.interactionId, s.title]),
-    ).set(e.interactionId, "Request 5"),
+      more.others.map((s) => [s.interactionId, s.title]),
+    ).set(e.interactionId, "Request 8"),
     target =
       after[after.indexOf(a) + 1] ?? after[after.indexOf(a) - 1] ?? "none";
   await form
@@ -2802,7 +2810,7 @@ test("work through the Inbox: drafts, filters and position survive key moves, ap
   await next.click();
   interactions++;
   await page.waitForURL((url) => url.searchParams.get("request") === target);
-  await position.getByText(/^\d of 3$/).waitFor();
+  await position.getByText(/^\d of 6$/).waitFor();
   await form.getByRole("radio", { name: /^Team owners/ }).click();
   interactions++;
   await form

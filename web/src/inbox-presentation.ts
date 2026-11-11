@@ -543,9 +543,12 @@ export function queueSteps<T extends { id: string }>(
     return { previous: rows[position - 1], next: rows[position + 1] };
   if (!anchor || anchor.id !== selectedId) return {};
   const shown = (id: string | undefined) => rows.find((row) => row.id === id),
-    next = shown(anchor.nextId) ?? rows[anchor.index],
-    previous =
-      shown(anchor.previousId) ?? rows[Math.min(anchor.index, rows.length) - 1];
+    before = shown(anchor.previousId),
+    // Rows can arrive above it, so its former Previous places it better than its old index.
+    next =
+      shown(anchor.nextId) ??
+      (before ? rows[rows.indexOf(before) + 1] : rows[anchor.index]),
+    previous = before ?? rows[Math.min(anchor.index, rows.length) - 1];
   // With every row above it gone, the row that slid into its place is only Next.
   return { previous: previous === next ? undefined : previous, next };
 }

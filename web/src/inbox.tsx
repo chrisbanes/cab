@@ -281,11 +281,14 @@ export function Inbox({
       render((v) => v + 1);
     }
   });
-  // Keep the queue's own scroll across detail visits (a hidden queue forgets its offset).
+  // Keep the queue's own scroll across detail visits (a hidden queue forgets its offset), and
+  // again once a remount's first read has rows to scroll.
+  const hasRows = rows.length > 0;
+  // biome-ignore lint/correctness/useExhaustiveDependencies: reapplies when rows first arrive.
   useLayoutEffect(() => {
     if (queue.current && !(single && urlId))
       queue.current.scrollTop = state.scrollTop;
-  }, [state, single, urlId]);
+  }, [state, single, urlId, hasRows]);
   // Returning from the phone detail focuses the opened row, or the row now at its place.
   useLayoutEffect(() => {
     if (!single || urlId || !state.returnFocus || !queue.current) return;
@@ -478,12 +481,15 @@ export function Inbox({
     if (single) return;
     const onKey = (event: KeyboardEvent) => {
       const target = event.target instanceof HTMLElement ? event.target : null,
-        { previous, next, choose } = steps.current,
-        item = shortcutApplies("j", event, target)
-          ? next
-          : shortcutApplies("k", event, target)
-            ? previous
-            : undefined;
+        { previous, next, choose } = steps.current;
+      // A menu, such as the sidebar's account menu, keeps its own letters.
+      if (target?.closest('[role="menu"], [role="menubar"], [role="listbox"]'))
+        return;
+      const item = shortcutApplies("j", event, target)
+        ? next
+        : shortcutApplies("k", event, target)
+          ? previous
+          : undefined;
       if (!item) return;
       event.preventDefault();
       focusHeading.current = true;
@@ -700,7 +706,7 @@ export function Inbox({
                         Open task
                       </a>
                     )}
-                    {(position >= 0 || anchored) && (
+                    {anchored && (
                       <>
                         <Button
                           variant="secondary"
@@ -778,7 +784,9 @@ export function Inbox({
                       </p>
                     ) : (
                       <p className="inbox-continue-end">
-                        No actionable requests remain.{" "}
+                        {status === "actionable"
+                          ? "No actionable requests remain."
+                          : "No more requests in this view."}{" "}
                         <ActionLink variant="secondary" href="/">
                           Back to overview
                         </ActionLink>
