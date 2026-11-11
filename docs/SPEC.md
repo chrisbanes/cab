@@ -1128,7 +1128,8 @@ never listen. Every place the effective policy is shown states what local listen
 in that harness and that other processes on the host can reach a listening port.
 Skipping the sandbox ([ADR-1029](adr/1029-skip-sandbox-for-host-tools.md)) lets a
 project's task turns run host tools that a harness sandbox blocks, such as browsers and
-Android emulators; it is a short-term measure until cab's own verification tool exists.
+Android emulators; the sandbox level of
+[ADR-1034](adr/1034-harness-native-sandbox-escalation.md) will replace it.
 A Codex task turn sends `sandboxPolicy: { type: "dangerFullAccess" }` with approval policy
 still `never`. A Claude Code task turn runs with its sandbox disabled; its permission mode,
 tool allowlist and disallowed tools, and the cab tool checks do not change, and the
