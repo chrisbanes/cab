@@ -2253,6 +2253,10 @@ test("Inbox dismissal keeps the question draft and history restoration starts no
     await captureBrowserEvidence(page, "inbox-history-selection-failure");
     throw error;
   }
+  // The UI opens the Dismissed view's only row itself; the test does not choose it.
+  const rows = page.locator(".inbox-row");
+  assert.equal(await rows.count(), 1);
+  assert.equal(await rows.first().getAttribute("aria-pressed"), "true");
   await page.getByText("Waiting for context", { exact: true }).waitFor();
   assert.equal(f.runtime.turns, turns);
   assert.equal(

@@ -257,16 +257,17 @@ export function Inbox({
     resource.state.fetchedAt,
     "request",
   );
-  // Open the first request once per visit when the first fresh read arrives on a wide layout.
-  const autoDone = useRef(false);
+  // Open the first request once per chosen status when its first fresh read arrives on a wide layout.
+  // Keyed by status so a stale effect for the outgoing status cannot use up the next one's auto-open.
+  const autoFor = useRef<string | null>(status);
   useEffect(() => {
     if (
-      autoDone.current ||
+      autoFor.current !== status ||
       resource.state.status !== "fresh" ||
       resource.state.data?.viewStatus !== status
     )
       return;
-    autoDone.current = true;
+    autoFor.current = null;
     const first = rows[0];
     if (!single && !urlId && !state.selected && !state.auto && first) {
       state.auto = first;
@@ -499,7 +500,7 @@ export function Inbox({
               value={status}
               onChange={(e) => {
                 state.clear();
-                autoDone.current = false;
+                autoFor.current = e.target.value;
                 navigate(
                   `/inbox${e.target.value === "actionable" ? "" : `?status=${e.target.value}`}`,
                 );
