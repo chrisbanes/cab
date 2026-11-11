@@ -66,7 +66,7 @@ test("task workspace-recheck refuses a hold that needs a person, and a read-only
   assert.equal(r.code, 4, r.err + r.out);
   assert.match(
     r.err + r.out,
-    /This workspace hold needs a person's judgement and cannot be rechecked: Task workspace unavailable: test hold/,
+    /This workspace hold needs a person's judgement and cannot be rechecked: test hold \(conflict/,
   );
   assert.equal(
     startedOf(o.s.f.service).workspaceBindings.get(o.s.taskId)?.state,
