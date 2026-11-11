@@ -307,6 +307,7 @@ export function InstructionProposalsTab(p: TabProps) {
   ) {
     setBusy(true);
     setMessage("");
+    setReadFailed(false);
     startingId.current = next.runId;
     const result = await client
       .command(
