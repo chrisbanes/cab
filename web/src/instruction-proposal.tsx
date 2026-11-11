@@ -99,7 +99,6 @@ export function InstructionProposalsTab(p: TabProps) {
   const [message, setMessage] = useState("");
   const [busy, setBusy] = useState(false);
   const [run, setRun] = useState<InstructionRun | null>(null);
-  const [finalText, setFinalText] = useState<string | null>(null);
   const [saved, setSaved] = useState<string | null>(null);
 
   const loadPage = useCallback(
@@ -194,12 +193,6 @@ export function InstructionProposalsTab(p: TabProps) {
       abort.abort();
     };
   }, [readRun, runId, polling, reviewing]);
-  useEffect(() => {
-    if (run?.state === "proposed" && run.instructionProposal)
-      setFinalText(
-        (text) => text ?? run.instructionProposal?.instructions ?? null,
-      );
-  }, [run]);
 
   const selection = selectionSummary(stored.refs.map((r) => r.text));
   const permitted = data.routing?.candidateProfileIds ?? [];
@@ -229,7 +222,6 @@ export function InstructionProposalsTab(p: TabProps) {
       expectedProjectVersion: data.project.version,
     };
     setRun(null);
-    setFinalText(null);
     setSaved(null);
     change(next);
     await sendStart(next);
@@ -316,7 +308,6 @@ export function InstructionProposalsTab(p: TabProps) {
       expectedProjectVersion: undefined,
     });
     setRun(null);
-    setFinalText(null);
   };
 
   return (
@@ -327,8 +318,6 @@ export function InstructionProposalsTab(p: TabProps) {
             {...p}
             run={run}
             busy={busy}
-            finalText={finalText ?? ""}
-            setFinalText={setFinalText}
             saved={saved}
             onSaved={async (revision) => {
               setSaved(savedLine(revision));
@@ -484,8 +473,6 @@ function Review(
   p: TabProps & {
     run: InstructionRun;
     busy: boolean;
-    finalText: string;
-    setFinalText: (text: string) => void;
     saved: string | null;
     onSaved: (revision: number | null) => Promise<void>;
     /** Reads the run again, so a conflicting save shows the target's current state. */
@@ -500,18 +487,25 @@ function Review(
   const proposal = run.instructionProposal;
   const target = run.instructionTarget;
   const current = target?.observedInstructions ?? "";
+  // The edited text lives in the run's draft, so it survives leaving the tab.
   const d = useDraft(p.drafts, `instruction-proposal:${run.runId}`);
-  const block = acceptBlock(run, p.finalText);
+  const finalText =
+    typeof d.values.instructions === "string"
+      ? d.values.instructions
+      : (proposal?.instructions ?? "");
+  // A sent save has frozen its body; further edits would be silently dropped.
+  const locked =
+    d.phase === "pending" || d.phase === "unknown" || d.phase === "recorded";
+  const block = acceptBlock(run, finalText);
   const diff = useMemo(() => {
-    const { current: removed, proposed: added } = lineDiff(
-      current,
-      p.finalText,
-    );
+    const { current: removed, proposed: added } = lineDiff(current, finalText);
     return [...removed, ...added].filter((row) => row.kind !== "same");
-  }, [current, p.finalText]);
+  }, [current, finalText]);
+  const proposed = proposal?.instructions;
   useEffect(() => {
-    if (!d.values.key) d.startOperation({ key: randomUUID() });
-  }, [d]);
+    if (!d.values.key && proposed !== undefined)
+      d.startOperation({ key: randomUUID(), instructions: proposed });
+  }, [d, proposed]);
   const reported = useRef(false);
   useEffect(() => {
     if (d.phase !== "recorded" || reported.current) return;
@@ -545,14 +539,14 @@ function Review(
           key: d.values.key,
           profileId: target.profileId,
           expectedVersion: run.targetCurrent?.version,
-          instructions: p.finalText,
+          instructions: finalText,
         }
       : {
           type: "project.configure",
           key: d.values.key,
           projectId: run.projectId,
           expectedVersion: run.targetCurrent?.version,
-          instructions: p.finalText,
+          instructions: finalText,
         };
   const feedbackOf = (id: string) =>
     run.feedback?.find((item) => item.id === id);
@@ -668,9 +662,10 @@ function Review(
             </label>
             <Textarea
               id="instruction-final"
-              value={p.finalText}
+              value={finalText}
               rows={10}
-              onChange={(e) => p.setFinalText(e.target.value)}
+              disabled={locked}
+              onChange={(e) => d.set("instructions", e.target.value)}
             />
             <ul className="body instruction-diff" aria-label="Changed lines">
               {diff.length === 0 ? (

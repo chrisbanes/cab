@@ -251,3 +251,45 @@ test("a reload while drafting reattaches to the same run", async (_t, j) => {
     "Keep it simple.\nShow keyboard evidence.",
   );
 });
+
+test("edited text survives leaving the tab, and the editor is locked while a save is unresolved", async (_t, j) => {
+  const { f, page, projectId, commands, open } = await launch(j, desktop);
+  await open();
+  await select(page, /keyboard navigation evidence/);
+  await page.getByRole("button", { name: "Request proposal" }).click();
+  const runId = await runningRun(f, new Set());
+  const domain = f.service.domain();
+  const current = String(domain.project(projectId).instructions);
+  await answer(f, runId, `${current}\nProposed.`);
+  const editor = page.locator("#instruction-final");
+  await editor.fill(`${current}\nEdited.`);
+  // Another settings tab and back: the edit is kept.
+  await page
+    .getByRole("navigation", { name: "Project configuration sections" })
+    .getByRole("link", { name: "General" })
+    .click();
+  await page.getByRole("link", { name: "Instruction proposals" }).click();
+  await editor.waitFor();
+  assert.equal(await editor.inputValue(), `${current}\nEdited.`);
+  // The save's response is lost: its outcome is unknown and the frozen body cannot be edited.
+  await page.route("**/api/operator/commands", (route) =>
+    route.request().postData()?.includes('"project.configure"')
+      ? route.abort()
+      : route.continue(),
+  );
+  await page.getByRole("button", { name: "Accept and save" }).click();
+  const check = page.getByRole("button", { name: "Check whether it saved" });
+  await check.waitFor();
+  assert.equal(await editor.isDisabled(), true);
+  await page.unroute("**/api/operator/commands");
+  await check.click();
+  await page.getByText(/^Saved as instructions revision \d+\.$/).waitFor();
+  // The check resent the same key and body: one save, of the edited text.
+  const saves = commands("project.configure");
+  assert.ok(saves.length >= 1);
+  assert.equal(new Set(saves.map((c) => c.key)).size, 1);
+  assert.equal(
+    String(domain.project(projectId).instructions),
+    `${current}\nEdited.`,
+  );
+});
