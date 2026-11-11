@@ -1,5 +1,8 @@
 import { randomUUID } from "node:crypto";
-import { CoordinationStore } from "../../src/core/coordination.js";
+import {
+  CoordinationStore,
+  type OperatorReviewRequest,
+} from "../../src/core/coordination.js";
 import { ConversationHistoryStore } from "../../src/standalone/conversation-history.js";
 import { ExecutionState } from "../../src/standalone/state.js";
 import type { ReviewMetadata } from "../../src/core/task-review.js";
@@ -123,10 +126,12 @@ export function seedTaskResult(
   producerAssignmentId: string,
   summary: string,
   metadata?: Partial<ReviewMetadata>,
+  operatorReview?: OperatorReviewRequest,
 ) {
   const d = f.service.domain();
   let resultId = "";
-  const workId = randomUUID();
+  const workId = randomUUID(),
+    callId = randomUUID();
   f.seedPersistedState((db) => {
     const c = new CoordinationStore(db, d),
       s = new ExecutionState(db);
@@ -159,16 +164,20 @@ export function seedTaskResult(
     resultId = c.recordResult({
       threadId: workId,
       turnId: workId,
-      callId: randomUUID(),
+      callId,
       tool: "cab_report_result",
-      arguments: { summary, ...(metadata ? { review: metadata } : {}) },
+      arguments: {
+        summary,
+        ...(metadata ? { review: metadata } : {}),
+        ...(operatorReview ? { operatorReview } : {}),
+      },
     }).result.resultId;
     db.prepare(
       "UPDATE execution_intents SET state='completed' WHERE workId=?",
     ).run(workId);
     c.recordSuccessfulTerminal(workId);
   });
-  return { resultId, workId };
+  return { resultId, workId, callId };
 }
 /**
  * An imported GitHub task with a lead, and an `issue.comment` grant that `setGrant` can change.
@@ -341,10 +350,20 @@ export async function seedReviewTask(
     summary: string,
     metadata?: Partial<ReviewMetadata>,
     producerAssignmentId = assignmentId,
-  ) => seedTaskResult(f, taskId, producerAssignmentId, summary, metadata);
+    operatorReview?: OperatorReviewRequest,
+  ) =>
+    seedTaskResult(
+      f,
+      taskId,
+      producerAssignmentId,
+      summary,
+      metadata,
+      operatorReview,
+    );
   function delegatedResult(
     summary: string,
     metadata?: Partial<ReviewMetadata>,
+    operatorReview?: OperatorReviewRequest,
   ) {
     const delegateId = randomUUID();
     d.execute({
@@ -360,7 +379,7 @@ export async function seedReviewTask(
       requesterAssignmentId: null,
     });
     return {
-      ...result(summary, metadata, delegateId),
+      ...result(summary, metadata, delegateId, operatorReview),
       assignmentId: delegateId,
     };
   }

@@ -430,6 +430,28 @@ export function deletionOwnedSeedRows(i: DeletionSeedIdentity) {
     },
     {
       shared: false,
+      table: "coordination_result_reviews",
+      values: {
+        reviewId: i.uuid("resultReviewId"),
+        taskId: i.taskId,
+        resultId: i.resultId,
+        workId: i.workId,
+        workRevision: 1,
+        requestingAssignmentId: i.assignmentId,
+        decision: "fixture-decision",
+        recommendation: "fixture-recommendation",
+        uncertaintiesJson: null,
+        status: "responded",
+        revision: 2,
+        responseJson: null,
+        supersededByResultId: null,
+        withdrawReason: null,
+        createdAt: 1,
+        updatedAt: 1,
+      },
+    },
+    {
+      shared: false,
       table: "coordination_result_workspaces",
       values: {
         resultId: i.resultId,

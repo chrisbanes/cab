@@ -11,6 +11,7 @@ import {
   validateQuestionAnswers,
   questionToolRefusal,
   approvalActionRefusal,
+  headlineProblems,
   type QuestionForm,
   type QuestionAnswers,
 } from "./question-forms.js";
@@ -106,6 +107,74 @@ const resultColumns = `(
       )`;
 const uuid = z.string().uuid();
 const summarySchema = z.string().trim().min(1).max(16000);
+/**
+ * A lead's request that the operator review its result. `decision` is a request headline
+ * (at most 120 characters, checked with the question headline rules when the result is recorded).
+ */
+export const operatorReviewRequestSchema = z
+  .object({
+    decision: z.string().trim().min(1).max(1000),
+    recommendation: z.string().trim().min(1).max(2000),
+    uncertainties: z
+      .array(z.string().trim().min(1).max(2000))
+      .max(20)
+      .optional(),
+  })
+  .strict();
+export type OperatorReviewRequest = z.infer<typeof operatorReviewRequestSchema>;
+export const resultReviewStatuses = [
+  "pending",
+  "responded",
+  "superseded",
+  "withdrawn",
+  "closed",
+] as const;
+const resultReviewResponseSchema = z
+  .object({
+    response: z.enum(["reviewed", "feedback"]),
+    message: z.string().nullable(),
+    eventId: uuid.nullable(),
+    respondedAt: z.number().int().nonnegative(),
+  })
+  .strict();
+/** One result review request and its lifecycle; never an interaction, approval or completion. */
+export interface ResultReview {
+  reviewId: string;
+  taskId: string;
+  resultId: string;
+  workId: string;
+  workRevision: number;
+  requestingAssignmentId: string;
+  decision: string;
+  recommendation: string;
+  /** Null when the lead recorded none, which is not the same as an empty list. */
+  uncertainties: string[] | null;
+  status: (typeof resultReviewStatuses)[number];
+  revision: number;
+  response: z.infer<typeof resultReviewResponseSchema> | null;
+  supersededByResultId: string | null;
+  withdrawReason: string | null;
+  createdAt: number;
+  updatedAt: number;
+}
+const resultReviewRespondSchema = z
+  .object({
+    actor: z.literal("operator"),
+    key: uuid,
+    taskId: uuid,
+    reviewId: uuid,
+    expectedRevision: z.number().int().positive(),
+    response: z.enum(["reviewed", "feedback"]),
+    message: z.string().trim().min(1).max(16000).optional(),
+  })
+  .strict()
+  .refine((v) => v.response !== "feedback" || v.message !== undefined, {
+    message: "Feedback needs a message",
+    path: ["message"],
+  });
+const resultReviewReceiptSchema = z
+  .object({ reviewId: uuid, eventId: uuid.nullable() })
+  .strict();
 const reportCallSchema = z
   .object({
     threadId: z.string().min(1).max(512),
@@ -116,6 +185,7 @@ const reportCallSchema = z
       .object({
         summary: summarySchema,
         review: reviewMetadataSchema.optional(),
+        operatorReview: operatorReviewRequestSchema.optional(),
       })
       .strict(),
   })
@@ -205,6 +275,18 @@ const withdrawCallSchema = z
       .object({
         assignmentId: uuid,
         reason: z.string().trim().min(1).max(withdrawalReasonLimit),
+      })
+      .strict(),
+  })
+  .strict();
+const withdrawResultReviewCallSchema = z
+  .object({
+    ...toolIdentity,
+    tool: z.literal("cab_withdraw_result_review"),
+    arguments: z
+      .object({
+        resultId: uuid,
+        reason: z.string().trim().min(1).max(2000),
       })
       .strict(),
   })
@@ -652,6 +734,28 @@ export class CoordinationStore {
     }
   }
 
+  /** Pending reviews on a task that is no longer open close with it. */
+  reconcileResultReviews(): void {
+    transaction(this.db, () => {
+      const closed = this.db
+        .prepare(
+          `UPDATE coordination_result_reviews
+        SET status = 'closed', revision = revision + 1, updatedAt = unixepoch()
+        WHERE status = 'pending' AND taskId IN (SELECT id FROM domain_tasks WHERE state <> 'open')
+        RETURNING reviewId, taskId`,
+        )
+        .all() as Array<{ reviewId: string; taskId: string }>;
+      for (const { reviewId, taskId } of closed)
+        this.inboxLifecycle().resolve(
+          reviewId,
+          this.domain.task(taskId).state === "done"
+            ? "Task is Done"
+            : "Task is Cancelled",
+          true,
+        );
+    });
+  }
+
   openInteractionsForCompletion(taskId: string): CoordinationInteraction[] {
     return this.interactions(taskId).filter(
       (i) =>
@@ -1024,7 +1128,26 @@ export class CoordinationStore {
         eventId TEXT PRIMARY KEY REFERENCES coordination_inbox_events(eventId),
         assignmentId TEXT NOT NULL REFERENCES domain_assignments(id),
         reason TEXT NOT NULL CHECK(reason IN ('delegate-withdrawn'))
-      );`);
+      );
+      CREATE TABLE IF NOT EXISTS coordination_result_reviews (
+        reviewId TEXT PRIMARY KEY,
+        taskId TEXT NOT NULL REFERENCES domain_tasks(id),
+        resultId TEXT NOT NULL UNIQUE REFERENCES coordination_results(resultId),
+        workId TEXT NOT NULL REFERENCES execution_intents(workId),
+        workRevision INTEGER NOT NULL CHECK(workRevision > 0),
+        requestingAssignmentId TEXT NOT NULL REFERENCES domain_assignments(id),
+        decision TEXT NOT NULL,
+        recommendation TEXT NOT NULL,
+        uncertaintiesJson TEXT,
+        status TEXT NOT NULL CHECK(status IN ('pending','responded','superseded','withdrawn','closed')),
+        revision INTEGER NOT NULL CHECK(revision > 0),
+        responseJson TEXT,
+        supersededByResultId TEXT REFERENCES coordination_results(resultId),
+        withdrawReason TEXT,
+        createdAt INTEGER NOT NULL DEFAULT (unixepoch()),
+        updatedAt INTEGER NOT NULL DEFAULT (unixepoch())
+      );
+      CREATE INDEX IF NOT EXISTS coordination_result_reviews_task ON coordination_result_reviews(taskId,status);`);
       this.db.exec(taskCommentSchemaSql);
       const interactionColumns = this.db
         .prepare("PRAGMA table_info(coordination_interactions)")
@@ -1300,6 +1423,27 @@ export class CoordinationStore {
       const binding = this.currentBinding(call.threadId, call.turnId);
       if (!binding)
         throw new Error("Coordination callback is not bound to current work");
+      const operatorReview = call.arguments.operatorReview;
+      const reportedByLead = this.isTaskLead({
+        id: String(binding.assignmentId),
+        taskId: String(binding.taskId),
+      });
+      if (operatorReview) {
+        if (!reportedByLead)
+          throw new DomainPolicyError(
+            "forbidden",
+            "Only the task's accountable lead can request operator review",
+          );
+        const problems = headlineProblems(
+          "operatorReview.decision",
+          operatorReview.decision,
+          120,
+        );
+        if (problems.length)
+          throw new Error(
+            `Result refused. ${problems.join(" ")} State the decision in one plain sentence without identifiers; put background in the recommendation or summary.`,
+          );
+      }
       const unfinishedChildren = (
         this.db
           .prepare(
@@ -1436,6 +1580,8 @@ export class CoordinationStore {
             result.summary,
             result.createdAt * 1000,
           );
+        if (reportedByLead) this.supersedeResultReviews(result);
+        if (operatorReview) this.insertResultReview(result, operatorReview);
       }
       const settledEffect = this.db
         .prepare(`UPDATE execution_pending_effects
@@ -1465,7 +1611,7 @@ export class CoordinationStore {
       )
         throw new Error("Assignment result settled a different work effect");
       const response = {
-        text: `Result recorded: ${result.resultId}`,
+        text: `Result recorded: ${result.resultId}${operatorReview ? "; operator review requested" : ""}`,
         success: true,
       };
       this.insertReceipt(call, result, response);
@@ -1648,6 +1794,288 @@ export class CoordinationStore {
       state: String(assignment.state),
       blockers: delegateBlockerCodes.filter((code) => blockers.has(code)),
     };
+  }
+
+  /** The task's result review requests, oldest first. */
+  resultReviews(taskId: string): ResultReview[] {
+    return (
+      this.db
+        .prepare(
+          "SELECT * FROM coordination_result_reviews WHERE taskId=? ORDER BY createdAt, rowid",
+        )
+        .all(taskId) as Row[]
+    ).map((row) => this.parseResultReview(row));
+  }
+
+  private parseResultReview(row: Row): ResultReview {
+    return {
+      reviewId: String(row.reviewId),
+      taskId: String(row.taskId),
+      resultId: String(row.resultId),
+      workId: String(row.workId),
+      workRevision: Number(row.workRevision),
+      requestingAssignmentId: String(row.requestingAssignmentId),
+      decision: String(row.decision),
+      recommendation: String(row.recommendation),
+      uncertainties:
+        row.uncertaintiesJson === null
+          ? null
+          : z
+              .array(z.string())
+              .parse(JSON.parse(String(row.uncertaintiesJson))),
+      status: z.enum(resultReviewStatuses).parse(row.status),
+      revision: Number(row.revision),
+      response:
+        row.responseJson === null
+          ? null
+          : resultReviewResponseSchema.parse(
+              JSON.parse(String(row.responseJson)),
+            ),
+      supersededByResultId:
+        row.supersededByResultId === null
+          ? null
+          : String(row.supersededByResultId),
+      withdrawReason:
+        row.withdrawReason === null ? null : String(row.withdrawReason),
+      createdAt: Number(row.createdAt),
+      updatedAt: Number(row.updatedAt),
+    };
+  }
+
+  /** In `recordResult`'s transaction: one pending review bound to exactly this result. */
+  private insertResultReview(
+    result: AssignmentResult,
+    request: OperatorReviewRequest,
+  ): void {
+    const reviewId = randomUUID();
+    this.db
+      .prepare(
+        `INSERT INTO coordination_result_reviews
+      (reviewId, taskId, resultId, workId, workRevision, requestingAssignmentId,
+        decision, recommendation, uncertaintiesJson, status, revision)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', 1)`,
+      )
+      .run(
+        reviewId,
+        result.taskId,
+        result.resultId,
+        result.workId,
+        result.workRevision,
+        result.assignmentId,
+        request.decision,
+        request.recommendation,
+        request.uncertainties ? JSON.stringify(request.uncertainties) : null,
+      );
+    this.inboxLifecycle().observe({
+      id: reviewId,
+      taskId: result.taskId,
+      kind: "result-review",
+      sourceKey: `result-review:${reviewId}`,
+    });
+  }
+
+  /** In `recordResult`'s transaction: a newer lead result supersedes every pending review. */
+  private supersedeResultReviews(result: AssignmentResult): void {
+    const superseded = this.db
+      .prepare(
+        `UPDATE coordination_result_reviews
+      SET status = 'superseded', supersededByResultId = ?, revision = revision + 1, updatedAt = unixepoch()
+      WHERE taskId = ? AND status = 'pending' RETURNING reviewId`,
+      )
+      .all(result.resultId, result.taskId) as Array<{ reviewId: string }>;
+    for (const { reviewId } of superseded)
+      this.inboxLifecycle().resolve(
+        reviewId,
+        "Superseded by a newer result",
+        true,
+      );
+  }
+
+  /** The lead's `cab_withdraw_result_review`: only a pending review on its own task. */
+  withdrawResultReview(input: CoordinationCall): CoordinationToolResponse {
+    const call = withdrawResultReviewCallSchema.parse(input);
+    return transaction(this.db, () => {
+      const replay = this.cachedToolResponse(call);
+      if (replay) return replay;
+      const binding = this.currentBinding(call.threadId, call.turnId);
+      if (!binding)
+        throw new Error("Review withdrawal is not bound to current work");
+      // Refusals write nothing, so a corrected retry with the same callId runs.
+      if (
+        !this.isTaskLead({
+          id: String(binding.assignmentId),
+          taskId: String(binding.taskId),
+        })
+      )
+        return {
+          success: false,
+          text: "Only the task's accountable lead can withdraw a review request",
+        };
+      const row = this.one(
+        "SELECT reviewId, status FROM coordination_result_reviews WHERE resultId = ? AND taskId = ?",
+        call.arguments.resultId,
+        String(binding.taskId),
+      );
+      if (!row)
+        return {
+          success: false,
+          text: "No operator review was requested for that result on this task",
+        };
+      if (row.status !== "pending")
+        return {
+          success: false,
+          text: `The review request is ${String(row.status)}; only a pending request can be withdrawn`,
+        };
+      assertOwnedTaskWritable(this.db, String(binding.taskId));
+      this.db
+        .prepare(
+          `UPDATE coordination_result_reviews
+        SET status = 'withdrawn', withdrawReason = ?, revision = revision + 1, updatedAt = unixepoch()
+        WHERE reviewId = ? AND status = 'pending'`,
+        )
+        .run(call.arguments.reason, String(row.reviewId));
+      this.inboxLifecycle().resolve(
+        String(row.reviewId),
+        "Withdrawn by the lead",
+        true,
+      );
+      const response = {
+        text: `Withdrew the review request for result ${call.arguments.resultId}`,
+        success: true,
+      };
+      this.insertToolReceipt(call, binding, response);
+      return response;
+    });
+  }
+
+  /**
+   * The operator's response to a pending review at its expected revision. Feedback, or a note
+   * with `reviewed`, reaches the lead as result-anchored operator feedback; nothing here
+   * grants, merges, completes or changes task, assignment or delivery state.
+   */
+  respondToResultReview(input: z.input<typeof resultReviewRespondSchema>): {
+    review: ResultReview;
+    event: InboxEvent | null;
+  } {
+    const command = resultReviewRespondSchema.parse(input);
+    const payload = {
+      taskId: command.taskId,
+      reviewId: command.reviewId,
+      expectedRevision: command.expectedRevision,
+      response: command.response,
+      ...(command.message === undefined ? {} : { message: command.message }),
+    };
+    const event = (eventId: string | null) =>
+      eventId === null
+        ? null
+        : this.parseEvent(
+            this.required(
+              "SELECT sequence, eventId, taskId, recipientAssignmentId, eventType, resultId, interactionId, payload, createdAt FROM coordination_inbox_events WHERE eventId = ?",
+              eventId,
+            ),
+          );
+    return transaction(this.db, () => {
+      const prior = this.one(
+        "SELECT payloadHash, result FROM coordination_operator_receipts WHERE scope = 'result-review-response' AND commandKey = ?",
+        command.key,
+      );
+      if (prior) {
+        if (prior.payloadHash !== materialDigest(payload))
+          throw new DomainConflictError(
+            "Operator command key reused with different content",
+          );
+        const receipt = resultReviewReceiptSchema.parse(
+          JSON.parse(String(prior.result)),
+        );
+        return {
+          review: this.parseResultReview(
+            this.required(
+              "SELECT * FROM coordination_result_reviews WHERE reviewId = ?",
+              receipt.reviewId,
+            ),
+          ),
+          event: event(receipt.eventId),
+        };
+      }
+      assertOwnedTaskWritable(this.db, command.taskId);
+      const row = this.one(
+        "SELECT * FROM coordination_result_reviews WHERE reviewId = ? AND taskId = ?",
+        command.reviewId,
+        command.taskId,
+      );
+      if (!row)
+        throw new DomainPolicyError(
+          "forbidden",
+          "Result review is not in this task",
+        );
+      if (
+        row.status !== "pending" ||
+        this.domain.task(command.taskId).state !== "open"
+      )
+        throw new DomainConflictError("Result review is no longer pending");
+      if (Number(row.revision) !== command.expectedRevision)
+        throw new DomainConflictError("Result review revision conflict");
+      let delivered: InboxEvent | null = null;
+      if (command.message !== undefined) {
+        const lead = this.one(
+          "SELECT assignmentId FROM task_lead_bindings WHERE taskId = ?",
+          command.taskId,
+        );
+        if (
+          !lead ||
+          !this.feedbackRecipient(command.taskId, String(lead.assignmentId))
+        )
+          throw new DomainConflictError("The lead cannot receive feedback now");
+        delivered = this.deliverOperatorFeedback(
+          command.taskId,
+          String(lead.assignmentId),
+          command.message,
+          { resultId: String(row.resultId) },
+        ).event;
+      }
+      const eventId = delivered?.eventId ?? null;
+      this.db
+        .prepare(
+          `UPDATE coordination_result_reviews
+        SET status = 'responded', responseJson = ?, revision = revision + 1, updatedAt = unixepoch()
+        WHERE reviewId = ? AND status = 'pending' AND revision = ?`,
+        )
+        .run(
+          JSON.stringify({
+            response: command.response,
+            message: command.message ?? null,
+            eventId,
+            respondedAt: Date.now(),
+          }),
+          command.reviewId,
+          command.expectedRevision,
+        );
+      this.inboxLifecycle().resolve(
+        command.reviewId,
+        command.response === "feedback"
+          ? "Feedback sent to the lead"
+          : "Marked reviewed",
+      );
+      this.db
+        .prepare(
+          `INSERT INTO coordination_operator_receipts
+        (scope, commandKey, payloadHash, result) VALUES ('result-review-response', ?, ?, ?)`,
+        )
+        .run(
+          command.key,
+          materialDigest(payload),
+          JSON.stringify({ reviewId: command.reviewId, eventId }),
+        );
+      return {
+        review: this.parseResultReview(
+          this.required(
+            "SELECT * FROM coordination_result_reviews WHERE reviewId = ?",
+            command.reviewId,
+          ),
+        ),
+        event: delivered,
+      };
+    });
   }
 
   /** The lead's `cab_withdraw_delegate`: only a delegate it requested. */

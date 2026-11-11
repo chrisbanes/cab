@@ -2,10 +2,11 @@ import { questionToolArgumentsSchema } from "../core/question-forms.js";
 import { reviewMetadataSchema } from "../core/task-review.js";
 import { z } from "zod";
 import { externalActionArgumentsSchema } from "../core/delivery.js";
-import type {
-  CoordinationStore,
-  CoordinationCall,
-  CoordinationToolResponse,
+import {
+  operatorReviewRequestSchema,
+  type CoordinationStore,
+  type CoordinationCall,
+  type CoordinationToolResponse,
 } from "../core/coordination.js";
 import type { RuntimeToolDefinition } from "./codex.js";
 
@@ -67,10 +68,27 @@ export const coordinationTools: readonly RuntimeToolDefinition[] = [
     type: "function",
     name: "cab_report_result",
     description:
-      "Persist the assignment's final result for its requester. This is not a progress update: finish work and ask any needed cab questions before reporting. Result persistence does not end the runtime turn; the assignment completes only after a successful terminal with no outstanding questions or delegated work. End your turn after reporting unless you still need a durable cab action. Use cab_ask_question for questions, never native asynchronous input tools.",
+      "Persist the assignment's final result for its requester. This is not a progress update: finish work and ask any needed cab questions before reporting. Result persistence does not end the runtime turn; the assignment completes only after a successful terminal with no outstanding questions or delegated work. End your turn after reporting unless you still need a durable cab action. Use cab_ask_question for questions, never native asynchronous input tools. State what changed and why in `summary`; put evidence in `review` (screenshots for UI behaviour, validations naming tests for backend work). Task lead only: pass `operatorReview` only when the result needs an operator decision or intervention, never for routine completion. Its `decision` states the exact response needed in one plain sentence (at most 120 characters, one line, no IDs or SHAs); `recommendation` is what you recommend and why; list any remaining `uncertainties`. It grants and blocks nothing; a newer result supersedes it.",
     inputSchema: object(
-      { summary: text, review: z.toJSONSchema(reviewMetadataSchema) },
+      {
+        summary: text,
+        review: z.toJSONSchema(reviewMetadataSchema),
+        operatorReview: z.toJSONSchema(operatorReviewRequestSchema),
+      },
       ["summary"],
+    ),
+  },
+  {
+    type: "function",
+    name: "cab_withdraw_result_review",
+    description:
+      "Task lead only: withdraw your pending operator review request for one of your results when the decision is no longer needed. The operator sees it as withdrawn with your reason. A newer result supersedes a pending request on its own, so do not withdraw before reporting again.",
+    inputSchema: object(
+      {
+        resultId: uuid,
+        reason: { type: "string", minLength: 1, maxLength: 2000 },
+      },
+      ["resultId", "reason"],
     ),
   },
   {
@@ -137,6 +155,8 @@ export function dispatchCoordinationTool(
       return store.requestTaskCompletion(call);
     case "cab_withdraw_delegate":
       return store.withdrawDelegate(call);
+    case "cab_withdraw_result_review":
+      return store.withdrawResultReview(call);
     default:
       return { text: "Unknown coordination tool", success: false };
   }

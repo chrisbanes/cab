@@ -246,7 +246,7 @@ const identifierPatterns: ReadonlyArray<readonly [string, RegExp]> = [
     /(?<![A-Za-z0-9_])[A-Z]{1,6}_[a-z](?=[A-Za-z0-9_-]*[A-Z0-9])[A-Za-z0-9_-]{7,}/,
   ],
 ];
-function headlineProblems(field: string, text: string, limit: number) {
+export function headlineProblems(field: string, text: string, limit: number) {
   const problems: string[] = [];
   const length = [...text].length;
   if (length > limit)

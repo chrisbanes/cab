@@ -841,6 +841,11 @@ export const projectDeletionStatements = [
     sql: "DELETE FROM task_review_results WHERE taskId IN (SELECT value FROM json_each(:tasks))",
   },
   {
+    table: "coordination_result_reviews",
+    where: "taskId IN (SELECT value FROM json_each(:tasks))",
+    sql: "DELETE FROM coordination_result_reviews WHERE taskId IN (SELECT value FROM json_each(:tasks))",
+  },
+  {
     table: "coordination_result_workspaces",
     where: "taskId IN (SELECT value FROM json_each(:tasks))",
     sql: "DELETE FROM coordination_result_workspaces WHERE taskId IN (SELECT value FROM json_each(:tasks))",
