@@ -72,11 +72,25 @@ for await (const line of createInterface({ input: process.stdin })) {
     const labels = [
       ...message.params.input[0].text.matchAll(/node chromium\.mjs ([a-z-]+)/g),
     ].map((m) => m[1]);
-    if (labels.includes("control"))
+    if (labels.includes("control")) {
       writeFileSync(
         join(cwd, "control-result.json"),
         JSON.stringify({ chromium: "sandbox blocked launch" }),
       );
+      write({
+        method: "item/completed",
+        params: {
+          threadId,
+          turnId,
+          item: {
+            type: "commandExecution",
+            id: `control-${turns}`,
+            command: "node chromium.mjs control",
+            status: "completed",
+          },
+        },
+      });
+    }
     if (turns === 1)
       write({
         id: "p1",

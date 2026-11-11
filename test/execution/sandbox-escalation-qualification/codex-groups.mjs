@@ -176,7 +176,12 @@ export async function runCodexGroup(
       method: message.method,
       id: message.id,
       ...(message.method === commandApproval
-        ? { command: short(p.command), cwd: p.cwd, reason: short(p.reason) }
+        ? {
+            command: short(p.command),
+            cwd: p.cwd,
+            reason: short(p.reason),
+            itemId: p.itemId,
+          }
         : {}),
     });
     if (message.method !== commandApproval) {
@@ -245,7 +250,7 @@ export async function runCodexGroup(
         kind: "item",
         type: item.type,
         ...(item.type === "commandExecution"
-          ? { command: short(item.command), status: item.status }
+          ? { id: item.id, command: short(item.command), status: item.status }
           : {}),
         ...(item.type === "agentMessage"
           ? { text: short(item.text, 200) }
@@ -303,14 +308,26 @@ export async function runCodexGroup(
           threadId,
           event,
         });
-        record({ kind: "overrule", ok: true, shape, response, attempts });
+        record({
+          kind: "overrule",
+          ok: true,
+          reviewId: trace.lastDenial.reviewId,
+          shape,
+          response,
+          attempts,
+        });
         return true;
       } catch (error) {
         if (error instanceof Deadline) throw error;
         attempts.push({ shape, error: short(String(error.message)) });
       }
     }
-    record({ kind: "overrule", ok: false, attempts });
+    record({
+      kind: "overrule",
+      ok: false,
+      reviewId: trace.lastDenial.reviewId,
+      attempts,
+    });
     return false;
   }
 

@@ -80,6 +80,14 @@ test("classification proves only from present evidence", async () => {
         answer: "decline",
       },
       {
+        t: 0.5,
+        turn: 1,
+        kind: "item",
+        type: "commandExecution",
+        command: "node chromium.mjs control",
+        status: "completed",
+      },
+      {
         t: 1.5,
         turn: 1,
         kind: "item",
@@ -153,12 +161,13 @@ test("classification proves only from present evidence", async () => {
         kind: "request",
         method: approval,
         command: "/bin/zsh -lc 'node chromium.mjs timing'",
+        turn: 1,
         id: 7,
         answer: "decline",
         answeredAt: hold,
       },
       { t: 10, kind: "resolved", requestId: 7 },
-      { t: hold + 5, kind: "turn", status: "completed" },
+      { t: hold + 5, turn: 1, kind: "turn", status: "completed" },
     ],
     results: {},
   });
@@ -208,6 +217,10 @@ test("classification proves only from present evidence", async () => {
   assert.equal(unavailable.autoModeAvailable.outcome, "refuted");
   assert.equal(unavailable.hookDenyWins.reason, "auto mode unavailable");
 
+  const timingOptions = [
+    { envOverrides: { BASH_MAX_TIMEOUT_MS: "3600000" } },
+    { envOverrides: { BASH_MAX_TIMEOUT_MS: "120000" } },
+  ];
   const timed = classify("claude-timing", {
     events: [
       {
@@ -246,6 +259,7 @@ test("classification proves only from present evidence", async () => {
       },
     ],
     queries: [],
+    options: timingOptions,
     results: {},
   });
   assert.equal(timed.ceilingAboveDefault.outcome, "proved");
@@ -274,9 +288,11 @@ test("classification proves only from present evidence", async () => {
         ]
       : [],
     queries: [],
+    options: timingOptions,
     results: {},
   });
-  assert.equal(unrequested.envClampsLargerRequest.outcome, "refuted");
+  // Not exercised, so not refuted either.
+  assert.equal(unrequested.envClampsLargerRequest.outcome, "untested");
   // A command killed at a 600 s limit echoes its own text, marker included: not proof.
   const killed = classify("claude-timing", {
     events: [
@@ -301,9 +317,38 @@ test("classification proves only from present evidence", async () => {
       },
     ],
     queries: [],
+    options: timingOptions,
     results: {},
   });
   assert.equal(killed.ceilingAboveDefault.outcome, "refuted");
+  // Under another query's settings the part was not exercised.
+  assert.equal(
+    classify("claude-timing", {
+      events: [
+        {
+          t: 0,
+          query: 1,
+          kind: "hook",
+          event: "PreToolUse",
+          toolUseId: "a",
+          command: wait(660_000),
+          timeout: 3_600_000,
+        },
+        {
+          t: 661_000,
+          query: 1,
+          kind: "hook",
+          event: "PostToolUse",
+          toolUseId: "a",
+          response: '{"stdout":"probe-exit=0"}',
+        },
+      ],
+      queries: [],
+      options: [...timingOptions].reverse(),
+      results: {},
+    }).ceilingAboveDefault.outcome,
+    "untested",
+  );
   assert.equal(timed.sixtyMinuteBoundary.outcome, "untested");
 
   const deniedByMode = classify("claude-sandbox", {
@@ -348,6 +393,144 @@ test("classification proves only from present evidence", async () => {
     blockedWait.ceilingAboveDefault.reason,
     "tool call rejected before execution",
   );
+
+  // Proofs use only evidence from the run, event and callback they qualify.
+  const accepted = (extra: Event[]) =>
+    classify("codex-user", {
+      workspace: ws,
+      events: [
+        {
+          t: 1,
+          turn: 1,
+          kind: "request",
+          method: approval,
+          command: "node chromium.mjs escalated",
+          cwd: ws,
+          reason: "r",
+          answer: "accept",
+          itemId: "i1",
+        },
+        {
+          t: 2,
+          turn: 1,
+          kind: "item",
+          type: "commandExecution",
+          id: "i1",
+          command: "node chromium.mjs escalated",
+          status: "completed",
+        },
+        ...extra,
+      ],
+      results: {
+        control: { chromium: "blocked" },
+        escalated: { chromium: "ok" },
+      },
+    }).acceptRunsOutsideSandbox;
+  // No control in this run: untested, not refuted.
+  assert.equal(accepted([]).reason, "no same-run sandboxed control");
+  assert.equal(
+    accepted([
+      {
+        t: 0,
+        turn: 1,
+        kind: "item",
+        type: "commandExecution",
+        command: "node chromium.mjs control",
+        status: "completed",
+      },
+    ]).outcome,
+    "proved",
+  );
+  const claudeLegs = (control: boolean) =>
+    classify("claude-sandbox", {
+      events: [
+        ...(control
+          ? [
+              {
+                t: 0,
+                kind: "hook",
+                event: "PreToolUse",
+                toolUseId: "c",
+                command: "node chromium.mjs control",
+                dangerouslyDisableSandbox: false,
+                decision: "allow",
+              },
+            ]
+          : []),
+        {
+          t: 1,
+          kind: "hook",
+          event: "PreToolUse",
+          toolUseId: "e",
+          command: "node chromium.mjs escalated",
+          dangerouslyDisableSandbox: true,
+          decision: "allow",
+        },
+      ],
+      results: {
+        control: { chromium: "blocked" },
+        escalated: { chromium: "ok" },
+      },
+    }).unsandboxedCommandRunsOutside.outcome;
+  assert.equal(claudeLegs(false), "untested");
+  assert.equal(claudeLegs(true), "proved");
+  // A denied call that still reached canUseTool is not a winning deny.
+  const leakedDeny = classify("claude-auto", {
+    events: [
+      {
+        t: 0,
+        kind: "message",
+        type: "system",
+        subtype: "init",
+        permissionMode: "auto",
+      },
+      {
+        t: 1,
+        kind: "hook",
+        event: "PreToolUse",
+        toolUseId: "d",
+        command: "echo probe-hook-deny",
+        decision: "deny",
+      },
+      { t: 2, kind: "canUseTool", toolUseId: "d" },
+      {
+        t: 3,
+        kind: "toolResult",
+        toolUseId: "d",
+        isError: true,
+        text: "PreToolUse:Bash hook error: probe deny",
+      },
+    ],
+    queries: [{ n: 1, done: true }],
+    results: {},
+  });
+  assert.equal(leakedDeny.hookDenyWins.outcome, "refuted");
+  // A completion from another review does not complete this one.
+  const mismatched = classify("codex-auto-review", {
+    events: [
+      {
+        t: 1,
+        turn: 1,
+        kind: "review",
+        phase: "started",
+        reviewId: "r1",
+        command: "node chromium.mjs reviewed",
+      },
+      {
+        t: 2,
+        turn: 1,
+        kind: "review",
+        phase: "completed",
+        reviewId: "r2",
+        status: "approved",
+        riskLevel: "low",
+        rationale: "x",
+        command: "node chromium.mjs reviewed",
+      },
+    ],
+    results: {},
+  });
+  assert.notEqual(mismatched.reviewNotifications.outcome, "proved");
 
   for (const [group, outcome] of Object.entries(
     classify("claude-sandbox", { events: [], results: {}, deadline: true }),

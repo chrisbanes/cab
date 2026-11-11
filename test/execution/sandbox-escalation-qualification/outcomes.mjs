@@ -67,6 +67,16 @@ const isItem = (e, command) =>
   e.kind === "item" &&
   e.type === "commandExecution" &&
   isCommand(e.command, command);
+/** The command item an approval request asked about: same item id, or (for traces that
+ * predate recording ids) the same command later in the same turn. */
+const itemFor = (events, request, command) =>
+  events.find(
+    (e) =>
+      isItem(e, command) &&
+      (request.itemId !== undefined && e.id !== undefined
+        ? e.id === request.itemId
+        : e.turn === request.turn && e.t >= request.t),
+  );
 // The probe hook's own deny reason; any other error result is not its denial.
 const hookDenied = (result) =>
   result?.isError === true && result.text?.includes("probe deny");
@@ -97,19 +107,28 @@ function codexUser(trace) {
         ? proved(fields)
         : refuted(fields);
     const legs = { control: results.control, escalated: results.escalated };
-    const ranItem = events.find(
-      (e) => isItem(e, STIMULI.escalated) && e.status === "completed",
+    const ranItem = itemFor(events, escalated, STIMULI.escalated);
+    // The control must have run sandboxed in this run: its command item, never approved.
+    const control = events.find((e) => isItem(e, STIMULI.control));
+    const controlApproved = requests.some(
+      (r) => isCommand(r.command, STIMULI.control) && r.answer === "accept",
     );
-    if (escalated.answer === "accept" && results.escalated && ranItem)
+    if (
+      escalated.answer === "accept" &&
+      results.escalated &&
+      ranItem?.status === "completed"
+    )
       out.acceptRunsOutsideSandbox =
-        blocked(results.control) && ran(results.escalated)
-          ? proved(legs)
+        !control || controlApproved || !results.control
+          ? untested("no same-run sandboxed control", legs)
           : ran(results.control)
             ? untested("sandboxed control also launched Chromium", legs)
-            : refuted(legs);
+            : blocked(results.control) && ran(results.escalated)
+              ? proved(legs)
+              : refuted(legs);
   }
   if (declined?.answer === "decline") {
-    const item = events.find((e) => isItem(e, STIMULI.declined));
+    const item = itemFor(events, declined, STIMULI.declined);
     const evidence = {
       resultFile: results.declined ?? null,
       itemStatus: item?.status,
@@ -163,7 +182,10 @@ function codexAutoReview(trace) {
     events.some((e) => e.kind === "turn" && e.turn === turn);
   const out = {};
   const [started] = reviews(1, "started", STIMULI.reviewed);
-  const [completed] = reviews(1, "completed", STIMULI.reviewed);
+  // The completion must belong to the same review as the start.
+  const completed = reviews(1, "completed", STIMULI.reviewed).find(
+    (e) => !started || e.reviewId === started.reviewId,
+  );
   if (started && completed?.riskLevel && completed.rationale)
     out.reviewNotifications = proved({
       started: { reviewId: started.reviewId },
@@ -178,11 +200,12 @@ function codexAutoReview(trace) {
       started: Boolean(started),
       completed: completed ?? null,
     });
+  // Chromium succeeding alone does not show escalation: this run has no sandboxed control.
   else if (ran(results.reviewed))
-    out.reviewNotifications = refuted({
-      reason: "escalated command ran without review notifications",
-      result: results.reviewed,
-    });
+    out.reviewNotifications = untested(
+      "no review notifications; the run has no control to show the command escalated",
+      { result: results.reviewed },
+    );
   else if (turnDone(1))
     out.reviewNotifications = untested("no escalation observed in turn 1", {
       result: results.reviewed ?? null,
@@ -201,7 +224,9 @@ function codexAutoReview(trace) {
   const denial = reviews(2, "completed", STIMULI.upload).find(
     (e) => e.status === "denied",
   );
-  const overrule = events.find((e) => e.kind === "overrule");
+  const overrule = events.find(
+    (e) => e.kind === "overrule" && e.reviewId === denial?.reviewId,
+  );
   if (!denial) {
     if (turnDone(2)) {
       const reason =
@@ -260,7 +285,7 @@ function codexTiming(trace) {
       e.t >= request.t &&
       (answeredAt === undefined || e.t < answeredAt) &&
       ((e.kind === "resolved" && e.requestId === request.id) ||
-        e.kind === "turn" ||
+        (e.kind === "turn" && e.turn === request.turn) ||
         (e.kind === "item" && e.type === "commandExecution")),
   );
   const evidence = {
@@ -272,7 +297,11 @@ function codexTiming(trace) {
   else if (answeredAt !== undefined && evidence.heldMs >= trace.holdMs)
     out.withholdFifteenMinutes = proved(evidence);
   const after = events.find(
-    (e) => e.kind === "turn" && answeredAt !== undefined && e.t >= answeredAt,
+    (e) =>
+      e.kind === "turn" &&
+      e.turn === request.turn &&
+      answeredAt !== undefined &&
+      e.t >= answeredAt,
   );
   if (after && early.length === 0)
     out.turnContinuesAfterDecline =
@@ -303,17 +332,26 @@ function claudeSandbox(trace) {
         e.toolUseId === escalated.toolUseId &&
         e.isError,
     );
+    // The control must have run in this query, allowed and without the flag.
+    const control = pre.find(
+      (e) =>
+        isCommand(e.command, STIMULI.control) &&
+        e.decision === "allow" &&
+        !e.dangerouslyDisableSandbox,
+    );
     out.unsandboxedCommandRunsOutside = !results.escalated
       ? denied
         ? refuted({ ...legs, toolResult: denied.text })
         : untested("escalated call wrote no result", legs)
-      : ran(results.control)
-        ? untested("sandboxed control also launched Chromium", legs)
-        : escalated.dangerouslyDisableSandbox &&
-            blocked(results.control) &&
-            ran(results.escalated)
-          ? proved(legs)
-          : refuted(legs);
+      : !control || !results.control
+        ? untested("no same-run sandboxed control", legs)
+        : ran(results.control)
+          ? untested("sandboxed control also launched Chromium", legs)
+          : escalated.dangerouslyDisableSandbox &&
+              blocked(results.control) &&
+              ran(results.escalated)
+            ? proved(legs)
+            : refuted(legs);
   }
   const flagged = events.find(
     (e) =>
@@ -395,7 +433,10 @@ function claudeAuto(trace) {
     const result = resultFor(denied.toolUseId);
     const evidence = {
       toolResult: result ?? null,
-      canUseTool: asked.some((e) => e.toolUseId === denied.toolUseId),
+      // Every callback, not just pass-through ones: a denied call must reach none.
+      canUseTool: events.some(
+        (e) => e.kind === "canUseTool" && e.toolUseId === denied.toolUseId,
+      ),
     };
     out.hookDenyWins =
       hookDenied(result) && !evidence.canUseTool
@@ -504,6 +545,8 @@ function waitCall(events, query, ms) {
 }
 
 function claudeTiming(trace) {
+  // Each part counts only under the BASH_* settings its own query recorded.
+  const env = (n) => trace.options?.[n - 1]?.envOverrides ?? {};
   const out = {
     sixtyMinuteBoundary: untested(
       "inferred from the two bounded parts; a full 60-minute wait is out of budget",
@@ -524,27 +567,30 @@ function claudeTiming(trace) {
       out[key] = untested("tool call rejected before execution", {
         toolResult: rejected(query),
       });
-  // Each part counts only with the requested timeout; a default could give the same trace.
+  // Each part counts only with its own settings and requested timeout; otherwise the
+  // contract was not exercised (a default could give the same trace).
   const first = waitCall(trace.events, 1, 660_000);
   if (first)
     out.ceilingAboveDefault =
-      first.requestedTimeout === 3_600_000 &&
-      // Beyond any 600 s limit, finished in the foreground with its own output.
-      first.elapsedMs >= 655_000 &&
-      !first.timedOut &&
-      first.exitedZero
-        ? proved(first)
-        : refuted(first);
+      env(1).BASH_MAX_TIMEOUT_MS !== "3600000" ||
+      first.requestedTimeout !== 3_600_000
+        ? untested("query 1 did not run with its requested ceiling", first)
+        : // Beyond any 600 s limit, finished in the foreground with its own output.
+          first.elapsedMs >= 655_000 && !first.timedOut && first.exitedZero
+          ? proved(first)
+          : refuted(first);
   const second = waitCall(trace.events, 2, 180_000);
   if (second)
     out.envClampsLargerRequest =
-      second.requestedTimeout === 600_000 &&
-      String(second.response).includes('"timedOutAfterMs":120000') &&
-      !second.exitedZero &&
-      second.elapsedMs >= 100_000 &&
-      second.elapsedMs < 170_000
-        ? proved(second)
-        : refuted(second);
+      env(2).BASH_MAX_TIMEOUT_MS !== "120000" ||
+      second.requestedTimeout !== 600_000
+        ? untested("query 2 did not request more than its ceiling", second)
+        : String(second.response).includes('"timedOutAfterMs":120000') &&
+            !second.exitedZero &&
+            second.elapsedMs >= 100_000 &&
+            second.elapsedMs < 170_000
+          ? proved(second)
+          : refuted(second);
   return out;
 }
 
