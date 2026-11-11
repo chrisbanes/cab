@@ -286,6 +286,7 @@ function prProviderFixture(change: Record<string, unknown> = {}) {
   const sent: string[] = [];
   let parents: string[] = [];
   let compareStatus = "ahead";
+  const compared: string[] = [];
   const fetcher: typeof fetch = async (input, init) => {
     const url = new URL(String(input));
     if (init?.method && init.method !== "GET" && url.pathname !== "/graphql") {
@@ -295,8 +296,10 @@ function prProviderFixture(change: Record<string, unknown> = {}) {
     }
     if (/^\/repos\/org\/repo\/commits\/[0-9a-f]{40}$/.test(url.pathname))
       return Response.json({ parents: parents.map((sha) => ({ sha })) });
-    if (url.pathname.startsWith("/repos/org/repo/compare/"))
+    if (url.pathname.startsWith("/repos/org/repo/compare/")) {
+      compared.push(url.pathname);
       return Response.json({ status: compareStatus });
+    }
     if (url.pathname === "/graphql") {
       const body = JSON.parse(String(init?.body));
       if (body.query.includes("CabDeliveryPr")) {
@@ -393,6 +396,8 @@ function prProviderFixture(change: Record<string, unknown> = {}) {
     setParents: (v: string[]) => {
       parents = v;
     },
+    /** Each compare path read. */
+    compared,
     /** How the base branch compares with any commit. */
     setCompareStatus: (v: string) => {
       compareStatus = v;
@@ -827,9 +832,22 @@ test("pr.update-branch is sent only for a conflict-free PR an up-to-date rule ho
   }
   f.setCompareStatus("ahead");
   f.setParents(["1".repeat(40), "2".repeat(40)]);
-  // Retargeted while pending: a merge from the new base is not the update the action asked for.
+  // Retargeted while pending: unproved until cab accepts the new base, then judged against it.
   f.raw.base.ref = "release";
-  assert.deepEqual(await f.provider.inspectAction(record), superseded);
+  assert.deepEqual(await f.provider.inspectAction(record), {
+    state: "uncertain",
+    reason: "provider-readback-unavailable",
+    receipt: null,
+  });
+  assert.deepEqual(
+    await f.provider.inspectAction({ ...record, acceptedBaseRef: "release" }),
+    {
+      state: "confirmed-success",
+      reason: null,
+      receipt: { nodeId: "P7", number: 7, headSha: updated },
+    },
+  );
+  assert.match(f.compared.at(-1) ?? "", /\.\.\.release$/);
   f.raw.base.ref = "main";
   assert.deepEqual(await f.provider.inspectAction(record), {
     state: "confirmed-success",

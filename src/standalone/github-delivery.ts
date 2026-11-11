@@ -2743,15 +2743,16 @@ export class GitHubHttpDeliveryProvider
               reason: "provider-update-branch-pending",
               receipt: null,
             };
+          // Only a merge from the base the action was authorised against proves it. While the PR targets
+          // another base the outcome waits, as the other readbacks do, until the retarget is accepted or undone.
+          const base = record.acceptedBaseRef ?? a.target.baseRef;
+          if (p.base.ref !== base) throw new Error("provider-pr-mismatch");
           const [own, merged, ...rest] = z
             .object({ parents: z.array(z.object({ sha })) })
             .parse(
               (await this.request(`${repo.path}/commits/${p.head.sha}`)).json,
             ).parents;
-          // Only a merge from the base the action was authorised against proves it; a retarget never does.
-          const base = record.acceptedBaseRef ?? a.target.baseRef;
           const fromBase =
-            p.base.ref === base &&
             own?.sha === a.target.expectedHeadSha &&
             merged !== undefined &&
             !rest.length &&
