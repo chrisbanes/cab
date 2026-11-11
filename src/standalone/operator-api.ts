@@ -287,6 +287,7 @@ import {
   RuntimeConfigurationRefusedError,
   type StandaloneService,
   WorkspaceRecheckRefusedError,
+  withoutWithdrawn,
 } from "./service.js";
 import { refusedRevisionPrefix } from "./state.js";
 import {
@@ -2132,10 +2133,9 @@ export class OperatorApi {
   }
   private execution(task: Row): Execution {
     // A withdrawn delegate owns no execution; its refused request is history.
-    const selections = this.domain()
-      .assignments(String(task.id))
-      .filter((a) => a.state !== "withdrawn")
-      .map((a) => this.selection(a));
+    const selections = withoutWithdrawn(
+      this.domain().assignments(String(task.id)),
+    ).map((a) => this.selection(a));
     const holds = {
       stop:
         this.service.isTaskStopped(String(task.id)) ||
@@ -2603,9 +2603,8 @@ export class OperatorApi {
    * assignment's current request only, so the read stays bounded by assignments.
    */
   private nextAssignments(taskId: string) {
-    return this.domain()
-      .assignments(taskId)
-      .flatMap((assignment) => {
+    return withoutWithdrawn(this.domain().assignments(taskId)).flatMap(
+      (assignment) => {
         const request = this.service.currentTurnRequest(
           String(assignment.id),
           Number(assignment.version),
@@ -2619,7 +2618,8 @@ export class OperatorApi {
         return runtime || refused || assignment.state === "held"
           ? [{ assignment, request, runtime }]
           : [];
-      });
+      },
+    );
   }
   /**
    * Runtime facts of the profiles whose turns are next: the queued or unrequested of

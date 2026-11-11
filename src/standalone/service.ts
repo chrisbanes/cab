@@ -893,12 +893,12 @@ function workspaceBase(link: StoredRepositoryLink) {
     ? {}
     : { base: { mode: baseMode, fetch: fetchBeforeProvisioning } };
 }
-/** Owns only standalone.sqlite in a marked data directory. No import or attach path exists. */
 /** Assignments still able to own execution: a withdrawn delegate's records are history. */
-const withoutWithdrawn = <T extends Record<string, unknown>>(
+export const withoutWithdrawn = <T extends Record<string, unknown>>(
   assignments: T[],
 ) => assignments.filter((a) => a.state !== "withdrawn");
 
+/** Owns only standalone.sqlite in a marked data directory. No import or attach path exists. */
 export class StandaloneService {
   private owner: StandaloneDataDirectory | undefined;
   private db: DatabaseSync | undefined;
