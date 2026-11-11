@@ -221,7 +221,10 @@ export function InstructionProposalsTab(p: TabProps) {
   const start = async (from: Stored, redraft = false) => {
     if (readOnly) return;
     let version = data.project.version;
+    if (busy) return;
     if (redraft) {
+      // Busy at once, so a second click cannot start a second run while the project is read.
+      setBusy(true);
       // The review may outlast the loaded configuration (an accepted save changes it).
       try {
         version = (
@@ -231,6 +234,7 @@ export function InstructionProposalsTab(p: TabProps) {
           )
         ).data.project.version;
       } catch {
+        setBusy(false);
         return setMessage("Couldn’t read the project. Try again.");
       }
     }
@@ -631,12 +635,17 @@ function Review(
           <Button
             type="button"
             variant="secondary"
-            disabled={readOnly}
+            disabled={readOnly || p.busy}
             onClick={p.redraft}
           >
             Redraft
           </Button>
-          <Button type="button" variant="secondary" onClick={p.clear}>
+          <Button
+            type="button"
+            variant="secondary"
+            disabled={p.busy}
+            onClick={p.clear}
+          >
             New selection
           </Button>
         </div>
@@ -648,7 +657,7 @@ function Review(
           <Button
             type="button"
             variant="secondary"
-            disabled={readOnly}
+            disabled={readOnly || p.busy}
             onClick={p.redraft}
           >
             Redraft
