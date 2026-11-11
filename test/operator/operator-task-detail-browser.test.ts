@@ -165,7 +165,7 @@ test("Task detail shows the designed header, two columns and C1/C2 criteria", as
   // The subtitle is the outcome's first line; the strip carries state and the lead.
   assert.equal(
     await header.locator(".page-header-title p.introduction").textContent(),
-    "Let keyboard users **open** the command menu.",
+    "Let keyboard users open the command menu.",
   );
   const strip = page.locator("[data-task-strip]");
   assert.doesNotMatch((await strip.textContent()) ?? "", /Lead · Task lead/);
@@ -3318,7 +3318,7 @@ test("The meaningful outcome sentence stays in the header and the full brief sta
   await subtitle.waitFor();
   assert.equal(
     await subtitle.textContent(),
-    "Let keyboard users **open** the command menu.",
+    "Let keyboard users open the command menu.",
   );
   assert.equal(
     await page.locator("[data-task-strip] details.task-outcome").count(),
@@ -4979,7 +4979,7 @@ test("Phone task header is Back, title, identity subtitle and one Task actions c
   const identity = header.locator(".page-subtitle-short");
   assert.equal(
     await identity.textContent(),
-    "Let keyboard users **open** the command menu.",
+    "Let keyboard users open the command menu.",
   );
   assert.ok(await identity.isVisible());
   assert.doesNotMatch(
