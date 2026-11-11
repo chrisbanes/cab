@@ -827,6 +827,10 @@ test("pr.update-branch is sent only for a conflict-free PR an up-to-date rule ho
   }
   f.setCompareStatus("ahead");
   f.setParents(["1".repeat(40), "2".repeat(40)]);
+  // Retargeted while pending: a merge from the new base is not the update the action asked for.
+  f.raw.base.ref = "release";
+  assert.deepEqual(await f.provider.inspectAction(record), superseded);
+  f.raw.base.ref = "main";
   assert.deepEqual(await f.provider.inspectAction(record), {
     state: "confirmed-success",
     reason: null,
