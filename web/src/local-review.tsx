@@ -975,9 +975,7 @@ export function ReviewComposer({ originKey }: { originKey: string }) {
           {anchor.resultId && (
             <>
               <dt>Result</dt>
-              <dd>
-                {anchor.resultId} · item {anchor.resultItemId}
-              </dd>
+              <dd>{anchor.resultId}</dd>
             </>
           )}
           {anchor.turnId && (
@@ -1262,9 +1260,9 @@ export function LocalReviewPanel() {
         Local review
       </h3>
       <p>
-        Select lines in Files, Changes or retained evidence, then add review
-        comments. The review is sent as one local message to the named project
-        lead. It does not post to GitHub, approve, merge or clear holds.
+        Select lines in Files or Changes, then add review comments. The review
+        is sent as one local message to the named project lead. It does not post
+        to GitHub, approve, merge or clear holds.
       </p>
       {draft?.unsentDraftLost && (
         <p role="status">

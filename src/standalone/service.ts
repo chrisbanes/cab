@@ -52,6 +52,7 @@ import {
   CoordinationStore,
   type CoordinationToolResponse,
   type InboxDelivery,
+  type ResultWorkspaceObservation,
   type RuntimeQuestionRecord,
 } from "../core/coordination.js";
 import { CachedDatabase } from "../core/database-cache.js";
@@ -313,9 +314,7 @@ import type {
   TerminationVerifier,
 } from "./recovery-types.js";
 import {
-  captureRetainedResultEvidence,
   captureRetainedReviewAnchor,
-  failedRetainedResultEvidenceCandidate,
   type RetainedReviewAnchorStageRequest,
   retainedReviewAnchorMaterialHash,
   retainedReviewAnchorStageRequestSchema,
@@ -3739,7 +3738,6 @@ export class StandaloneService {
     request: RetainedReviewAnchorStageRequest,
   ) {
     const task = this.domain().task(request.taskId);
-    const evidence = this.retainedEvidence();
     const operatorApi = new OperatorApi(this, [
       this.dataDir,
       process.env.CAB_OPERATOR_AUTH_FILE ?? "",
@@ -3779,7 +3777,10 @@ export class StandaloneService {
             this.workspaceComparisonExport(request.taskId, comparisonId),
           comparisonOwner: (comparisonId) =>
             this.current?.workspaceComparisons.comparisonOwner(comparisonId),
-          retainedEvidence: evidence,
+          resultWorkId: (resultId) =>
+            this.started()
+              .coordination.results(request.taskId)
+              .find((result) => result.resultId === resultId)?.workId,
         }),
       );
     const [latestPolicy, latestWorkspace] = await Promise.all([
@@ -5394,6 +5395,29 @@ export class StandaloneService {
     return this.started().workspaces.get(taskId, options);
   }
 
+  /** Each result's recorded workspace state; a result without an entry was not observed. */
+  resultWorkspaces(taskId: string) {
+    this.domain().task(taskId);
+    return this.started().coordination.resultWorkspaces(taskId);
+  }
+
+  readCommittedFile(
+    taskId: string,
+    repositoryId: string,
+    commit: string,
+    path: string,
+    maxBytes: number,
+  ) {
+    this.domain().task(taskId);
+    return this.started().workspaces.readCommittedFile(
+      taskId,
+      repositoryId,
+      commit,
+      path,
+      maxBytes,
+    );
+  }
+
   replaceWorkspaceComparison(
     comparison: WorkspaceComparisonSnapshot,
     sides: readonly WorkspaceComparisonSideContent[],
@@ -5615,10 +5639,20 @@ export class StandaloneService {
           const path = this.current?.workspaceBindings.get(taskId)?.path;
           const workspace =
             path && existsSync(path) ? realpathSync(path) : path;
+          const { coordination, deliveryStore } = this.started();
+          const pendingResultWork = coordination
+            .pendingDirtyResultWork(taskId)
+            .map((work) => ({
+              ...work,
+              lastPushedSha:
+                deliveryStore.taskBranch(taskId, work.repositoryId)
+                  ?.lastPushedSha ?? null,
+            }));
           const result = await this.started().workspaces.archiveAndCleanup(
             taskId,
             evidence,
             () => state.confirmArchive(taskId),
+            pendingResultWork,
           );
           // The Claude sandbox temporary base lives exactly as long as the workspace.
           if (result.outcome === "cleaned" && workspace)
@@ -6138,7 +6172,7 @@ export class StandaloneService {
     taskId: string;
     expectedVersion: number;
   }): Promise<TaskResetReceipt> {
-    const { state, domain, schedulerStore } = this.started();
+    const { state, domain, schedulerStore, coordination } = this.started();
     this.domain().task(command.taskId);
     const { receipt, replayed } = state.recordTaskReset(command, () => {
       const availability = this.resetAvailability(command.taskId);
@@ -6149,6 +6183,10 @@ export class StandaloneService {
       const leadAssignmentId = String(lead.id);
       const latest = schedulerStore.latest(leadAssignmentId);
       domain.reopenCompletedAssignment(leadAssignmentId);
+      coordination.discardUncommittedResultWorkWithinTransaction(
+        command.taskId,
+        Date.now(),
+      );
       const conversations = domain
         .assignments(command.taskId)
         .map((assignment) => ({
@@ -6694,9 +6732,7 @@ export class StandaloneService {
         let response: CoordinationToolResponse;
         if (call.tool === "cab_report_result") {
           const resultCall = call as CoordinationCall;
-          let candidate:
-            | Awaited<ReturnType<typeof captureRetainedResultEvidence>>
-            | undefined;
+          let workspaces: ResultWorkspaceObservation[] = [];
           const review = reviewMetadataSchema.safeParse(
             resultCall.arguments.review,
           );
@@ -6709,54 +6745,14 @@ export class StandaloneService {
             ) &&
             (resultCall.arguments.review === undefined || review.success)
           ) {
-            const api = new OperatorApi(this, [
-              this.dataDir,
-              process.env.CAB_OPERATOR_AUTH_FILE ?? "",
-            ]);
-            const policy = () =>
-              api.retainedEvidencePolicy(binding.taskId).then((value) =>
-                value
-                  ? {
-                      taskVersion: value.taskVersion,
-                      fingerprint: value.fingerprint,
-                      excluded: value.excluded,
-                      authorizedRepositoryIds: value.authorizedRepositoryIds,
-                    }
-                  : undefined,
-              );
-            const identity = {
-              taskId: binding.taskId,
-              taskVersion: binding.admittedTaskVersion,
-              captureTaskVersion: binding.taskVersion,
-              assignmentId: binding.assignmentId,
-              assignmentVersion: binding.assignmentVersion,
-              workId: binding.workId,
-              workRevision: binding.workRevision,
-              requestSequence: binding.requestSequence,
-              conversationRevision: binding.conversationRevision,
-              instructionsRevision: binding.instructionsRevision,
-              profileRevision: binding.profileRevision,
-              profileId: binding.profileId,
-              threadId: call.threadId,
-              turnId: call.turnId,
-            };
-            const retainedReview = review.success ? review.data : undefined;
             try {
-              candidate = await captureRetainedResultEvidence({
-                identity,
-                review: retainedReview,
-                currentWorkspace: () =>
-                  this.turnWorkspaceInspectionCurrent(binding.taskId),
-                currentPolicy: policy,
-                turnCaptures: this.workspaceTurnCaptureSlots(binding.taskId),
-                exportComparison: (comparisonId) =>
-                  this.workspaceComparisonExport(binding.taskId, comparisonId),
-              });
+              workspaces =
+                await this.started().workspaces.observeResultWorkspaces(
+                  binding.taskId,
+                );
             } catch {
-              candidate = failedRetainedResultEvidenceCandidate(
-                identity,
-                retainedReview,
-              );
+              // An unobserved workspace never blocks the result; its views say so.
+              workspaces = [];
             }
             const latestBinding = state.coordinationBinding(
               call.threadId,
@@ -6786,9 +6782,7 @@ export class StandaloneService {
                 "Coordination callback binding changed during result capture",
               );
           }
-          response = coordination.recordResult(resultCall, candidate, {
-            nativeResultCallback: true,
-          }).response;
+          response = coordination.recordResult(resultCall, workspaces).response;
         } else {
           response = dispatchCoordinationTool(
             coordination,

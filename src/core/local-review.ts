@@ -128,7 +128,6 @@ function anchorContext(
     anchor.side === "left" ? "Before" : anchor.side === "right" ? "After" : "",
     anchor.comparisonId ? `comparison ${anchor.comparisonId}` : "",
     anchor.resultId ? `result ${anchor.resultId}` : "",
-    anchor.resultItemId ? `item ${anchor.resultItemId}` : "",
     anchor.turnId ? `turn ${anchor.turnId}` : "",
     anchor.sourceSha256 ? `sha256 ${anchor.sourceSha256}` : "",
     `retained anchor ${anchor.anchorId}`,

@@ -91,7 +91,7 @@ export function linkNamesInspector(path: string, hash = ""): boolean {
   const params = new URLSearchParams(beforeHash.split("?")[1] ?? "");
   const section = params.get("section") ?? (fragment || hash.slice(1));
   if (section) return inspectorTargets.includes(section);
-  return ["result", "source", "evidence", "record", "inspectAssignment"].some(
-    (p) => params.has(p),
+  return ["result", "source", "record", "inspectAssignment"].some((p) =>
+    params.has(p),
   );
 }

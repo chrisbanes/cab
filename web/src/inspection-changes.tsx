@@ -51,9 +51,6 @@ const ChangesTree = lazy(() => import("./changes-tree.js"));
 type ComparisonData = WorkspaceComparisonRead["data"];
 type Snapshot = Extract<ComparisonData, { state: "available" }>["comparison"];
 type Entry = Snapshot["entries"][number];
-type SelectableAnchor = Omit<Anchor, "context"> & {
-  context: Exclude<Anchor["context"], "result">;
-};
 type Target = TaskChangesState["target"];
 
 function entryKey(entry: Entry, index: number) {
@@ -100,7 +97,7 @@ function exactReadMatches(data: ComparisonData, requestedId: string) {
 type SelectionMatch = {
   entry: Entry;
   index: number;
-  anchor: SelectableAnchor;
+  anchor: Anchor;
   minLine: number;
   maxLine: number;
 };
@@ -140,7 +137,6 @@ function selectionMatch(
       const maxLine = minLine + lineCount - 1;
       if (
         anchor &&
-        anchor.context !== "result" &&
         anchor.taskId === taskId &&
         anchor.path === selection.path &&
         anchor.contentSha256 === selection.contentSha256 &&
@@ -155,7 +151,7 @@ function selectionMatch(
         return {
           entry,
           index,
-          anchor: anchor as SelectableAnchor,
+          anchor,
           minLine,
           maxLine,
         };
@@ -177,7 +173,7 @@ type SelectionFields = Pick<
 >;
 
 function changeSelection(
-  anchor: SelectableAnchor,
+  anchor: Anchor,
   fields: SelectionFields,
 ): TaskChangeSelection {
   return {
@@ -576,7 +572,7 @@ export function TaskWorkspaceChanges({
     maxLine: number,
     extend: boolean,
   ) => {
-    if (anchor.context === "result" || !selected) return;
+    if (!selected) return;
     const selectedKey = entryKey(selected, selectedIndex);
     state.selectedEntryKey = selectedKey;
     const previous = state.selection;
@@ -593,7 +589,7 @@ export function TaskWorkspaceChanges({
     // Switching side or hunk starts a new selection; a fixed edge or Shift extends this one.
     const extending = sameRange && (extend || previous.pin !== null);
     const rangeAnchorLine = extending ? previous.rangeAnchorLine : currentLine;
-    state.selection = changeSelection(anchor as SelectableAnchor, {
+    state.selection = changeSelection(anchor, {
       entryKey: selectedKey,
       currentLine,
       rangeAnchorLine,

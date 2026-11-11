@@ -1393,30 +1393,13 @@
         "harness:result-get",
         "docs/evidence/issue-901-cli8-live-2026-10-12.json"
       ],
-      "effect": "Shows a result with review metadata, artifact ids and evidence manifest; an older result beyond the review window is found by id.",
-      "denial": "n/a: read-only; a missing review record reads review-unavailable and evidence-unavailable.",
+      "effect": "Shows a result with review metadata, artifact ids and the workspace state it recorded (HEAD, branch, uncommitted changes); an older result beyond the review window is found by id.",
+      "denial": "n/a: read-only; a missing review record reads review-unavailable.",
       "revision": "n/a: read; no version or revision check",
       "retry": "n/a: idempotent read; no receipt",
       "observation": "real",
       "state": "passed",
       "gap": "Real host journey in the CLI8 live record: installed from npm pack outside the checkout, loopback HTTP, live Codex (2 turns), scripted external client; other denial/revision/retry cases from the cited deterministic suites. Not run from a second machine over private HTTPS: prerequisite unavailable (no second trusted machine was granted)."
-    },
-    {
-      "id": "result evidence",
-      "kind": "command",
-      "area": "result/artifact/delivery",
-      "scenarios": ["CLI01"],
-      "evidence": [
-        "test/workspaces/operator-cli-evidence.test.ts",
-        "docs/evidence/issue-895-cli2-2026-10-11.md"
-      ],
-      "effect": "Writes a retained evidence item's exact bytes (BOM and CRLF preserved) to a new 0600 --out file after digest and size verification.",
-      "denial": "n/a: read-only; a gap item shown with evidence-gap exits 5 with --out and leaves no file.",
-      "revision": "n/a: read; no version or revision check",
-      "retry": "n/a: idempotent read; no receipt",
-      "observation": "synthetic",
-      "state": "bounded",
-      "gap": "Exercised only through the in-process CLI against a real loopback service with fixture runtimes: not through the installed binary in the live journey, and no second machine or private HTTPS (prerequisite unavailable: no second trusted machine was granted)."
     },
     {
       "id": "artifact get",
@@ -1429,9 +1412,9 @@
         "test/operator/operator-cli-inventory.test.ts",
         "docs/evidence/issue-895-cli2-2026-10-11.md"
       ],
-      "effect": "Writes a retained artifact (source retained, or a still-matching recorded workspace file) to a new 0600 file after x-ensemble-sha256 verification.",
+      "effect": "Writes a recorded artifact (source recorded-workspace for a still-matching workspace file, or recorded-commit for the bytes at the commit its result recorded) to a new 0600 file after x-cab-sha256 verification.",
       "denial": "n/a: read-only; another task's artifact is 404, a digest mismatch is integrity-mismatch (exit 5) with no file, and an existing --out path is refused untouched.",
-      "revision": "A changed workspace file is 409 (exit 4); a retained gap with a live file is 503 (exit 5).",
+      "revision": "A changed workspace file the recorded commit cannot supply is 409 (exit 4).",
       "retry": "n/a: idempotent read; no receipt",
       "observation": "synthetic",
       "state": "bounded",

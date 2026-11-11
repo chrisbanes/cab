@@ -97,7 +97,7 @@ import { NativeSelect } from "./ui/native-select.js";
 import { Textarea } from "./ui/textarea.js";
 import { MarkdownPreview, TaskFiles } from "./task-files.js";
 import { TaskWorkspaceChanges } from "./inspection-changes.js";
-import { RetainedResultEvidence } from "./retained-evidence.js";
+import { resultWorkspaceLines } from "../../src/operator/task-presentation.js";
 import {
   hasImproveWork,
   ImproveWithLead,
@@ -193,15 +193,9 @@ const tabSections: Record<TaskTab, string> = {
 };
 const sourceGap =
   "Retained source body and checklist coverage are unavailable. Source fields are retained only up to 16,000 characters; private or missing material may also be unavailable. Consult the external source or ask the lead.";
-/** The Overview card a `source`, `result` or `evidence` link names when it names no section. */
+/** The Overview card a `source` or `result` link names when it names no section. */
 const linkedCard = (p: URLSearchParams) =>
-  p.has("evidence")
-    ? "result-evidence"
-    : p.has("result")
-      ? "review"
-      : p.has("source")
-        ? "brief"
-        : null;
+  p.has("result") ? "review" : p.has("source") ? "brief" : null;
 const overviewCards = ["brief", "result-evidence", "assignments", "context"];
 /** Overview sections that sit in the inspector's fold. */
 const inspectorSections = ["brief", "assignments", "context"];
@@ -514,11 +508,8 @@ export function TaskWorkspace({
       // The first paint already shows the linked tab.
       state.tab = tabForLocation(path, location.hash) ?? "overview";
       state.selectedResult = params.get("result");
-      const evidenceItem = params.get("evidence");
-      if (state.selectedResult && evidenceItem)
-        state.retained(state.selectedResult).selectedItemId = evidenceItem;
       state.selectedSource = params.get("source");
-      // A link to a retained source or to evidence opens the card that shows it; a link that
+      // A link to a retained source opens the card that shows it; a link that
       // names a result, record or section already has its target.
       if (
         state.selectedSource &&
@@ -527,7 +518,6 @@ export function TaskWorkspace({
         !params.has("section")
       )
         state.overview.add("brief");
-      if (state.selectedResult && evidenceItem) state.overview.add("evidence");
       // A section or fragment naming a card opens it once, here; a Back to this entry
       // remounts the page with the operator's own choice kept.
       const named =
@@ -537,7 +527,7 @@ export function TaskWorkspace({
       // The inspector's fold holds the cards a link can name; a phone opens it closed otherwise.
       if (
         inspectorSections.includes(named) ||
-        ["record", "result", "source", "evidence"].some((p) => params.has(p))
+        ["record", "result", "source"].some((p) => params.has(p))
       )
         state.inspectorOpen = true;
       if (named === "result-evidence") state.overview.add("evidence");
@@ -3011,20 +3001,6 @@ export function TaskWorkspace({
                                 ask={ask}
                               />
                             )}
-                            <RetainedResultEvidence
-                              key={selected.resultId}
-                              client={client}
-                              session={session}
-                              taskId={taskId}
-                              resultId={selected.resultId}
-                              state={state.retained(selected.resultId)}
-                              changed={changed}
-                              openCurrent={(scope, filePath) => {
-                                state.files.openCurrentFile(scope, filePath);
-                                changed();
-                                requestAnimationFrame(() => reveal("files"));
-                              }}
-                            />
                           </div>
                         </details>
                       </section>
@@ -3043,6 +3019,11 @@ export function TaskWorkspace({
                       <ShortId value={selected.assignmentId} /> · work revision{" "}
                       {selected.workRevision} · {date(selected.createdAt)}
                     </p>
+                    <ul className="result-workspace metadata muted">
+                      {resultWorkspaceLines(selected.workspace).map((line) => (
+                        <li key={line}>{line}</li>
+                      ))}
+                    </ul>
                   </section>
                 )}
                 <section id="brief">

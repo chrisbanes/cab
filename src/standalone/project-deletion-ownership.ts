@@ -119,7 +119,6 @@ const workRoots = [
   ["conversation_history_turn_omissions", "workId"],
   ["conversation_plan_updates", "workId"],
   ["lead_text_submissions", "workId"],
-  ["retained_result_evidence", "workId"],
   ["retained_review_anchor_contexts", "workId"],
   ["coordination_results", "workId"],
   ["task_review_contexts", "workId"],
@@ -589,10 +588,6 @@ export function captureDeletionOwnership(db: Database, projectId: string) {
       `${inSet("taskId", "tasks")} OR ${inSet("workId", "work")}`,
     ],
     [
-      "retained_result_evidence",
-      `${inSet("taskId", "tasks")} OR ${inSet("workId", "work")}`,
-    ],
-    [
       "retained_review_anchor_contexts",
       `${inSet("taskId", "tasks")} OR ${inSet("workId", "work")}`,
     ],
@@ -631,7 +626,6 @@ export function captureDeletionOwnership(db: Database, projectId: string) {
     "conversation_history_items",
     "conversation_history_turn_omissions",
     "conversation_plan_updates",
-    "retained_result_evidence",
     "retained_review_anchor_contexts",
     "runtime_terminal_evidence",
     "coordination_receipts",
@@ -691,7 +685,6 @@ export function captureDeletionOwnership(db: Database, projectId: string) {
     publications: ids("task_publications", "publicationId"),
   });
   Object.assign(base, {
-    resultItems: ids("retained_result_evidence_items", "itemId"),
     artifacts: ids("task_review_artifact_ids", "artifactId"),
     sources: ids(
       "task_review_sources",

@@ -40,11 +40,7 @@ import {
   DomainPolicyError,
   DomainStore,
 } from "./domain.js";
-import {
-  RetainedEvidenceStore,
-  unavailableRetainedEvidenceCandidate,
-  type RetainedEvidenceCandidate,
-} from "./retained-evidence.js";
+import { RetainedEvidenceStore } from "./retained-evidence.js";
 import {
   DeliveryStore,
   externalActionSchema,
@@ -386,6 +382,39 @@ type ReceiptIdentity = Pick<
   CoordinationReceipt,
   "taskId" | "assignmentId" | "workId" | "workRevision"
 >;
+
+export const resultWorkspaceObservationSchema = z
+  .object({
+    repositoryId: z.string().min(1).max(512),
+    headCommit: z.string().regex(/^[0-9a-f]{40}$/),
+    branch: z.string().min(1).max(1024).nullable(),
+    dirty: z.boolean(),
+    observedAt: z.number().int().nonnegative(),
+  })
+  .strict();
+export const resultWorkspaceObservationsSchema = z
+  .array(resultWorkspaceObservationSchema)
+  .max(20);
+/** A repository's HEAD, branch (null when detached) and dirty flag when a result was recorded. */
+export type ResultWorkspaceObservation = z.infer<
+  typeof resultWorkspaceObservationSchema
+>;
+export type ResultWorkspace = ResultWorkspaceObservation & {
+  discardedAt: number | null;
+};
+
+function parseResultWorkspace(row: Row): ResultWorkspace {
+  return {
+    ...resultWorkspaceObservationSchema.parse({
+      repositoryId: row.repositoryId,
+      headCommit: row.headCommit,
+      branch: row.branch,
+      dirty: row.dirty === 1,
+      observedAt: row.observedAt,
+    }),
+    discardedAt: row.discardedAt === null ? null : Number(row.discardedAt),
+  };
+}
 
 export interface AssignmentResult {
   resultId: string;
@@ -762,6 +791,18 @@ export class CoordinationStore {
       );
       CREATE TABLE IF NOT EXISTS coordination_results ${resultColumns};
       CREATE INDEX IF NOT EXISTS coordination_results_task_created ON coordination_results(taskId,createdAt);
+      CREATE TABLE IF NOT EXISTS coordination_result_workspaces (
+        resultId TEXT NOT NULL REFERENCES coordination_results(resultId),
+        taskId TEXT NOT NULL REFERENCES domain_tasks(id),
+        repositoryId TEXT NOT NULL,
+        headCommit TEXT NOT NULL CHECK(length(headCommit) = 40),
+        branch TEXT,
+        dirty INTEGER NOT NULL CHECK(dirty IN (0,1)),
+        observedAt INTEGER NOT NULL,
+        discardedAt INTEGER,
+        PRIMARY KEY(resultId, repositoryId)
+      );
+      CREATE INDEX IF NOT EXISTS coordination_result_workspaces_task_dirty ON coordination_result_workspaces(taskId,dirty);
       CREATE TABLE IF NOT EXISTS coordination_unresolved_result_destinations (
         resultId TEXT PRIMARY KEY REFERENCES coordination_results(resultId),
         taskId TEXT NOT NULL REFERENCES domain_tasks(id),
@@ -957,7 +998,9 @@ export class CoordinationStore {
         CREATE INDEX IF NOT EXISTS coordination_inbox_events_taskId
         ON coordination_inbox_events(taskId);`);
       new TaskReviewStore(this.db).populateMissingWithinTransaction();
-      new RetainedEvidenceStore(this.db).migrate();
+      const retained = new RetainedEvidenceStore(this.db);
+      retained.migrate();
+      retained.dropResultEvidence();
       this.localReviews().migrate();
     });
   }
@@ -1163,10 +1206,10 @@ export class CoordinationStore {
     return this.parseReceipt(row);
   }
 
+  /** `workspaces` is the observed state of each task repository; empty when it was not observed. */
   recordResult(
     input: CoordinationCall,
-    evidenceCandidate?: RetainedEvidenceCandidate,
-    options: { nativeResultCallback?: boolean } = {},
+    workspaces: readonly ResultWorkspaceObservation[] = [],
   ): {
     result: AssignmentResult;
     response: CoordinationToolResponse;
@@ -1241,14 +1284,6 @@ export class CoordinationStore {
           "FROM coordination_results WHERE workId = ?",
         String(binding.workId),
       );
-      if (
-        options.nativeResultCallback === true &&
-        !priorResult &&
-        !evidenceCandidate
-      )
-        throw new Error(
-          "Native result callback requires retained evidence capture",
-        );
       let result: AssignmentResult;
       if (priorResult) {
         if (priorResult.payloadHash !== callHash)
@@ -1273,6 +1308,22 @@ export class CoordinationStore {
             callHash,
             recipient.id,
             recipient.resolved ? "resolved" : "unresolved",
+          );
+        const insertWorkspace =
+          this.db.prepare(`INSERT INTO coordination_result_workspaces
+          (resultId, taskId, repositoryId, headCommit, branch, dirty, observedAt)
+          VALUES (?, ?, ?, ?, ?, ?, ?)`);
+        for (const workspace of resultWorkspaceObservationsSchema.parse(
+          workspaces,
+        ))
+          insertWorkspace.run(
+            resultId,
+            String(binding.taskId),
+            workspace.repositoryId,
+            workspace.headCommit,
+            workspace.branch,
+            workspace.dirty ? 1 : 0,
+            workspace.observedAt,
           );
         if (
           recipient.resolved &&
@@ -1330,44 +1381,6 @@ export class CoordinationStore {
             result.summary,
             result.createdAt * 1000,
           );
-        if (evidenceCandidate) {
-          const currentIdentity = this.retainedEvidenceIdentity(binding, call);
-          if (!currentIdentity)
-            throw new Error("Coordination callback request identity changed");
-          const evidenceStore = this.retainedEvidence();
-          const owner = {
-            resultId: result.resultId,
-            taskId: result.taskId,
-            assignmentId: result.assignmentId,
-            assignmentVersion: result.assignmentVersion,
-            workId: result.workId,
-            workRevision: result.workRevision,
-          };
-          this.db.exec("SAVEPOINT retained_result_evidence_write");
-          try {
-            evidenceStore.recordResultWithinTransaction(
-              owner,
-              currentIdentity,
-              evidenceCandidate,
-            );
-            this.db.exec("RELEASE SAVEPOINT retained_result_evidence_write");
-          } catch (evidenceWriteFailure) {
-            try {
-              this.db.exec(
-                "ROLLBACK TO SAVEPOINT retained_result_evidence_write",
-              );
-              this.db.exec("RELEASE SAVEPOINT retained_result_evidence_write");
-            } catch {
-              // SQLite may have aborted the transaction; retain the original write failure.
-              throw evidenceWriteFailure;
-            }
-            evidenceStore.recordResultWithinTransaction(
-              owner,
-              currentIdentity,
-              unavailableRetainedEvidenceCandidate(evidenceCandidate),
-            );
-          }
-        }
       }
       const settledEffect = this.db
         .prepare(`UPDATE execution_pending_effects
@@ -3602,6 +3615,49 @@ export class CoordinationStore {
     return rows.map((row) => this.parseResult(row));
   }
 
+  /** Recorded workspace state per result, keyed by result ID; a result without rows was not observed. */
+  resultWorkspaces(taskId: string): Map<string, ResultWorkspace[]> {
+    const rows = this.db
+      .prepare(
+        "SELECT resultId, repositoryId, headCommit, branch, dirty, observedAt, discardedAt FROM coordination_result_workspaces WHERE taskId = ? ORDER BY resultId, repositoryId",
+      )
+      .all(uuid.parse(taskId)) as Row[];
+    const byResult = new Map<string, ResultWorkspace[]>();
+    for (const row of rows) {
+      const resultId = String(row.resultId);
+      const list = byResult.get(resultId) ?? [];
+      list.push(parseResultWorkspace(row));
+      byResult.set(resultId, list);
+    }
+    return byResult;
+  }
+
+  /** Dirty result records not discarded by a task reset; cleanup must prove each settled. */
+  pendingDirtyResultWork(
+    taskId: string,
+  ): Array<{ resultId: string; repositoryId: string; headCommit: string }> {
+    return (
+      this.db
+        .prepare(
+          "SELECT resultId, repositoryId, headCommit FROM coordination_result_workspaces WHERE taskId = ? AND dirty = 1 AND discardedAt IS NULL ORDER BY observedAt, resultId, repositoryId",
+        )
+        .all(uuid.parse(taskId)) as Row[]
+    ).map((row) => ({
+      resultId: String(row.resultId),
+      repositoryId: String(row.repositoryId),
+      headCommit: String(row.headCommit),
+    }));
+  }
+
+  /** Called inside the task reset transaction: reset is the explicit discard of uncommitted result work. */
+  discardUncommittedResultWorkWithinTransaction(taskId: string, at: number) {
+    this.db
+      .prepare(
+        "UPDATE coordination_result_workspaces SET discardedAt = ? WHERE taskId = ? AND dirty = 1 AND discardedAt IS NULL",
+      )
+      .run(at, uuid.parse(taskId));
+  }
+
   unresolvedResultDestinations(taskId?: string): UnresolvedResultDestination[] {
     const sql =
       "SELECT resultId, taskId, assignmentId, originalDestination, reason, revision " +
@@ -4651,32 +4707,6 @@ export class CoordinationStore {
       throw new Error("Coordination callback matches ambiguous work");
     if (rows[0]) assertOwnedTaskWritable(this.db, String(rows[0].taskId));
     return rows[0];
-  }
-
-  private retainedEvidenceIdentity(binding: Row, call: CoordinationCall) {
-    if (
-      binding.requestSequence === null ||
-      binding.requestSequence === undefined ||
-      binding.admittedTaskVersion === null ||
-      binding.admittedTaskVersion === undefined
-    )
-      return undefined;
-    return {
-      taskId: String(binding.taskId),
-      taskVersion: Number(binding.admittedTaskVersion),
-      captureTaskVersion: Number(binding.taskVersion),
-      assignmentId: String(binding.assignmentId),
-      assignmentVersion: Number(binding.assignmentVersion),
-      workId: String(binding.workId),
-      workRevision: Number(binding.workRevision),
-      requestSequence: Number(binding.requestSequence),
-      conversationRevision: Number(binding.conversationRevision),
-      instructionsRevision: Number(binding.instructionsRevision),
-      profileRevision: Number(binding.profileRevision),
-      profileId: String(binding.profileId),
-      threadId: call.threadId,
-      turnId: call.turnId,
-    };
   }
 
   private resolveRecipient(binding: Row): {

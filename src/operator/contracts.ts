@@ -62,8 +62,6 @@ import {
   setupRepositorySchema,
 } from "../core/github-source-contracts.js";
 import {
-  retainedEvidenceIdentitySchema,
-  retainedEvidenceSourceObservationSchema,
   reviewAnchorRecordBaseSchema,
   reviewAnchorSelectionSchema,
 } from "../core/review-anchor-contracts.js";
@@ -512,99 +510,6 @@ export const workspacePreviewReadSchema = envelope(
           message: "unavailable preview cannot contain file data",
         });
     }),
-);
-const retainedEvidenceAvailableItemSchema = z
-  .object({
-    itemId: uuid,
-    kind: z.enum(["file", "diff"]),
-    state: z.literal("available"),
-    source: z.enum(["artifact-file", "change-file", "observed-diff"]),
-    repositoryId: z.string().min(1).max(512).nullable(),
-    path: z.string().min(1).max(2048),
-    artifactId: uuid.optional(),
-    mime: z.string().min(1).max(128),
-    sha256: hash,
-    size: z.number().int().nonnegative().safe(),
-    capturedAt: time,
-    observedAt: time.nullable(),
-    provenance: z.record(z.string().max(80), scalar),
-  })
-  .strict();
-const retainedEvidenceItemReadSchema = z.discriminatedUnion("state", [
-  retainedEvidenceAvailableItemSchema,
-  z
-    .object({
-      itemId: uuid,
-      kind: z.enum(["file", "diff"]),
-      state: z.literal("gap"),
-      reason: z.string().min(1).max(80),
-    })
-    .strict(),
-  z
-    .object({
-      itemId: uuid,
-      kind: z.enum(["file", "diff"]),
-      state: z.literal("unavailable"),
-      reason: z.enum(["excluded", "unavailable"]),
-    })
-    .strict(),
-]);
-export const retainedResultEvidenceReadSchema = envelope(
-  z.discriminatedUnion("state", [
-    z
-      .object({
-        taskId: uuid,
-        resultId: uuid,
-        state: z.enum(["empty", "available", "partial", "gap"]),
-        evidenceId: uuid,
-        // The result route supplies the task; the identity does not repeat it.
-        identity: retainedEvidenceIdentitySchema.omit({ taskId: true }),
-        capturedAt: time,
-        sourceObservation: retainedEvidenceSourceObservationSchema,
-        items: z.array(retainedEvidenceItemReadSchema).max(320),
-      })
-      .strict(),
-    z
-      .object({
-        taskId: uuid,
-        resultId: uuid,
-        state: z.literal("unavailable"),
-        reason: z.enum(["not-retained", "excluded", "unavailable"]),
-      })
-      .strict(),
-  ]),
-);
-export const retainedEvidenceItemContentReadSchema = envelope(
-  z.discriminatedUnion("state", [
-    z
-      .object({
-        taskId: uuid,
-        resultId: uuid,
-        itemId: uuid,
-        state: z.literal("available"),
-        item: retainedEvidenceAvailableItemSchema,
-        preview: workspacePreviewDataSchema,
-      })
-      .strict(),
-    z
-      .object({
-        taskId: uuid,
-        resultId: uuid,
-        itemId: uuid,
-        state: z.literal("gap"),
-        reason: z.string().min(1).max(80),
-      })
-      .strict(),
-    z
-      .object({
-        taskId: uuid,
-        resultId: uuid,
-        itemId: uuid,
-        state: z.literal("unavailable"),
-        reason: z.enum(["excluded", "unavailable"]),
-      })
-      .strict(),
-  ]),
 );
 // Reads stay open-ended on `reason`; the store records the closed gap-reason enum.
 const retainedReviewAnchorRecordSchema = reviewAnchorRecordBaseSchema
@@ -1510,6 +1415,19 @@ const result = z
     recipientAssignmentId: uuid.nullable(),
     destinationDisposition: z.enum(["delivered", "unresolved"]),
     createdAt: time,
+    // Empty when the result recorded no workspace state (older results, or a failed observation).
+    workspace: z
+      .array(
+        z
+          .object({
+            repositoryId: z.string().min(1).max(512),
+            headCommit: z.string().regex(/^[0-9a-f]{40}$/),
+            branch: z.string().min(1).max(1024).nullable(),
+            dirty: z.boolean(),
+          })
+          .strict(),
+      )
+      .max(20),
   })
   .strict();
 export const interactionSchema = z

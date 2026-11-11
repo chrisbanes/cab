@@ -29,6 +29,11 @@ import { transaction, type Database } from "../core/store.js";
 import { runGit } from "./git-process.js";
 import { safeBranchName } from "../core/delivery.js";
 import type { BranchFetch, FetchBranchResult } from "./git-fetch.js";
+import { provedAncestor, verifierGit } from "./push-verification.js";
+import {
+  resultWorkspaceObservationsSchema,
+  type ResultWorkspaceObservation,
+} from "../core/coordination.js";
 import { maxErrorMessageBytes } from "./service-log.js";
 
 const maxGitOutputBytes = 1024 * 1024;
@@ -42,6 +47,8 @@ const gitOperations = [
   "worktree-add",
   "archive-status",
   "worktree-remove",
+  "result-observe",
+  "result-read",
 ] as const;
 
 type GitOperation = (typeof gitOperations)[number];
@@ -55,6 +62,8 @@ const gitOperationTimeouts: Record<GitOperation, number> = {
   "worktree-add": 120_000,
   "archive-status": 120_000,
   "worktree-remove": 120_000,
+  "result-observe": 30_000,
+  "result-read": 30_000,
 };
 
 const workspaceStateSchema = z.enum([
@@ -218,6 +227,14 @@ export interface WorkspaceCleanupEvidence {
   workspaceContentsPreserved: boolean;
 }
 
+/** A result that recorded uncommitted changes; cleanup refuses until the work is committed or delivered. */
+export interface PendingResultWork {
+  resultId: string;
+  repositoryId: string;
+  headCommit: string;
+  lastPushedSha: string | null;
+}
+
 export type WorkspaceCleanupResult =
   | { outcome: "cleaned"; binding: TaskWorkspaceBinding }
   | { outcome: "retained"; binding: TaskWorkspaceBinding; reason: string };
@@ -273,6 +290,7 @@ export interface TaskWorkspaceLifecycle {
     taskId: string,
     evidence: WorkspaceCleanupEvidence,
     finalWriterCheck?: () => boolean,
+    pendingResultWork?: readonly PendingResultWork[],
   ): Promise<WorkspaceCleanupResult>;
 }
 
@@ -826,6 +844,7 @@ export class WorkspaceManager implements TaskWorkspaceLifecycle {
     taskId: string,
     evidence: WorkspaceCleanupEvidence,
     finalWriterCheck?: () => boolean,
+    pendingResultWork: readonly PendingResultWork[] = [],
   ): Promise<WorkspaceCleanupResult> {
     const id = z.string().trim().min(1).max(512).parse(taskId);
     const approval = z
@@ -886,6 +905,18 @@ export class WorkspaceManager implements TaskWorkspaceLifecycle {
           );
       }
 
+      for (const work of pendingResultWork) {
+        const repository = checked.repositories.find(
+          (candidate) => candidate.repositoryId === work.repositoryId,
+        );
+        if (repository && (await this.resultWorkSettled(repository, work)))
+          continue;
+        return this.retained(
+          checked,
+          `Result ${work.resultId} recorded uncommitted changes in ${work.repositoryId} that are neither committed nor delivered; commit or deliver them, or reset the task to discard them`,
+        );
+      }
+
       if (finalWriterCheck && !finalWriterCheck())
         return this.retained(
           checked,
@@ -924,6 +955,120 @@ export class WorkspaceManager implements TaskWorkspaceLifecycle {
           held.reason ?? "Workspace cleanup interrupted",
         );
       }
+    });
+  }
+
+  /** Committed: HEAD moved to a proved descendant. Delivered: the last push is a proved descendant. */
+  private async resultWorkSettled(
+    repository: TaskWorkspaceRepository,
+    work: PendingResultWork,
+  ): Promise<boolean> {
+    this.assertNotCancelled();
+    const git = verifierGit(
+      repository.workspacePath,
+      this.gitCancellation.signal,
+      this.gitExecutable,
+    );
+    const head = await git(["rev-parse", "--verify", "HEAD^{commit}"]);
+    const descendants = [
+      head.status === "ok" ? head.stdout.toString("utf8").trim() : null,
+      work.lastPushedSha,
+    ];
+    for (const commit of descendants)
+      if (
+        commit &&
+        commit !== work.headCommit &&
+        (await provedAncestor(git, work.headCommit, commit)) === true
+      )
+        return true;
+    return false;
+  }
+
+  /**
+   * Each repository's HEAD, branch (null when detached) and whether it has uncommitted changes,
+   * ignored files excluded. Throws when the workspace is not ready or Git cannot say.
+   */
+  async observeResultWorkspaces(
+    taskId: string,
+  ): Promise<ResultWorkspaceObservation[]> {
+    const binding = this.store.get(taskId);
+    if (binding?.state !== "ready")
+      throw new Error(`Task ${taskId} has no ready workspace`);
+    const observations: ResultWorkspaceObservation[] = [];
+    for (const repository of binding.repositories) {
+      const at = repository.workspacePath;
+      const headCommit = await this.git(
+        at,
+        "result-observe",
+        "rev-parse",
+        "--verify",
+        "HEAD^{commit}",
+      );
+      // `symbolic-ref` exits 1 when detached, which the runner treats as a failure.
+      const branch = await this.git(
+        at,
+        "result-observe",
+        "rev-parse",
+        "--abbrev-ref",
+        "HEAD",
+      );
+      // Only whether there is output matters: output past a small cap is dirty.
+      const status = await this.gitBytes(
+        at,
+        "result-observe",
+        4096,
+        "status",
+        "--porcelain=v1",
+        "--untracked-files=all",
+        "--ignore-submodules=dirty",
+      ).catch((error: unknown) => {
+        if (error instanceof WorkspaceGitError && error.kind === "output-limit")
+          return Buffer.from("?");
+        throw error;
+      });
+      observations.push({
+        repositoryId: repository.repositoryId,
+        headCommit,
+        branch: branch === "HEAD" ? null : branch,
+        dirty: status.length > 0,
+        observedAt: Date.now(),
+      });
+    }
+    return resultWorkspaceObservationsSchema.parse(observations);
+  }
+
+  /**
+   * A file's bytes at `commit`, read from the repository that owns the worktree so it still works
+   * after cleanup. Undefined when the commit or path does not exist or exceeds `maxBytes`.
+   */
+  async readCommittedFile(
+    taskId: string,
+    repositoryId: string,
+    commit: string,
+    path: string,
+    maxBytes: number,
+  ): Promise<Buffer | undefined> {
+    const repository = this.store
+      .get(taskId)
+      ?.repositories.find(
+        (candidate) => candidate.repositoryId === repositoryId,
+      );
+    if (
+      !repository ||
+      !/^[0-9a-f]{40}$/.test(commit) ||
+      path.split("/").some((part) => !part || part === "." || part === "..")
+    )
+      return undefined;
+    return this.gitBytes(
+      worktreeOwner(repository),
+      "result-read",
+      maxBytes,
+      "cat-file",
+      "blob",
+      `${commit}:${path}`,
+    ).catch((error: unknown) => {
+      if (error instanceof WorkspaceGitError) return undefined;
+      throw error;
     });
   }
 
@@ -1725,6 +1870,17 @@ export class WorkspaceManager implements TaskWorkspaceLifecycle {
     operation: GitOperation,
     ...args: string[]
   ): Promise<string> {
+    return (await this.gitBytes(cwd, operation, maxGitOutputBytes, ...args))
+      .toString("utf8")
+      .trim();
+  }
+
+  private async gitBytes(
+    cwd: string,
+    operation: GitOperation,
+    maxOutputBytes: number,
+    ...args: string[]
+  ): Promise<Buffer> {
     this.assertNotCancelled();
     const signal = this.gitCancellation.signal;
     // Cancelled before starting: no child, so no failure observation.
@@ -1741,10 +1897,10 @@ export class WorkspaceManager implements TaskWorkspaceLifecycle {
       timeoutMs: this.gitTimeouts[operation] ?? defaultTimeoutMs,
       terminationGraceMs: this.gitTerminationGraceMs,
       observationMs: this.gitTerminationObservationMs,
-      maxOutputBytes: maxGitOutputBytes,
+      maxOutputBytes,
       signal,
     });
-    if (result.status === "ok") return result.stdout.toString("utf8").trim();
+    if (result.status === "ok") return result.stdout;
     const failure =
       result.status === "exit"
         ? {

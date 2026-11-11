@@ -3516,54 +3516,11 @@ test("Task detail identifiers are short mono metadata and tokens read as sentenc
     .waitFor();
   await page.unrouteAll({ behavior: "wait" });
 
-  // Each retained-evidence reason reads as its sentence; the code is only in Details.
-  const evidence = page.locator(".retained-evidence");
-  await evidence
-    .getByText(
-      "Evidence was not retained for this result. Current files are not used instead.",
-      { exact: true },
-    )
+  // A result that recorded no workspace state says so beside its details.
+  await page
+    .locator("#result-details")
+    .getByText("Workspace state was not recorded", { exact: true })
     .waitFor();
-  const code = evidence.getByText("not-retained", { exact: true });
-  assert.equal(await code.isVisible(), false);
-  await evidence.getByText("Details", { exact: true }).click();
-  assert.equal(await code.isVisible(), true);
-  let reason = "excluded";
-  await page.route(
-    (url) =>
-      url.pathname ===
-      `/api/operator/tasks/${a.taskId}/results/${r2.resultId}/evidence`,
-    async (route) => {
-      const response = await route.fetch();
-      const json = await response.json();
-      json.data = { ...json.data, state: "unavailable", reason };
-      await route.fulfill({ response, json });
-    },
-  );
-  for (const [code, sentence] of [
-    ["excluded", "Evidence for this result is excluded from view."],
-    [
-      "unavailable",
-      "Retained evidence for this result can't be shown right now.",
-    ],
-  ] as const) {
-    reason = code;
-    await page.reload();
-    await openOverviewCard(page, "evidence");
-    await page
-      .locator(".retained-evidence")
-      .getByText(`${sentence} Current files are not used instead.`, {
-        exact: true,
-      })
-      .waitFor();
-    assert.equal(
-      await page
-        .locator(".retained-evidence details")
-        .evaluate((el: HTMLDetailsElement) => el.open),
-      false,
-    );
-  }
-  await page.unrouteAll({ behavior: "wait" });
 });
 
 test("The delivery block names a GitLab merge request, its link and its read, and the handback names GitLab", async (_t, j) => {

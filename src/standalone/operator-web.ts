@@ -320,22 +320,6 @@ export class OperatorWebBoundary {
         reviewSession,
       );
     }
-    const retainedEvidence = path.match(
-      /^\/api\/operator\/tasks\/([^/]+)\/results\/([^/]+)\/evidence(?:\/([^/]+))?$/,
-    );
-    if (retainedEvidence) {
-      if ([...query].length) throw new OperatorApiError(400, "invalid-input");
-      return retainedEvidence[3]
-        ? this.api.readRetainedEvidenceItem(
-            retainedEvidence[1] ?? "",
-            retainedEvidence[2] ?? "",
-            retainedEvidence[3],
-          )
-        : this.api.readRetainedResultEvidence(
-            retainedEvidence[1] ?? "",
-            retainedEvidence[2] ?? "",
-          );
-    }
     const retainedAnchor = path.match(
       /^\/api\/operator\/tasks\/([^/]+)\/review-anchors\/([^/]+)$/,
     );

@@ -89,7 +89,6 @@ test("linkNamesInspector is true only for links to what the inspector shows", ()
     "/t?section=result-evidence",
     "/t#context",
     "/t?result=r",
-    "/t?evidence=e&result=r",
     "/t?source=s",
     "/t?record=x",
     "/t?inspectAssignment=a",

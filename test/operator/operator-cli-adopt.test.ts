@@ -6,7 +6,7 @@ import { completedLead, until } from "../fixtures/completed-lead.js";
 import { databaseDigest } from "../fixtures/database-digest.js";
 import { seedInstructionHistory } from "../fixtures/instruction-history.js";
 import { startCliOperator, startCliService } from "../fixtures/operator-cli.js";
-import { captureNativeResult } from "../fixtures/retained-evidence.js";
+import { captureNativeResult } from "../fixtures/native-result.js";
 
 // biome-ignore lint/suspicious/noExplicitAny: parsed CLI envelopes are asserted structurally
 type Json = Record<string, any>;

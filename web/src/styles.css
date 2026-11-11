@@ -1223,9 +1223,6 @@ nav {
   border-left: 3px solid var(--color-primary);
   border-radius: 6px;
 }
-.retained-diff {
-  min-width: 0;
-}
 .changes-pending-turn {
   padding: 12px;
   margin: 12px 0;
@@ -1976,24 +1973,11 @@ textarea[data-auto-grow="true"] {
   margin: 0;
   overflow-wrap: anywhere;
 }
-.retained-evidence {
-  display: grid;
-  gap: 12px;
-  min-width: 0;
-}
-.retained-items {
-  display: grid;
-  gap: 8px;
+.result-workspace {
   margin: 0;
   padding: 0;
   list-style: none;
-}
-.retained-items button {
-  max-width: 100%;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  justify-content: flex-start;
+  overflow-wrap: anywhere;
 }
 .retained-provenance {
   display: grid;
@@ -2003,11 +1987,6 @@ textarea[data-auto-grow="true"] {
 }
 .retained-provenance dt {
   font-weight: 600;
-}
-.retained-preview {
-  display: grid;
-  gap: 8px;
-  min-width: 0;
 }
 .review-composer {
   display: grid;

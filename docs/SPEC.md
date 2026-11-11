@@ -105,7 +105,7 @@ upgrade readiness use the selected connection's mode. Settings issues, lists, ro
 and the packaged `cab` executable supports `auth login|status|logout`,
 `connection list|use|remove`, project and `profile` list/get/instructions/revisions,
 task list/search/get/messages, assignment get/history/instructions, result
-list/get/evidence and artifact get. Supported agent, project, routing and
+list/get and artifact get. Supported agent, project, routing and
 capacity configuration is changed through prepared, digest-bound change documents
 applied once by request key; `assignment apply-current` adopts current instructions
 for the next turn, and `operation get` reads configuration and adoption receipts
@@ -1047,7 +1047,8 @@ operator acknowledgement cannot release them. Conversation replacement and archi
 do not automatically delete
 workspaces. Retain until operator archival by default; automatic cleanup requires
 confirmed delivery and preservation checks for uncommitted work, handoffs and
-reconciliation evidence. Missing workspaces hold affected execution visibly.
+reconciliation evidence, and refuses while a result's uncommitted changes are
+neither committed nor delivered (see [Result workspace identity](#result-workspace-identity)). Missing workspaces hold affected execution visibly.
 A workspace held only because Git could not read its worktree identity is rechecked
 at startup, before admitting a turn and by `task workspace-recheck`, and returns to
 ready once the check passes; every other workspace hold still needs a person.
@@ -2118,7 +2119,8 @@ submitting and held work stays with the `recovery` commands.
   for every assignment of the task: the existing conversation replacement, then a fresh
   first turn for the current lead only, who re-delegates. Other assignments are not
   revived. A completed lead is reopened for it. The old conversations, results, history
-  and the workspace stay readable and are kept, not reprovisioned. The lead's refused
+  and the workspace stay readable and are kept, not reprovisioned; uncommitted work
+  that earlier results recorded no longer holds workspace cleanup. The lead's refused
   request, if any, gets a restart record. Reset is available only on an open, Ready
   task whose lead has started, with no queued, running or unresolved execution, writer,
   capacity or effect state, and no task, Stop, source or assignment hold; otherwise it is
@@ -2214,12 +2216,11 @@ records deterministic qualification and its visual and runtime limits.
 
 ### Task workspace inspection and local review
 
-The task workspace provides **Files**, **Changes**, **Retained result evidence**
-and **Local review** sections of the authenticated task route, so every entry
+The task workspace provides **Files**, **Changes** and **Local review** sections of the authenticated task route, so every entry
 point that opens a task reaches them. This is post-MVP capability; it adds no
 release or cutover gate. The Files, Changes and Review entries under the latest
 result scroll in place and keep the entry's origin for "Back to originating view". Exact links accept `path` with optional
-`repository`, comparison `target`/`repository`/`base`, `result` with `evidence`,
+`repository`, comparison `target`/`repository`/`base`, `result`,
 and a sent `review` operation; missing or unauthorised targets explain their
 state and never substitute other bytes. At 1024px and wider the Overview's Changes
 actions (a conversation's "Open in Changes" and the latest result's Changes link) open
@@ -2316,8 +2317,7 @@ The Files section renders Markdown inertly with a Source view, fits/zooms/pans
 rasters, and renders PDFs through a pinned `pdfjs-dist` worker onto an app-owned
 canvas. Directory rows come first, then other entries, alphabetically within each
 group; file sizes use readable units and retain exact bytes in row details. There
-is no download, export or execute action. Opening current contents
-from retained evidence is a separate explicit action. Read-only inspection
+is no download, export or execute action. Read-only inspection
 rechecks may reuse a successful Git worktree identity read for up to 1 second
 while the worktree root and its `.git` entry keep the same filesystem identity.
 Execution admission always rereads Git.
@@ -2358,8 +2358,8 @@ immutable comparison sides. Capture or store failure remains an explicit gap;
 it does not determine runtime completion, clear a hold, or replace the previous
 finished capture. Exported side text is checked against its original byte hash,
 size, line count, path, side and range before it is retained or returned. This
-export feeds retained result evidence and review context; the bounded copy
-remains distinct from the latest-turn slot and from review delivery.
+export feeds review context; the bounded copy remains distinct from the
+latest-turn slot and from review delivery.
 
 Comparison and each before/after observation scan at most 4,096 entries and
 return at most 256. A text file or side is limited to 1 MiB, source bytes to
@@ -2378,55 +2378,47 @@ whole-workspace snapshot. Real Codex turn capture is qualified by one bounded
 repository-free journey ([evidence](evidence/wi03-turn-capture.md));
 fake-runtime evidence does not establish broader native runtime behaviour.
 
-#### Retained result evidence
+#### Result workspace identity
 
-The service captures bounded evidence during the accepted
-`cab_report_result` callback, before recording its result and callback
-receipt. Eligible sources are linked artifact files, supplied change-file
-references read through the existing safe workspace reader, and a compatible
-exact turn-comparison export. A direct result-recording path that does not pass
-through this callback keeps its prior behavior; results recorded before retention
-existed remain references and are never backfilled from current files. A callback
-with no eligible file links records an empty manifest. Exact callback replay
-returns the committed result and original manifest without rereading the workspace.
+Results reference Git instead of retaining copies
+([ADR-1033](adr/1033-results-reference-git.md)). In the transaction that records
+a native `cab_report_result`, the service records, for each repository of the
+task's ready workspace, its HEAD commit, its branch (none when detached, as cab's
+task worktrees are) and whether it had uncommitted changes, counting untracked
+files and not ignored ones. Exact callback replay records nothing new. If the
+workspace cannot be observed, the result is still recorded with no workspace
+state, and its views say "Workspace state was not recorded"; results recorded
+before this existed read the same way and are never backfilled. The task read,
+the result page, `cab result get` and the task workspace show the same values; a
+branch name is shown under the current disclosure exclusions, and withheld when they
+cannot be established.
 
-Each manifest binds its result, task, assignment and work revisions, request
-sequence, agent/instructions revisions, runtime thread and turn, capture
-time, and comparison observation identity. `taskVersion` is the exact revision
-admitted by the turn request; `captureTaskVersion` is the current task revision
-used for workspace and access-policy checks. A metadata edit after admission but
-before the callback preserves the admitted request identity while capture uses
-the current revision. If that current revision changes during capture, result,
-receipt and evidence commit together only when the exact binding still matches;
-otherwise the transaction is rejected without partial acceptance. Available
-bytes live in SQLite BLOBs. Capture, policy, read, size and quota failures are
-represented as explicit gaps while a valid result is recorded. A stale or
-foreign result binding remains rejected; an unrecoverable SQLite result/receipt
-commit failure rolls back the result and evidence together. Pending or unsettled
-comparison exports produce a diff gap. The service does not substitute an older
-turn or backfill that gap from a later comparison, and capture time does not
-imply that the callback stopped later workspace writes.
+A linked artifact file is served from the workspace while its bytes still match
+the recorded size and SHA-256 (`x-cab-evidence-source: recorded-workspace`).
+Once the workspace copy has moved on or the workspace is cleaned, it is read from
+the commit its result recorded, in the repository that owns the worktree
+(`recorded-commit`), with the same size, hash and image checks. A file that was
+never committed and has changed since is not served. Both reads apply the current
+policy first and again after reading: a repository the project no longer links
+or an excluded or control path is withheld, and a policy change during the read
+withholds the bytes.
 
-Authenticated task-scoped reads resolve exact result and item IDs and recheck
-the current task, project, session, repository and path exclusions. A retained
-diff is withheld if any included path, including either rename path, is now
-excluded. A new retained gap or unavailable item never falls through to a
-matching live file. Legacy records without a retained manifest keep the
-existing reference behavior. Text and image/PDF previews retain the original
-captured bytes under the existing preview limits; original filesystem roots
-remain internal. The Retained result evidence section shows capture provenance,
-item states and original bytes; gaps are never backfilled from later bytes.
+Workspace cleanup refuses while a result recorded uncommitted changes in a
+repository and that work is neither committed nor delivered, naming the result:
+committed means the repository's HEAD moved to a proved descendant of the
+recorded commit; delivered means the task branch's last push is one. An ancestry
+Git cannot prove counts as neither. Task reset is the explicit discard: it marks
+the task's uncommitted result work as discarded for cleanup, and cab never
+commits, stashes or deletes workspace files for it.
 
-The logical payload limits are 1 MiB per retained text file, 8 MiB per image or
-PDF, 1 MiB per serialized observed diff, 32 selected files and 32 MiB per
-result, 128 MiB of result payload per task, and 512 MiB across retained result
-and review payloads per installation. Review context is limited to 256 KiB per
-anchor, 128 anchors and 16 MiB per task within the same installation pool.
-Quota pressure records a gap for new material and never evicts referenced
-bytes. These limits count logical BLOB payloads; SQLite pages, indexes, WAL and
-filesystem overhead can increase disk use. Offline SQLite backup, verification
-and restore include retained evidence BLOBs; managed workspace contents remain
-outside the snapshot.
+Review context is limited to 256 KiB per anchor, 128 anchors and 16 MiB per
+task, and 512 MiB per installation. Quota pressure records a gap for new
+material and never evicts referenced bytes. These limits count logical BLOB
+payloads; SQLite pages, indexes, WAL and filesystem overhead can increase disk
+use. Offline SQLite backup, verification and restore include review-anchor
+BLOBs; managed workspace contents remain outside the snapshot. Starting this
+version drops the retained result evidence tables of earlier versions; their
+space returns to SQLite's free list.
 
 #### Local review
 
@@ -2467,15 +2459,14 @@ available alongside batched reviews.
 
 Review anchors retain a bounded original excerpt, exact source hash, line and
 byte range, side, source identity and observation time. Comments stage exact
-anchors through `review.anchor.stage` from a current file (`workspace-file`), a
-comparison side (`comparison-side`) or a retained file item (`result-evidence`);
+anchors through `review.anchor.stage` from a current file (`workspace-file`)
+or a comparison side (`comparison-side`);
 Shift extends a line range. Anchors are allowed for the repository-free root and
 for repositories linked to the project, which is how production binds task
 repositories. Drafts may select a current workspace file or
 an exact comparison side without a result. A supplied result association is
-validated against the same task/work and exact source comparison where
-applicable; a comparison-side anchor remains comparison evidence even when
-associated with a result whose callback-time diff is a gap. Sealing moves the
+validated against the task's recorded result and its work; a comparison-side
+anchor remains comparison evidence even when associated with a result. Sealing moves the
 exact anchor IDs into a durable submitted-context reference; it is not a review
 delivery or receipt. Discarding a sealed draft preserves its submitted context.
 Anchors continue to resolve their original excerpt after file edits, latest-turn

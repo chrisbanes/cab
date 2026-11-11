@@ -430,8 +430,7 @@ name, version and preview digest. The service rechecks every confirmation atomic
      [--before T] [--historical]` (times are ISO-8601 or epoch milliseconds) and
      `task messages TASK_ID`;
    - `assignment get|history|instructions ASSIGNMENT_ID`;
-   - `result list TASK_ID`, `result get TASK_ID RESULT_ID`,
-     `result evidence TASK_ID RESULT_ID ITEM_ID [--out PATH]` and
+   - `result list TASK_ID`, `result get TASK_ID RESULT_ID` and
      `artifact get TASK_ID ARTIFACT_ID --out PATH`.
 
    Tables lead with the title or name and end with the full id, which every command

@@ -78,3 +78,14 @@ export function taskColumnOf(
     return "Waiting";
   return "Ready";
 }
+
+/** The workspace state a result recorded, one line per repository; shared by the operator UI and the CLI. */
+export function resultWorkspaceLines(
+  workspace: TaskRead["data"]["results"][number]["workspace"],
+): string[] {
+  if (workspace.length === 0) return ["Workspace state was not recorded"];
+  return workspace.map(
+    (w) =>
+      `${w.repositoryId}: recorded at ${w.headCommit.slice(0, 7)} on ${w.branch ?? "detached HEAD"}${w.dirty ? ", with uncommitted changes" : ""}`,
+  );
+}

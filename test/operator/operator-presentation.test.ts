@@ -13,6 +13,7 @@ import {
   settingsFix,
   unavailableAlert,
 } from "../../src/operator/runtime-restart-copy.js";
+import { resultWorkspaceLines } from "../../src/operator/task-presentation.js";
 import { harnessReason } from "../../web/src/execution-runtime.js";
 import {
   leadFeedbackMode,
@@ -371,4 +372,21 @@ test("a repository is labelled by its verified name and falls back to its ID", (
   for (const id of ["R_null", "R_absent", "R_unmatched"])
     assert.equal(repositoryLabel(id, names), id);
   assert.equal(repositoryLabel("R_named"), "R_named");
+});
+
+test("a result's workspace state reads as one line per repository", () => {
+  const head = "0123456789abcdef0123456789abcdef01234567";
+  assert.deepEqual(resultWorkspaceLines([]), [
+    "Workspace state was not recorded",
+  ]);
+  assert.deepEqual(
+    resultWorkspaceLines([
+      { repositoryId: "app", headCommit: head, branch: "topic", dirty: false },
+      { repositoryId: "lib", headCommit: head, branch: null, dirty: true },
+    ]),
+    [
+      "app: recorded at 0123456 on topic",
+      "lib: recorded at 0123456 on detached HEAD, with uncommitted changes",
+    ],
+  );
 });

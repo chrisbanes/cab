@@ -175,17 +175,17 @@ release or cutover gates. Preserve the task workspace behaviour. Recorded eviden
 | --- | --- | --- |
 | WI01 | Browse repository-free and multiple-repository task workspaces | Files and generated outputs are inspectable with explicit task/repository identity. Ignored clutter is hidden initially and can be revealed; excluded sensitive content remains inaccessible. Missing/removed workspaces are explicit. |
 | WI02 | Open text/code, Markdown, raster images, PDF, binary and oversized files | Supported previews are bounded and usable; unsupported, excluded and oversized states give truthful limits. No download/export action is provided. Inspected active content cannot execute with application authority. |
-| WI03 | Attempt traversal, absolute-path injection, symlink escape, cross-task access and file replacement during reads/capture | Service-side validation prevents access outside the authorised task scope and applies the same exclusions to listings, previews, captures and retained evidence. Inconsistent reads fail with an explicit gap rather than false exactness. |
+| WI03 | Attempt traversal, absolute-path injection, symlink escape, cross-task access and file replacement during reads/capture | Service-side validation prevents access outside the authorised task scope and applies the same exclusions to listings, previews, captures and review anchors. Inconsistent reads fail with an explicit gap rather than false exactness. |
 | WI04 | Select Branch and Uncommitted in a workspace with committed, staged, unstaged, untracked, deleted and renamed changes | Branch compares against the merge base with the identified task base branch; Uncommitted offers staged/unstaged filters. Display the exact baseline and observation time; binary and unsupported entries remain visible. Each repository has its own baseline. Git targets are unavailable for repository-free workspaces. |
 | WI05 | Base branch is unknown or a selected local branch has no usable baseline | Explain the missing baseline and allow local base selection. No implicit guessed baseline, fetch or checkout occurs. An unusable comparison stays unavailable. |
-| WI06 | Complete successive real agent turns, then observe a failed/interrupted/uncertain turn | Last turn is bound to the actual turn/agent and bounded before/after observation, not a result revision. Only the latest turn capture is retained as turn history; result evidence survives replacement. Partial/unknown observations disclose identity, outcome, time and uncertainty without clearing holds or asserting writes have ended. Older tasks with no capture remain unavailable. |
-| WI07 | Report a result, change its files, replace the latest turn capture, restart, then remove the workspace | Successfully retained result-linked file bytes and diffs remain attributable and inspectable as the original evidence. No whole-workspace snapshot is implied. Capture exclusions, size limits and failures are recorded without rejecting the result or replacing historical bytes with later contents. |
+| WI06 | Complete successive real agent turns, then observe a failed/interrupted/uncertain turn | Last turn is bound to the actual turn/agent and bounded before/after observation, not a result revision. Only the latest turn capture is retained as turn history; a result's recorded workspace state survives replacement. Partial/unknown observations disclose identity, outcome, time and uncertainty without clearing holds or asserting writes have ended. Older tasks with no capture remain unavailable. |
+| WI07 | Report a result, change its files, replace the latest turn capture, restart, then clean the workspace | The result records each repository's HEAD, branch and uncommitted-changes flag ([ADR-1033](adr/1033-results-reference-git.md)). Linked files are read from the workspace while they match, then from the recorded commit; a file that was never committed and has changed is unavailable, never replaced by later bytes. Cleanup refuses while the result's uncommitted changes are neither committed nor delivered, and allows it after a commit, delivery or task reset. No whole-workspace snapshot is implied. |
 | WI08 | Work continues while an operator reads a file/diff and later refreshes | Keep the displayed read stable until explicit refresh, show observation time and known changes, preserve selection/reading position where still valid and represent deletion/unavailability honestly. Inspection neither pauses work nor changes execution, approval or ownership state. |
 | WI09 | Reach inspection from task, result/evidence and applicable direct links on desktop and phone | Preserve exact current/result/turn context, return navigation, disclosures and unfinished replies. Keyboard navigation and long files/diffs remain usable. Review applicable List/Board, Overview, Inbox and existing advanced routes for consistent task navigation; document absent entry points rather than adding unrelated ones. |
 | WI10 | Select single lines and ranges in text previews and both diff sides, including deleted lines; collect comments across files | Draft comments can be added, edited and removed, with an optional review summary. Exact task/repository/content/range/side and comparison/result/turn context remain attached. Cross-task, invalid-range and excluded-content anchors are rejected. |
 | WI11 | Change, rename or delete reviewed files, replace the latest turn capture, restart or remove the workspace | Bounded retained review context remains tied to original content. Affected comments show outdated status; missing or unknown comparison remains explicit. No automatic retargeting, newer-byte substitution or implied whole-workspace history occurs. |
 | WI12 | Inspect a draft and send, retry a confirmed failure, or reconcile an uncertain submission | One logical review containing the exact comments and summary reaches the named accountable lead with a receipt. Confirmed failures preserve editable drafts; unknown outcomes retain the original operation for reconciliation without duplicate delivery. No GitHub call, approval, readiness/completion change, merge authority or hold release occurs. |
-| WI13 | Navigate among files, diffs and exact result evidence while drafting on desktop, phone and keyboard | Draft content and anchors survive navigation/refresh under session privacy rules. Sent feedback remains inspectable with its original context. Existing contextual feedback is preserved; no unrelated thread-resolution or retraction workflow is introduced. |
+| WI13 | Navigate among files, diffs and a result's context while drafting on desktop, phone and keyboard | Draft content and anchors survive navigation/refresh under session privacy rules. Sent feedback remains inspectable with its original context. Existing contextual feedback is preserved; no unrelated thread-resolution or retraction workflow is introduced. |
 
 ### LAN operator access acceptance
 
@@ -278,7 +278,7 @@ implementation and evidence remain unproved until the delivery slices qualify it
 
 Slice evidence for authentication and task inspection, with its limits, is in the
 [CLI1 record](evidence/issue-894-cli1-2026-10-11.md), and for read-only browsing of
-work, instructions, history and retained evidence in the
+work, instructions, history and results in the
 [CLI2 record](evidence/issue-895-cli2-2026-10-11.md), and for reviewed configuration
 changes, receipts and adoption in the
 [CLI3 record](evidence/issue-896-cli3-2026-10-11.md), and for bounded execution
@@ -326,7 +326,7 @@ runtime requesting, reasoning storage or display.
 | `inbox`, `question`, `approval` | Inspect attention; answer supported forms; approve/deny exact reviewed material | CLI01, CLI04 |
 | `execution`, `logs` | List/get; inspect supplied inputs, observed settings, events/tool activity and filtered service diagnostics; bounded follow | CLI01, CLI05, CLI06 |
 | `recovery` | Inspect eligibility/holds; prepare and submit each supported evidence-bearing recovery operation | CLI01, CLI04 |
-| `result`, `artifact`, `delivery` | Inspect results, retained evidence and existing delivery state; existing refresh and staged comment operations, including review/confirm/send | CLI01, CLI04 |
+| `result`, `artifact`, `delivery` | Inspect results, their recorded workspace state and existing delivery state; existing refresh and staged comment operations, including review/confirm/send | CLI01, CLI04 |
 | `operation` | Look up an existing mutation receipt by service/scope/UUID and reconcile an uncertain command outcome | CLI03 |
 
 CLI03 applies exact-material, revision and scoped retry requirements to every
@@ -741,14 +741,14 @@ exact resource cleanup, and reuse unaffected runtime evidence.
 | Criteria | Deterministic evidence |
 | --- | --- |
 | WI01–WI02 Files across repository-free and multiple-repository workspaces, safe previews, PDF canvas and no download | `operator-files-browser.test.ts`, `operator-pdf-render-browser.test.ts` |
-| WI03 path, binding, exclusion, race and current-session privacy on comparison reads, capture and retained evidence; current policy rechecked after awaited filesystem and stored-projection work; exact binding, safe capture/read and rename-path filtering | `workspace-inspection.test.ts`, `workspace-comparison.test.ts`, `operator-comparisons.test.ts`, `turn-capture-service.test.ts`, `retained-evidence-store.test.ts`, `retained-result-service.test.ts`, `operator-retained-evidence.test.ts`, `operator-task-review.test.ts`, `operator-workspace-inspection.test.ts`; real SQLite/filesystem fixtures and authenticated HTTP |
+| WI03 path, binding, exclusion, race and current-session privacy on comparison reads, capture and review anchors; current policy rechecked after awaited filesystem and stored-projection work; exact binding, safe capture/read and rename-path filtering | `workspace-inspection.test.ts`, `workspace-comparison.test.ts`, `operator-comparisons.test.ts`, `turn-capture-service.test.ts`, `operator-task-review.test.ts`, `operator-workspace-inspection.test.ts`; real SQLite/filesystem fixtures and authenticated HTTP |
 | WI04–WI05, WI08 Branch/Uncommitted selection, per-repository exact baselines, honest unavailable states, stable reads and Refresh | `workspace-comparison.test.ts`, `operator-comparisons.test.ts` (real Git repositories; no ref/index mutation), `operator-changes-browser.test.ts`, `workspaces.test.ts` (inspection identity reuse) |
 | WI06 actual-turn identity, bounded before/after capture, pending and latest-finished Last turn, latest replacement, restart, held failure and the three-start lifecycle | `turn-capture-service.test.ts`, `turn-capture-harness.test.ts` (SQLite, production service admission, fake runtime, authenticated read and restart), `operator-changes-browser.test.ts`, `inspection-review-lifecycle.test.ts` |
-| WI07 original linked file/image bytes, callback receipt replay, truthful empty/gap states, no older-turn substitution or later-file backfill; exact bytes and identity read after edit, restart and workspace cleanup; explicit current-file action | `retained-evidence-store.test.ts`, `retained-result-service.test.ts`, `operator-retained-evidence.test.ts`, `operator-retained-inspection-browser.test.ts` |
+| WI07 recorded HEAD, branch and dirty flag; failed observation still records the result; linked files from the workspace, then the recorded commit after edit and cleanup, and never-committed changed files unavailable; cleanup refusal until commit, delivery or reset | `result-workspace-identity.test.ts`, `operator-artifact-source.test.ts`, `operator-cli-evidence.test.ts` |
 | WI09 Board and Search origins, section links and exact direct links | `operator-inspection-navigation-browser.test.ts` |
-| WI10–WI11 immutable comparison-side/range/hash anchors with optional result association; durable draft/sealed/discarded context; original context after edits, rename/delete, latest-capture replacement, restart and workspace cleanup; missing comparison stays unknown and retained bytes are not retargeted; the copied export is independent of latest-turn replacement | `workspace-comparison.test.ts`, `turn-capture-service.test.ts`, `operator-comparisons.test.ts`, `review-anchor-retention.test.ts`, `retained-evidence-integration.test.ts`, `operator-retained-evidence.test.ts` |
+| WI10–WI11 immutable comparison-side/range/hash anchors with optional result association; durable draft/sealed/discarded context; original context after edits, rename/delete, latest-capture replacement, restart and workspace cleanup; missing comparison stays unknown and retained bytes are not retargeted; the copied export is independent of latest-turn replacement | `workspace-comparison.test.ts`, `turn-capture-service.test.ts`, `operator-comparisons.test.ts`, `review-anchor-retention.test.ts`, `review-anchor-durability.test.ts` |
 | WI10–WI13 multi-origin anchors, draft edits, reload continuity, lost-response reconciliation, sent inspection, next review and sign-out privacy | `operator-local-review-browser.test.ts`, `local-review.test.ts` |
-| SQLite persistence and offline backup/verify/restore of evidence BLOBs (integrity, foreign-key and exact-byte readback) | `retained-evidence-integration.test.ts`, `workspaces.test.ts`, `operator-web-http.test.ts` |
+| SQLite persistence and offline backup/verify/restore of review-anchor BLOBs (integrity, foreign-key and exact-byte readback); startup drops retained result evidence and keeps other anchors | `review-anchor-durability.test.ts`, `result-reference-migration.test.ts`, `workspaces.test.ts`, `operator-web-http.test.ts` |
 
 `turn-capture-harness.test.ts` also proves the offline harness's one-dispatch
 guard, finite deadlines/read count, delayed start and terminal handling,
@@ -764,13 +764,12 @@ journey (three starts, no local review) in which the Stop hold was retained; see
 covers native successive-turn, restart, failed, interrupted or uncertain-capture
 cases, and review delivery is qualified offline only.
 
-The integrated callback fixture demonstrates a pending comparison gap at result
-time, then a finished exact comparison used for separately retained review
-anchors. The original result manifest remains pending with its diff gap; the
-anchor keeps the completed comparison's own observation time and bytes. This
-does not imply that the result callback stopped later writes or that a review
-was delivered or received. Direct result-recording paths without a retention
-candidate and results recorded before retention preserve their earlier behaviour.
+The integrated anchor fixture reports a result while its turn comparison is still
+pending, then stages review anchors from the finished exact comparison; each anchor
+keeps that comparison's own observation time and bytes. This does not imply that
+the result callback stopped later writes or that a review was delivered or
+received. Results recorded without workspace state, including those from before
+it existed, read as "Workspace state was not recorded".
 
 ### Operator follow-up to a completed lead
 
