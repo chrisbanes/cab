@@ -22,6 +22,28 @@ async function assertPausedBadgeIdle(scope: Locator) {
   assert.ok(!classes.includes("text-(--attn)"), classes);
 }
 
+/** A paused sidebar or drawer row: muted "Paused" metadata with one symbol, no badge, and the name on one line. */
+async function assertSidebarPaused(scope: Locator) {
+  const row = scope.locator("a.nav-project", { hasText: "Paused" });
+  assert.equal(await row.count(), 1);
+  assert.equal(await row.locator('[data-slot="badge"]').count(), 0);
+  const paused = row.getByText("Paused", { exact: true });
+  assert.equal(await paused.locator('svg[aria-hidden="true"]').count(), 1);
+  const classes = (await paused.getAttribute("class")) ?? "";
+  assert.ok(
+    classes.includes("nav-count") && classes.includes("metadata"),
+    classes,
+  );
+  const name = await row
+    .locator(".nav-label > span")
+    .first()
+    .evaluate((el) => ({
+      height: el.getBoundingClientRect().height,
+      lineHeight: parseFloat(getComputedStyle(el).lineHeight),
+    }));
+  assert.ok(name.height <= name.lineHeight * 1.5, JSON.stringify(name));
+}
+
 test("Settings index lists projects, profiles, routing and runtime from their own reads", async (_t, journey) => {
   const { ids, page } = await startSettings(journey, "/settings");
   const main = page.locator("main");
@@ -100,7 +122,7 @@ test("Settings index lists projects, profiles, routing and runtime from their ow
   assert.ok(
     ((await revoked.getAttribute("class")) ?? "").includes("text-(--attn)"),
   );
-  await assertPausedBadgeIdle(
+  await assertSidebarPaused(
     page.getByRole("navigation", { name: "Operator navigation" }),
   );
   await noPageOverflow(page);
@@ -161,7 +183,7 @@ test("Settings index is one column with 44px targets on a phone", async (_t, jou
     .getByRole("button", { name: "Projects and navigation", exact: true })
     .click();
   const drawer = page.getByRole("dialog", { name: "Projects and navigation" });
-  await assertPausedBadgeIdle(drawer);
+  await assertSidebarPaused(drawer);
   await noPageOverflow(page);
   await captureBrowserEvidence(page, "390-drawer-paused-project");
 });
