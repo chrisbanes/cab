@@ -236,6 +236,27 @@ export const repositoryBaseModeSchema = z.enum([
 ]);
 export type RepositoryBaseMode = z.output<typeof repositoryBaseModeSchema>;
 
+/** A link's saved base for display: "Remote branch release · fetch before workspace". */
+export function describeLinkBase(link: {
+  ref: string;
+  baseMode?: RepositoryBaseMode | undefined;
+  fetchBeforeProvisioning?: boolean | undefined;
+}): string {
+  const mode = link.baseMode ?? "ref";
+  const base =
+    mode === "remote-branch"
+      ? `Remote branch ${link.ref}`
+      : mode === "remote-default"
+        ? "Remote default branch"
+        : `Explicit ref ${link.ref}`;
+  return link.fetchBeforeProvisioning
+    ? `${base} · fetch before workspace`
+    : base;
+}
+/** Every base change applies to new workspaces only. */
+export const linkBaseChangeNote =
+  "Applies to workspaces created after saving; existing workspaces keep their recorded base.";
+
 export const repositoryLinkSchema = z
   .object({
     repositoryId: nonempty,

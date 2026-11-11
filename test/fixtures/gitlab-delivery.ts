@@ -41,10 +41,12 @@ export async function gitlabWorld(
       fetcher: remote.fetcher,
       // The scripted instance has every branch the fixture pushed, and the checkout's others.
       fetchBranch: (request) =>
-        localBranchFetch(world.source, (branch) =>
-          pushes.findLast((p) => p.branch === branch)?.commitSha as
-            | string
-            | undefined,
+        localBranchFetch(
+          world.source,
+          (branch) =>
+            pushes.findLast((p) => p.branch === branch)?.commitSha as
+              | string
+              | undefined,
         ).fetchBranch(request),
       push: async (request) => {
         pushes.push({ ...request });

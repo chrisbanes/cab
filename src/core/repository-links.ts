@@ -59,12 +59,22 @@ export function localBaseRev(link: LinkBase): string | null {
 
 const baseIssues = (
   values: LinkBase[],
-  context: { addIssue(issue: { code: "custom"; message: string; path: (string | number)[] }): void },
+  context: {
+    addIssue(issue: {
+      code: "custom";
+      message: string;
+      path: (string | number)[];
+    }): void;
+  },
 ) =>
   values.forEach((value, index) => {
     const issue = linkBaseIssue(value);
     if (issue)
-      context.addIssue({ code: "custom", message: issue, path: [index, "baseMode"] });
+      context.addIssue({
+        code: "custom",
+        message: issue,
+        path: [index, "baseMode"],
+      });
   });
 
 /** A DNS hostname without port or userinfo. `github.com` belongs to GitHub links only. */

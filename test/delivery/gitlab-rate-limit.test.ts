@@ -1,5 +1,8 @@
 import assert from "node:assert/strict";
-import { syntheticWorkspace, unchangedTargetFetch } from "../fixtures/branch-fetch.js";
+import {
+  syntheticWorkspace,
+  unchangedTargetFetch,
+} from "../fixtures/branch-fetch.js";
 import { test } from "node:test";
 import type { DeliveryPolicy } from "../../src/core/delivery.js";
 import { GitLabDiscoveryReader } from "../../src/standalone/gitlab-discovery.js";

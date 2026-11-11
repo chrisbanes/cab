@@ -1187,7 +1187,12 @@ export class DomainStore {
           try {
             return parseLinkedRepositoryResult(
               await this.verifyRepository(
-                { repositoryId: link.repositoryId, path, ref: link.ref, ...base },
+                {
+                  repositoryId: link.repositoryId,
+                  path,
+                  ref: link.ref,
+                  ...base,
+                },
                 link.codeHost === "gitlab" && projectPath !== undefined
                   ? { codeHost: "gitlab", host: link.host, projectPath }
                   : undefined,

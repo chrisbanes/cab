@@ -269,13 +269,23 @@ const projectGet: BrowseCommand = {
           ? [
               "",
               table(
-                ["Repository", "Name", "Code host", "Host", "Ref"],
+                [
+                  "Repository",
+                  "Name",
+                  "Code host",
+                  "Host",
+                  "Ref",
+                  "Base",
+                  "Fetch",
+                ],
                 d.repositories.links.map((r) => [
                   unavailable(r.repositoryId),
                   ("name" in r && r.name) || "none",
                   r.codeHost,
                   unavailable(r.host),
                   unavailable(r.ref),
+                  r.baseMode ?? "ref",
+                  r.fetchBeforeProvisioning ? "before workspace" : "off",
                 ]),
               ),
             ]

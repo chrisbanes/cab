@@ -9,7 +9,9 @@ import {
 import type { OperatorClient } from "./api.js";
 import { Button } from "./components.js";
 import { FolderPicker } from "./folder-picker.js";
-import { verificationCopy } from "./setup-model.js";
+import { linkBaseOf, verificationCopy } from "./setup-model.js";
+import { LinkBaseFields } from "./link-base-fields.js";
+import type { RepositoryBaseMode } from "../../src/core/github-source-contracts.js";
 import { Input } from "./ui/input.js";
 import { NativeSelect } from "./ui/native-select.js";
 
@@ -21,6 +23,8 @@ export interface GitLabRow {
   projectPath: string;
   ref: string;
   path: string;
+  baseMode?: RepositoryBaseMode;
+  fetchBeforeProvisioning?: boolean;
 }
 const emptyGitLabRow = (host: string): GitLabRow => ({
   id: randomUUID(),
@@ -71,6 +75,7 @@ export function withGitLabRepositories(
             repositoryId: r.repositoryId,
             path: r.path.trim(),
             ref: r.ref.trim(),
+            ...linkBaseOf(r),
           };
         }),
       ],
@@ -288,6 +293,14 @@ export function GitLabSetupRows({
                     onChange={(e) => update(i, { ...row, ref: e.target.value })}
                   />
                 </Labelled>
+              )}
+              {row.projectPath && (
+                <LinkBaseFields
+                  id={`gitlab-setup-${row.id}`}
+                  value={row}
+                  disabled={disabled}
+                  onChange={(base) => update(i, { ...row, ...base })}
+                />
               )}
             </div>
             {row.projectPath && (

@@ -32,7 +32,11 @@ const old = "1".repeat(40);
 const commit = "2".repeat(40);
 const outside = "3".repeat(40);
 // The fake fetch reports the target at the proposed commit itself, which merges trivially.
-const target = { branch: "main", commonDirectory: "/work/.git", managed: false };
+const target = {
+  branch: "main",
+  commonDirectory: "/work/.git",
+  managed: false,
+};
 const createContext = { target };
 const policy = { requiredChecks: [] } as unknown as DeliveryPolicy;
 
@@ -816,7 +820,11 @@ test("create is held when the branch moved, the base is missing or the title alr
   const prefixed = world();
   prefixed.state.head = commit;
   await assert.rejects(
-    prefixed.provider.preflight(created({ title: "draft: Change" }), policy, createContext),
+    prefixed.provider.preflight(
+      created({ title: "draft: Change" }),
+      policy,
+      createContext,
+    ),
     /provider-title-draft-prefix/,
   );
 });

@@ -58,6 +58,7 @@ import {
   jiraInstanceSchema,
   readinessConditionSchema,
   readinessSchema,
+  repositoryBaseModeSchema,
   setupRepositorySchema,
 } from "../core/github-source-contracts.js";
 import {
@@ -2526,6 +2527,11 @@ const keptConfigurationRowSchema = z
 const keptDeliveryRowSchema = z
   .object({ savedRow: deliverySavedRowSchema, keep: z.literal(true) })
   .strict();
+/** A link's saved base mode and fetch policy; absent from older services. */
+const linkBaseReadback = {
+  baseMode: repositoryBaseModeSchema.optional(),
+  fetchBeforeProvisioning: z.boolean().optional(),
+};
 const repositoryConfigurationRowSchema = z
   .unknown()
   .transform((input, context) => {
@@ -4262,6 +4268,7 @@ export const projectConfigurationSchema = envelope(
                   codeHost: z.literal("github"),
                   host: z.literal("github.com").nullable(),
                   ref: safeText,
+                  ...linkBaseReadback,
                   /** The verified `owner/name`, display only; absent from older services, null when none is verified or disclosable. */
                   name: safeText.optional(),
                   savedRow: savedConfigurationRowSchema.optional(),
@@ -4273,6 +4280,7 @@ export const projectConfigurationSchema = envelope(
                   codeHost: z.literal("gitlab"),
                   host: z.string().min(1).max(253).nullable(),
                   ref: safeText,
+                  ...linkBaseReadback,
                   savedRow: savedConfigurationRowSchema.optional(),
                 })
                 .strict(),

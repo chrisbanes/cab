@@ -27,11 +27,17 @@ export function localBranchFetch(
     requests.push(request);
     let branch = request.branch;
     const known = branch === null ? undefined : pushed(branch);
-    if (branch !== null && known) return { kind: "fetched", branch, commit: known };
+    if (branch !== null && known)
+      return { kind: "fetched", branch, commit: known };
     let commit: string;
     try {
       branch ??= run(remote, "symbolic-ref", "--short", "HEAD");
-      commit = run(remote, "rev-parse", "--verify", `refs/heads/${branch}^{commit}`);
+      commit = run(
+        remote,
+        "rev-parse",
+        "--verify",
+        `refs/heads/${branch}^{commit}`,
+      );
     } catch {
       return { kind: "unavailable" };
     }

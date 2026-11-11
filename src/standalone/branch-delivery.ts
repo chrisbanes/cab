@@ -187,7 +187,8 @@ export async function checkPublicationTarget(
       targetRetained: target.managed,
     });
   } finally {
-    if (!target.managed) await rm(destination, { recursive: true, force: true });
+    if (!target.managed)
+      await rm(destination, { recursive: true, force: true });
   }
 }
 

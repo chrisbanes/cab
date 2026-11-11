@@ -19,6 +19,19 @@ import type { z } from "zod";
 import { unavailableAlert } from "./execution-runtime.js";
 import { addClaudeHref } from "./settings-sections.js";
 import { isCodeHostGrant } from "../../src/core/delivery-levels.js";
+import type { RepositoryBaseMode } from "../../src/core/github-source-contracts.js";
+
+/** A setup row's base fields, sent only when the operator chose a base other than the default. */
+export const linkBaseOf = (r: {
+  baseMode?: RepositoryBaseMode | undefined;
+  fetchBeforeProvisioning?: boolean | undefined;
+}) =>
+  r.baseMode && (r.baseMode !== "ref" || r.fetchBeforeProvisioning)
+    ? {
+        baseMode: r.baseMode,
+        fetchBeforeProvisioning: r.fetchBeforeProvisioning === true,
+      }
+    : {};
 
 /** One repository row. A typed row keeps its raw `text`; a discovered row carries the node ID. */
 export interface SetupRow {
@@ -30,6 +43,8 @@ export interface SetupRow {
   name: string;
   ref: string;
   path: string;
+  baseMode?: RepositoryBaseMode;
+  fetchBeforeProvisioning?: boolean;
 }
 export const emptyRow = (source: SetupRow["source"]): SetupRow => ({
   id: randomUUID(),
@@ -148,6 +163,7 @@ export function buildProjectCreate(
               name: r.name,
               path: r.path.trim(),
               ref: r.ref.trim(),
+              ...linkBaseOf(r),
             };
           }),
         }
