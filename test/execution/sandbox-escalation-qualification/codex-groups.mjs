@@ -285,11 +285,10 @@ export async function runCodexGroup(
     turnId = response?.turn?.id;
     if (!completedTurns.has(turnId)) await race(done);
     // A failed or interrupted turn did not run its probe as asked: stop and fail the run.
-    // After codex-timing's held decline, the turn's status is the measured outcome instead.
+    // In codex-timing the turn's status, during or after the hold, is the measured outcome;
+    // if no request arrived, its classifier decides nothing and the run fails anyway.
     const status = completedTurns.get(turnId);
-    const measured =
-      spec.hold && trace.events.some((e) => e.answeredAt !== undefined);
-    if (status !== "completed" && !measured)
+    if (status !== "completed" && !spec.hold)
       throw new Error(`turn ${turn} ended ${status}`);
   }
 
