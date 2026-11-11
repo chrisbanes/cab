@@ -73,8 +73,8 @@ effects. Already-queued completion evidence finishes before the serialized close
 no later effect is released. Token caching never bypasses validity. Source/binary/input pins are
 checked before effects, using a bounded initial hash and metadata revalidation.
 Changed pins hold the run; they do not grant a retry or replacement identity.
-The first rejection that closes the authority becomes the `cause` of every later
-`v2-authority-closed` refusal; a hold, close or expiry without one has none.
+The first rejection that latches the fault becomes the `cause` of every later
+`v2-authority-closed` refusal; a hold or close latches without one.
 The original teardown horizon permits only owned stop/interrupt calls after a
 main authority fault. It continues to verify canonical ownership. Failed runtime
 identity capture does not revoke cleanup through that runtime's exact owned child
