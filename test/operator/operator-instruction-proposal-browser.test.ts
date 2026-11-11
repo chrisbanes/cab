@@ -224,7 +224,8 @@ test("instructions changed in another tab make Accept unavailable and send no co
   // No reload: the open review reads the run again and shows the change.
   await page
     .getByText(/The instructions changed since this proposal was drafted/)
-    .waitFor();
+    // An open review re-reads the run every 10 s.
+    .waitFor({ timeout: 15_000 });
   assert.equal(
     await page.getByRole("button", { name: "Accept and save" }).isDisabled(),
     true,

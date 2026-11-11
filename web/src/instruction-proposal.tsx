@@ -134,7 +134,8 @@ export function InstructionProposalsTab(p: TabProps) {
   latest.current = stored;
   const resent = useRef(new Set<string>());
   const startingId = useRef<string | null>(null);
-  // biome-ignore lint/correctness/useExhaustiveDependencies: sendStart reads only refs and stable props, so it need not re-create the read.
+  // The latest render's sender, so a resend uses the current session.
+  const sendStartRef = useRef<typeof sendStart>(async () => {});
   const readRun = useCallback(
     async (signal?: AbortSignal) => {
       if (!runId) return;
@@ -153,7 +154,7 @@ export function InstructionProposalsTab(p: TabProps) {
         const { startKey, expectedProjectVersion } = latest.current;
         if (startKey && expectedProjectVersion && !resent.current.has(runId)) {
           resent.current.add(runId);
-          await sendStart({
+          await sendStartRef.current({
             ...latest.current,
             runId,
             startKey,
@@ -171,6 +172,7 @@ export function InstructionProposalsTab(p: TabProps) {
     },
     [client, runId, change],
   );
+  const reviewing = run?.state === "proposed";
   // A proposal is read again too, so a target changed elsewhere shows as changed.
   const polling =
     !run ||
@@ -182,15 +184,16 @@ export function InstructionProposalsTab(p: TabProps) {
     const abort = new AbortController();
     void readRun(abort.signal);
     if (!polling) return () => abort.abort();
+    // A proposal waiting for review is only re-read to notice a changed target.
     const timer = setInterval(
       () => void readRun(abort.signal),
-      instructionProposalPollMs,
+      reviewing ? instructionProposalPollMs * 5 : instructionProposalPollMs,
     );
     return () => {
       clearInterval(timer);
       abort.abort();
     };
-  }, [readRun, runId, polling]);
+  }, [readRun, runId, polling, reviewing]);
   useEffect(() => {
     if (run?.state === "proposed" && run.instructionProposal)
       setFinalText(
@@ -231,6 +234,7 @@ export function InstructionProposalsTab(p: TabProps) {
     change(next);
     await sendStart(next);
   };
+  sendStartRef.current = sendStart;
   async function sendStart(
     next: Stored & {
       runId: string;
