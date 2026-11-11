@@ -843,10 +843,6 @@
   font-weight: var(--weight-medium);
 }
 
-.phone-column-controls {
-  display: none;
-}
-
 .board-footer {
   margin: var(--space-4) 0 0;
 }
@@ -896,8 +892,8 @@
     order: 4;
   }
 
-  /* Phone Board: Project, State and the column chips share one row that scrolls sideways;
-     the switch and Refresh tasks sit on the line below. The wrapper dissolves in List. */
+  /* Phone Board: Project and State share a row, the column tabs wrap in a row of their
+     own, and the switch and Refresh tasks sit on the line below. The wrapper dissolves in List. */
   .work-filters {
     display: contents;
   }
@@ -907,10 +903,8 @@
     flex: 1 0 100%;
     align-items: center;
     gap: var(--space-4);
+    flex-wrap: wrap;
     min-width: 0;
-    overflow-x: auto;
-    overscroll-behavior-x: contain;
-    scrollbar-width: none;
   }
 
   .work-toolbar[data-view="board"] .work-filters > * {
@@ -922,20 +916,19 @@
     text-overflow: ellipsis;
   }
 
-  .work-columns {
+  .work-toolbar[data-view="board"] .work-filters > .work-columns {
     display: flex;
-    margin-left: var(--space-4);
+    flex: 1 0 100%;
   }
 
   .work-columns .column-navigation {
     display: flex;
-    flex-wrap: nowrap;
+    flex-wrap: wrap;
     margin: 0;
   }
 
   .work-columns .column-tab {
     min-height: 44px;
-    white-space: nowrap;
   }
 
   .overview-stats {
@@ -1032,16 +1025,5 @@
 
   .board-column.selected-column {
     display: flex;
-  }
-
-  .phone-column-controls {
-    display: flex;
-    justify-content: space-between;
-    gap: var(--space-12);
-    margin-top: var(--space-16);
-  }
-
-  .phone-column-controls [data-slot="button"] {
-    flex: 0 1 auto;
   }
 }

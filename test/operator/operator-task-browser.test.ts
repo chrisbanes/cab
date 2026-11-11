@@ -1713,20 +1713,35 @@ for (const viewport of [
     if (viewport.width < 1121)
       await page.getByRole("button", { name: /^Waiting · / }).click();
     if (viewport.width < 760) {
-      await visibleControl(page, "Previous column: Running");
-      await page
-        .getByRole("button", { name: "Previous column: Running", exact: true })
-        .click();
+      assert.equal(
+        await page
+          .getByRole("button", { name: /^(Previous|Next) column/ })
+          .count(),
+        0,
+      );
+      await page.getByRole("button", { name: /^Running · / }).click();
       assert.equal(
         await page
           .getByRole("button", { name: /^Running · / })
           .getAttribute("aria-pressed"),
         "true",
       );
-      await visibleControl(page, "Next column: Waiting");
-      await page
-        .getByRole("button", { name: "Next column: Waiting", exact: true })
-        .click();
+      const tabs = page.getByRole("toolbar", { name: "Board columns" });
+      assert.equal(
+        await tabs.evaluate((e) => e.scrollWidth <= e.clientWidth),
+        true,
+      );
+      assert.equal(
+        await tabs.getByRole("button").evaluateAll((es) =>
+          es.every((e) => {
+            const r = e.getBoundingClientRect();
+            return r.left >= 0 && r.right <= innerWidth;
+          }),
+        ),
+        true,
+        "every column tab is inside the viewport",
+      );
+      await page.getByRole("button", { name: /^Waiting · / }).click();
     }
     await page.getByLabel("State", { exact: true }).selectOption("Stopping");
     await page.getByRole("button", { name: "List", exact: true }).click();

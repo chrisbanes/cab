@@ -2113,10 +2113,20 @@ test("board headings show every count, with collapsed empty columns and drawn ca
     .getByRole("button")
     .evaluateAll((es) => es.map((e) => e.getBoundingClientRect()));
   assert.ok(tabs.every((r) => r.height >= 44));
+  // The tabs wrap in their own row: all ten lie inside the viewport and nothing scrolls.
+  assert.ok(
+    tabs.every((r) => r.left >= 0 && r.right <= phone.width),
+    "every column tab is inside the viewport",
+  );
+  assert.ok(new Set(tabs.map((r) => Math.round(r.top))).size > 1, "tabs wrap");
   assert.equal(
-    new Set(tabs.map((r) => Math.round(r.top))).size,
-    1,
-    "10 tabs share one scrolling row",
+    await bar.evaluate((e) => e.scrollWidth <= e.clientWidth),
+    true,
+    "the toolbar does not scroll",
+  );
+  assert.equal(
+    await page.getByRole("button", { name: /^(Previous|Next) column/ }).count(),
+    0,
   );
   await bar.getByRole("button", { name: /^Waiting · / }).click();
   assert.equal(await bar.locator('[aria-pressed="true"]').count(), 1);
@@ -2130,33 +2140,28 @@ test("board headings show every count, with collapsed empty columns and drawn ca
       ),
     ["column-Waiting"],
   );
-  const next = page.getByRole("button", { name: "Next column: Paused" }),
-    previous = page.getByRole("button", { name: "Previous column: Running" });
-  assert.equal(await next.innerText(), "Paused →");
-  assert.equal(await previous.innerText(), "← Running");
   await shot(page, "390-board-waiting");
-  await next.click();
+  await bar.getByRole("button", { name: /^Running · / }).click();
   assert.equal(
     await bar
-      .getByRole("button", { name: /^Paused · / })
+      .getByRole("button", { name: /^Running · / })
       .getAttribute("aria-pressed"),
     "true",
   );
-  await page.getByRole("button", { name: "Previous column: Waiting" }).click();
-  assert.equal(
-    await bar
-      .getByRole("button", { name: /^Waiting · / })
-      .getAttribute("aria-pressed"),
-    "true",
+  assert.deepEqual(
+    await page
+      .locator(".board-column")
+      .evaluateAll((es) =>
+        es
+          .filter((e) => getComputedStyle(e).display !== "none")
+          .map((e) => e.id),
+      ),
+    ["column-Running"],
   );
-  await bar.getByRole("button", { name: /^Ready · / }).click();
-  const first = page.getByRole("button", { name: /^Previous column/ });
-  assert.equal(await first.isDisabled(), true);
-  assert.equal(await first.innerText(), "1 of 10");
-  await bar.getByRole("button", { name: /^Cancelled · / }).click();
-  const last = page.getByRole("button", { name: /^Next column/ });
-  assert.equal(await last.isDisabled(), true);
-  assert.equal(await last.innerText(), "10 of 10");
+  assert.ok(
+    (await page.locator("#column-Running [data-task-id]").count()) > 0,
+    "Running shows its cards",
+  );
   await bar.getByRole("button", { name: /^Uncertain · / }).click();
   await shot(page, "390-board-uncertain");
 
@@ -2560,7 +2565,7 @@ test("board columns keep a readable width and scroll inside the board", async (_
     await resolved(page, "color", "var(--risk)"),
   );
   const targets = await page
-    .locator(".column-tab, .phone-column-controls button")
+    .locator(".column-tab")
     .evaluateAll((es) => es.map((e) => e.getBoundingClientRect().height));
   assert.ok(
     targets.every((h) => h >= 44),
@@ -2689,7 +2694,7 @@ test("the board column chips render only below the shell breakpoint", async (_t,
   assert.equal(commands(), 0);
 });
 
-test("phone board keeps filters and column chips in one horizontal row with the first card on screen", async (_t, journey) => {
+test("phone board keeps the selects in one row and wraps the column tabs beneath", async (_t, journey) => {
   const { f, ids, web, page, commands } = await start(
     journey,
     "/tasks?view=board&state=all",
@@ -2721,27 +2726,32 @@ test("phone board keeps filters and column chips in one horizontal row with the 
     return c.left >= r.left - 1 && c.right <= r.right + 1;
   };
 
-  // (1) One row: both selects and every chip share a top, the row scrolls, the page does not.
+  // (1) Project and State share a row; the tabs wrap in a row of their own below it, and
+  // neither the row nor the page scrolls sideways.
   const tops = await Promise.all(
     [project, state, bar.getByRole("button")].map((l) =>
       l.evaluateAll((es) => es.map((e) => e.getBoundingClientRect().top)),
     ),
   ).then((groups) => groups.flat());
-  assert.ok(tops.length >= 9, `selects and chips: ${tops.length}`);
-  assert.ok(Math.max(...tops) - Math.min(...tops) <= 1, `one row: ${tops}`);
-  // Left to right: Project, State, then the chips, which is also the Tab order.
-  const [pr, sr, cr] = await Promise.all(
-    [project, state, bar.getByRole("button").first()].map((l) =>
-      l.evaluate((e) => e.getBoundingClientRect().toJSON()),
-    ),
+  const selectTops = await Promise.all(
+    [project, state].map((l) => l.evaluate((e) => e.getBoundingClientRect())),
   );
-  assert.ok(pr.right <= sr.left + 1 && sr.right <= cr.left + 1, "order");
+  assert.ok(Math.abs(selectTops[0]!.top - selectTops[1]!.top) <= 1, "one row");
+  assert.ok(
+    (await bar
+      .getByRole("button")
+      .first()
+      .evaluate((e) => e.getBoundingClientRect().top)) >=
+      Math.max(selectTops[0]!.bottom, selectTops[1]!.bottom),
+    "tabs sit below the selects",
+  );
+  const pr = selectTops[0]!;
   assert.ok(pr.width <= 200, `Project select truncates: ${pr.width}`);
   const scroller = await row.evaluate((e) => ({
     overflowX: getComputedStyle(e).overflowX,
     scrolls: e.scrollWidth > e.clientWidth,
   }));
-  assert.deepEqual(scroller, { overflowX: "auto", scrolls: true });
+  assert.deepEqual(scroller, { overflowX: "visible", scrolls: false });
   assert.ok(await noPageOverflow(page));
 
   // (2) The first card is on the first screen.
@@ -2750,10 +2760,14 @@ test("phone board keeps filters and column chips in one horizontal row with the 
     ".board-columns .selected-column [data-task-id] .task-title",
   );
   assert.ok((await title.count()) >= 1, "the Waiting column holds a card");
-  assert.ok(
-    (await title.first().evaluate((e) => e.getBoundingClientRect().bottom)) <=
-      844,
-  );
+  // Three rows of 44px tabs fill the first screen's toolbar: every tab is on it and the
+  // Waiting column's cards follow below.
+  const tabBottom = await bar
+    .getByRole("button")
+    .evaluateAll((es) =>
+      Math.max(...es.map((e) => e.getBoundingClientRect().bottom)),
+    );
+  assert.ok(tabBottom <= 844, `tabs end at ${tabBottom}`);
 
   // (3) The pressed chip is fully visible, and the switch and Refresh share the next line.
   const waiting = bar.getByRole("button", { name: /^Waiting · / });
@@ -2862,12 +2876,14 @@ test("phone board keeps filters and column chips in one horizontal row with the 
     await page.locator(".work-filters .column-navigation").count(),
     1,
   );
-  const projectTops = await Promise.all(
-    [state, bar.getByRole("button")].map((l) =>
-      l.evaluateAll((es) => es.map((e) => e.getBoundingClientRect().top)),
-    ),
-  ).then((groups) => groups.flat());
-  assert.ok(Math.max(...projectTops) - Math.min(...projectTops) <= 1);
+  const [stateBox, firstTab] = await Promise.all([
+    state.evaluate((e) => e.getBoundingClientRect().bottom),
+    bar
+      .getByRole("button")
+      .first()
+      .evaluate((e) => e.getBoundingClientRect().top),
+  ]);
+  assert.ok(firstTab >= stateBox, "the tabs wrap below the State select");
   await page.goto(`${web.origin}/?view=board&ready=any`);
   await page
     .locator(".overview-panel .work-toolbar .column-navigation")
