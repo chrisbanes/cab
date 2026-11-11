@@ -481,10 +481,7 @@ test("Task detail Back returns to the originating Board entry", async (_t, j) =>
   await signIn(page, web.origin, web.password, "/tasks?view=board&ready=any");
   const card = page.locator(`[data-task-id="${a.taskId}"] .task-title`);
   await card.waitFor();
-  // Columns and rails now fit one 1366 screen; widen them so the board still scrolls.
-  await page.addStyleTag({
-    content: ".board-columns .board-column{min-width:600px !important}",
-  });
+  // Columns keep a 240px floor, so the board scrolls at this width.
   const board = page.locator(".board-columns");
   // The card sits in the first column, off screen at this scroll. A pointer click would first
   // scroll the board to it. Leave in the same turn as the scroll, before its event can save it.

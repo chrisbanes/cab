@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
-import { chromium, type Browser, type Page } from "playwright";
+import { chromium, type Browser, type Page, type Route } from "playwright";
 import {
   browserSuite,
   captureBrowserEvidence,
@@ -1939,11 +1939,12 @@ test("overview without requests or completed work says so and omits the complete
 /** The column sits inside the board's own scroll area. */
 const inBoard = (page: Page, column: string) =>
   page.waitForFunction((id) => {
+    // Columns are wider than the board can show at once: some of the column is on screen.
     const board = document
         .querySelector(".board-columns")!
         .getBoundingClientRect(),
       area = document.getElementById(id)!.getBoundingClientRect();
-    return area.left >= board.left - 1 && area.right <= board.right + 1;
+    return area.right > board.left + 40 && area.left < board.right - 40;
   }, `column-${column}`);
 
 test("board headings show every count, with collapsed empty columns and drawn cards", async (_t, journey) => {
@@ -1994,7 +1995,7 @@ test("board headings show every count, with collapsed empty columns and drawn ca
     );
   for (const [empty, width] of widths)
     assert.ok(
-      empty ? width >= 40 && width <= 60 : width >= 140,
+      empty ? width >= 100 && width <= 140 : width >= 240,
       `${empty} ${width}`,
     );
   const populated = widths.filter(([empty]) => !empty).map(([, w]) => w);
@@ -2034,7 +2035,7 @@ test("board headings show every count, with collapsed empty columns and drawn ca
   await page.keyboard.press("Enter");
   await page.waitForURL((u) => u.pathname === `/tasks/${ids.question.id}`);
   await page.goBack();
-  await inBoard(page, "Uncertain");
+  await inBoard(page, "Running");
 
   // A failed Inbox read keeps the reasons and drops the action link.
   await page.route("**/api/operator/inbox**", (route) =>
@@ -2091,7 +2092,10 @@ test("board headings show every count, with collapsed empty columns and drawn ca
     if (id === "column-Done") assert.equal(empty, null);
     else {
       assert.equal(empty, "true", id);
-      assert.ok(width <= 60, `${id} collapses to ${width}px`);
+      assert.ok(
+        width >= 100 && width <= 140,
+        `${id} is about 120px, got ${width}px`,
+      );
     }
   assert.equal(
     await page.locator("#column-Ready p").innerText(),
@@ -2242,9 +2246,13 @@ test("board cards follow the frame's anatomy", async (_t, journey) => {
     "Question requiring action",
     "Service integration · Local task",
     "Question needs an answer",
-    "Next: you · answer question",
     "Answer question →",
   ]);
+  // The card's response link says what the operator does, so it repeats no "Next: you".
+  assert.equal(
+    await page.locator(`${card(ids.question.id)} .task-next`).count(),
+    0,
+  );
   // Capacity is stated once for the board; a card nobody must act on has no Next line.
   assert.equal(await page.getByText(/Capacity is full/).count(), 1);
   assert.equal(await page.locator(".work-capacity").count(), 1);
@@ -2291,10 +2299,23 @@ test("board cards follow the frame's anatomy", async (_t, journey) => {
     await page.locator(`${card(ids.question.id)} .task-status`).count(),
     0,
   );
-  assert.equal(
-    await style(page, `${card(ids.question.id)} .task-next`, "color"),
-    await resolved(page, "color", "var(--attn)"),
-  );
+  // A Next line naming another actor stays on a card without the operator's response link.
+  const leadReview = (route: Route) =>
+    route.fetch().then(async (response) => {
+      const json = await response.json();
+      for (const task of json.data.tasks)
+        if (task.id === ids.running.id)
+          task.attention = { codes: ["lead-review"], count: 1 };
+      await route.fulfill({ response, json });
+    });
+  await page.route("**/api/operator/task-list**", leadReview);
+  await page.reload();
+  const kept = page.locator(`${card(ids.running.id)} .task-next`);
+  await kept.waitFor();
+  assert.equal(await kept.getAttribute("data-operator"), null);
+  await page.unroute("**/api/operator/task-list**", leadReview);
+  await page.reload();
+  await page.locator(card(ids.question.id)).waitFor();
   const border = (id: string) =>
     style(page, `${card(id)} .task-card`, "border-top-color");
   assert.equal(
@@ -2381,7 +2402,7 @@ test("board cards follow the frame's anatomy", async (_t, journey) => {
   assert.equal(commands(), 0);
 });
 
-test("board columns share one 1366 screen, collapse to rails and scroll only inside the board", async (_t, journey) => {
+test("board columns keep a readable width and scroll inside the board", async (_t, journey) => {
   const { ids, web, page, commands } = await start(
     journey,
     "/tasks?view=board",
@@ -2409,8 +2430,8 @@ test("board columns share one 1366 screen, collapse to rails and scroll only ins
       };
     });
 
-  // (a) Seven populated Active columns, equal and all on one screen, beside the empty
-  // Not started rail.
+  // (a) Seven populated Active columns keep 240px and scroll inside the board, beside the
+  // empty Not started column.
   const one = await layout();
   assert.equal(one.columns.length, 8);
   assert.deepEqual(
@@ -2418,11 +2439,10 @@ test("board columns share one 1366 screen, collapse to rails and scroll only ins
     ["column-Not started"],
   );
   const populated = one.columns.filter((c) => !c.empty);
-  assert.ok(one.columns.every((c) => c.inside));
-  assert.ok(populated.every((c) => c.width >= 140));
+  assert.ok(populated.every((c) => c.width >= 240));
   const widths = populated.map((c) => c.width);
   assert.ok(Math.max(...widths) - Math.min(...widths) <= 1, `${widths}`);
-  assert.ok(one.scrollWidth <= one.clientWidth, "board does not scroll");
+  assert.ok(one.scrollWidth > one.clientWidth, "board scrolls inside itself");
   assert.ok(await noPageOverflow(page));
   assert.equal(await page.evaluate(() => scrollX), 0);
   await shot(page, "1366-board-all-columns");
@@ -2459,7 +2479,7 @@ test("board columns share one 1366 screen, collapse to rails and scroll only ins
     () => document.activeElement?.textContent === "Cancelled work",
   );
 
-  // (c) Every empty column is a labelled vertical rail that does not clip its text.
+  // (c) Every empty column is a labelled horizontal column that does not clip its text.
   await page.goto(`${web.origin}/tasks?view=board&state=Done&ready=any`);
   await page.locator(".board-column").first().waitFor();
   const rails = await page.locator(".board-column").evaluateAll((es) =>
@@ -2470,17 +2490,21 @@ test("board columns share one 1366 screen, collapse to rails and scroll only ins
       count: e.querySelector(".board-column-count")?.checkVisibility(),
       vertical: getComputedStyle(e.querySelector(".board-column-name")!)
         .writingMode,
-      clipped: e.scrollHeight > e.clientHeight + 1,
+      clipped:
+        e.scrollHeight > e.clientHeight + 1 ||
+        [...e.querySelectorAll<HTMLElement>(".board-column-name, p")].some(
+          (t) => t.scrollWidth > t.clientWidth + 1,
+        ),
     })),
   );
   assert.equal(rails.filter((r) => r.empty).length, 8);
   for (const rail of rails)
     if (rail.empty) {
-      assert.ok(rail.width >= 40 && rail.width <= 60, JSON.stringify(rail));
-      assert.equal(rail.vertical, "vertical-rl", rail.id);
+      assert.ok(rail.width >= 100 && rail.width <= 140, JSON.stringify(rail));
+      assert.equal(rail.vertical, "horizontal-tb", rail.id);
       assert.equal(rail.count, true, rail.id);
       assert.equal(rail.clipped, false, rail.id);
-    } else assert.ok(rail.id === "column-Done" && rail.width > 500);
+    } else assert.ok(rail.id === "column-Done" && rail.width >= 240);
   assert.equal(
     await page.locator("#column-Ready p").innerText(),
     "None ready. Held Ready work is in Waiting.",

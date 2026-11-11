@@ -629,8 +629,8 @@
   --state-border: var(--ok-border);
 }
 
-/* Board (04-tasks-board): equal columns with a 140px floor, so seven fit one 1366 screen;
-   anything wider scrolls inside .board-columns only. */
+/* Board (04-tasks-board): equal columns with a 240px floor; whatever does not fit scrolls
+   inside .board-columns only. */
 .column-navigation {
   display: flex;
   flex-wrap: wrap;
@@ -668,7 +668,7 @@
 }
 
 .board-columns {
-  --board-column-min: 140px;
+  --board-column-min: 240px;
   display: flex;
   align-items: stretch;
   gap: 10px;
@@ -740,31 +740,16 @@
   margin: 0 var(--space-4);
 }
 
-/* An empty column is a 44px labelled rail: count, then name and sentence read vertically. */
+/* An empty column is a narrow labelled column; its text stays horizontal. */
 @media (min-width: 760px) {
   .board-column[data-empty="true"] {
-    flex: 0 0 44px;
-    align-items: center;
-    gap: 10px;
+    flex: 0 0 120px;
     min-width: 0;
-    padding: 10px 0;
   }
 
   .board-column[data-empty="true"] .board-column-heading {
-    flex-direction: column-reverse;
-    gap: 10px;
-    padding: 0;
-  }
-
-  .board-column[data-empty="true"] .board-column-name,
-  .board-column[data-empty="true"] > p {
-    writing-mode: vertical-rl;
-  }
-
-  /* The bounded block length wraps a long sentence onto a second vertical line. */
-  .board-column[data-empty="true"] > p {
-    max-height: 10rem;
-    margin: 0;
+    flex-wrap: wrap;
+    padding: 2px 4px 4px;
   }
 }
 

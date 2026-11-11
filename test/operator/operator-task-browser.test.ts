@@ -1607,14 +1607,14 @@ for (const viewport of [
       }
       await reach.waitFor({ state: "visible" });
       if (viewport.width >= 1121) {
-        // The focused card starts inside the board; the browser may leave its far edge clipped.
+        // The focused card is on screen in the board; the browser may leave an edge clipped.
         const focused = await reach.evaluate((link) => {
           const board = link.closest(".board-columns")!.getBoundingClientRect();
           const box = link.getBoundingClientRect();
           return (
             link === document.activeElement &&
-            box.left >= board.left - 1 &&
-            box.left < board.right
+            box.right > board.left + 40 &&
+            box.left < board.right - 40
           );
         });
         assert.equal(focused, true, `${column} card is focused in the board`);

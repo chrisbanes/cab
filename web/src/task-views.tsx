@@ -108,9 +108,12 @@ const identity = (task: TaskListSummary) => taskIdentity(task).label;
 function TaskFacts({
   task,
   shared = [],
+  hideOperatorNext = false,
 }: {
   task: TaskListSummary;
   shared?: readonly string[];
+  /** A card with the operator's response link already says what the operator does. */
+  hideOperatorNext?: boolean;
 }) {
   // The Next line names who acts; a task nobody must act on shows none (the task strip still says so).
   const next = nextActor(task.attention.codes, taskColumn(task));
@@ -126,7 +129,7 @@ function TaskFacts({
             <ReasonText reason={r} />
           </p>
         ))}
-      {next.code && (
+      {next.code && !(hideOperatorNext && next.operator) && (
         <p
           className="body task-next"
           data-operator={next.operator ? "true" : undefined}
@@ -226,7 +229,11 @@ export function TaskCard({
             </span>
           )}
         </p>
-        <TaskFacts task={task} shared={shared ?? []} />
+        <TaskFacts
+          task={task}
+          shared={shared ?? []}
+          hideOperatorNext={!!request}
+        />
         {task.source && task.source.state !== "open" && (
           <p className="metadata muted task-source-state">
             {sourceStateText(task.source)}
