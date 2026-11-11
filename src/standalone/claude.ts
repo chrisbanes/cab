@@ -787,7 +787,7 @@ export class ClaudeRuntime implements Runtime {
     if (settings) return unavailable(settings);
     const problem = this.settingsProblem(input.settings);
     if (problem) return unavailable(problem);
-    // A passed self-test admits exactly one turn; a skip-sandbox turn leaves it for the next.
+    // A passed self-test admits exactly one turn; an unsandboxed turn leaves it for the next.
     if (!input.skipSandbox) this.sandboxProbes.delete(input.workspace);
     return undefined;
   }

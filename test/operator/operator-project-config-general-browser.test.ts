@@ -2228,16 +2228,18 @@ test("local listening is a switch with its disclosure that saves as a versioned 
   assert.equal(d.localListening(ids.atlas), false);
 });
 
-test("skip sandbox asks for confirmation when turned on and saves off without one", async (_t, journey) => {
+test("the sandbox level asks for confirmation when made unsandboxed and saves strict without one", async (_t, journey) => {
   const { f, ids, page } = await startSettings(
     journey,
     "/projects/:atlas/settings",
   );
   const d = f.service.domain();
-  const skip = page.getByRole("switch", { name: "Skip sandbox (dangerous)" });
-  await skip.waitFor();
-  assert.equal(await skip.isChecked(), false);
-  await page.getByText("Skip sandbox is disabled for this project.").waitFor();
+  const level = page.getByRole("combobox", { name: "Sandbox level" });
+  await level.waitFor();
+  assert.equal(await level.inputValue(), "strict");
+  await page
+    .getByText("The sandbox level is strict for this project.")
+    .waitFor();
   await page
     .getByText(/dangerFullAccess/)
     .first()
@@ -2250,40 +2252,44 @@ test("skip sandbox asks for confirmation when turned on and saves off without on
   const dialog = page.getByRole("alertdialog");
 
   // Cancel keeps the draft and sends nothing.
-  await skip.click();
-  await changes(page).getByText("Skip sandbox enabled").waitFor();
+  await level.selectOption("unsandboxed");
+  await changes(page)
+    .getByText("Sandbox level: Strict → Unsandboxed (dangerous)")
+    .waitFor();
   await save.click();
   await dialog
     .getByText(/full filesystem, process, network and credential access/)
     .waitFor();
   await dialog.getByRole("button", { name: "Cancel" }).click();
   await dialog.waitFor({ state: "hidden" });
-  assert.equal(d.dangerouslySkipSandbox(ids.atlas), false);
-  assert.equal(await skip.isChecked(), true);
+  assert.equal(d.sandboxLevel(ids.atlas), "strict");
+  assert.equal(await level.inputValue(), "unsandboxed");
 
-  // Confirm saves it on.
+  // Confirm saves it.
   await save.click();
   const sent = commandBody(page);
-  await dialog.getByRole("button", { name: "Skip sandbox" }).click();
+  await dialog.getByRole("button", { name: "Run unsandboxed" }).click();
   const body = await sent;
   assert.equal(body.type, "project.configure");
-  assert.equal(body.dangerouslySkipSandbox, true);
+  assert.equal(body.sandbox, "unsandboxed");
   await savedOutcome(page);
-  assert.equal(d.dangerouslySkipSandbox(ids.atlas), true);
-  await page.getByText("Skip sandbox is enabled for this project").waitFor();
+  assert.equal(d.sandboxLevel(ids.atlas), "unsandboxed");
   await page
-    .getByText(/Superseded while skipping the sandbox/)
+    .getByText("The sandbox level is unsandboxed for this project")
+    .waitFor();
+  await page
+    .getByText(/Superseded while the sandbox level is unsandboxed/)
     .first()
     .waitFor();
 
-  // Turning it off saves at once.
-  await skip.click();
+  // Choosing strict saves at once.
+  await level.selectOption("strict");
   const back = commandBody(page);
   await save.click();
-  assert.equal((await back).dangerouslySkipSandbox, false);
+  assert.equal((await back).sandbox, "strict");
   assert.equal(await dialog.count(), 0);
   await savedOutcome(page);
-  assert.equal(d.dangerouslySkipSandbox(ids.atlas), false);
+  assert.equal(d.sandboxLevel(ids.atlas), "strict");
 });
 
 test("diagnostic capture sits beside command network access and saves both modes as versioned changes", async (_t, journey) => {

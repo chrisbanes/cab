@@ -1,4 +1,5 @@
 import { inboxLifecycleSchema } from "../core/inbox-lifecycle.js";
+import { sandboxLevelSchema } from "../core/sandbox-level.js";
 import { delegateWithdrawalRefusalCodes } from "../core/delegate-withdrawal.js";
 import {
   maxToolPathChars,
@@ -1325,7 +1326,7 @@ const generation = z
     /** Optional so older services still parse; null until the turn is admitted, true only for a Claude task turn. */
     localListening: z.boolean().nullable().optional(),
     /** Optional so older services still parse; null until the turn is admitted. */
-    dangerouslySkipSandbox: z.boolean().nullable().optional(),
+    sandbox: sandboxLevelSchema.nullable().optional(),
     /** The latest failed turn's bounded classification; null when none failed. */
     failure: z
       .object({
@@ -3217,7 +3218,7 @@ export const operatorCommandSchema = z.discriminatedUnion("type", [
       reasoningSummaries: z.boolean().optional(),
       commandNetworkAccess: z.boolean().optional(),
       localListening: z.boolean().optional(),
-      dangerouslySkipSandbox: z.boolean().optional(),
+      sandbox: sandboxLevelSchema.optional(),
       stacking: z.boolean().optional(),
     })
     .strict(),
@@ -4357,7 +4358,7 @@ export const projectConfigurationSchema = envelope(
       reasoningSummaries: z.boolean().optional(),
       commandNetworkAccess: z.boolean().optional(),
       localListening: z.boolean().optional(),
-      dangerouslySkipSandbox: z.boolean().optional(),
+      sandbox: sandboxLevelSchema.optional(),
       stacking: z.boolean().optional(),
       routing: z
         .object({

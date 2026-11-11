@@ -1,6 +1,7 @@
 import { UnstackStore } from "./unstack.js";
 import { assertCleanupOwnershipAvailableWithinTransaction } from "./project-cleanup-reservations.js";
 import { projectDeleteCommandSchema } from "./project-lifecycle.js";
+import { sandboxLevelSchema, type SandboxLevel } from "./sandbox-level.js";
 import {
   archiveBlockers,
   assertProjectWritable,
@@ -231,7 +232,7 @@ const commandSchema = z.discriminatedUnion("type", [
       // Applies to turns admitted afterwards; absent leaves it unchanged.
       localListening: z.boolean().optional(),
       // Applies to turns admitted afterwards; absent leaves it unchanged.
-      dangerouslySkipSandbox: z.boolean().optional(),
+      sandbox: sandboxLevelSchema.optional(),
       // Applies to dependents not yet started; absent leaves it unchanged.
       stacking: z.boolean().optional(),
     })
@@ -958,9 +959,9 @@ export class DomainStore {
           projectId TEXT PRIMARY KEY REFERENCES domain_projects(id),
           enabled INTEGER NOT NULL CHECK(enabled IN (0, 1))
         );
-        CREATE TABLE IF NOT EXISTS project_dangerously_skip_sandbox (
+        CREATE TABLE IF NOT EXISTS project_sandbox_level (
           projectId TEXT PRIMARY KEY REFERENCES domain_projects(id),
-          enabled INTEGER NOT NULL CHECK(enabled IN (0, 1))
+          level TEXT NOT NULL CHECK(level IN ('strict', 'unsandboxed'))
         );
         CREATE TABLE IF NOT EXISTS scheduler_project_capacity_limits (
           projectId TEXT PRIMARY KEY REFERENCES domain_projects(id),
@@ -976,6 +977,18 @@ export class DomainStore {
           payloadHash TEXT NOT NULL,
           UNIQUE(projectId, taskId, taskVersion)
         );`);
+      // Level 32: the skip-sandbox boolean becomes the sandbox level, then its table goes.
+      if (
+        this.db
+          .prepare(
+            "SELECT 1 FROM sqlite_schema WHERE type='table' AND name='project_dangerously_skip_sandbox'",
+          )
+          .get()
+      )
+        this.db.exec(`INSERT OR IGNORE INTO project_sandbox_level (projectId, level)
+          SELECT projectId, CASE enabled WHEN 1 THEN 'unsandboxed' ELSE 'strict' END
+          FROM project_dangerously_skip_sandbox;
+          DROP TABLE project_dangerously_skip_sandbox;`);
       const version = this.db
         .prepare("SELECT version FROM domain_schema")
         .get() as Row | undefined;
@@ -2334,13 +2347,13 @@ export class DomainStore {
     );
   }
 
-  /** Skip the harness sandbox for new task turns; no row means off. */
-  dangerouslySkipSandbox(projectId: string): boolean {
+  /** The sandbox level for new task turns; no row means strict. */
+  sandboxLevel(projectId: string): SandboxLevel {
     return (
-      this.one(
-        "SELECT enabled FROM project_dangerously_skip_sandbox WHERE projectId = ?",
+      (this.one(
+        "SELECT level FROM project_sandbox_level WHERE projectId = ?",
         id.parse(projectId),
-      )?.enabled === 1
+      )?.level as SandboxLevel | undefined) ?? "strict"
     );
   }
 
@@ -3540,12 +3553,12 @@ export class DomainStore {
               "INSERT INTO project_local_listening (projectId, enabled) VALUES (?, ?) ON CONFLICT(projectId) DO UPDATE SET enabled = excluded.enabled",
             )
             .run(command.projectId, Number(command.localListening));
-        if (command.dangerouslySkipSandbox !== undefined)
+        if (command.sandbox !== undefined)
           this.db
             .prepare(
-              "INSERT INTO project_dangerously_skip_sandbox (projectId, enabled) VALUES (?, ?) ON CONFLICT(projectId) DO UPDATE SET enabled = excluded.enabled",
+              "INSERT INTO project_sandbox_level (projectId, level) VALUES (?, ?) ON CONFLICT(projectId) DO UPDATE SET level = excluded.level",
             )
-            .run(command.projectId, Number(command.dangerouslySkipSandbox));
+            .run(command.projectId, command.sandbox);
         if (command.stacking !== undefined)
           this.db
             .prepare(

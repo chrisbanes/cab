@@ -23,12 +23,13 @@ import {
   projectLocalListeningLine,
 } from "../../src/operator/local-listening-copy.js";
 import {
-  skipSandboxAppliesNote,
-  skipSandboxGrantLines,
-  skipSandboxRisk,
-  skipSandboxSupersededLine,
-  projectSkipSandboxLine,
-} from "../../src/operator/skip-sandbox-copy.js";
+  projectSandboxLevelLine,
+  sandboxLevelAppliesNote,
+  sandboxLevelLabels,
+  unsandboxedGrantLines,
+  unsandboxedRisk,
+  unsandboxedSupersededLine,
+} from "../../src/operator/sandbox-level-copy.js";
 import {
   ActionLink,
   Button,
@@ -459,9 +460,7 @@ function GeneralTab(p: TabProps) {
     ...(data.localListening === undefined
       ? {}
       : { localListening: data.localListening }),
-    ...(data.dangerouslySkipSandbox === undefined
-      ? {}
-      : { dangerouslySkipSandbox: data.dangerouslySkipSandbox }),
+    ...(data.sandbox === undefined ? {} : { sandbox: data.sandbox }),
     ...(data.diagnosticCapture === undefined
       ? {}
       : { diagnosticCapture: data.diagnosticCapture }),
@@ -516,9 +515,8 @@ function GeneralTab(p: TabProps) {
     Boolean(v.localListening) !== data.localListening
       ? { localListening: Boolean(v.localListening) }
       : {}),
-    ...(data.dangerouslySkipSandbox !== undefined &&
-    Boolean(v.dangerouslySkipSandbox) !== data.dangerouslySkipSandbox
-      ? { dangerouslySkipSandbox: Boolean(v.dangerouslySkipSandbox) }
+    ...(data.sandbox !== undefined && v.sandbox !== data.sandbox
+      ? { sandbox: v.sandbox }
       : {}),
     ...(data.diagnosticCapture !== undefined &&
     v.diagnosticCapture !== data.diagnosticCapture
@@ -531,11 +529,11 @@ function GeneralTab(p: TabProps) {
       : {}),
     ...privateField("instructions", v.instructions, revealed),
   });
-  const [confirmSkip, setConfirmSkip] = useState(false);
+  const [confirmUnsandboxed, setConfirmUnsandboxed] = useState(false);
   const form = useRef<HTMLFormElement>(null);
-  const skipping = data.dangerouslySkipSandbox === true;
-  const turnsOnSkip =
-    data.dangerouslySkipSandbox === false && Boolean(v.dangerouslySkipSandbox);
+  const unsandboxed = data.sandbox === "unsandboxed";
+  const becomesUnsandboxed =
+    data.sandbox === "strict" && v.sandbox === "unsandboxed";
   return (
     <div className="settings-split">
       <div className="settings-column">
@@ -543,10 +541,10 @@ function GeneralTab(p: TabProps) {
           <form
             ref={form}
             onSubmit={(e) => {
-              // Turning the sandbox off for the project needs an explicit confirmation first.
-              if (turnsOnSkip && !holdSave && !d.readOnly) {
+              // Moving the project to unsandboxed needs an explicit confirmation first.
+              if (becomesUnsandboxed && !holdSave && !d.readOnly) {
                 e.preventDefault();
-                setConfirmSkip(true);
+                setConfirmUnsandboxed(true);
                 return;
               }
               void submitDraft(
@@ -594,7 +592,7 @@ function GeneralTab(p: TabProps) {
                 <p className="metadata muted">
                   {projectCommandNetworkLine(data.commandNetworkAccess)}{" "}
                   {commandNetworkAppliesNote} {commandNetworkDisclosure}
-                  {skipping && ` ${skipSandboxSupersededLine}`}
+                  {unsandboxed && ` ${unsandboxedSupersededLine}`}
                 </p>
               </>
             )}
@@ -609,22 +607,23 @@ function GeneralTab(p: TabProps) {
                 <p className="metadata muted">
                   {projectLocalListeningLine(data.localListening)}{" "}
                   {localListeningAppliesNote} {localListeningLimit}
-                  {skipping && ` ${skipSandboxSupersededLine}`}
+                  {unsandboxed && ` ${unsandboxedSupersededLine}`}
                 </p>
               </>
             )}
-            {data.dangerouslySkipSandbox !== undefined && (
+            {data.sandbox !== undefined && (
               <>
-                <DraftCheck
-                  draft={d}
-                  field="dangerouslySkipSandbox"
-                  label="Skip sandbox (dangerous)"
-                  toggle
-                />
+                <DraftField draft={d} field="sandbox" label="Sandbox level">
+                  {Object.entries(sandboxLevelLabels).map(([id, label]) => (
+                    <option key={id} value={id}>
+                      {label}
+                    </option>
+                  ))}
+                </DraftField>
                 <p className="metadata muted">
-                  {projectSkipSandboxLine(data.dangerouslySkipSandbox)}{" "}
-                  {skipSandboxAppliesNote} {skipSandboxGrantLines.join(" ")}{" "}
-                  {skipSandboxRisk}
+                  {projectSandboxLevelLine(data.sandbox)}{" "}
+                  {sandboxLevelAppliesNote} {unsandboxedGrantLines.join(" ")}{" "}
+                  {unsandboxedRisk}
                 </p>
               </>
             )}
@@ -701,18 +700,23 @@ function GeneralTab(p: TabProps) {
             />
           </form>
           {data.reasoningSummaries !== undefined && <DeleteReasoning {...p} />}
-          <Dialog open={confirmSkip} onOpenChange={setConfirmSkip}>
+          <Dialog
+            open={confirmUnsandboxed}
+            onOpenChange={setConfirmUnsandboxed}
+          >
             <DialogContent role="alertdialog" className="stop-dialog">
-              <DialogTitle>Skip the sandbox for this project?</DialogTitle>
+              <DialogTitle>
+                Run this project's task turns unsandboxed?
+              </DialogTitle>
               <DialogDescription className="body">
-                {skipSandboxRisk} {skipSandboxAppliesNote}
+                {unsandboxedRisk} {sandboxLevelAppliesNote}
               </DialogDescription>
               <div className="stop-dialog-actions">
                 <Button
                   type="button"
                   variant="destructive"
                   onClick={() => {
-                    setConfirmSkip(false);
+                    setConfirmUnsandboxed(false);
                     if (form.current)
                       void sendDraft(
                         form.current,
@@ -724,7 +728,7 @@ function GeneralTab(p: TabProps) {
                       );
                   }}
                 >
-                  Skip sandbox
+                  Run unsandboxed
                 </Button>
                 <DialogClose asChild>
                   <Button type="button" variant="secondary">

@@ -1,7 +1,7 @@
 // Bounded live task turns through the real service, for one harness: the agent runs a fixed
 // workspace script that launches headless Chromium and boots the Medium_Phone emulator.
-// Two cells in fresh fixtures: dangerouslySkipSandbox off (both must fail), then on (both must
-// work). Each cell also checks the admitted value, the policy actually sent to the runtime
+// Two cells in fresh fixtures: sandbox level strict (both must fail), then unsandboxed (both
+// must work). Each cell also checks the admitted level, the policy actually sent to the runtime
 // (Codex turn/start, Claude query options) and turn completion. Prints sanitised evidence JSON;
 // Claude uses the service user's native Claude Code login (cab no longer takes a token);
 // reads no secret and never operator data or ~/.env.
@@ -99,9 +99,11 @@ const roots = [];
 
 async function runCell(skip) {
   const marker = `skip-sandbox-live-${harness}-${skip ? "on" : "off"}`;
+  const level = skip ? "unsandboxed" : "strict";
   const deadline = Date.now() + 20 * 60_000;
   const cell = {
-    skipSandbox: skip,
+    sandbox: level,
+    admittedSandbox: null,
     startTurnCalls: [],
     wire: [],
     refusedTurns: 0,
@@ -249,7 +251,7 @@ async function runCell(skip) {
       projectId,
       expectedVersion: Number(d.project(projectId).version),
       paused: false,
-      dangerouslySkipSandbox: skip,
+      sandbox: level,
     });
     stage(`${marker}: task`);
     exec({
@@ -283,6 +285,7 @@ async function runCell(skip) {
         ? JSON.parse(readFileSync(resultFile, "utf8"))
         : null;
     cell.task = { state: intent.state, reason: intent.reason, steps };
+    cell.admittedSandbox = service.sandboxLevelFor(intent.workId);
     const wire = cell.wire[0];
     const wired =
       harness === "codex"
@@ -294,7 +297,7 @@ async function runCell(skip) {
     cell.checks = {
       turnCompleted: intent.state === "completed",
       oneTurn: cell.startTurnCalls.length === 1 && cell.wire.length === 1,
-      admitted: service.dangerouslySkipSandboxFor(intent.workId) === skip,
+      admitted: cell.admittedSandbox === level,
       runtimePolicy:
         (cell.startTurnCalls[0]?.policy?.skipSandbox === true) === skip,
       wirePolicy:

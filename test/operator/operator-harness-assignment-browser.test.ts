@@ -287,18 +287,20 @@ test("assignment facts state the command network access or local listening each 
       .count(),
     1,
   );
-  // Skip sandbox is every task turn's line, not recorded yet, then admitted on.
+  // The sandbox level is every task turn's line, not recorded yet, then admitted unsandboxed.
   await claude
-    .getByText(/No skip-sandbox admission recorded/)
+    .getByText(/No sandbox level admission recorded/)
     .waitFor(attached);
   f.seedPersistedState((db) =>
     db.exec(
-      "INSERT OR REPLACE INTO execution_intent_dangerously_skip_sandbox (intentId, enabled) SELECT id, 1 FROM execution_intents",
+      "INSERT OR REPLACE INTO execution_intent_sandbox_level (intentId, level) SELECT id, 'unsandboxed' FROM execution_intents",
     ),
   );
   await page.reload();
   await openOverviewCard(page, "assignments");
   await claude
-    .getByText(/Admitted with the sandbox skipped\. Superseded while skipping/)
+    .getByText(
+      /Admitted at the unsandboxed sandbox level\. Superseded while the sandbox level is unsandboxed/,
+    )
     .waitFor(attached);
 });

@@ -7,12 +7,12 @@ import {
   turnLocalListeningLine,
 } from "../operator/local-listening-copy.js";
 import {
-  claudeSkipSandboxLine,
-  codexSkipSandboxLine,
-  skipSandboxRisk,
-  skipSandboxSupersededLine,
-  turnSkipSandboxLine,
-} from "../operator/skip-sandbox-copy.js";
+  claudeUnsandboxedLine,
+  codexUnsandboxedLine,
+  turnSandboxLevelLine,
+  unsandboxedRisk,
+  unsandboxedSupersededLine,
+} from "../operator/sandbox-level-copy.js";
 import {
   assignmentDetailSchema,
   assignmentHistorySchema,
@@ -199,16 +199,16 @@ const assignmentGet: BrowseCommand = {
               localListeningLimit,
             ]
           : []),
-        ...(!g || g.dangerouslySkipSandbox !== undefined
+        ...(!g || g.sandbox !== undefined
           ? [
-              turnSkipSandboxLine(g?.dangerouslySkipSandbox ?? null),
-              ...(g?.dangerouslySkipSandbox
+              turnSandboxLevelLine(g?.sandbox ?? null),
+              ...(g?.sandbox === "unsandboxed"
                 ? [
                     (g.harness ?? a.runtime.harness) === "codex"
-                      ? codexSkipSandboxLine
-                      : claudeSkipSandboxLine,
-                    skipSandboxSupersededLine,
-                    skipSandboxRisk,
+                      ? codexUnsandboxedLine
+                      : claudeUnsandboxedLine,
+                    unsandboxedSupersededLine,
+                    unsandboxedRisk,
                   ]
                 : []),
             ]

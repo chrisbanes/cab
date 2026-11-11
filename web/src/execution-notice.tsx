@@ -7,9 +7,10 @@ import {
 import { turnCommandNetworkLine } from "../../src/operator/command-network-copy.js";
 import { turnLocalListeningLine } from "../../src/operator/local-listening-copy.js";
 import {
-  skipSandboxSupersededLine,
-  turnSkipSandboxLine,
-} from "../../src/operator/skip-sandbox-copy.js";
+  turnSandboxLevelLine,
+  unsandboxedSupersededLine,
+} from "../../src/operator/sandbox-level-copy.js";
+import type { SandboxLevel } from "../../src/core/sandbox-level.js";
 import { ActionLink } from "./components.js";
 import { failureNotice, waitRoute } from "./execution-runtime.js";
 
@@ -62,17 +63,17 @@ export function LocalListeningLine({
   );
 }
 
-/** What skip-sandbox value this assignment's latest turn was admitted with; true supersedes network access and listening. */
-export function SkipSandboxLine({
+/** The sandbox level this assignment's latest turn was admitted with; unsandboxed supersedes network access and listening. */
+export function SandboxLevelLine({
   generation,
 }: {
-  generation?: { dangerouslySkipSandbox?: boolean | null | undefined } | null;
+  generation?: { sandbox?: SandboxLevel | null | undefined } | null;
 }) {
-  const value = generation?.dangerouslySkipSandbox ?? null;
+  const level = generation?.sandbox ?? null;
   return (
     <p className="body">
-      {turnSkipSandboxLine(value)}
-      {value === true && ` ${skipSandboxSupersededLine}`}
+      {turnSandboxLevelLine(level)}
+      {level === "unsandboxed" && ` ${unsandboxedSupersededLine}`}
     </p>
   );
 }

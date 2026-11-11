@@ -748,16 +748,16 @@ export const projectDeletionInventory = {
     columns: ["workId", "projectId", "admittedAt", "lead", "agentId"],
     ownership: "projectId=P",
   },
-  execution_intent_dangerously_skip_sandbox: {
-    columns: ["intentId", "enabled"],
-    ownership: "intentId in I",
-  },
   execution_intent_local_listening: {
     columns: ["intentId", "enabled"],
     ownership: "intentId in I",
   },
   execution_intent_reasoning_summaries: {
     columns: ["intentId", "enabled"],
+    ownership: "intentId in I",
+  },
+  execution_intent_sandbox_level: {
+    columns: ["intentId", "level"],
     ownership: "intentId in I",
   },
   execution_intent_network_access: {
@@ -1136,10 +1136,6 @@ export const projectDeletionInventory = {
     columns: ["projectId", "enabled"],
     ownership: "projectId=P",
   },
-  project_dangerously_skip_sandbox: {
-    columns: ["projectId", "enabled"],
-    ownership: "projectId=P",
-  },
   project_diagnostic_capture: {
     columns: ["projectId", "mode"],
     ownership: "projectId=P",
@@ -1169,6 +1165,10 @@ export const projectDeletionInventory = {
       "credentialRef",
       "candidateProfileIds",
     ],
+    ownership: "projectId=P",
+  },
+  project_sandbox_level: {
+    columns: ["projectId", "level"],
     ownership: "projectId=P",
   },
   project_stacking: {
