@@ -2534,6 +2534,9 @@ test("An open approval leads Overview and stays reachable from every tab in Deci
 
   // Phone: conversation and Reply precede the inspector; controls keep 44px targets.
   await page.setViewportSize({ width: 390, height: 844 });
+  // The page switches to its phone render a frame after the resize; until the strip's desktop
+  // options are gone the strip is still two rows tall and every box below it is offset.
+  await page.locator(".task-tools").waitFor({ state: "detached" });
   await page.evaluate(() => scrollTo(0, 0));
   const phoneCard = await box("section#decisions"),
     phoneAside = await box('aside[aria-label="Task context"]'),
