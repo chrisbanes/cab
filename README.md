@@ -255,7 +255,7 @@ each acceptance scenario to its evidence and disposition.
   the desktop app and Homebrew channel are deferred under
   [#1265](https://github.com/chrisbanes/cab/issues/1265).
 - **Isolation.** cab relies on the execution runtime and host for isolation.
-  Broad host-permitted reads remain enabled, command network access (Codex), local
+  Broad host-permitted reads remain enabled, command network access (Codex) and local
   listening for test fixtures (Claude Code) are off, and the sandbox level is strict, unless
   the operator changes them per project; the unsandboxed level lets host tools such as
   browsers and emulators run (both harnesses). Stop is best-effort: unresolved work
