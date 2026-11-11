@@ -47,6 +47,7 @@
     "git-access:live": "node test/execution/git-access-qualification/live-git-access.mjs --live --one-attempt",
     "local-listening:live": "node test/execution/local-listening-qualification/live-local-listening.mjs --live --one-attempt",
     "skip-sandbox:live": "node test/execution/skip-sandbox-qualification/live-skip-sandbox.mjs --live --one-attempt",
+    "sandbox-escalation:live": "node test/execution/sandbox-escalation-qualification/live-escalation.mjs --live --one-attempt",
     "drafting:live": "node test/execution/drafting-qualification/live-drafting.mjs",
     "recovery:live": "node test/execution/recovery-qualification/live-runtime.mjs --live",
     "planned-restart:live": "node test/execution/planned-restart-qualification/live-restart.mjs --live",
