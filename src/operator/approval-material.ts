@@ -22,11 +22,14 @@ const textFields = [
 
 /**
  * The approval's bound material as the operator reads it: rendered text, before/after diffs for
- * edits, and named facts. Display only: the material was validated when it was requested, and the
- * decision still sends it unchanged. No value import from the delivery store (web bundle).
+ * edits, and named facts. Display only: the decision still sends the material unchanged. Only an
+ * approval whose action is the material's kind is read as an action, because the service then
+ * validated it strictly against that action (and its target against the approval's); any other
+ * material is unrecognized and lists its fields. No value import from the delivery store (web).
  */
 export function approvalMaterialView(
   material: JsonValue,
+  action: string | null,
 ): ApprovalMaterialView {
   const view: ApprovalMaterialView = {
     facts: [],
@@ -35,7 +38,11 @@ export function approvalMaterialView(
     unrecognized: false,
   };
   const m = object(material);
-  if (typeof m?.kind !== "string" || !Object.hasOwn(deliveryActionCopy, m.kind))
+  if (
+    typeof m?.kind !== "string" ||
+    m.kind !== action ||
+    !Object.hasOwn(deliveryActionCopy, m.kind)
+  )
     return { ...view, unrecognized: true };
   const target = object(m.target);
   const fact = (label: string, value: JsonValue | undefined) => {

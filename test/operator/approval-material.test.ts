@@ -1,11 +1,16 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
+import type { JsonValue } from "../../src/operator/contracts.js";
 import { approvalMaterialView } from "../../src/operator/approval-material.js";
+
+// A delivery approval's action is its material's kind.
+const read = (material: { kind: string } & { [key: string]: JsonValue }) =>
+  approvalMaterialView(material, material.kind);
 
 const target = { repositoryId: "R1", nodeId: "I1", number: 7 };
 
 test("an issue edit with its expected text reads as title and body diffs", () => {
-  const view = approvalMaterialView({
+  const view = read({
     kind: "issue.edit",
     target,
     fields: { title: "New", body: "a\nc" },
@@ -19,14 +24,13 @@ test("an issue edit with its expected text reads as title and body diffs", () =>
   assert.equal(view.unrecognized, false);
   // Without the replaced text, the proposed text is shown whole.
   assert.deepEqual(
-    approvalMaterialView({ kind: "pr.edit", target, fields: { body: "x" } })
-      .texts,
+    read({ kind: "pr.edit", target, fields: { body: "x" } }).texts,
     [{ label: "Body", text: "x" }],
   );
 });
 
 test("an issue create reads as its title, labels and body", () => {
-  const view = approvalMaterialView({
+  const view = read({
     kind: "issue.create",
     target: { repositoryId: "R1" },
     title: "T",
@@ -42,7 +46,7 @@ test("an issue create reads as its title, labels and body", () => {
 
 test("a merge and a recovery read as named facts", () => {
   assert.deepEqual(
-    approvalMaterialView({
+    read({
       kind: "pr.merge",
       target: { ...target, number: 12 },
       method: "squash",
@@ -55,7 +59,7 @@ test("a merge and a recovery read as named facts", () => {
     ],
   );
   assert.deepEqual(
-    approvalMaterialView({
+    read({
       kind: "branch.force-push",
       target: { repositoryId: "R1" },
       commitSha: "c".repeat(40),
@@ -72,7 +76,15 @@ test("a merge and a recovery read as named facts", () => {
   );
 });
 
-test("material that is not an action is unrecognized", () => {
+test("material that is not the approval's action is unrecognized", () => {
   for (const material of [{ scope: "fixture" }, null, "text", { kind: "x" }])
-    assert.equal(approvalMaterialView(material).unrecognized, true);
+    assert.equal(approvalMaterialView(material, "x").unrecognized, true);
+  // An approval for another action cannot borrow an action's presentation.
+  assert.equal(
+    approvalMaterialView(
+      { kind: "issue.comment", body: "hi", also: "hidden" },
+      "Post a comment",
+    ).unrecognized,
+    true,
+  );
 });

@@ -264,12 +264,13 @@ const questionGet: BrowseCommand = {
 
 /** The bound material as the review shows it: facts, then each text and diff under its label. */
 function materialLines(approval: {
+  action: string | null;
   material: JsonValue;
   materialUnavailable: boolean;
 }): string[] {
   if (approval.materialUnavailable) return ["Material: (unavailable)"];
   const { material } = approval;
-  const view = approvalMaterialView(material);
+  const view = approvalMaterialView(material, approval.action);
   const literal = (value: JsonValue) =>
     typeof value === "string" ? value : JSON.stringify(value);
   const fields: [string, string][] = !view.unrecognized

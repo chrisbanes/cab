@@ -3,6 +3,7 @@ import { randomUUID } from "node:crypto";
 import { writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { test } from "node:test";
+import { canonicalMaterial } from "../../src/core/delivery.js";
 import { nativeQuestionForm } from "../../src/core/question-forms.js";
 import { fakeServer, harness } from "../fixtures/cli-harness.js";
 import { exhaustibleRuntime } from "../fixtures/runtime-exhaustion.js";
@@ -538,7 +539,7 @@ test("approval get shows an issue edit's text as a diff before its hash, and JSO
     o.s.f,
     undefined,
     undefined,
-    undefined,
+    { action: "issue.edit", target: canonicalMaterial(material.target) },
     material,
   );
   const r = await o.h.run([

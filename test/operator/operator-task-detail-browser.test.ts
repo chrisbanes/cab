@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import type { TestContext } from "node:test";
+import { canonicalMaterial } from "../../src/core/delivery.js";
 import {
   chromium,
   webkit,
@@ -1901,7 +1902,7 @@ test("An issue edit approval shows its current and proposed text as a diff befor
     f,
     undefined,
     undefined,
-    { action: "Edit issue #1", target: "acme/atlas#1" },
+    { action: "issue.edit", target: canonicalMaterial(material.target) },
     material,
   );
   const web = await j.start("fixture.web", () => f.startWeb());
@@ -1979,7 +1980,7 @@ test("A recovery approval shows its exact material and a compare link on its cod
   j.observe(page);
   page.setDefaultTimeout(5000);
   const compare = `https://github.com/acme/app/compare/${"a".repeat(40)}...${"b".repeat(40)}`;
-  const material = {
+  let material: string | { kind: string; [key: string]: unknown } = {
     kind: "branch.adopt",
     target: { repositoryId: "R1" },
     branch: "cab/aaaa1111-ship-it",
@@ -1995,6 +1996,8 @@ test("A recovery approval shows its exact material and a compare link on its cod
       const response = await route.fetch();
       const json = await response.json();
       json.data.approvals[0].material = material;
+      json.data.approvals[0].action =
+        typeof material === "string" ? "Rotate a key" : material.kind;
       if (link) {
         json.data.approvals[0].compareUrl = link;
         json.data.approvals[0].compareCodeHost = codeHost;
@@ -2037,6 +2040,13 @@ test("A recovery approval shows its exact material and a compare link on its cod
     await panel.getByRole("link", { name: /Compare on GitHub/ }).count(),
     0,
   );
+  // Material that is not an object is shown, not left to the closed Exact JSON.
+  material = "Rotate the deploy key";
+  await page.reload();
+  await panel
+    .locator(".approval-material-literal")
+    .getByText("Rotate the deploy key")
+    .waitFor();
 });
 
 /** A signed-in page on a fresh fixture, with every command POST recorded. */

@@ -168,7 +168,9 @@ export function ApprovalReview({
           {" · the outside change on the task branch"}
         </p>
       )}
-      {!approval.materialUnavailable && <Material value={approval.material} />}
+      {!approval.materialUnavailable && (
+        <Material value={approval.material} action={approval.action} />
+      )}
       <p className="metadata muted approval-review-version">
         Version v{approval.revision}
         {approval.materialHash && (
@@ -244,8 +246,14 @@ export function ApprovalReview({
 }
 
 /** The bound material as readable text, diffs and facts; unrecognized material lists its fields. */
-function Material({ value }: { value: JsonValue }) {
-  const view = approvalMaterialView(value);
+function Material({
+  value,
+  action,
+}: {
+  value: JsonValue;
+  action: string | null;
+}) {
+  const view = approvalMaterialView(value, action);
   const fields =
     view.unrecognized &&
     value !== null &&
@@ -284,6 +292,11 @@ function Material({ value }: { value: JsonValue }) {
           </div>
         );
       })}
+      {view.unrecognized && !fields && (
+        <pre className="literal-text approval-material-literal">
+          {typeof value === "string" ? value : JSON.stringify(value, null, 2)}
+        </pre>
+      )}
       {fields && (
         <dl className="approval-material-fields">
           {fields.map(([key, field]) => (
