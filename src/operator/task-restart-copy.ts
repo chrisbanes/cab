@@ -101,5 +101,5 @@ export const unsavedTurnHoldText = (
   records.some(
     (r) => r.intentState === "held" && r.threadId !== null && r.turnId === null,
   )
-    ? "cab never saved this held turn's ID, so it can't match runtime events to the turn, and quiet time won't release it. It waits until the runtime reports the turn's ID and its end, or its process is verified to have exited. To act now, Stop the task or end the runtime process."
+    ? "cab never saved this held turn's ID, so it can't match runtime events to the turn, and quiet time won't release it. It waits until the runtime reports the turn's ID and its end, or its process is verified to have exited. To act now, end the runtime process so cab can verify it exited; Stop only keeps the task from continuing, and holds the turn until Resume."
     : null;

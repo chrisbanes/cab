@@ -71,7 +71,7 @@ test("recovery get explains that a held turn with no saved turn ID ignores quiet
   const read = () =>
     w.h.run(["recovery", "get", w.g.assignmentId, "--connection", "ro"]);
   const explanation =
-    /never saved this held turn's ID.*quiet time won't release it.*reports the turn's ID and its end, or its process is verified to have exited.*Stop the task or end the runtime process/;
+    /never saved this held turn's ID.*quiet time won't release it.*reports the turn's ID and its end, or its process is verified to have exited.*end the runtime process.*Stop only keeps the task from continuing/;
   // A generation with no saved thread never sent a turn, so it has no such wait.
   assert.doesNotMatch((await read()).out, explanation);
   // As after a lost turn/start reply: the thread is saved, the turn is not.

@@ -539,14 +539,14 @@ test("request-only refusal copy names Start again or its independent blocker", a
   );
 });
 
-test("a held turn with no saved turn ID says quiet time won't release it and names Stop", async () => {
+test("a held turn with no saved turn ID says quiet time won't release it and names its recovery", async () => {
   const { unsavedTurnHoldText } = await import(
     "../../src/operator/task-restart-copy.js"
   );
   const held = { intentState: "held", threadId: "thread-1", turnId: null };
   assert.match(
     unsavedTurnHoldText([held]) ?? "",
-    /quiet time won't release it.*reports the turn's ID and its end, or its process is verified to have exited.*Stop the task or end the runtime process/,
+    /quiet time won't release it.*reports the turn's ID and its end, or its process is verified to have exited.*end the runtime process.*Stop only keeps the task from continuing/,
   );
   // A saved turn keeps the quiet-period release; no saved thread never sent a turn.
   for (const record of [

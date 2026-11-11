@@ -977,6 +977,7 @@ function ReleaseForm(
 /**
  * Start again for this assignment's task, the same action the task page, Inbox and Home offer.
  * While cab is still releasing a held turn it shows the latest release time instead.
+ * A held turn with no saved turn ID shows why quiet time won't release it.
  */
 function RestartRecovery(
   p: SettingsProps & {
@@ -1008,9 +1009,11 @@ function RestartRecovery(
   return (
     <Panel
       title="Start again"
-      description="cab interrupts a held turn and releases its writer and capacity when the runtime reports the turn ended, its process is verified to have exited, or 30 minutes pass with no event for it. Start again then continues the task's conversation."
+      description={
+        unsavedTurn ??
+        "cab interrupts a held turn and releases its writer and capacity when the runtime reports the turn ended, its process is verified to have exited, or 30 minutes pass with no event for it. Start again then continues the task's conversation."
+      }
     >
-      {unsavedTurn && <p className="body">{unsavedTurn}</p>}
       {restart?.releasePending ? (
         <p className="body" role="status">
           Interrupting the held turn; expected to be released by{" "}
@@ -1021,7 +1024,9 @@ function RestartRecovery(
           unless activity continues.
         </p>
       ) : (
-        task.state.data && (
+        task.state.data &&
+        // Its "nothing ran" decision would contradict a turn that may still be running.
+        (!unsavedTurn || restart?.eligible || offered?.available) && (
           <StartAgainAction
             readOnly={p.readOnly ?? false}
             client={p.client}
