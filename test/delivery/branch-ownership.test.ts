@@ -731,3 +731,36 @@ test("a closed PR's own branch does not hold, but another repository's outside h
   setOutsideHead(w, "R2", "5".repeat(40));
   assert.equal(holdsCompletion(w), true);
 });
+
+test("an allow pr.edit grant needs no approval; an approval grant still does", async (t) => {
+  for (const mode of ["allow", "approval"] as const) {
+    const w = publicationWorld(t, {
+      grants: ["branch.push", "pr.edit"],
+      mode,
+      approved: true,
+    });
+    const sha = w.commit();
+    await w.submit("branch.push", sha);
+    const edit = {
+      operationId: randomUUID(),
+      action: {
+        kind: "pr.edit" as const,
+        target: {
+          repositoryId,
+          nodeId: "P7",
+          number: 7,
+          baseRef: "main",
+          headRef: branchOf(w)?.branch ?? "",
+          expectedHeadSha: sha,
+        },
+        fields: { title: "x" },
+      },
+    };
+    if (mode === "allow") w.store.authorize(edit, w.caller, false);
+    else
+      assert.throws(
+        () => w.store.authorize(edit, w.caller, false),
+        /approval required/,
+      );
+  }
+});

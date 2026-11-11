@@ -820,6 +820,8 @@ function restoreRequestSchema21(db: DatabaseSync) {
 
 /** The schema digest each migration level created. Append an entry with every level bump. */
 const SCHEMA_PINS: Record<number, string> = {
+  // Data only: reversible delivery grants switch from approval to allow.
+  27: "3731abbd6375466b3bb6401734f5df48be6339f2a21f35df6b3d3dcca8bb91c6",
   // Drafting runs admit instruction runs and record their target and feedback.
   26: "3731abbd6375466b3bb6401734f5df48be6339f2a21f35df6b3d3dcca8bb91c6",
   // Data only: repositories at a delivery preset gain its pr.update-branch grant.

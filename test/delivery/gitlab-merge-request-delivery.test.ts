@@ -145,7 +145,7 @@ test("edit and ready change the merge request once each, and a thread reply and 
       ["abc"],
     );
 
-    // An edit always needs the operator's approval of its exact text.
+    // An approved edit binds the operator's approval of its exact text.
     const edit = {
       kind: "pr.edit",
       target: pr,

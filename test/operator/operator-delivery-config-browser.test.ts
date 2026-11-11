@@ -377,6 +377,28 @@ test("Delivery local errors focus the first field and branch adoption offers app
   await savedOutcome(page);
 });
 
+test("a new grant starts in its kind's default mode and can be set to Require approval", async (_t, journey) => {
+  const { page } = await startSettings(journey, path);
+  await page.getByRole("button", { name: "Add grant", exact: true }).click();
+  const row = grant(page);
+  const authority = row.getByLabel("Authority", { exact: true });
+  assert.equal(await authority.inputValue(), "allow");
+  await row.getByLabel("Action", { exact: true }).selectOption("pr.merge");
+  assert.equal(await authority.inputValue(), "approval");
+  await row.getByLabel("Action", { exact: true }).selectOption("issue.labels");
+  assert.equal(await authority.inputValue(), "allow");
+  await row.getByLabel("Repository", { exact: true }).selectOption("R_atlas");
+  await authority.selectOption("approval");
+  const sent = body(page);
+  await save(page).click();
+  assert.deepEqual(((await sent).grants as unknown[]).at(-1), {
+    action: "issue.labels",
+    repositoryId: "R_atlas",
+    mode: "approval",
+  });
+  await savedOutcome(page);
+});
+
 test("Delivery opaque rows and prefix are kept by default, removable and restored by Discard", async (_t, journey) => {
   const { page, f, ids } = await startSettings(journey, path, phone);
   const hidden = "HIDDEN_DELIVERY_TEXT";

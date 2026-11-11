@@ -6,8 +6,10 @@ import {
   type QuestionForm,
   validateQuestionAnswers,
 } from "../core/question-forms.js";
+import { approvalMaterialView } from "../operator/approval-material.js";
 import {
   type InboxItem,
+  type JsonValue,
   inboxReadSchema,
   questionReadSchema,
   taskSchema,
@@ -25,6 +27,7 @@ import {
 } from "./browse.js";
 import { exactCommand, positiveIntFlag, readTextFile } from "./configure.js";
 import { CliError } from "./connections.js";
+import { lineDiff } from "./diff.js";
 import { taskHeldLabels } from "./remedy.js";
 import { keyValues, oneLine, table, unavailable } from "./render.js";
 import {
@@ -259,6 +262,38 @@ const questionGet: BrowseCommand = {
   },
 };
 
+/** The bound material as the review shows it: facts, then each text and diff under its label. */
+function materialLines(approval: {
+  action: string | null;
+  material: JsonValue;
+  materialUnavailable: boolean;
+}): string[] {
+  if (approval.materialUnavailable) return ["Material: (unavailable)"];
+  const { material } = approval;
+  const view = approvalMaterialView(material, approval.action);
+  const literal = (value: JsonValue) =>
+    typeof value === "string" ? value : JSON.stringify(value);
+  const fields: [string, string][] = !view.unrecognized
+    ? view.facts.map(({ label, value }) => [label, value])
+    : material !== null &&
+        typeof material === "object" &&
+        !Array.isArray(material)
+      ? Object.entries(material).map(([key, value]) => [key, literal(value)])
+      : [["Material", literal(material)]];
+  const indent = (lines: string[]) => lines.map((line) => `    ${line}`);
+  return [
+    ...(fields.length ? [keyValues(fields)] : []),
+    ...view.texts.flatMap(({ label, text }) => [
+      `${label}:`,
+      ...indent(text.split("\n")),
+    ]),
+    ...view.diffs.flatMap(({ label, before, after }) => [
+      `${label}:`,
+      ...indent(lineDiff(before, after)),
+    ]),
+  ];
+}
+
 const approvalGet: BrowseCommand = {
   usage: "approval get TASK_ID INTERACTION_ID",
   positionals: 2,
@@ -295,13 +330,10 @@ const approvalGet: BrowseCommand = {
           ],
           ["Action", unavailable(approval.action)],
           ["Target", unavailable(approval.target)],
+        ]),
+        ...materialLines(approval),
+        keyValues([
           ["Material hash", approval.materialHash ?? "(none recorded)"],
-          [
-            "Material",
-            approval.material === null
-              ? "(unavailable)"
-              : JSON.stringify(approval.material),
-          ],
           ...(approval.compareUrl
             ? [["Compare", approval.compareUrl] as [string, string]]
             : []),

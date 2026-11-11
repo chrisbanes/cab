@@ -246,7 +246,7 @@ test("custom authority retains Project scopes, first matching action and credent
   );
 });
 
-test("custom allow grants show mandatory PR-edit and recovery approval without losing names", () => {
+test("custom allow grants show mandatory adoption and recovery approval without losing names", () => {
   const grants = [
     { action: "pr.edit", repositoryId: "R", mode: "allow" },
     { action: "branch.adopt", repositoryId: "R", mode: "allow" },
@@ -264,7 +264,7 @@ test("custom allow grants show mandatory PR-edit and recovery approval without l
     );
     assert.match(
       groups[1]!.lines[0]!,
-      /Require approval: edit pull requests in acme\/atlas \(always requires approval\)/,
+      /Allow: edit pull requests in acme\/atlas\.?$/,
     );
     assert.match(
       groups[0]!.lines[0]!,

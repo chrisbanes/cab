@@ -21,6 +21,31 @@ export type RepositoryDeliveryLevel =
 
 type Grant = DeliveryPolicy["grants"][number];
 
+/** The mode a new grant of each kind starts in (ADR-1032): reversible, cab-owned actions are allowed. */
+export const defaultGrantModes: Record<Grant["action"], "allow" | "approval"> =
+  {
+    "branch.push": "allow",
+    "pr.create": "allow",
+    "pr.edit": "allow",
+    "pr.ready": "allow",
+    "pr.update-branch": "allow",
+    "pr.thread.reply": "allow",
+    "pr.thread.resolve": "allow",
+    "issue.comment": "allow",
+    "issue.labels": "allow",
+    "project.item.add": "allow",
+    "project.field": "allow",
+    "pr.merge": "approval",
+    "issue.close": "approval",
+    "issue.edit": "approval",
+    "issue.create": "approval",
+    "branch.force-push": "approval",
+    "branch.adopt": "approval",
+  };
+
+export const defaultGrantMode = (action: Grant["action"]) =>
+  defaultGrantModes[action];
+
 const levels = {
   "open-prs": [
     ["branch.push", "allow"],

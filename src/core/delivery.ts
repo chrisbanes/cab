@@ -1025,6 +1025,72 @@ export class DeliveryStore {
     // Before anything parses a policy, including applyOpenPrsDefault.
     this.stripIssueStatusGrants();
     this.grantUpdateBranchAtPresetLevels();
+    this.allowReversibleGrants();
+  }
+  /**
+   * Once per store (ADR-1032): existing `approval` grants of the reversible, cab-owned kinds become
+   * `allow`; no grant is added or removed and every other field stays. Data-only like
+   * `stripIssueStatusGrants`: the version stays, so settlements and approvals bound to it stay
+   * valid and in-flight projects are migrated too. A row the operator sets back later stays.
+   */
+  private allowReversibleGrants(): void {
+    const migrationId = "allow-default-kinds-v1";
+    // Frozen: later default changes never alter this migration.
+    const kinds = new Set([
+      "branch.push",
+      "pr.create",
+      "pr.edit",
+      "pr.ready",
+      "pr.thread.reply",
+      "pr.thread.resolve",
+      "issue.comment",
+      "issue.labels",
+      "project.item.add",
+      "project.field",
+    ]);
+    this.transaction(() => {
+      if (
+        this.db
+          .prepare("SELECT 1 FROM delivery_migrations WHERE migrationId=?")
+          .get(migrationId)
+      )
+        return;
+      const rows = this.db
+        .prepare("SELECT projectId, policyJson FROM delivery_policies")
+        .all() as { projectId: string; policyJson: string }[];
+      for (const { projectId, policyJson } of rows) {
+        let policy: unknown;
+        try {
+          policy = JSON.parse(policyJson);
+        } catch {
+          // Left as it is; `configuration` keeps reporting it invalid.
+          continue;
+        }
+        if (
+          typeof policy !== "object" ||
+          policy === null ||
+          !("grants" in policy) ||
+          !Array.isArray(policy.grants)
+        )
+          continue;
+        let changed = false;
+        const grants = policy.grants.map((grant) => {
+          if (grant?.mode !== "approval" || !kinds.has(grant?.action))
+            return grant;
+          changed = true;
+          return { ...grant, mode: "allow" };
+        });
+        if (!changed) continue;
+        this.db
+          .prepare(
+            "UPDATE delivery_policies SET policyJson=? WHERE projectId=?",
+          )
+          .run(canonicalMaterial({ ...policy, grants }), projectId);
+      }
+      this.db
+        .prepare("INSERT INTO delivery_migrations VALUES (?)")
+        .run(migrationId);
+    });
   }
   /**
    * Once per store: a repository whose grants were a preset level before `pr.update-branch` joined
@@ -1439,7 +1505,6 @@ export class DeliveryStore {
     if (
       (grant?.mode === "approval" ||
         action.kind === "issue.edit" ||
-        action.kind === "pr.edit" ||
         // The confirmed publication review is the approval in either grant mode.
         isOperatorPublicationCaller(binding) ||
         // A recovery is never covered by an `allow` grant.
