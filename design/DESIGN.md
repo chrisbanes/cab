@@ -160,8 +160,11 @@ fixed application dimensions.
   without covering content.
 - **Changes pane:** from 1024px the Overview's Changes actions open a split in place of
   the inspector: the conversation (at least 480px) and the Changes view (at least
-  320px, a surface card like the inspector, sticky under the page top) share the row,
-  and the page's 1100px maximum width is lifted while it is open. The handle between
+  320px, one surface card like the inspector, sticky under the page top) share the row,
+  and the page's 1100px maximum width is lifted while it is open. The card has one
+  heading row, "Changes" with Open full width and Close, and its comparison controls,
+  status line, changed files and diff are hairline-separated sections inside it, not
+  nested cards; the content's own headings are not repeated. The handle between
   them is a 1px `--line` hairline with a 16px hit target (`--line-strong` on hover and
   drag, a 2px `--focus` line on keyboard focus), is a window splitter that Arrow keys,
   Home and End resize, and keeps its width per browser in `localStorage`. Opening

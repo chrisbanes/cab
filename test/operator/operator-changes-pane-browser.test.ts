@@ -181,6 +181,77 @@ for (const colorScheme of ["light", "dark"] as const) {
   });
 }
 
+test("the pane is one card: one heading row, an unstretched Details and no nested cards", async (_t, j) => {
+  const { page } = await start(j, { viewport: { width: 1366, height: 900 } });
+  await openPane(page);
+  await changedFile(pane(page), "guide.md").click({ timeout: 30_000 });
+  await diffTitle(pane(page)).waitFor();
+  const centre = async (target: Locator) => {
+    const box = await target.boundingBox();
+    assert.ok(box);
+    return box;
+  };
+  const heading = pane(page).getByRole("heading", {
+    name: "Changes",
+    exact: true,
+  });
+  assert.equal(await heading.count(), 1, "one Changes heading in the pane");
+  const headingBox = await centre(heading);
+  for (const name of ["Open full width", "Close"]) {
+    const box = await centre(
+      pane(page).getByRole("button", { name, exact: true }),
+    );
+    assert.ok(
+      Math.abs(
+        box.y + box.height / 2 - (headingBox.y + headingBox.height / 2),
+      ) <= 4,
+      `${name} shares the heading row`,
+    );
+  }
+  assert.equal(
+    await pane(page)
+      .getByRole("heading", { name: "Workspace comparisons" })
+      .count(),
+    0,
+  );
+  const summary = await centre(
+    pane(page).locator("summary", { hasText: "Details" }),
+  );
+  const refresh = await centre(
+    pane(page).getByRole("button", { name: "Refresh comparison", exact: true }),
+  );
+  assert.ok(summary.height <= 32, `Details is ${summary.height}px tall`);
+  assert.ok(
+    Math.abs(summary.y - refresh.y) <= 4,
+    "Details aligns with Refresh",
+  );
+  // The target and Repository selects are adjacent rows with no empty row between them.
+  const target = await centre(pane(page).getByLabel("Comparison target"));
+  const repository = await centre(pane(page).getByLabel("Repository"));
+  assert.ok(repository.y - (target.y + target.height) < 40, "no empty row");
+  // Nothing bordered and rounded sits more than one level below the pane card.
+  const nested = await pane(page).evaluate((card) => {
+    const bordered = (el: Element) => {
+      const s = getComputedStyle(el);
+      return (
+        parseFloat(s.borderTopWidth) > 0 &&
+        s.borderTopStyle !== "none" &&
+        parseFloat(s.borderTopLeftRadius) > 0
+      );
+    };
+    const found: string[] = [];
+    for (const el of card.querySelectorAll("*")) {
+      if (!bordered(el)) continue;
+      let depth = 0;
+      for (let p = el.parentElement; p && p !== card; p = p.parentElement)
+        if (bordered(p)) depth++;
+      if (depth >= 1) found.push(el.className.toString() || el.tagName);
+    }
+    return found;
+  });
+  assert.deepEqual(nested, []);
+});
+
 test("below 1024px the result link and the pane buttons keep to the tab", async (_t, j) => {
   const { page } = await start(j, { viewport: { width: 1023, height: 900 } });
   await resultLink(page).click();

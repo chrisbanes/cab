@@ -117,6 +117,7 @@ export function ChangesPane({
       onKeyDown={dismiss}
     >
       <div className="changes-pane-actions">
+        <h3>Changes</h3>
         <Button variant="secondary" onClick={onFullWidth}>
           Open full width
         </Button>

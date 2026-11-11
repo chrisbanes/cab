@@ -1032,6 +1032,16 @@ nav {
   align-items: center;
   gap: 8px;
 }
+/* Labels carry no outer margin here: it stacked into an empty row between the selects. */
+.workspace-changes .changes-controls,
+.workspace-changes .changes-filters {
+  align-items: end;
+  margin-bottom: 12px;
+}
+.workspace-changes .changes-controls label,
+.workspace-changes .changes-filters label {
+  margin: 0;
+}
 .changes-filters {
   display: grid;
   grid-template-columns: repeat(2, minmax(180px, 300px));
@@ -1043,24 +1053,46 @@ nav {
   align-items: center;
   gap: 12px;
   padding: 10px 0;
+  border-top: 1px solid var(--color-border);
+  margin-top: 12px;
   overflow-wrap: anywhere;
+}
+.changes-observation-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  gap: 12px;
+}
+.changes-observation .action-outcome-details {
+  align-self: flex-start;
+  margin: 0;
+}
+.changes-observation .action-outcome-details:not([open]) {
+  padding: 0;
+  border: 0;
+}
+@media (min-width: 701px) {
+  .changes-observation .action-outcome-details > summary {
+    min-height: 0;
+    max-height: 32px;
+  }
 }
 .changes-workbench-host {
   min-width: 0;
+  border-top: 1px solid var(--color-border);
 }
 /* Stacked: a card too narrow to put the files beside the diff. */
 .changes-workbench {
   display: grid;
   grid-template-columns: minmax(0, 1fr);
-  gap: 12px;
   min-width: 0;
+}
+.changes-workbench > * + * {
+  border-top: 1px solid var(--color-border);
 }
 .changes-rail,
 .changes-reading-area {
   min-width: 0;
-  border: 1px solid var(--color-border);
-  border-radius: 8px;
-  background: var(--color-card);
 }
 .changes-rail {
   display: flex;
@@ -1072,7 +1104,6 @@ nav {
 .changes-workbench-split {
   min-height: 360px;
   max-height: 75vh;
-  border: 1px solid var(--color-border);
   border-radius: 8px;
   background: var(--color-card);
   overflow: hidden;
@@ -1632,7 +1663,6 @@ nav {
   .workspace-changes .changes-controls label,
   .workspace-changes .changes-filters label {
     gap: 4px;
-    margin: 4px 0;
   }
   .changes-observation {
     gap: 4px 8px;
