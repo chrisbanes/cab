@@ -839,27 +839,16 @@ test("The strip and decision card follow the server's attention codes, not a cli
     "Next: you · inspect execution",
   );
   await page.setViewportSize({ width: 390, height: 844 });
-  const usable = await strip.evaluate((element) => {
-    const next = element.querySelector(".task-next")!.getBoundingClientRect();
-    const chip = element
-      .querySelector(".task-source-chip")!
-      .getBoundingClientRect();
-    return {
-      nextWidth: next.width,
-      chipWidth: chip.width,
-      oneLine:
-        Math.abs(next.top + next.height / 2 - chip.top - chip.height / 2) < 2,
-      noOverflow: document.documentElement.scrollWidth <= innerWidth,
-    };
-  });
-  assert.ok(
-    usable.nextWidth >= 44 && usable.chipWidth >= 44,
-    "action and identity stay usable on a phone",
-  );
-  assert.ok(
-    usable.oneLine && usable.noOverflow,
-    "strip stays on one line without widening the phone",
-  );
+  // A phone's strip is the state and the action: the identity chip is not drawn there.
+  const usable = await strip.evaluate((element) => ({
+    nextWidth: element.querySelector(".task-next")!.getBoundingClientRect()
+      .width,
+    chip: element.querySelector(".task-source-chip")!.checkVisibility(),
+    noOverflow: document.documentElement.scrollWidth <= innerWidth,
+  }));
+  assert.ok(usable.nextWidth >= 44, "the action stays usable on a phone");
+  assert.equal(usable.chip, false);
+  assert.ok(usable.noOverflow, "the strip does not widen the phone");
   const card = page.locator("section#decisions");
   assert.equal(
     await card
@@ -871,7 +860,7 @@ test("The strip and decision card follow the server's attention codes, not a cli
   codes = ["lead-review"];
   await page.reload();
   await strip.waitFor();
-  await strip.locator("[data-task-reason]").waitFor();
+  await strip.locator("[data-task-reason]").waitFor({ state: "attached" }); // Not drawn on a phone.
   assert.equal(
     await strip.locator("span.task-next").innerText(),
     "Next: cab · recording routing fallback",
@@ -4953,6 +4942,7 @@ test("Phone task header is Back, title, identity subtitle and one Task actions c
     "Stopped task",
     "One line outcome.",
   );
+  const question = await seedOwnQuestion(fixture.f);
   fixture.f.seedPersistedState((db) => {
     db.prepare(
       "UPDATE domain_tasks SET state = 'done', version = version + 1 WHERE id = ?",
@@ -5043,6 +5033,17 @@ test("Phone task header is Back, title, identity subtitle and one Task actions c
     await header.getByRole("button", { name: "Stop…" }).isVisible(),
     false,
   );
+  // One task menu on the page: the strip's options live in Task actions.
+  const menus = () =>
+    page.evaluate(
+      () =>
+        [...document.querySelectorAll("summary, button, a")].filter((e) =>
+          ["Task actions", "More task options"].includes(
+            (e.getAttribute("aria-label") ?? e.textContent ?? "").trim(),
+          ),
+        ).length,
+    );
+  assert.equal(await menus(), 1);
 
   // The keyboard opens it; Execution then Stop… follow in order; Stop… asks before it posts.
   await toggle.focus();
@@ -5052,6 +5053,8 @@ test("Phone task header is Back, title, identity subtitle and one Task actions c
   await activeIs("Execution");
   await page.keyboard.press("Tab");
   await activeIs("Edit task…");
+  await page.keyboard.press("Tab");
+  await activeIs("Publish to GitHub");
   await page.keyboard.press("Tab");
   await activeIs("Stop…");
   await page.keyboard.press("Enter");
@@ -5117,6 +5120,34 @@ test("Phone task header is Back, title, identity subtitle and one Task actions c
     await header.locator(".page-subtitle-short").textContent(),
     "Source-owned imported outcome",
   );
+  // Its source actions are in Task actions, and Refresh source still refreshes from there.
+  assert.equal(await menus(), 1);
+  await toggle.click();
+  const refreshed = page.waitForRequest(
+    (r) => new URL(r.url()).pathname === "/api/operator/source-refresh",
+  );
+  await header.getByRole("button", { name: "Refresh source" }).click();
+  await refreshed;
+  await page.mouse.click(4, 700);
+
+  // The strip is the state and the whole next step; the identity is not repeated there.
+  await page.goto(`${web.origin}/tasks/${question.taskId}`);
+  const strip = page.locator("[data-task-strip]");
+  await strip.locator(".task-next").waitFor();
+  for (const fact of [
+    strip.locator(".task-state"),
+    strip.locator(".task-next"),
+  ]) {
+    assert.ok(await fact.isVisible());
+    assert.deepEqual(
+      await fact.evaluate((e) => [
+        e.scrollWidth <= e.clientWidth,
+        getComputedStyle(e).textOverflow,
+      ]),
+      [true, "clip"],
+    );
+  }
+  assert.equal(await strip.locator(".task-source-chip").isVisible(), false);
 
   // A finished task offers Execution and no Stop….
   await page.goto(`${web.origin}/tasks/${finished.taskId}`);
@@ -5128,6 +5159,7 @@ test("Phone task header is Back, title, identity subtitle and one Task actions c
     [
       ["A", "Execution"],
       ["BUTTON", "Edit task…"],
+      ["BUTTON", "Publish to GitHub"],
     ],
   );
 
@@ -5151,16 +5183,23 @@ test("Phone task header is Back, title, identity subtitle and one Task actions c
       !document.querySelector(".task-header-overflow")?.hasAttribute("open"),
   );
 
-  // The meaningful outcome is the phone subtitle; source identity stays in the strip.
+  // The meaningful outcome is the phone subtitle.
   assert.equal(
     await header.locator(".page-subtitle-short").textContent(),
     "One line outcome.",
   );
-  await page.setViewportSize({ width: 1366, height: 900 });
+  await page.setViewportSize({ width: 1366, height: 850 });
   await settle(page);
   // From 760px the header keeps the recorded outcome and carries no phone identity line.
   assert.equal(await header.locator(".page-subtitle-short").isVisible(), false);
   assert.ok(await header.locator(".introduction").isVisible());
+  // The strip's options toggle is a compact icon button in line with the identity chip.
+  const middle = (box: { y: number; height: number } | null) =>
+    box ? box.y + box.height / 2 : Number.NaN;
+  const options = await page.getByLabel("More task options").boundingBox(),
+    chip = await page.locator(".task-strip .task-source-chip").boundingBox();
+  assert.ok(options && options.width <= 32 && options.height <= 32);
+  assert.ok(Math.abs(middle(options) - middle(chip)) <= 2);
   assert.deepEqual(stops, []);
 });
 

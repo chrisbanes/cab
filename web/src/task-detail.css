@@ -1336,13 +1336,29 @@ a.task-source-chip:hover {
   box-shadow: 0 -8px 16px var(--surface);
 }
 
-.task-tools {
+/* The strip's options are a menu, not a workspace disclosure: no frame, a 32px icon toggle. */
+.task-workspace details.task-tools {
   position: relative;
+  margin: 0;
+  padding: 0;
+  border: 0;
 }
-.task-tools > summary {
-  cursor: pointer;
+.task-workspace .task-tools > summary {
+  justify-content: center;
+  width: 32px;
+  min-height: 0;
+  height: 32px;
+  border: 1px solid var(--line-strong);
+  border-radius: 6px;
+  color: var(--fg);
   list-style: none;
-  padding: 8px;
+}
+.task-tools > summary::-webkit-details-marker {
+  display: none;
+}
+.task-tools > summary svg {
+  width: 18px;
+  height: 18px;
 }
 .task-tools > .task-actions {
   position: absolute;
@@ -1374,23 +1390,23 @@ a.task-source-chip:hover {
 .task-strip-facts > .task-state {
   flex: none;
 }
+/* Phone: the state and the whole next step; the header and decision card carry the rest. */
 @media (max-width: 759px) {
-  .task-tools > summary {
-    min-width: 44px;
-    min-height: 44px;
-  }
   .task-strip-facts {
     gap: var(--space-8);
   }
-  .task-strip-facts > [data-task-reason] {
-    max-width: 25%;
+  .task-strip-facts > [data-task-reason],
+  .task-strip-facts > .task-source-chip,
+  .task-strip-facts > .task-strip-lead {
+    display: none;
   }
-  .task-strip-facts > .task-source-chip {
-    max-width: 35%;
+  .task-strip-facts > .task-next {
+    white-space: normal;
+    text-overflow: clip;
   }
 }
 
-/* Next text yields to the identity chip without making either action disappear on a phone. */
+/* Next text yields to the identity chip without making either action disappear. */
 .task-strip-facts > .task-next {
   flex: 1;
   min-width: 44px;

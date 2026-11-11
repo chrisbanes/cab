@@ -140,11 +140,15 @@ import {
   type TimelineWindow,
 } from "./task-conversation-model.js";
 import { taskAttentionProjection } from "./inbox-presentation.js";
+import { Ellipsis } from "lucide-react";
 import {
   type TaskHeaderReport,
+  type TaskOption,
+  type TaskOptionRequest,
   TaskStrip,
   TaskTabs,
   taskHeaderReport,
+  taskOptionEvent,
 } from "./task-header.js";
 import {
   type ConversationTarget,
@@ -503,6 +507,7 @@ export function TaskWorkspace({
     material = useRef<string | null>(null);
   const params = new URLSearchParams((path.split("?")[1] ?? "").split("#")[0]);
   const wide = useMediaQuery("(min-width: 1024px)");
+  const phone = useMediaQuery("(max-width: 759px)");
   const initialVisit = useRef(!state.selectionInitialized);
   const selectedPath = useRef<string | null>(null);
   if (selectedPath.current !== path) {
@@ -634,6 +639,57 @@ export function TaskWorkspace({
   useEffect(() => {
     if (publishWork) setPublishOpen((open) => open ?? true);
   }, [publishWork]);
+  const publishPolicy = data?.publication;
+  const publishShown = publishPolicy ? (publishOpen ?? publishWork) : false;
+  const improvePolicy = data?.issueEdit;
+  const improveShown = improvePolicy
+    ? (improveOpen ?? hasImproveWork(taskId, improvePolicy))
+    : false;
+  // The strip's options; a phone's Task actions shows the same ones and asks this page to run them.
+  const taskOptions: TaskOption[] = !data
+    ? []
+    : data.source
+      ? [
+          ...(improvePolicy
+            ? [
+                {
+                  kind: "improve" as const,
+                  label: "Improve with lead",
+                  disabled: projectReadOnly,
+                  expanded: improveShown,
+                },
+              ]
+            : []),
+          {
+            kind: "refresh",
+            label: "Refresh source",
+            disabled: projectReadOnly,
+          },
+        ]
+      : publishPolicy
+        ? [
+            {
+              kind: "publish",
+              label: "Publish to GitHub",
+              disabled: projectReadOnly,
+              expanded: publishShown,
+            },
+          ]
+        : [];
+  const runOption = useRef<(kind: TaskOption["kind"]) => void>(() => {});
+  runOption.current = (kind) => {
+    if (kind === "improve") setImproveOpen(!improveShown);
+    else if (kind === "publish") setPublishOpen(!publishShown);
+    else void refreshSource();
+  };
+  useEffect(() => {
+    const run = (event: Event) => {
+      const { detail } = event as CustomEvent<TaskOptionRequest>;
+      if (detail.taskId === taskId) runOption.current(detail.kind);
+    };
+    addEventListener(taskOptionEvent, run);
+    return () => removeEventListener(taskOptionEvent, run);
+  }, [taskId]);
   const headerReport =
     data &&
     JSON.stringify(
@@ -641,6 +697,7 @@ export function TaskWorkspace({
         data,
         data.project?.name ?? null,
         (window.history.state as { origin?: string } | null)?.origin,
+        taskOptions,
       ),
     );
   useEffect(() => {
@@ -2347,12 +2404,6 @@ export function TaskWorkspace({
       )}
     </section>
   );
-  const publishPolicy = data.publication;
-  const publishShown = publishPolicy ? (publishOpen ?? publishWork) : false;
-  const improvePolicy = data.issueEdit;
-  const improveShown = improvePolicy
-    ? (improveOpen ?? hasImproveWork(taskId, improvePolicy))
-    : false;
   const columns = (
     <div className="task-columns">
       <section
@@ -2751,54 +2802,39 @@ export function TaskWorkspace({
           </p>
         )}
         <TaskStrip data={data}>
-          <details className="task-tools">
-            <summary aria-label="More task options">•••</summary>
-            <div className="task-actions">
-              {data.source && (
-                <>
-                  {improvePolicy && (
-                    <Button
-                      variant="secondary"
-                      disabled={projectReadOnly}
-                      aria-expanded={improveShown}
-                      onClick={() => setImproveOpen(!improveShown)}
-                    >
-                      Improve with lead
-                    </Button>
-                  )}
+          {/* A phone has one task menu: these options are in the header's Task actions. */}
+          {!phone && (
+            <details className="task-tools">
+              <summary aria-label="More task options">
+                <Ellipsis aria-hidden="true" />
+              </summary>
+              <div className="task-actions">
+                {taskOptions.map((option) => (
                   <Button
+                    key={option.kind}
                     variant="secondary"
-                    disabled={projectReadOnly}
-                    onClick={() => void refreshSource()}
+                    disabled={option.disabled}
+                    aria-expanded={option.expanded}
+                    onClick={() => runOption.current(option.kind)}
                   >
-                    Refresh source
+                    {option.label}
                   </Button>
-                </>
-              )}
-              {!data.source && publishPolicy && (
-                <Button
-                  variant="secondary"
-                  disabled={projectReadOnly}
-                  aria-expanded={publishShown}
-                  onClick={() => setPublishOpen(!publishShown)}
-                >
-                  Publish to GitHub
-                </Button>
-              )}
-              {wide && (
-                <Button
-                  ref={focusToggle}
-                  variant="secondary"
-                  aria-pressed={focus}
-                  aria-keyshortcuts={"\\"}
-                  title={"Focus mode (\\)"}
-                  onClick={toggleFocus}
-                >
-                  Focus mode
-                </Button>
-              )}
-            </div>
-          </details>
+                ))}
+                {wide && (
+                  <Button
+                    ref={focusToggle}
+                    variant="secondary"
+                    aria-pressed={focus}
+                    aria-keyshortcuts={"\\"}
+                    title={"Focus mode (\\)"}
+                    onClick={toggleFocus}
+                  >
+                    Focus mode
+                  </Button>
+                )}
+              </div>
+            </details>
+          )}
         </TaskStrip>
         {!projectReadOnly && publishPolicy && publishShown && (
           <PublishToGitHub

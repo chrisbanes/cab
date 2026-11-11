@@ -245,8 +245,11 @@ Make the next decision obvious, and keep its evidence close:
   phone the docked Reply is one textarea (at most 12% of the viewport) until focus is
   inside it, a draft is unsent, or a send, notice or uncertain state shows, and the page's
   `scroll-padding-bottom` keeps a focused control clear of it. The strip
-  stays on one line with one identity chip. Refresh source, Focus mode and Improve
-  with lead share More task options. Delegations read as collapsible
+  stays on one line with one identity chip. Refresh source, Focus mode, Improve
+  with lead and Publish share More task options, a 32px icon toggle. On a phone the
+  strip shows only the state and the next step, which wraps rather than truncates; the
+  source identity stays in Details, and the strip's options join the header's Task
+  actions, so the page has one task menu. Focus mode is desktop-only. Delegations read as collapsible
   sub-conversations in place, retaining the task's accountable lead and
   assignment/conversation identities. Use recorded facts and attributed excerpts;
   add no invented summary capability.

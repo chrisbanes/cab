@@ -80,24 +80,34 @@ async function launch(
     await page.goto(`${web.origin}/tasks/${taskId}`);
     await page.getByLabel("Password").fill(web.password);
     await page.getByRole("button", { name: "Sign in", exact: true }).click();
-    await page.getByLabel("More task options").click();
-    await page
-      .locator(".task-tools")
-      .getByRole("button", { name: "Publish to GitHub" })
-      .waitFor();
+    await openOptions(page);
   };
   return { f, gh, page, taskId, commands, open, seeded };
 }
 
 const panel = (page: Page) =>
   page.locator("section.task-publish", { hasText: "Publish to GitHub" });
+/** A phone keeps the task options in the header's Task actions; wider, in the strip's menu. */
+const onPhone = (page: Page) => (page.viewportSize()?.width ?? 0) < 760;
 const header = (page: Page) =>
   page
-    .locator(".task-tools")
-    .getByRole("button", { name: "Publish to GitHub" });
+    .locator(onPhone(page) ? ".task-header-actions" : ".task-tools")
+    // A phone's closed menu hides its buttons; their state is still read.
+    .getByRole("button", { name: "Publish to GitHub", includeHidden: true });
+async function openOptions(page: Page) {
+  if (await header(page).isVisible()) return;
+  await page
+    .locator(
+      onPhone(page) ? ".task-header-overflow-toggle" : ".task-tools > summary",
+    )
+    .click();
+  await header(page).waitFor();
+}
 async function openPanel(page: Page) {
-  if ((await header(page).getAttribute("aria-expanded")) !== "true")
+  if ((await header(page).getAttribute("aria-expanded")) !== "true") {
+    await openOptions(page);
     await header(page).click();
+  }
   await panel(page).waitFor();
 }
 const noOverflow = (page: Page) =>
@@ -165,7 +175,9 @@ for (const [name, viewport] of viewports) {
     assert.equal(commands("task.publish.send").length, 1);
     assert.equal(gh.posts, 1);
     // The task now is the issue: its identity and source link show and the task cannot be published again.
-    await page.locator("[data-task-strip] a.task-source-chip").waitFor();
+    await page
+      .locator("[data-task-strip] a.task-source-chip")
+      .waitFor({ state: "attached" });
     assert.equal(await header(page).count(), 0);
     assert.equal(f.service.domain().importedTask(taskId) !== undefined, true);
     await panel(page).getByRole("button", { name: "Done" }).click();
