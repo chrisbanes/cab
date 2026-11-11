@@ -72,4 +72,6 @@ live scope and capability dependencies with the delivery issues before dispatch.
 - Done automation: `set-status`
 - Automation description: Project workflows `Item closed` and `Pull request merged`
   are enabled; a merged-and-closed issue moves from `In progress` to `Done`
-  through `github-project-automation` and remains unarchived.
+  through `github-project-automation`. The `Auto-archive items` workflow is also
+  enabled and may archive Done items later; the controller relies only on the
+  immediate move to `Done`.
