@@ -2,12 +2,13 @@
 // Scripted App Server for the offline harness contract. Each turn asks for approval of the
 // last `node chromium.mjs <label>` in its prompt, after one unexpected permissions request on
 // turn 1; it writes `<label>-result.json` only when accepted. Every client message is
-// appended to the log file named by argv[2].
+// appended to the log file named by argv[2]. With argv[3] "failed-turns", every turn fails.
 import { appendFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { createInterface } from "node:readline";
 
 const logPath = process.argv[2];
+const turnStatus = process.argv[3] === "failed-turns" ? "failed" : "completed";
 const write = (message) => process.stdout.write(`${JSON.stringify(message)}\n`);
 let turns = 0;
 let active;
@@ -42,7 +43,7 @@ for await (const line of createInterface({ input: process.stdin })) {
       });
       write({
         method: "turn/completed",
-        params: { threadId, turn: { id: turnId, status: "completed" } },
+        params: { threadId, turn: { id: turnId, status: turnStatus } },
       });
       active = undefined;
     }
@@ -94,7 +95,7 @@ for await (const line of createInterface({ input: process.stdin })) {
       });
       write({
         method: "turn/completed",
-        params: { threadId, turn: { id: turnId, status: "completed" } },
+        params: { threadId, turn: { id: turnId, status: turnStatus } },
       });
       continue;
     }

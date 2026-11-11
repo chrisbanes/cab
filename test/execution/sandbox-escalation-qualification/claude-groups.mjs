@@ -4,6 +4,7 @@
 // allow, deny or pass-through. `canUseTool` records and denies.
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
+import { isCommand, STIMULI, wait } from "./outcomes.mjs";
 
 const preamble =
   "This is a disposable sandbox probe in a fixture workspace. Use only the Bash tool, run only the listed commands, and never retry a call, whatever its result.";
@@ -15,14 +16,12 @@ const sandbox = (workspace, allowUnsandboxedCommands) => ({
   network: { allowedDomains: [] },
   filesystem: { allowWrite: [workspace] },
 });
-// Claude Code rejects `sleep N` chained with other commands, so the wait is a Node timer.
-const wait = (ms) =>
-  `node -e 'setTimeout(() => console.log("probe-exit=0"), ${ms})'`;
 const waitPrompt = (command, timeout) =>
   `${preamble} Use the Bash tool exactly once, in the foreground (not in the background), with timeout ${timeout}, to run \`${command}\`. Wait for it to finish, then reply done.`;
 
 // Exact commands only: the model sometimes adds or chains commands of its own.
-const exact = (command, ...allowed) => allowed.includes(command.trim());
+const exact = (command, ...allowed) =>
+  allowed.some((expected) => isCommand(command, expected));
 
 export const CLAUDE_GROUPS = {
   "claude-sandbox": [
@@ -30,14 +29,9 @@ export const CLAUDE_GROUPS = {
       permissionMode: "dontAsk",
       allowedTools: ["Bash"],
       allowUnsandboxedCommands: true,
-      prompt: `${preamble} Make exactly three Bash calls, in order: (1) \`node chromium.mjs control\` normally, inside the sandbox; (2) \`node chromium.mjs escalated\` with dangerouslyDisableSandbox set to true; (3) \`node chromium.mjs hook-deny\` with dangerouslyDisableSandbox set to true. Then reply done.`,
+      prompt: `${preamble} Make exactly three Bash calls, in order: (1) \`${STIMULI.control}\` normally, inside the sandbox; (2) \`${STIMULI.escalated}\` with dangerouslyDisableSandbox set to true; (3) \`${STIMULI.hookDeny}\` with dangerouslyDisableSandbox set to true. Then reply done.`,
       decide: (command, calls) =>
-        calls <= 4 &&
-        exact(
-          command,
-          "node chromium.mjs control",
-          "node chromium.mjs escalated",
-        )
+        calls <= 4 && exact(command, STIMULI.control, STIMULI.escalated)
           ? "allow"
           : "deny",
     },
@@ -48,14 +42,9 @@ export const CLAUDE_GROUPS = {
       permissionMode: "auto",
       allowedTools: [],
       allowUnsandboxedCommands: true,
-      prompt: `${preamble} Make exactly three Bash calls, in order, each with dangerouslyDisableSandbox set to true: (1) \`echo probe-hook-deny\`; (2) \`node chromium.mjs auto-escalated\`; (3) \`curl -sS -m 5 https://probe.invalid/\`. Then reply done.`,
+      prompt: `${preamble} Make exactly three Bash calls, in order, each with dangerouslyDisableSandbox set to true: (1) \`${STIMULI.echoDeny}\`; (2) \`${STIMULI.autoEscalated}\`; (3) \`${STIMULI.curl}\`. Then reply done.`,
       decide: (command, calls) =>
-        calls <= 4 &&
-        exact(
-          command,
-          "node chromium.mjs auto-escalated",
-          "curl -sS -m 5 https://probe.invalid/",
-        )
+        calls <= 4 && exact(command, STIMULI.autoEscalated, STIMULI.curl)
           ? "pass"
           : "deny",
     },
@@ -239,11 +228,14 @@ export async function runClaudeGroup(
               ? { permissionMode: message.permissionMode, model: message.model }
               : message.type === "system"
                 ? { detail: short(JSON.stringify(message), 400) }
-                : {}),
+                : message.type === "result"
+                  ? { isError: message.is_error === true }
+                  : {}),
           });
           if (message.type === "result") {
             q.done = true;
             q.resultSubtype = message.subtype;
+            q.resultIsError = message.is_error === true;
           }
         }
       } catch (error) {
@@ -251,9 +243,15 @@ export async function runClaudeGroup(
       } finally {
         q.elapsedMs = t() - queryStart;
       }
-      // A query that threw or ended without a result did not run its probe: fail the run.
+      // A query that threw, ended without a result or ended unsuccessfully (an error
+      // subtype, or `success` with is_error as cab's runtime also treats it) fails the run.
       if (!trace.deadline && !q.done)
         trace.failure ??= `query ${n}: ${q.error ?? "ended without a result"}`;
+      else if (
+        !trace.deadline &&
+        (q.resultIsError || q.resultSubtype !== "success")
+      )
+        trace.failure ??= `query ${n}: result ${q.resultSubtype}${q.resultIsError ? " (is_error)" : ""}`;
       if (trace.failure) break;
     }
   } catch (error) {

@@ -53,7 +53,7 @@ test("escalation driver refuses anything but the exact live grammar and creates 
 });
 
 test("classification proves only from present evidence", async () => {
-  const { classify } = await load("outcomes.mjs");
+  const { classify, wait } = await load("outcomes.mjs");
   const ws = "/fixture/ws";
   const approval = "item/commandExecution/requestApproval";
   const user = classify("codex-user", {
@@ -79,6 +79,14 @@ test("classification proves only from present evidence", async () => {
         reason: "r",
         answer: "decline",
       },
+      {
+        t: 1.5,
+        turn: 1,
+        kind: "item",
+        type: "commandExecution",
+        command: "node chromium.mjs escalated",
+        status: "completed",
+      },
       { t: 3, turn: 3, kind: "item", type: "agentMessage", text: "x" },
       { t: 4, turn: 3, kind: "turn", status: "completed" },
     ],
@@ -93,6 +101,22 @@ test("classification proves only from present evidence", async () => {
   assert.equal(user.declineRefuses.outcome, "untested");
   assert.equal(user.otherKindsRefused.outcome, "untested");
   assert.match(user.otherKindsRefused.reason, /no permission-request attempt/);
+
+  // Only an identifiable permission-request call is an attempt; a web search is not.
+  const turn3 = (item: Event) =>
+    classify("codex-user", {
+      workspace: ws,
+      events: [
+        { t: 1, turn: 3, kind: "item", ...item },
+        { t: 2, turn: 3, kind: "turn", status: "completed" },
+      ],
+      results: {},
+    }).otherKindsRefused.outcome;
+  assert.equal(turn3({ type: "webSearch" }), "untested");
+  assert.equal(
+    turn3({ type: "functionCallOutput", name: "request_permissions" }),
+    "proved",
+  );
 
   const leaked = classify("codex-user", {
     workspace: ws,
@@ -116,6 +140,7 @@ test("classification proves only from present evidence", async () => {
         t: 0,
         kind: "request",
         method: approval,
+        command: "/bin/zsh -lc 'node chromium.mjs timing'",
         id: 7,
         answer: "decline",
         answeredAt: hold,
@@ -166,7 +191,8 @@ test("classification proves only from present evidence", async () => {
         kind: "hook",
         event: "PreToolUse",
         toolUseId: "a",
-        command: "node -e 'setTimeout(() => {}, 660000)'",
+        command: wait(660_000),
+        timeout: 3_600_000,
       },
       {
         t: 661_000,
@@ -182,7 +208,8 @@ test("classification proves only from present evidence", async () => {
         kind: "hook",
         event: "PreToolUse",
         toolUseId: "b",
-        command: "node -e 'setTimeout(() => {}, 180000)'",
+        command: wait(180_000),
+        timeout: 600_000,
       },
       {
         t: 820_500,
@@ -190,7 +217,7 @@ test("classification proves only from present evidence", async () => {
         kind: "hook",
         event: "PostToolUseFailure",
         toolUseId: "b",
-        response: "timed out",
+        response: '{"backgroundTaskId":"x","timedOutAfterMs":120000}',
       },
     ],
     queries: [],
@@ -198,6 +225,33 @@ test("classification proves only from present evidence", async () => {
   });
   assert.equal(timed.ceilingAboveDefault.outcome, "proved");
   assert.equal(timed.envClampsLargerRequest.outcome, "proved");
+  // Without the requested 600 000 ms timeout, the 120 s default gives the same trace.
+  const unrequested = classify("claude-timing", {
+    events: timed.envClampsLargerRequest.evidence
+      ? [
+          {
+            t: 700_000,
+            query: 2,
+            kind: "hook",
+            event: "PreToolUse",
+            toolUseId: "b",
+            command: wait(180_000),
+            timeout: null,
+          },
+          {
+            t: 820_500,
+            query: 2,
+            kind: "hook",
+            event: "PostToolUse",
+            toolUseId: "b",
+            response: '{"timedOutAfterMs":120000}',
+          },
+        ]
+      : [],
+    queries: [],
+    results: {},
+  });
+  assert.equal(unrequested.envClampsLargerRequest.outcome, "refuted");
   assert.equal(timed.sixtyMinuteBoundary.outcome, "untested");
 
   const deniedByMode = classify("claude-sandbox", {
@@ -343,6 +397,18 @@ test("codex groups send the granular turn policy, answer only accept or decline,
   assert.equal(timed.withholdFifteenMinutes.outcome, "proved");
   assert.equal(timed.turnContinuesAfterDecline.outcome, "proved");
   assert.throws(() => process.kill(timing.appServerPid, 0));
+
+  // A turn that ends anything but completed fails the run and stops later turns.
+  rmSync(logPath, { force: true });
+  const failedTurn = await runCodexGroup("codex-user", {
+    executable: process.execPath,
+    args: [...fake, "failed-turns"],
+    env: process.env,
+    workspace: ws,
+    deadlineMs: 60_000,
+  });
+  assert.match(failedTurn.failure, /turn 1 ended failed/);
+  assert.ok(failedTurn.events.every((e: Event) => e.turn === 1));
 });
 
 test("claude auto group sends auto mode with unsandboxed commands allowed and records the hook deny before any classifier signal", async (t) => {
@@ -396,7 +462,7 @@ test("claude auto group sends auto mode with unsandboxed commands allowed and re
             type: "tool_result",
             tool_use_id: "t1",
             is_error: denied.hookSpecificOutput?.permissionDecision === "deny",
-            content: "blocked by hook",
+            content: "PreToolUse:Bash hook error: probe deny",
           },
         ],
       },
@@ -490,6 +556,31 @@ test("claude auto group sends auto mode with unsandboxed commands allowed and re
     deadlineMs: 10_000,
   });
   assert.match(failed.failure, /query 1: transport closed/);
+
+  // An unsuccessful result ends the query without running the probe: it fails the run.
+  for (const [result, expected] of [
+    [
+      { type: "result", subtype: "error_during_execution", is_error: true },
+      /query 1: result error_during_execution \(is_error\)/,
+    ],
+    [
+      { type: "result", subtype: "success", is_error: true },
+      /query 1: result success \(is_error\)/,
+    ],
+  ] as const) {
+    async function* erroringQuery() {
+      yield result;
+    }
+    const errored = await runClaudeGroup("claude-timing", {
+      query: erroringQuery,
+      workspace: ws,
+      env: {},
+      executable: "/fake/claude",
+      deadlineMs: 10_000,
+    });
+    assert.match(errored.failure, expected);
+    assert.equal(errored.queries.length, 1);
+  }
 
   const token = "sk-fake-token-value";
   const root = join(homedir(), ".cache", "cab-sandbox-escalation-x");
