@@ -132,3 +132,39 @@ test("phone recovery keeps Start again reachable without horizontal scroll", asy
   await noPageOverflow(page);
   await captureBrowserEvidence(page, "390-recovery-start-again");
 });
+
+test("a held turn with no saved turn ID explains its wait without the Start again decision", async (_t, journey) => {
+  const { page } = await startSettings(
+    journey,
+    "/assignments/:assignment/recovery",
+  );
+  // As after a lost turn/start reply: the thread is saved, the turn is not.
+  await page.route(
+    "**/api/operator/assignments/*/recovery-options",
+    async (route) => {
+      const response = await route.fetch();
+      const body = await response.json();
+      assert.ok(body.data.records.length > 0);
+      body.data.records = body.data.records.map(
+        (r: Record<string, unknown>) => ({
+          ...r,
+          intentState: "held",
+          threadId: "thread-saved",
+          turnId: null,
+        }),
+      );
+      body.data.restart = {
+        eligible: false,
+        blockedBy: ["execution-unresolved"],
+        releasePending: null,
+      };
+      await route.fulfill({ response, json: body });
+    },
+  );
+  await page.reload();
+  const panel = startAgainPanel(page);
+  await panel.getByText(/quiet time won't release it/).waitFor();
+  // Its "nothing ran" decision would contradict a turn that may still be running.
+  assert.equal(await panel.getByText(/nothing ran|Your decision/).count(), 0);
+  assert.equal(await panel.getByText(/30 minutes pass/).count(), 0);
+});

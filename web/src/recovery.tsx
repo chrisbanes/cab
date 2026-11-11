@@ -1,4 +1,7 @@
-import { requestRefusalText } from "../../src/operator/task-restart-copy.js";
+import {
+  requestRefusalText,
+  unsavedTurnHoldText,
+} from "../../src/operator/task-restart-copy.js";
 import { randomUUID } from "./browser-crypto.js";
 import {
   Fragment,
@@ -974,6 +977,7 @@ function ReleaseForm(
 /**
  * Start again for this assignment's task, the same action the task page, Inbox and Home offer.
  * While cab is still releasing a held turn it shows the latest release time instead.
+ * A held turn with no saved turn ID shows why quiet time won't release it.
  */
 function RestartRecovery(
   p: SettingsProps & {
@@ -992,12 +996,23 @@ function RestartRecovery(
   );
   const restart = p.resource.state.data?.data.restart;
   const offered = task.state.data?.data.startAgain;
-  if (!restart?.releasePending && !restart?.eligible && !offered?.available)
+  const unsavedTurn = unsavedTurnHoldText(
+    p.resource.state.data?.data.records ?? [],
+  );
+  if (
+    !restart?.releasePending &&
+    !restart?.eligible &&
+    !offered?.available &&
+    !unsavedTurn
+  )
     return null;
   return (
     <Panel
       title="Start again"
-      description="cab interrupts a held turn and releases its writer and capacity when the runtime reports the turn ended, its process is verified to have exited, or 30 minutes pass with no event for it. Start again then continues the task's conversation."
+      description={
+        unsavedTurn ??
+        "cab interrupts a held turn and releases its writer and capacity when the runtime reports the turn ended, its process is verified to have exited, or 30 minutes pass with no event for it. Start again then continues the task's conversation."
+      }
     >
       {restart?.releasePending ? (
         <p className="body" role="status">
@@ -1009,7 +1024,9 @@ function RestartRecovery(
           unless activity continues.
         </p>
       ) : (
-        task.state.data && (
+        task.state.data &&
+        // Its "nothing ran" decision would contradict a turn that may still be running.
+        (!unsavedTurn || restart?.eligible || offered?.available) && (
           <StartAgainAction
             readOnly={p.readOnly ?? false}
             client={p.client}

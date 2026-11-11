@@ -66,6 +66,26 @@ test("recovery get shows identity, holds, the release path and Start again on bo
   assert.equal(unknown.json().error.code, "not-found");
 });
 
+test("recovery get explains that a held turn with no saved turn ID ignores quiet time", async (t) => {
+  const w = await cliGeneration(t, "no-turn");
+  const read = () =>
+    w.h.run(["recovery", "get", w.g.assignmentId, "--connection", "ro"]);
+  const explanation =
+    /never saved this held turn's ID.*quiet time won't release it.*reports the turn's ID and its end, or its process is verified to have exited.*end the runtime process.*Stop only keeps the task from continuing/;
+  // A generation with no saved thread never sent a turn, so it has no such wait.
+  assert.doesNotMatch((await read()).out, explanation);
+  // As after a lost turn/start reply: the thread is saved, the turn is not.
+  w.s.f.seedPersistedState((db) => {
+    db.prepare(
+      "UPDATE execution_intents SET threadId = 'thread-saved' WHERE workId = ?",
+    ).run(w.g.workId);
+  });
+  const human = await read();
+  assert.equal(human.code, 0, human.err);
+  assert.match(human.out, /Turn: +\(unavailable\)/);
+  assert.match(human.out, explanation);
+});
+
 test("recovery get reports omitted, redacted, unavailable and missing evidence as gaps", async (t) => {
   const w = await cliGeneration(t, "no-turn");
   const ids = {
