@@ -121,6 +121,7 @@ import {
   commandReceiptSchema,
   composerOptionsSchema,
   draftingRunReadSchema,
+  operatorFeedbackPageSchema,
   configurationImpactSchema,
   deliveryReadSchema,
   discoveryBranchesSchema,
@@ -215,6 +216,7 @@ import type {
   CoordinationTaskView,
   CoordinationView,
 } from "./coordination-view.js";
+import { type DraftingRun, instructionProposalOf } from "./drafting.js";
 import { DraftTurnUnavailableError } from "./draft-turn.js";
 import {
   identityToken,
@@ -3620,6 +3622,8 @@ export class OperatorApi {
       ...current,
       ...this.service.draftingGrantPaths(runId),
     ]);
+    if (run.kind === "instruction")
+      return this.readInstructionRun(run, excluded);
     // Text the exclusions would change is withheld whole, never shown altered or empty.
     // An issue run keeps its body in `outcome`; it is read with the issue body's limit.
     const issueRun = run.kind === "issue";
@@ -3643,6 +3647,11 @@ export class OperatorApi {
           shown && issueRun
             ? { title: shown.title, body: shown.outcome }
             : null,
+        instructionProposal: null,
+        instructionTarget: null,
+        feedback: null,
+        targetCurrent: null,
+        impact: null,
         proposalWithheld: run.proposal !== null && shown === null,
         leadName: this.safe(
           this.domain().profileRevision(run.profileId, run.profileRevision)
@@ -3653,6 +3662,188 @@ export class OperatorApi {
         expiresAt: run.expiresAt,
       },
       observedAt: Date.now(),
+    });
+  }
+
+  /**
+   * An instruction run: only its target's own instructions are disclosed, as in the target's
+   * instruction view; the feedback is redacted like the task messages it came from.
+   */
+  private async readInstructionRun(
+    run: DraftingRun,
+    excluded: readonly string[],
+  ) {
+    const d = this.domain(),
+      target = run.target,
+      feedback = run.feedback;
+    if (!target || !feedback || run.observedVersion === null)
+      throw new Error("Instruction run without its target");
+    const disclosing = await this.instructionExclusions(
+      [
+        target.kind === "project"
+          ? `project:${run.projectId}`
+          : `profile:${target.profileId}`,
+      ],
+      run.projectId,
+    );
+    if (disclosing === undefined)
+      throw new OperatorApiError(503, "unavailable");
+    const disclosed = prepareExclusions([
+      ...disclosing,
+      ...this.service.draftingGrantPaths(run.runId),
+    ]);
+    const excludedFor = await this.feedbackExclusions(
+      run.projectId,
+      feedback.map((item) => item.taskId),
+    );
+    const proposal = instructionProposalOf(run);
+    const shown = proposal && {
+      ...proposal,
+      summary: this.exact(proposal.summary, disclosed, 512),
+      instructions: this.exact(proposal.instructions, disclosed),
+      rationale: this.exact(proposal.rationale, disclosed, 4000),
+      generalisation: this.exact(proposal.generalisation, disclosed, 4000),
+      conflicts: this.exact(proposal.conflicts, disclosed, 4000),
+      evidence: proposal.evidence.map((entry) => ({
+        ...entry,
+        note: this.exact(entry.note, disclosed, 1000),
+      })),
+    };
+    const complete =
+      shown &&
+      [
+        shown.summary,
+        shown.instructions,
+        shown.rationale,
+        shown.generalisation,
+        shown.conflicts,
+        ...shown.evidence.map(({ note }) => note),
+      ].every((text) => text !== null)
+        ? shown
+        : null;
+    const profile =
+      target.kind === "profile" ? d.profile(target.profileId) : undefined;
+    const project = d.project(run.projectId);
+    const impact = d.instructionTargetImpact(run.projectId, target);
+    return draftingRunReadSchema.parse({
+      data: {
+        runId: run.runId,
+        projectId: run.projectId,
+        state: run.state,
+        reason: run.reason,
+        kind: run.kind,
+        proposal: null,
+        issueProposal: null,
+        instructionProposal: complete,
+        instructionTarget: {
+          kind: target.kind,
+          profileId: profile ? String(profile.id) : null,
+          name: this.safe(profile ? profile.name : project.name, excluded),
+          observedVersion: run.observedVersion,
+          observedInstructions: this.exact(run.observedInstructions, disclosed),
+        },
+        feedback: feedback.map((item) => {
+          const itemExcluded = excludedFor.get(item.taskId);
+          return {
+            kind: item.kind,
+            id: item.id,
+            taskId: item.taskId,
+            taskTitle: this.safe(item.taskTitle, itemExcluded),
+            recipientName: this.safe(item.recipientName, itemExcluded),
+            createdAt: item.createdAt * 1000,
+            text: this.exact(item.text, itemExcluded),
+          };
+        }),
+        targetCurrent: profile
+          ? {
+              version: Number(profile.version),
+              unchanged:
+                !profile.revoked &&
+                String(profile.instructions) === run.observedInstructions,
+            }
+          : {
+              version: Number(project.version),
+              unchanged:
+                Number(project.instructionsRevision) ===
+                run.observedInstructionsRevision,
+            },
+        impact: {
+          projects: impact.projects.map((entry) => ({
+            ...entry,
+            name: this.safe(entry.name, excluded),
+          })),
+          openAssignments: impact.openAssignments,
+        },
+        proposalWithheld: run.proposal !== null && complete === null,
+        leadName: this.safe(
+          d.profileRevision(run.profileId, run.profileRevision).name,
+          excluded,
+        ),
+        createdAt: run.createdAt,
+        expiresAt: run.expiresAt,
+      },
+      observedAt: Date.now(),
+    });
+  }
+  /** Each task's own exclusions, as its messages are read with. */
+  private async feedbackExclusions(projectId: string, taskIds: string[]) {
+    const base = this.exclusionBase(),
+      excludedFor = new Map<string, readonly string[] | undefined>();
+    for (const taskId of new Set(taskIds))
+      excludedFor.set(
+        taskId,
+        await this.exclusions(projectId, taskId, [], [], base),
+      );
+    return excludedFor;
+  }
+  /** Operator feedback to choose an instruction proposal's evidence from, newest first. */
+  async readOperatorFeedback(projectId: string, query: URLSearchParams) {
+    return this.readWithExclusionFence(async () => {
+      this.requireProject(projectId);
+      const limit = query.get("limit") ?? "20",
+        cursor = query.get("cursor");
+      if (
+        !/^[1-9][0-9]?$/.test(limit) ||
+        Number(limit) > 50 ||
+        (cursor !== null && !/^[0-9]{1,15}\|[0-9a-f-]{36}$/.test(cursor))
+      )
+        throw new OperatorApiError(400, "invalid-input");
+      const d = this.domain(),
+        page = this.service.operatorFeedback(projectId, {
+          limit: Number(limit),
+          cursor,
+        }),
+        excludedFor = await this.feedbackExclusions(
+          projectId,
+          page.items.map((item) => item.taskId),
+        );
+      return operatorFeedbackPageSchema.parse({
+        data: {
+          items: page.items.map((item) => {
+            const excluded = excludedFor.get(item.taskId),
+              text = this.exact(item.text, excluded);
+            return {
+              kind: item.kind,
+              id: item.id,
+              taskId: item.taskId,
+              taskTitle: this.safe(item.taskTitle, excluded),
+              recipientName: this.safe(
+                item.recipientAssignmentIds
+                  .map(
+                    (id) => d.profile(String(d.assignment(id).profileId)).name,
+                  )
+                  .join(", "),
+                excluded,
+              ),
+              createdAt: item.createdAt * 1000,
+              text,
+              available: text !== null,
+            };
+          }),
+          nextCursor: page.nextCursor,
+        },
+        observedAt: Date.now(),
+      });
     });
   }
 
@@ -9981,6 +10172,34 @@ export class OperatorApi {
         if (c.type === "drafting.start") this.requireProject(c.projectId);
         else if (!this.service.readDrafting(c.runId))
           throw new OperatorApiError(404, "not-found");
+        return commandReceiptSchema.parse(
+          await this.service.draftingCommand(c),
+        );
+      }
+      if (c.type === "instruction.draft.start") {
+        this.requireProject(c.projectId);
+        const visibility = this.visibilityToken(),
+          version = this.domain().project(c.projectId).version,
+          items = this.service.operatorFeedbackItems(c.projectId, c.feedback),
+          excludedFor = await this.feedbackExclusions(
+            c.projectId,
+            items.map((item) => item.taskId),
+          ),
+          excluded = await this.exclusions(c.projectId);
+        // The selection was checked against exclusions that must still hold when the run starts.
+        if (
+          visibility !== this.visibilityToken() ||
+          this.domain().project(c.projectId).version !== version
+        )
+          throw new OperatorApiError(409, "conflict");
+        if (
+          !this.disclosable(c.note, excluded) ||
+          items.some(
+            (item) =>
+              !this.disclosable(item.text, excludedFor.get(item.taskId)),
+          )
+        )
+          throw new OperatorApiError(403, "forbidden");
         return commandReceiptSchema.parse(
           await this.service.draftingCommand(c),
         );

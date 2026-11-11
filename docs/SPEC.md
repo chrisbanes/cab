@@ -1768,14 +1768,63 @@ keeps its meaning ([ADR-1013](adr/1013-project-owned-drafting-runs.md)).
   cannot be shown. The operator's edited text is held in the browser session with the run
   id until it is reviewed or discarded; Redraft starts a new run from the current text.
   An issue run creates no task, assignment, result or delivery record.
-- **Operator CLI.** The CLI does not offer drafting or Improve with lead; see
-  [Operator CLI](design/operator-cli.md).
+- **Instruction runs.** An **Instruction proposal** is a third kind of drafting run, with
+  the same agent, access, capacity, Stop, cap, restart and reattach rules, started from a
+  project's Settings, Instruction proposals tab. It is a bounded, operator-requested
+  suggestion, not continuous learning: the lead never searches history, and nothing
+  infers a standing preference from what was selected.
+  - *Evidence.* The operator selects 1 to 20 items, at most 64,000 characters in all, of
+    one project's recorded operator feedback: ordinary operator messages (including
+    contextual feedback and sent local reviews), operator follow-ups, and shared
+    comments, a comment once rather than per recipient. Question answers, approval
+    decisions, agent messages and results are not eligible. The list is newest first,
+    redacted like task messages; an item whose text the operator's exclusions would
+    change is listed with its text withheld and cannot be selected. An optional note
+    takes up to 16,000 characters. A missing, foreign, ineligible, duplicate,
+    undisclosable or over-limit selection is refused whole, with no run and nothing
+    truncated.
+  - *Target.* `instruction.draft.start` names the project's own instructions or one
+    non-revoked agent that is the project's lead or a permitted agent. The run records
+    the target's version, the project's instructions revision (project targets), its
+    exact current text and a snapshot of each selected item with its kind, task title,
+    recipient agents, recorded time and text. The lead is shown exactly that, with the
+    note. The read lists, for an agent target, every project using the agent as lead or
+    permitted agent, and the number of open-task assignments bound to the target.
+  - *Proposal.* Its own result tool proposes a summary (1 to 512 characters), the full
+    replacement instructions (up to 16,000), a non-blank rationale and generalisation
+    (up to 4,000 each; the generalisation says why the change is reusable, or why it is
+    not), any conflicts (up to 4,000) and whether the evidence is insufficient, with one
+    evidence entry for each selected item: supports, conflicts or not used, with a note
+    of up to 1,000 characters. Evidence that does not name each selected item exactly
+    once, or unchanged text without insufficient evidence, is refused so the lead can
+    retry. Only the target's own text is disclosed in the proposal and its read, as in
+    the target's instruction view; other instructions stay withheld.
+  - *Review and accept.* The operator sees each item's provenance and use, the
+    generalisation, the conflicts, the current and final text with the changed lines,
+    who saving reaches and how to restore earlier wording, and may edit the text.
+    Generating, reading, editing or rejecting a proposal changes no instructions,
+    permissions or assignments. Accept is the ordinary version-fenced
+    `project.configure` or `profile.configure` with the reviewed text, offered only while
+    the target is unchanged since the run started (the same instructions revision for a
+    project, the same text for an agent) and the final text differs; an unknown outcome
+    is checked by resending the same key and body. It creates the target's next
+    revision; new assignments use it and existing assignments keep their captured
+    revision until Apply current instructions. Earlier wording is restored with the
+    existing restore-revision workflow. After a confirmed save the run is settled as
+    accepted; Reject discards it and Redraft starts a new run from the same selection.
+    A changed target makes Accept unavailable and offers Redraft.
+- **Operator CLI.** The CLI does not offer drafting, Improve with lead or instruction
+  proposals; see [Operator CLI](design/operator-cli.md).
 
 Status: implemented, on Codex and Claude with fake-host tests and on Codex in one
 bounded live run ([evidence](evidence/2026-10-18-drafting-live-run.md); [acceptance plan](acceptance.md#drafting-runs)).
 The operator API carries `drafting.start`, `drafting.stop` and `drafting.settle`
-commands, plus `issue.draft.start` for an issue run, receipted by key, and one read of a
-run by id that says its kind and carries a brief or an issue proposal. A run that is held because its
+commands, plus `issue.draft.start` for an issue run and `instruction.draft.start` for an
+instruction run, receipted by key, one read of a run by id that says its kind and carries
+a brief, issue or instruction proposal, and a paged read of a project's operator feedback
+(`GET /api/operator/projects/{projectId}/operator-feedback`). Instruction runs are
+covered by fake-host tests on Codex and Claude and one bounded live Codex run
+([evidence](evidence/2026-11-11-instruction-proposal-live-run.md)). A run that is held because its
 end cannot be verified stays held until a later start verifies it; there is no operator
 recovery for drafting.
 

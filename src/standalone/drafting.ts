@@ -11,6 +11,9 @@ import { type Database, transaction } from "../core/store.js";
 import {
   type DraftProposal,
   draftProposalSchema,
+  instructionFeedbackLimits,
+  instructionTargetSchema,
+  operatorFeedbackKinds,
 } from "../operator/contracts.js";
 import type { RuntimeToolDefinition } from "./codex.js";
 
@@ -55,8 +58,57 @@ export const issueEditProposalSchema = z
   .strict();
 export type IssueEditProposal = z.infer<typeof issueEditProposalSchema>;
 
-/** A `brief` run drafts a task from an idea; an `issue` run improves an imported issue. */
-const draftingKinds = ["brief", "issue"] as const;
+/** The operator feedback an instruction run was given, as it read when the run started. */
+export const instructionFeedbackSchema = z
+  .object({
+    kind: z.enum(operatorFeedbackKinds),
+    id: z.string().uuid(),
+    taskId: z.string().uuid(),
+    taskTitle: z.string(),
+    recipientName: z.string(),
+    createdAt: z.number().int().nonnegative(),
+    text: z.string(),
+  })
+  .strict();
+export type InstructionFeedback = z.infer<typeof instructionFeedbackSchema>;
+
+export type InstructionTarget = z.infer<typeof instructionTargetSchema>;
+
+/** A lead's proposed replacement for one target's instructions, with how it used the evidence. */
+export const instructionProposalSchema = z
+  .object({
+    summary: z.string().trim().min(1).max(512),
+    /** The full replacement, within the configure `instructions` limit. */
+    instructions: z.string().max(16_000),
+    rationale: z.string().max(4000).regex(/\S/, "Explain the change"),
+    /** Why the change is reusable beyond the selected feedback, or why it is not. */
+    generalisation: z
+      .string()
+      .max(4000)
+      .regex(/\S/, "Explain the generalisation"),
+    conflicts: z.string().max(4000),
+    insufficientEvidence: z.boolean(),
+    evidence: z
+      .array(
+        z
+          .object({
+            feedbackId: z.string().uuid(),
+            use: z.enum(["supports", "conflicts", "not-used"]),
+            note: z.string().max(1000),
+          })
+          .strict(),
+      )
+      .max(instructionFeedbackLimits.items),
+  })
+  .strict();
+export type InstructionProposal = z.infer<typeof instructionProposalSchema>;
+
+/**
+ * A `brief` run drafts a task from an idea; an `issue` run improves an imported issue; an
+ * `instruction` run proposes a project's or agent's instructions from selected feedback.
+ */
+const draftingKinds = ["brief", "issue", "instruction"] as const;
+export type DraftingKind = (typeof draftingKinds)[number];
 
 const runSchema = z
   .object({
@@ -70,6 +122,13 @@ const runSchema = z
     /** The synced title and body an issue run started from. */
     observedTitle: z.string().nullable(),
     observedBody: z.string().nullable(),
+    /** What an instruction run proposes for, and that target's text when it started. */
+    target: instructionTargetSchema.nullable(),
+    observedVersion: z.number().int().positive().nullable(),
+    /** A project target's instructions revision; null for an agent, whose version is its revision. */
+    observedInstructionsRevision: z.number().int().positive().nullable(),
+    observedInstructions: z.string().nullable(),
+    feedback: z.array(instructionFeedbackSchema).nullable(),
     harness: z.string().min(1).max(64),
     profileId: z.string().uuid(),
     profileRevision: z.number().int().positive(),
@@ -81,12 +140,22 @@ const runSchema = z
     createdAt: z.number().int().nonnegative(),
     proposedAt: z.number().int().nonnegative().nullable(),
   })
-  .refine((run) => run.kind === "issue" || run.idea.length > 0, {
+  .refine((run) => run.kind !== "brief" || run.idea.length > 0, {
     message: "A brief run needs an idea",
   })
   .refine(
     (run) =>
-      run.kind === "brief" ||
+      run.kind !== "instruction" ||
+      (run.target !== null &&
+        run.observedVersion !== null &&
+        run.observedInstructions !== null &&
+        run.feedback !== null &&
+        run.feedback.length > 0),
+    { message: "An instruction run records its target and evidence" },
+  )
+  .refine(
+    (run) =>
+      run.kind !== "issue" ||
       (run.taskId !== null &&
         run.sourceNodeId !== null &&
         run.observedTitle !== null &&
@@ -99,9 +168,7 @@ export type DraftingRun = z.infer<typeof runSchema> & {
   expiresAt: number | null;
 };
 
-/** Idempotent; also created by ExecutionState, whose harness lookups join it. */
-export function createDraftingTable(db: Database): void {
-  db.exec(`CREATE TABLE IF NOT EXISTS drafting_runs (
+const draftingColumns = (table: string) => `CREATE TABLE ${table} (
       runId TEXT PRIMARY KEY,
       projectId TEXT NOT NULL,
       idea TEXT NOT NULL,
@@ -115,12 +182,22 @@ export function createDraftingTable(db: Database): void {
       outcome TEXT,
       createdAt INTEGER NOT NULL,
       proposedAt INTEGER,
-      kind TEXT NOT NULL DEFAULT 'brief' CHECK(kind IN ('brief','issue')),
+      kind TEXT NOT NULL DEFAULT 'brief' CHECK(kind IN (${draftingKinds.map((kind) => `'${kind}'`).join(",")})),
       taskId TEXT,
       sourceNodeId TEXT,
       observedTitle TEXT,
-      observedBody TEXT
-    )`);
+      observedBody TEXT,
+      targetKind TEXT,
+      targetId TEXT,
+      observedVersion INTEGER,
+      observedInstructionsRevision INTEGER,
+      observedInstructions TEXT,
+      feedbackJson TEXT
+    )`;
+
+/** Idempotent; also created by ExecutionState, whose harness lookups join it. */
+export function createDraftingTable(db: Database): void {
+  db.exec(draftingColumns("IF NOT EXISTS drafting_runs"));
   // Runs written before issue runs existed were all briefs.
   const columns = db
     .prepare("PRAGMA table_info(drafting_runs)")
@@ -139,6 +216,42 @@ export function createDraftingTable(db: Database): void {
   ])
     if (!columns.some(({ name }) => name === column))
       db.exec(`ALTER TABLE drafting_runs ADD COLUMN ${column} TEXT`);
+  // SQLite cannot widen the `kind` CHECK, so a table from before instruction runs is rebuilt.
+  const { sql } = db
+    .prepare(
+      "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'drafting_runs'",
+    )
+    .get() as { sql: string };
+  if (!sql.includes("'instruction'")) {
+    const kept = [
+      "runId",
+      "projectId",
+      "idea",
+      "harness",
+      "profileId",
+      "profileRevision",
+      "instructionsRevision",
+      "state",
+      "reason",
+      "title",
+      "outcome",
+      "createdAt",
+      "proposedAt",
+      "kind",
+      "taskId",
+      "sourceNodeId",
+      "observedTitle",
+      "observedBody",
+    ].join(", ");
+    // Recreated under its own name, so a migrated schema reads exactly as a fresh one.
+    const rebuild = () =>
+      db.exec(`ALTER TABLE drafting_runs RENAME TO drafting_runs_old;
+        ${draftingColumns("IF NOT EXISTS drafting_runs")};
+        INSERT INTO drafting_runs (${kept}) SELECT ${kept} FROM drafting_runs_old;
+        DROP TABLE drafting_runs_old;`);
+    if (db.isTransaction === true) rebuild();
+    else transaction(db, rebuild);
+  }
   db.exec(`CREATE TABLE IF NOT EXISTS drafting_command_receipts (
       key TEXT PRIMARY KEY,
       payloadHash TEXT NOT NULL,
@@ -177,13 +290,26 @@ export class DraftingRunStore {
       observedTitle: string;
       observedBody: string;
     };
+    instruction?: {
+      target: InstructionTarget;
+      observedVersion: number;
+      observedInstructionsRevision: number | null;
+      observedInstructions: string;
+      feedback: InstructionFeedback[];
+    };
   }): DraftingRun {
     const existing = this.get(input.runId);
     if (existing) {
       if (
         existing.projectId !== input.projectId ||
         existing.idea !== input.idea ||
-        existing.taskId !== (input.issue?.taskId ?? null)
+        existing.taskId !== (input.issue?.taskId ?? null) ||
+        JSON.stringify(existing.target) !==
+          JSON.stringify(input.instruction?.target ?? null) ||
+        JSON.stringify(existing.feedback?.map(({ kind, id }) => [kind, id])) !==
+          JSON.stringify(
+            input.instruction?.feedback.map(({ kind, id }) => [kind, id]),
+          )
       )
         throw new DomainConflictError(
           "Drafting run identity already used with other content",
@@ -196,8 +322,9 @@ export class DraftingRunStore {
         `INSERT INTO drafting_runs
         (runId, projectId, idea, harness, profileId, profileRevision,
           instructionsRevision, state, createdAt, kind, taskId, sourceNodeId,
-          observedTitle, observedBody)
-        VALUES (?, ?, ?, ?, ?, ?, ?, 'queued', ?, ?, ?, ?, ?, ?)`,
+          observedTitle, observedBody, targetKind, targetId, observedVersion,
+          observedInstructionsRevision, observedInstructions, feedbackJson)
+        VALUES (?, ?, ?, ?, ?, ?, ?, 'queued', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       )
       .run(
         input.runId,
@@ -208,11 +335,25 @@ export class DraftingRunStore {
         input.profileRevision,
         input.instructionsRevision,
         this.now(),
-        input.issue ? "issue" : "brief",
+        input.issue ? "issue" : input.instruction ? "instruction" : "brief",
         input.issue?.taskId ?? null,
         input.issue?.sourceNodeId ?? null,
         input.issue?.observedTitle ?? null,
         input.issue?.observedBody ?? null,
+        input.instruction?.target.kind ?? null,
+        input.instruction?.target.kind === "profile"
+          ? input.instruction.target.profileId
+          : null,
+        input.instruction?.observedVersion ?? null,
+        input.instruction?.observedInstructionsRevision ?? null,
+        input.instruction?.observedInstructions ?? null,
+        input.instruction
+          ? JSON.stringify(
+              z
+                .array(instructionFeedbackSchema)
+                .parse(input.instruction.feedback),
+            )
+          : null,
       );
     return this.require(input.runId);
   }
@@ -314,15 +455,19 @@ export class DraftingRunStore {
   /** Last valid call wins; the state changes only when the turn ends. */
   recordProposal(
     runId: string,
-    proposal: DraftProposal | IssueEditProposal,
+    proposal: DraftProposal | IssueEditProposal | InstructionProposal,
   ): void {
     assertOwnedTaskWritable(this.db, runId);
     const kind = this.require(runId).kind;
-    // An issue run stores its body in the `outcome` column.
+    // An issue run stores its body in the `outcome` column; an instruction run, the rest as JSON.
     const [title, outcome] =
       kind === "issue"
         ? ((v) => [v.title, v.body])(issueEditProposalSchema.parse(proposal))
-        : ((v) => [v.title, v.outcome])(draftProposalSchema.parse(proposal));
+        : kind === "instruction"
+          ? (({ summary, ...rest }) => [summary, JSON.stringify(rest)])(
+              instructionProposalSchema.parse(proposal),
+            )
+          : ((v) => [v.title, v.outcome])(draftProposalSchema.parse(proposal));
     this.db
       .prepare(
         "UPDATE drafting_runs SET title = ?, outcome = ? WHERE runId = ? AND state IN ('running','stopping')",
@@ -394,9 +539,20 @@ export class DraftingRunStore {
   }
 
   private parse(row: unknown): DraftingRun {
-    const stored = row as Record<string, unknown>;
+    const { targetKind, targetId, feedbackJson, ...stored } = row as Record<
+      string,
+      unknown
+    >;
     const run = runSchema.parse({
       ...stored,
+      target:
+        targetKind === "project"
+          ? { kind: "project" }
+          : targetKind === "profile"
+            ? { kind: "profile", profileId: targetId }
+            : null,
+      feedback:
+        typeof feedbackJson === "string" ? JSON.parse(feedbackJson) : null,
       // The candidate is offered only once the run is `proposed`.
       proposal:
         stored.state === "proposed" && typeof stored.title === "string"
@@ -467,4 +623,67 @@ export function issueEditProposalOf(
   return run.kind === "issue" && run.proposal
     ? { title: run.proposal.title, body: run.proposal.outcome }
     : null;
+}
+
+export const instructionProposalToolName = "cab_propose_instruction_edit";
+
+export const instructionProposalTool: RuntimeToolDefinition = {
+  type: "function",
+  name: instructionProposalToolName,
+  description:
+    "Propose the instruction edit. Call once with a summary, the full replacement instructions, a rationale, the generalisation, any conflicts, whether the evidence is insufficient, and one evidence entry for every selected feedback id. This changes nothing; the operator reviews it.",
+  inputSchema: z.toJSONSchema(instructionProposalSchema),
+};
+
+/** Added to the lead's own instructions for every instruction drafting run. */
+export const instructionDraftingInstruction = [
+  "You are proposing an improvement to one set of instructions from operator feedback the operator selected.",
+  "Use only the selected feedback and the current instructions in the request. Do not search history for more.",
+  "Generalise only what the feedback supports as a reusable preference. A one-off task requirement, an agent's claim or conflicting feedback is not a standing preference: say so in the generalisation and conflicts instead of adding it.",
+  "If the feedback does not support a change, set insufficientEvidence and keep the current instructions.",
+  "You only propose. Do not change files you intend to keep, and do not create tasks, issues, branches or pull requests.",
+  `When you are done, call ${instructionProposalToolName} once with the full replacement instructions and one evidence entry for every feedback id, then stop.`,
+].join("\n");
+
+/** The request part of an instruction run: the target's text, the selected feedback and the note. */
+export function instructionDraftingRequest(
+  run: Pick<
+    DraftingRun,
+    "idea" | "target" | "observedInstructions" | "feedback"
+  >,
+): string {
+  return [
+    run.target?.kind === "profile"
+      ? `Target: the instructions of agent ${run.target.profileId}, which every project using that agent shares`
+      : "Target: this project's instructions",
+    `Current instructions:\n${run.observedInstructions || "(empty)"}`,
+    ...(run.feedback ?? []).map((item) =>
+      [
+        `Feedback ${item.id} (${item.kind}, task "${item.taskTitle}", to ${item.recipientName}, ${new Date(item.createdAt * 1000).toISOString()}):`,
+        item.text,
+      ].join("\n"),
+    ),
+    `Operator note:\n${run.idea || "(none)"}`,
+  ].join("\n\n");
+}
+
+/** The proposal an instruction run made, once it is `proposed`. */
+export function instructionProposalOf(
+  run: Pick<DraftingRun, "kind" | "proposal">,
+): InstructionProposal | null {
+  return run.kind === "instruction" && run.proposal
+    ? instructionProposalSchema.parse({
+        summary: run.proposal.title,
+        ...(JSON.parse(run.proposal.outcome) as object),
+      })
+    : null;
+}
+
+/** The one tool each kind of run is offered. */
+export function draftingTool(kind: DraftingKind): RuntimeToolDefinition {
+  return kind === "issue"
+    ? issueEditProposalTool
+    : kind === "instruction"
+      ? instructionProposalTool
+      : draftProposalTool;
 }

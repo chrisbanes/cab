@@ -4,6 +4,7 @@ import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import {
   draftProposalToolName,
+  instructionProposalToolName,
   issueEditProposalToolName,
 } from "../../src/standalone/drafting.js";
 import type { StandaloneService } from "../../src/standalone/service.js";
@@ -144,6 +145,169 @@ export async function answerIssueDraft(
     ...turn,
     callId: randomUUID(),
     tool: issueEditProposalToolName,
+    arguments: proposal,
+  });
+  if (!outcome.success) throw new Error(outcome.text);
+  f.runtime.complete(Number(turn.turnId.replace("fixture-turn-", "")));
+}
+
+/**
+ * A task of the project assigned to its lead and to a permitted agent, Rae, with one of each
+ * kind of recorded operator feedback, oldest first: a message, a follow-up and a comment to both.
+ * It also records an agent result and a question answer, which are not operator feedback.
+ */
+export function seedOperatorFeedback(
+  service: StandaloneService,
+  projectId: string,
+  leadId: string,
+) {
+  const domain = service.domain();
+  const db = (service as unknown as { db: import("node:sqlite").DatabaseSync })
+    .db;
+  const agentId = randomUUID();
+  const taskId = randomUUID();
+  const leadAssignment = randomUUID();
+  const agentAssignment = randomUUID();
+  const run = (command: Record<string, unknown>) =>
+    domain.execute({
+      actor: "operator",
+      key: randomUUID(),
+      ...command,
+    } as never);
+  run({
+    type: "profile.create",
+    profileId: agentId,
+    name: "Rae",
+    instructions: "Review interface changes.",
+    capabilities: "review",
+  });
+  run({
+    type: "routing.configure",
+    projectId,
+    expectedVersion: Number(domain.routing(projectId).version),
+    enabled: false,
+    candidateProfileIds: [agentId],
+  });
+  run({
+    type: "task.create",
+    projectId,
+    taskId,
+    title: "Settings dialog",
+    outcome: "Ship the settings dialog.",
+    ready: false,
+    initialAssignment: { assignmentId: leadAssignment, profileId: leadId },
+  });
+  run({
+    type: "assignment.create",
+    projectId,
+    taskId,
+    assignmentId: agentAssignment,
+    profileId: agentId,
+    brief: "Review the dialog.",
+    resultDestination: "lead",
+    requesterAssignmentId: null,
+  });
+  const event = db.prepare(`INSERT INTO coordination_inbox_events
+    (eventId, taskId, recipientAssignmentId, eventType, payload, createdAt)
+    VALUES (?, ?, ?, ?, ?, ?)`);
+  const message = {
+    id: randomUUID(),
+    text: "Show keyboard navigation evidence for this dialog.",
+  };
+  const followUp = {
+    id: randomUUID(),
+    text: "Add focus-order evidence before finishing.",
+  };
+  const comment = {
+    id: randomUUID(),
+    text: "Every UI change needs keyboard evidence.",
+  };
+  event.run(
+    message.id,
+    taskId,
+    leadAssignment,
+    "operator-message",
+    JSON.stringify({ message: message.text }),
+    100,
+  );
+  event.run(
+    followUp.id,
+    taskId,
+    leadAssignment,
+    "assignment-follow-up",
+    JSON.stringify({ requester: "operator", instructions: followUp.text }),
+    200,
+  );
+  event.run(
+    randomUUID(),
+    taskId,
+    leadAssignment,
+    "assignment-follow-up",
+    JSON.stringify({ requester: "lead", instructions: "Lead follow-up." }),
+    250,
+  );
+  db.prepare(
+    "INSERT INTO coordination_task_comments (commentId, taskId, author, body, createdAt) VALUES (?, ?, 'operator', ?, 300)",
+  ).run(comment.id, taskId, comment.text);
+  const deliveries = [leadAssignment, agentAssignment].map((assignmentId) => {
+    const eventId = randomUUID();
+    event.run(
+      eventId,
+      taskId,
+      assignmentId,
+      "operator-message",
+      JSON.stringify({ message: comment.text }),
+      300,
+    );
+    db.prepare(
+      `INSERT INTO coordination_task_comment_deliveries
+      (commentId, recipientAssignmentId, eventId, expectedAssignmentVersion, effect, assignmentVersion)
+      VALUES (?, ?, ?, 1, 'input', 1)`,
+    ).run(comment.id, assignmentId, eventId);
+    return eventId;
+  });
+  const result = randomUUID();
+  event.run(
+    result,
+    taskId,
+    leadAssignment,
+    "assignment-result",
+    JSON.stringify({ summary: "Done" }),
+    400,
+  );
+  const answer = randomUUID();
+  event.run(
+    answer,
+    taskId,
+    leadAssignment,
+    "question-answer",
+    JSON.stringify({ answer: "Yes" }),
+    500,
+  );
+  return {
+    taskId,
+    agentId,
+    leadAssignment,
+    message,
+    followUp,
+    comment,
+    /** Events that are not operator feedback in their own right. */
+    ineligible: { result, answer, commentDelivery: deliveries[0] as string },
+  };
+}
+
+/** The lead's side of an instruction run: it proposes, then its turn ends. */
+export async function answerInstructionDraft(
+  f: Fixture,
+  runId: string,
+  proposal: Record<string, unknown>,
+) {
+  const turn = draftingTurn(f.service, runId);
+  if (!turn) throw new Error("The drafting turn is not running");
+  const outcome = await f.runtime.callTool({
+    ...turn,
+    callId: randomUUID(),
+    tool: instructionProposalToolName,
     arguments: proposal,
   });
   if (!outcome.success) throw new Error(outcome.text);

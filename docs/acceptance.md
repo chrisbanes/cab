@@ -793,8 +793,10 @@ recorded in the
 
 ## Drafting runs
 
-A drafting run proposes a task title and outcome for the composer, or an improved
-title and body for an imported issue (Improve with lead), without creating anything.
+A drafting run proposes a task title and outcome for the composer, an improved
+title and body for an imported issue (Improve with lead), or a project's or agent's
+instructions from selected operator feedback (an instruction proposal), without
+creating or changing anything.
 Service, API and composer are covered by these deterministic suites on both
 harnesses; the real-runtime runs are recorded in the
 [live drafting evidence](evidence/2026-10-18-drafting-live-run.md) and the
@@ -814,6 +816,9 @@ harnesses; the real-runtime runs are recorded in the
 | An issue changed on GitHub after the draft started is refused as stale at review and again at the provider before any write; an unknown outcome stays uncertain across a restart and is never resent | `operator-issue-edit.test.ts`, `github-delivery-provider.test.ts` |
 | Commands are receipted by key; excluded text, a stale copy, a missing grant and a runtime actor are refused; the task read reports the first unavailable reason and the latest edit | `operator-issue-edit-api.test.ts` |
 | Improve with lead runs from note to proposal, edit, full current-and-proposed review and send, shows disabled, stale (Redraft) and uncertain (held, no resend, kept across a reload) states, and sends no task or comment command (1366 px, 390 px, WebKit phone) | `operator-issue-improve-browser.test.ts`, `issue-improve-model.test.ts` |
+| An instruction run is given only the selected operator feedback (messages, operator follow-ups, a comment once) and the target's current text; ineligible, foreign, duplicate, undisclosable and over-limit selections and a non-permitted or revoked agent are refused with no run; its tool requires evidence for exactly the selected items and changed text unless insufficient, and may hold the target's own text; generating changes no instructions, task or assignment; the store rebuild keeps every brief and issue row | `drafting-service.test.ts` (Codex and Claude), `drafting-runs.test.ts`, `startup-snapshot.test.ts` |
+| The feedback list is newest first, paged and withholds excluded text; the start replays by key and refuses a stale project or undisclosable text; the read needs a session, discloses only the target's text and names every project using an agent target; Accept is one version-fenced configure that leaves existing assignments on their revision; a changed target reads as changed and its configure is refused; Reject changes nothing | `operator-instruction-proposal-api.test.ts` |
+| Instruction proposals run from keyboard selection and an agent target, with the reuse disclosure, to provenance, exact current and proposed text, edit, Reject, Redraft and one Accept that names the new revision; a target changed elsewhere makes Accept unavailable and sends no configure; a reload reattaches (1366 px, 390 px) | `operator-instruction-proposal-browser.test.ts`, `instruction-proposal-model.test.ts`; live run in [instruction proposal evidence](evidence/2026-11-11-instruction-proposal-live-run.md) |
 
 ## Task Git access
 

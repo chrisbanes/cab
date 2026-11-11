@@ -766,6 +766,36 @@ function schemaDigest(data: string): string {
 const undoLevel24 =
   "ALTER TABLE task_workspace_bindings DROP COLUMN holdReleasable; ALTER TABLE drafting_workspace_bindings DROP COLUMN holdReleasable; ";
 
+/** Reconstruct the drafting runs table from before instruction runs, keeping its rows. */
+function restoreDraftingSchema23(db: DatabaseSync) {
+  const kept =
+    "runId, projectId, idea, harness, profileId, profileRevision, instructionsRevision, state, reason, title, outcome, createdAt, proposedAt, kind, taskId, sourceNodeId, observedTitle, observedBody";
+  db.exec("ALTER TABLE drafting_runs RENAME TO drafting_runs_new");
+  // Preserve the prior schema's exact SQL spelling for its pinned digest.
+  db.exec(`CREATE TABLE drafting_runs (
+      runId TEXT PRIMARY KEY,
+      projectId TEXT NOT NULL,
+      idea TEXT NOT NULL,
+      harness TEXT NOT NULL,
+      profileId TEXT NOT NULL,
+      profileRevision INTEGER NOT NULL,
+      instructionsRevision INTEGER NOT NULL,
+      state TEXT NOT NULL CHECK(state IN ('queued','running','stopping','proposed','interrupted','failed','accepted','discarded','expired')),
+      reason TEXT,
+      title TEXT,
+      outcome TEXT,
+      createdAt INTEGER NOT NULL,
+      proposedAt INTEGER,
+      kind TEXT NOT NULL DEFAULT 'brief' CHECK(kind IN ('brief','issue')),
+      taskId TEXT,
+      sourceNodeId TEXT,
+      observedTitle TEXT,
+      observedBody TEXT
+    )`);
+  db.exec(`INSERT INTO drafting_runs (${kept}) SELECT ${kept} FROM drafting_runs_new;
+    DROP TABLE drafting_runs_new;`);
+}
+
 /** Reconstruct the previous schema without changing its retained rows. */
 function restoreRequestSchema21(db: DatabaseSync) {
   db.exec(`DROP TABLE assignment_request_refusals;
@@ -790,6 +820,8 @@ function restoreRequestSchema21(db: DatabaseSync) {
 
 /** The schema digest each migration level created. Append an entry with every level bump. */
 const SCHEMA_PINS: Record<number, string> = {
+  // Drafting runs admit instruction runs and record their target and feedback.
+  26: "PENDING",
   // Data only: repositories at a delivery preset gain its pr.update-branch grant.
   25: "c4d5b1034030e6af97c598f25f8882df5517ac74648fc2d1ac36898e56d7e5de",
   // Workspace bindings record whether a hold came only from a failed identity read.
@@ -910,6 +942,8 @@ test("reasoning migration protects the level 19 schema before adding either tabl
         )
         .run(intentId);
       restoreRequestSchema21(before);
+      restoreDraftingSchema23(before);
+      restoreDraftingSchema23(before);
       before.exec(
         `${undoLevel24}DROP TABLE inbox_lifecycle_receipts; DROP TABLE inbox_lifecycle; DROP TABLE project_reasoning_summaries; DROP TABLE execution_intent_reasoning_summaries; DROP TABLE execution_pre_turn_refusals`,
       );
@@ -1021,6 +1055,7 @@ test("pre-turn refusal migration snapshots the level 20 schema and adds its tabl
     const database = join(dirs.data, "standalone.sqlite");
     const before = new DatabaseSync(database);
     restoreRequestSchema21(before);
+    restoreDraftingSchema23(before);
     before.exec(
       `${undoLevel24}DROP TABLE inbox_lifecycle_receipts; DROP TABLE inbox_lifecycle; DROP TABLE execution_pre_turn_refusals`,
     );
@@ -1255,6 +1290,7 @@ test("Inbox lifecycle migration snapshots level 22 and initializes both tables w
     before.exec(
       `${undoLevel24}DROP TABLE inbox_lifecycle_receipts; DROP TABLE inbox_lifecycle`,
     );
+    restoreDraftingSchema23(before);
     before.close();
     assert.equal(schemaDigest(dirs.data), SCHEMA_PINS[22]);
     await run(dirs.data);
@@ -1285,6 +1321,7 @@ test("request-only refusal migration snapshots level 21 and preserves restart li
     await run(dirs.data, 21);
     const db = new DatabaseSync(join(dirs.data, "standalone.sqlite"));
     restoreRequestSchema21(db);
+    restoreDraftingSchema23(db);
     db.exec(
       `${undoLevel24}DROP TABLE inbox_lifecycle_receipts; DROP TABLE inbox_lifecycle`,
     );

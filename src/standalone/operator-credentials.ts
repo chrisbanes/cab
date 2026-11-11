@@ -279,7 +279,7 @@ export function operatorRouteAuthority(
     /^\/api\/operator\/tasks\/[^/]+\/(?:review-anchors|questions)\/[^/]+$/.test(
       path,
     ) ||
-    /^\/api\/operator\/projects\/[^/]+\/(?:composer-options|delete-preview)$/.test(
+    /^\/api\/operator\/projects\/[^/]+\/(?:composer-options|delete-preview|operator-feedback)$/.test(
       path,
     ) ||
     /^\/api\/operator\/drafting-runs\/[^/]+$/.test(path) ||

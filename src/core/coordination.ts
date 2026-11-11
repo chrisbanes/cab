@@ -250,6 +250,53 @@ const completionFinalizeSchema = z
   .strict();
 type Row = Record<string, string | number | null>;
 
+/** One operator-authored correction a lead may be shown, as recorded. `createdAt` is unix seconds. */
+export type OperatorFeedbackRecord = {
+  kind: "message" | "follow-up" | "comment";
+  /** The event id; for a comment, the comment id. */
+  id: string;
+  taskId: string;
+  taskTitle: string;
+  recipientAssignmentIds: string[];
+  createdAt: number;
+  text: string;
+};
+
+// A comment's per-recipient deliveries are operator-message or follow-up events: they count once, as the comment.
+const notCommentDelivery =
+  "NOT EXISTS (SELECT 1 FROM coordination_task_comment_deliveries d WHERE d.eventId = e.eventId)";
+const operatorFeedbackSql = `
+  SELECT 'message' AS kind, e.eventId AS id, t.projectId, e.taskId, base.title AS taskTitle,
+    e.createdAt, json_extract(e.payload, '$.message') AS text,
+    json_array(e.recipientAssignmentId) AS recipients
+  FROM coordination_inbox_events e JOIN domain_tasks t ON t.id = e.taskId JOIN tasks base ON base.id = t.id
+  WHERE e.eventType = 'operator-message' AND ${notCommentDelivery}
+  UNION ALL
+  SELECT 'follow-up', e.eventId, t.projectId, e.taskId, base.title, e.createdAt,
+    json_extract(e.payload, '$.instructions'), json_array(e.recipientAssignmentId)
+  FROM coordination_inbox_events e JOIN domain_tasks t ON t.id = e.taskId JOIN tasks base ON base.id = t.id
+  WHERE e.eventType = 'assignment-follow-up'
+    AND json_extract(e.payload, '$.requester') = 'operator' AND ${notCommentDelivery}
+  UNION ALL
+  SELECT 'comment', c.commentId, t.projectId, c.taskId, base.title, c.createdAt, c.body,
+    (SELECT json_group_array(recipient) FROM (SELECT d.recipientAssignmentId AS recipient
+      FROM coordination_task_comment_deliveries d WHERE d.commentId = c.commentId ORDER BY d.rowid))
+  FROM coordination_task_comments c JOIN domain_tasks t ON t.id = c.taskId JOIN tasks base ON base.id = t.id`;
+
+function operatorFeedbackRecord(row: Row): OperatorFeedbackRecord {
+  return {
+    kind: z.enum(["message", "follow-up", "comment"]).parse(row.kind),
+    id: String(row.id),
+    taskId: String(row.taskId),
+    taskTitle: String(row.taskTitle),
+    recipientAssignmentIds: z
+      .array(z.string())
+      .parse(JSON.parse(String(row.recipients))),
+    createdAt: Number(row.createdAt),
+    text: String(row.text ?? ""),
+  };
+}
+
 export type RuntimeQuestionDeliveryState =
   | "unanswered"
   | "recorded"
@@ -2821,6 +2868,51 @@ export class CoordinationStore {
         "Operator command key reused with different content",
       );
     return receipt;
+  }
+
+  /**
+   * One project's operator-authored feedback, newest first: ordinary messages (including
+   * contextual feedback and sent local reviews), operator follow-ups and shared comments, a
+   * comment once rather than per recipient. The cursor is the last item's `createdAt|id`.
+   */
+  operatorFeedback(
+    projectId: string,
+    page: { limit: number; cursor?: string | null },
+  ): { items: OperatorFeedbackRecord[]; nextCursor: string | null } {
+    const [at, id] = (page.cursor ?? "").split("|");
+    const after = page.cursor ? [Number(at), Number(at), String(id)] : null;
+    const rows = this.db
+      .prepare(
+        `SELECT * FROM (${operatorFeedbackSql}) WHERE projectId = ?
+        ${after ? "AND (createdAt < ? OR (createdAt = ? AND id < ?))" : ""}
+        ORDER BY createdAt DESC, id DESC LIMIT ?`,
+      )
+      .all(uuid.parse(projectId), ...(after ?? []), page.limit + 1) as Row[];
+    const items = rows.slice(0, page.limit).map(operatorFeedbackRecord);
+    const last = items.at(-1);
+    return {
+      items,
+      nextCursor:
+        rows.length > page.limit && last
+          ? `${last.createdAt}|${last.id}`
+          : null,
+    };
+  }
+
+  /** The named items of one project's operator feedback, in the order asked; missing ones are left out. */
+  operatorFeedbackItems(
+    projectId: string,
+    refs: readonly { kind: OperatorFeedbackRecord["kind"]; id: string }[],
+  ): OperatorFeedbackRecord[] {
+    const statement = this.db.prepare(
+      `SELECT * FROM (${operatorFeedbackSql}) WHERE projectId = ? AND kind = ? AND id = ?`,
+    );
+    return refs.flatMap((ref) => {
+      const row = statement.get(uuid.parse(projectId), ref.kind, ref.id) as
+        | Row
+        | undefined;
+      return row ? [operatorFeedbackRecord(row)] : [];
+    });
   }
 
   /** The task's sent comments, oldest first, each with its recipient deliveries. */

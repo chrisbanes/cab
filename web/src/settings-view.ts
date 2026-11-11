@@ -44,6 +44,7 @@ export const projectTabs = [
   { id: "source", label: "Task source" },
   { id: "delivery", label: "Delivery" },
   { id: "sync", label: "Sync & placement" },
+  { id: "instruction-proposals", label: "Instruction proposals" },
 ] as const;
 export type ProjectTab = (typeof projectTabs)[number]["id"];
 export function projectTab(query: string): ProjectTab {

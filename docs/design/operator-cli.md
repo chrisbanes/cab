@@ -67,6 +67,11 @@ value is the same: the lead's read of the repositories, the editable proposal, t
 full-text review and the reattach after a reload, none of which a CLI caller
 needs. Revisit with composer drafting.
 
+Nor does it offer instruction proposals (a drafting run that proposes a project's or
+agent's instructions from selected operator feedback). Accepting one is an ordinary
+`project` or `profile` configure, which the CLI already prepares and applies, with
+`--restore-revision` to restore earlier wording.
+
 ## Diagnostic evidence
 
 Add richer bounded capture for future executions: cab-supplied instructions

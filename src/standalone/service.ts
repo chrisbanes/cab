@@ -121,16 +121,26 @@ import { ClaudeRuntime, releaseClaudeTemporaryBase } from "./claude.js";
 import {
   type DraftingRun,
   DraftingRunStore,
-  draftProposalTool,
   draftProposalToolName,
   draftingInstruction,
   issueDraftingInstruction,
   issueDraftingRequest,
   issueEditProposalSchema,
-  issueEditProposalTool,
   issueEditProposalToolName,
   draftingTimeLimitMs,
+  draftingTool,
+  type InstructionFeedback,
+  type InstructionTarget,
+  instructionDraftingInstruction,
+  instructionDraftingRequest,
+  instructionProposalSchema,
+  instructionProposalToolName,
 } from "./drafting.js";
+import {
+  instructionFeedbackLimits,
+  instructionTargetSchema,
+  operatorFeedbackKinds,
+} from "../operator/contracts.js";
 import {
   type DraftTurnFacts,
   DraftTurnUnavailableError,
@@ -6496,7 +6506,8 @@ export class StandaloneService {
     const { coordination, state } = this.started();
     if (
       call.tool === draftProposalToolName ||
-      call.tool === issueEditProposalToolName
+      call.tool === issueEditProposalToolName ||
+      call.tool === instructionProposalToolName
     )
       return Promise.resolve(this.handleDraftProposal(call));
     if (!isCoordinationTool(call.tool))
@@ -6994,6 +7005,182 @@ export class StandaloneService {
   }
 
   /**
+   * Starts a project-owned run in which the lead proposes one target's instructions from
+   * operator feedback the operator selected. It records the target's text and the feedback as
+   * they read now and changes nothing; only a later configure command does.
+   */
+  async startInstructionDrafting(input: {
+    runId: string;
+    projectId: string;
+    target: InstructionTarget;
+    feedback: { kind: (typeof operatorFeedbackKinds)[number]; id: string }[];
+    note: string;
+  }): Promise<DraftingRun> {
+    return this.withProjectWrite(input.projectId, "callback", async () => {
+      const value = z
+        .object({
+          runId: z.string().uuid(),
+          projectId: z.string().uuid(),
+          target: instructionTargetSchema,
+          feedback: z
+            .array(
+              z
+                .object({
+                  kind: z.enum(operatorFeedbackKinds),
+                  id: z.string().uuid(),
+                })
+                .strict(),
+            )
+            .min(1)
+            .max(instructionFeedbackLimits.items),
+          note: z.string().max(16_000),
+        })
+        .strict()
+        .parse(input);
+      const { drafting, schedulerStore, coordination } = this.started();
+      // A start that already created its run converges on it: what it recorded stands.
+      const earlier = drafting.get(value.runId);
+      if (earlier) {
+        const refs = (items: readonly { kind: string; id: string }[]) =>
+          JSON.stringify(items.map(({ kind, id }) => [kind, id]));
+        if (
+          earlier.kind !== "instruction" ||
+          !earlier.target ||
+          !earlier.feedback ||
+          earlier.observedVersion === null ||
+          earlier.observedInstructions === null ||
+          JSON.stringify(earlier.target) !== JSON.stringify(value.target) ||
+          refs(earlier.feedback) !== refs(value.feedback)
+        )
+          throw new DomainConflictError(
+            "Drafting run identity already used with other content",
+          );
+        const instruction = {
+          target: earlier.target,
+          observedVersion: earlier.observedVersion,
+          observedInstructionsRevision: earlier.observedInstructionsRevision,
+          observedInstructions: earlier.observedInstructions,
+          feedback: earlier.feedback,
+        };
+        const replayed = drafting.atomically(() => {
+          const created = drafting.create({
+            ...earlier,
+            idea: value.note,
+            instruction,
+          });
+          schedulerStore.ensure(StandaloneService.draftingRequest(created));
+          return created;
+        });
+        await this.wakeScheduler();
+        return drafting.require(replayed.runId);
+      }
+      const refused = (message: string) =>
+        new DomainPolicyError("invalid-input", message, ["feedback"]);
+      if (
+        new Set(value.feedback.map(({ kind, id }) => `${kind}:${id}`)).size !==
+        value.feedback.length
+      )
+        throw refused("Each feedback item can be selected once");
+      const records = coordination.operatorFeedbackItems(
+        value.projectId,
+        value.feedback,
+      );
+      if (records.length !== value.feedback.length)
+        throw refused(
+          "Selected feedback is not this project's operator feedback",
+        );
+      if (
+        records.reduce((total, item) => total + item.text.length, 0) >
+        instructionFeedbackLimits.characters
+      )
+        throw refused("The selected feedback is too long");
+      const domain = this.domain();
+      const project = domain.project(value.projectId);
+      let observed: {
+        observedVersion: number;
+        observedInstructionsRevision: number | null;
+        observedInstructions: string;
+      };
+      if (value.target.kind === "project")
+        observed = {
+          observedVersion: Number(project.version),
+          observedInstructionsRevision: Number(project.instructionsRevision),
+          observedInstructions: String(project.instructions),
+        };
+      else {
+        const { profileId } = value.target;
+        const permitted = z
+          .array(z.string())
+          .parse(
+            JSON.parse(
+              String(domain.routing(value.projectId).candidateProfileIds),
+            ),
+          )
+          .includes(profileId);
+        const profile =
+          project.leadProfileId === profileId || permitted
+            ? domain.profile(profileId)
+            : undefined;
+        if (!profile || profile.revoked)
+          throw new DomainPolicyError(
+            "invalid-input",
+            "Choose this project's lead or a permitted agent",
+            ["target"],
+          );
+        observed = {
+          observedVersion: Number(profile.version),
+          observedInstructionsRevision: null,
+          observedInstructions: String(profile.instructions),
+        };
+      }
+      // The lead is shown this text, so it must hold nothing the operator's reads withhold.
+      const failure = this.failureExclusions();
+      const excluded = failure && prepareExclusions([...failure]);
+      if (
+        [value.note, ...records.map((item) => item.text)].some(
+          (text) =>
+            !excluded || sanitizeConversationText(text, excluded) !== text,
+        )
+      )
+        throw new DomainPolicyError(
+          "forbidden",
+          "The selected feedback holds text that cannot be shown",
+          ["feedback"],
+        );
+      const feedback: InstructionFeedback[] = records.map((item) => ({
+        kind: item.kind,
+        id: item.id,
+        taskId: item.taskId,
+        taskTitle: item.taskTitle,
+        recipientName: item.recipientAssignmentIds
+          .map((assignmentId) =>
+            String(
+              domain.profile(String(domain.assignment(assignmentId).profileId))
+                .name,
+            ),
+          )
+          .join(", "),
+        createdAt: item.createdAt,
+        text: item.text,
+      }));
+      // The run and its turn request commit together: neither can exist without the other.
+      const run = drafting.atomically(() => {
+        const created = drafting.create({
+          runId: value.runId,
+          projectId: value.projectId,
+          idea: value.note,
+          ...this.draftingLead(value.projectId),
+          instruction: { target: value.target, ...observed, feedback },
+        });
+        schedulerStore.ensure(StandaloneService.draftingRequest(created));
+        return created;
+      });
+      await this.wakeScheduler();
+      return drafting.require(run.runId);
+    });
+  }
+
+  /**
    * The private paths of the copy a run was built from, kept with the run after the
    * project unlinks the repository or the copy is removed.
    */
@@ -7021,10 +7208,33 @@ export class StandaloneService {
       assignmentVersion: null,
       instructionsRevision: run.instructionsRevision,
       profileRevision: run.profileRevision,
-      prompt: run.kind === "issue" ? issueDraftingRequest(run) : run.idea,
+      prompt:
+        run.kind === "issue"
+          ? issueDraftingRequest(run)
+          : run.kind === "instruction"
+            ? instructionDraftingRequest(run)
+            : run.idea,
       workspace: null,
       previousWorkId: null,
     };
+  }
+
+  /** One project's operator-authored feedback, newest first; see `CoordinationStore.operatorFeedback`. */
+  operatorFeedback(
+    projectId: string,
+    page: { limit: number; cursor: string | null },
+  ) {
+    return this.started().coordination.operatorFeedback(projectId, page);
+  }
+
+  operatorFeedbackItems(
+    projectId: string,
+    refs: readonly {
+      kind: (typeof operatorFeedbackKinds)[number];
+      id: string;
+    }[],
+  ) {
+    return this.started().coordination.operatorFeedbackItems(projectId, refs);
   }
 
   readDrafting(runId: string): DraftingRun | undefined {
@@ -7084,7 +7294,8 @@ export class StandaloneService {
           | "drafting.start"
           | "drafting.stop"
           | "drafting.settle"
-          | "issue.draft.start";
+          | "issue.draft.start"
+          | "instruction.draft.start";
       }
     >,
   ): Promise<DraftingReceipt> {
@@ -7111,7 +7322,8 @@ export class StandaloneService {
           | "drafting.start"
           | "drafting.stop"
           | "drafting.settle"
-          | "issue.draft.start";
+          | "issue.draft.start"
+          | "instruction.draft.start";
       }
     >,
   ): Promise<DraftingReceipt> {
@@ -7158,6 +7370,29 @@ export class StandaloneService {
           await this.startIssueDrafting({
             runId: command.runId,
             taskId: command.taskId,
+            note: command.note,
+          }),
+        ),
+      );
+    }
+    if (command.type === "instruction.draft.start") {
+      // As for an issue run, an existing run converges without the project fence.
+      if (
+        !drafting.get(command.runId) &&
+        Number(this.domain().project(command.projectId).version) !==
+          command.expectedProjectVersion
+      )
+        throw new DomainConflictError("The project changed");
+      return drafting.recordReceipt(
+        key,
+        content,
+        receiptOf(
+          "start",
+          await this.startInstructionDrafting({
+            runId: command.runId,
+            projectId: command.projectId,
+            target: command.target,
+            feedback: command.feedback,
             note: command.note,
           }),
         ),
@@ -7261,12 +7496,7 @@ export class StandaloneService {
       const run = drafting.get(runId);
       if (run?.state !== "running") break;
       // Each kind of run is offered one tool and no other.
-      if (
-        call.tool !==
-        (run.kind === "issue"
-          ? issueEditProposalToolName
-          : draftProposalToolName)
-      )
+      if (call.tool !== draftingTool(run.kind).name)
         return {
           success: false,
           text: "This tool is not offered to this drafting run",
@@ -7274,7 +7504,9 @@ export class StandaloneService {
       const parsed =
         run.kind === "issue"
           ? issueEditProposalSchema.safeParse(call.arguments)
-          : draftProposalSchema.safeParse(call.arguments);
+          : run.kind === "instruction"
+            ? instructionProposalSchema.safeParse(call.arguments)
+            : draftProposalSchema.safeParse(call.arguments);
       if (!parsed.success)
         return {
           success: false,
@@ -7302,19 +7534,49 @@ export class StandaloneService {
                 .instructions,
             ),
             domain.instructionRevision(run.projectId, run.instructionsRevision),
-          ].filter((text) => text.length > 0),
+          ]
+            // An instruction run's replacement legitimately holds its target's own text.
+            .filter((text) => text !== run.observedInstructions)
+            .filter((text) => text.length > 0),
         ]);
       const shown = (text: string) =>
         excluded !== undefined &&
         sanitizeConversationText(text, excluded) === text;
-      const body =
-        "body" in parsed.data ? parsed.data.body : parsed.data.outcome;
-      if (!shown(parsed.data.title) || !shown(body))
+      const data = parsed.data;
+      const texts =
+        "summary" in data
+          ? [
+              data.summary,
+              data.instructions,
+              data.rationale,
+              data.generalisation,
+              data.conflicts,
+              ...data.evidence.map(({ note }) => note),
+            ]
+          : [data.title, "body" in data ? data.body : data.outcome];
+      if ("summary" in data) {
+        const selected = (run.feedback ?? []).map(({ id }) => id).sort();
+        const cited = data.evidence.map(({ feedbackId }) => feedbackId).sort();
+        if (JSON.stringify(cited) !== JSON.stringify(selected))
+          return {
+            success: false,
+            text: `Give exactly one evidence entry for each selected feedback id: ${selected.join(", ")}.`,
+          };
+        if (
+          !data.insufficientEvidence &&
+          data.instructions === run.observedInstructions
+        )
+          return {
+            success: false,
+            text: "The instructions are unchanged. Change them, or set insufficientEvidence and explain why.",
+          };
+      }
+      if (!texts.every(shown))
         return {
           success: false,
           text: "The draft holds text that cannot be shown to the operator, such as a private path or credential. Remove it and call the tool again.",
         };
-      drafting.recordProposal(runId, parsed.data);
+      drafting.recordProposal(runId, data);
       return { success: true, text: "Draft recorded. You can finish now." };
     }
     return {
@@ -8492,12 +8754,14 @@ export class StandaloneService {
           text:
             run.kind === "issue"
               ? issueDraftingInstruction
-              : draftingInstruction,
+              : run.kind === "instruction"
+                ? instructionDraftingInstruction
+                : draftingInstruction,
         },
         {
           name: "request",
           text:
-            run.kind === "issue"
+            run.kind !== "brief"
               ? request.prompt
               : `Rough idea from the operator:\n${request.prompt}`,
         },
@@ -9487,10 +9751,10 @@ export class StandaloneService {
       const tools =
         request.kind === "drafting"
           ? [
-              this.started().drafting.require(this.draftingRunIdOf(request))
-                .kind === "issue"
-                ? issueEditProposalTool
-                : draftProposalTool,
+              draftingTool(
+                this.started().drafting.require(this.draftingRunIdOf(request))
+                  .kind,
+              ),
             ]
           : request.kind === "assignment" && request.assignmentId
             ? coordinationTools
