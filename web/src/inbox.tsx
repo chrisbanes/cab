@@ -67,6 +67,8 @@ export class InboxState {
   returnFocus: { id: string; index: number } | null = null;
   /** Where the selection last stood in the queue, so Previous/Next continue after it leaves. */
   anchor: QueueAnchor | null = null;
+  /** Unsent result review drafts, kept while the operator moves between requests. */
+  reviewDrafts = new Map<string, string>();
   clear() {
     this.project = "";
     this.kind = "";
@@ -75,6 +77,7 @@ export class InboxState {
     this.auto = null;
     this.returnFocus = null;
     this.anchor = null;
+    this.reviewDrafts.clear();
   }
 }
 /** What the Inbox asks the shell header to show; the shell only merges it into its props. */
@@ -844,7 +847,9 @@ export function Inbox({
                     task={task.state.data.data}
                     reviewId={selectedId}
                     onChanged={resource.refresh}
-                    showDecision={false}
+                    // Without its queue item the pane's heading cannot name the decision.
+                    showDecision={!selected}
+                    drafts={state.reviewDrafts}
                   />
                 ) : (
                   <ResourceStatus

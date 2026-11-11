@@ -196,18 +196,6 @@ export function ReviewEvidence({
           const head = data.delivery?.binding?.headSha,
             unknown =
               !v.checkedHead || !head || data.delivery?.binding?.readError;
-          if (headComparison)
-            return (
-              <p key={`${v.label}:${v.scope}:${v.provenance}`}>
-                {v.label}: {v.outcome} · {v.scope} · {v.provenance} ·{" "}
-                {v.checkedHead && (
-                  <>
-                    checked head <ShortId value={v.checkedHead} /> ·{" "}
-                  </>
-                )}
-                {headComparison(v.checkedHead)}
-              </p>
-            );
           return (
             <p key={`${v.label}:${v.scope}:${v.provenance}`}>
               {v.label}: {v.outcome} · {v.scope} · {v.provenance} ·{" "}
@@ -216,14 +204,19 @@ export function ReviewEvidence({
                   checked head <ShortId value={v.checkedHead} /> ·{" "}
                 </>
               )}
-              {unknown
-                ? "Head comparison unknown"
-                : v.checkedHead === head
-                  ? reviewHeadComparison(true, data.delivery?.binding?.codeHost)
-                  : reviewHeadComparison(
-                      false,
-                      data.delivery?.binding?.codeHost,
-                    )}
+              {headComparison
+                ? headComparison(v.checkedHead)
+                : unknown
+                  ? "Head comparison unknown"
+                  : v.checkedHead === head
+                    ? reviewHeadComparison(
+                        true,
+                        data.delivery?.binding?.codeHost,
+                      )
+                    : reviewHeadComparison(
+                        false,
+                        data.delivery?.binding?.codeHost,
+                      )}
             </p>
           );
         })

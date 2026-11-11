@@ -47,9 +47,12 @@ export function resultHeadComparison(
   workspace: Result["workspace"],
 ) {
   if (!checkedHead || !workspace.length) return "Head comparison unknown";
-  return workspace.some((w) => w.headCommit === checkedHead)
-    ? "Checked the head recorded for this result"
-    : "Checked a different head than the one recorded for this result";
+  const match = workspace.find((w) => w.headCommit === checkedHead);
+  if (!match)
+    return "Checked a different head than the one recorded for this result";
+  return match.dirty
+    ? "Checked the head recorded for this result, which had uncommitted changes"
+    : "Checked the head recorded for this result";
 }
 
 /** "R2 · work revision 2 · recorded 14:05": the result identity cab recorded. */

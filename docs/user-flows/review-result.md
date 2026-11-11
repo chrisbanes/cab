@@ -42,15 +42,17 @@ to say to the lead.
    the latest, not above it.
 4. Message lead sends feedback on the result; completion stays the lead's decision.
 
-For a requested review, the panel reads in decision order, with nothing behind a disclosure
-except Details:
+For a requested review, the panel reads in decision order. Only Details and criteria beyond the
+first three ("N more") sit behind a disclosure:
 
 1. The decision and the lead's recommendation, labelled as reported by the lead.
-2. What changed and why (the result summary) with its Changes link, then the criteria.
+2. What changed and why (the result summary) with its Changes link, then the criteria; both
+   are labelled as reported by the lead.
 3. Evidence: validations, with each checked head compared with the head cab recorded for
    the result, and artifacts, with screenshots shown inline. A result with no recorded
    evidence says so.
-4. Remaining uncertainty, or "No remaining uncertainty recorded" when the lead listed none.
+4. Remaining uncertainty: "No remaining uncertainty recorded" when the lead recorded no list,
+   and "The lead listed no remaining uncertainty" for an empty one.
 5. The response: Mark reviewed, with an optional note, or Send feedback, with required
    text. A note or feedback reaches the lead as feedback on that result; Mark reviewed
    without a note sends nothing. Neither approves, merges or completes the task.
@@ -98,6 +100,9 @@ The operator CLI is outside the budget: it has no screens.
 - A review that a newer lead result superseded reads "Superseded by a newer result", links
   that result and takes no response. A response sent from a page that had not refreshed is
   refused with "This review is no longer current"; nothing is recorded and the unsent draft
-  stays visible.
+  stays visible. Feedback the lead cannot receive now is refused while the review stays
+  pending; the draft stays in the form, and Mark reviewed without a note still records it.
+- A draft in the Inbox survives moving to another request and back; dismissing a review
+  records no response, and Restore returns it.
 - A review the lead withdrew reads "Withdrawn by the lead" with its reason; one whose task
   closed reads "Closed with the task".

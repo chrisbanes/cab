@@ -17,6 +17,8 @@ import {
 } from "../fixtures/operator-settings.js";
 import { stubReadiness } from "../fixtures/setup-browser.js";
 import { seedReviewTask } from "../fixtures/task-review.js";
+import { choiceForm } from "../fixtures/question-data.js";
+import { seedOwnQuestion } from "../fixtures/questions.js";
 
 // The budget is the review-request rows under "Budget" in docs/user-flows/review-result.md.
 const test = browserSuite("result-review-request");
@@ -252,6 +254,120 @@ test("a newer result supersedes an open review: a send refuses, keeps its draft 
     s.f.service.coordinationView().readTask(s.taskId).resultReviews[0]
       ?.response,
     null,
+  );
+});
+
+test("a refresh after a newer result turns an open review read-only without a send", async (_t, journey) => {
+  const s = await start(
+    journey,
+    desktop,
+    ({ taskId, reviewId }) => `/inbox?task=${taskId}&request=${reviewId}`,
+  );
+  const panel = s.page.getByRole("region", { name: "Result review" });
+  await assertMaterial(panel);
+  s.result("Revised toolbar after a second pass.");
+  await s.page
+    .getByRole("button", { name: "Refresh", exact: true })
+    .first()
+    .click();
+  await panel.getByText("Superseded by a newer result").waitFor();
+  assert.equal(
+    await panel.getByRole("button", { name: "Mark reviewed" }).count(),
+    0,
+  );
+  assert.equal(responses(s.posts).length, 0);
+});
+
+test("a dismissed review stays pending with no response, and Restore returns it", async (_t, journey) => {
+  const s = await start(
+    journey,
+    desktop,
+    ({ taskId, reviewId }) => `/inbox?task=${taskId}&request=${reviewId}`,
+  );
+  const detail = s.page.locator(".inbox-detail");
+  await detail.getByRole("region", { name: "Result review" }).waitFor();
+  await detail.getByRole("button", { name: "Dismiss", exact: true }).click();
+  await detail.getByRole("button", { name: "Dismiss request" }).click();
+  await detail
+    .getByText("Dismissed. No response was recorded; the review stays pending.")
+    .waitFor();
+  const [review] = s.f.service
+    .coordinationView()
+    .readTask(s.taskId).resultReviews;
+  assert.equal(review?.status, "pending");
+  assert.equal(review?.response, null);
+  await s.page.goto(
+    new URL(
+      `/inbox?status=dismissed&task=${s.taskId}&request=${s.reviewId}`,
+      s.page.url(),
+    ).href,
+  );
+  await detail
+    .getByText(
+      "Dismissed. The review stays pending and no response was recorded.",
+    )
+    .waitFor();
+  await detail.getByRole("button", { name: "Restore", exact: true }).click();
+  await detail.getByText("Restored. No work was started.").waitFor();
+  assert.equal(responses(s.posts).length, 0);
+});
+
+test("a review draft survives moving to another request with J and back with K", async (_t, journey) => {
+  const s = await start(
+    journey,
+    desktop,
+    ({ taskId, reviewId }) => `/inbox?task=${taskId}&request=${reviewId}`,
+  );
+  await seedOwnQuestion(s.f, choiceForm, "Guide task", "Docs");
+  await s.page
+    .getByRole("button", { name: "Refresh", exact: true })
+    .first()
+    .click();
+  await s.page
+    .locator(".inbox-row")
+    .filter({ hasText: "Guide task" })
+    .waitFor();
+  const panel = s.page.getByRole("region", { name: "Result review" }),
+    note = panel.getByLabel("Note or feedback for the lead");
+  await note.fill("Half-written feedback");
+  const rows = s.page.locator(".inbox-row");
+  const reviewFirst =
+    (await rows.first().getAttribute("data-record-id")) === s.reviewId;
+  // Leave the textarea so J and K move between requests.
+  await s.page.locator(".inbox-detail h2").focus();
+  await s.page.keyboard.press(reviewFirst ? "j" : "k");
+  await panel.waitFor({ state: "detached" });
+  await s.page.keyboard.press(reviewFirst ? "k" : "j");
+  await panel.waitFor();
+  assert.equal(await note.inputValue(), "Half-written feedback");
+});
+
+test("refused feedback to a lead that cannot receive it keeps the draft and the review pending", async (_t, journey) => {
+  const s = await start(
+    journey,
+    desktop,
+    ({ taskId, reviewId }) => `/inbox?task=${taskId}&request=${reviewId}`,
+  );
+  // A held lead receives no feedback; the review itself stays pending.
+  s.f.seedPersistedState((db) =>
+    db
+      .prepare("UPDATE domain_assignments SET state='held' WHERE id=?")
+      .run(s.assignmentId),
+  );
+  const panel = s.page.getByRole("region", { name: "Result review" });
+  await assertMaterial(panel);
+  await panel
+    .getByLabel("Note or feedback for the lead")
+    .fill("Please revisit");
+  await panel.getByRole("button", { name: "Send feedback" }).click();
+  await panel.getByText("The response was not recorded.").waitFor();
+  assert.equal(
+    await panel.getByLabel("Note or feedback for the lead").inputValue(),
+    "Please revisit",
+  );
+  assert.equal(
+    s.f.service.coordinationView().readTask(s.taskId).resultReviews[0]?.status,
+    "pending",
   );
 });
 

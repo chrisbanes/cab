@@ -5,8 +5,6 @@ import type { TaskRead } from "../../src/operator/contracts.js";
 import {
   missingEvidence,
   pendingReviews,
-  recordedByCab,
-  reportedByLead,
   resultHeadComparison,
   resultIdentity,
   reviewStatus,
@@ -75,11 +73,6 @@ test("an omitted uncertainty list is not an empty one, and neither reads as none
   });
 });
 
-test("provenance separates what the lead reported from what cab recorded", () => {
-  assert.equal(reportedByLead, "Reported by the lead");
-  assert.equal(recordedByCab, "Recorded by cab");
-});
-
 test("a checked head is compared with the head cab recorded for the result", () => {
   const head = "a".repeat(40),
     workspace = [
@@ -98,6 +91,10 @@ test("a checked head is compared with the head cab recorded for the result", () 
     "Head comparison unknown",
   );
   assert.equal(resultHeadComparison(head, []), "Head comparison unknown");
+  assert.equal(
+    resultHeadComparison(head, [{ ...workspace[0]!, dirty: true }]),
+    "Checked the head recorded for this result, which had uncommitted changes",
+  );
 });
 
 test("the result identity names its revision, and missing evidence is stated", () => {

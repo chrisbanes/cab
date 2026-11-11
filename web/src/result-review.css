@@ -37,3 +37,13 @@
   flex-wrap: wrap;
   gap: var(--space-8);
 }
+
+/* Literal text wraps in the body font wherever the panel sits, as on the task page. */
+.result-review .literal-text {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  font: inherit;
+  line-height: 1.65;
+  max-width: 100%;
+  margin: 0;
+}

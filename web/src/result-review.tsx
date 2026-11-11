@@ -22,17 +22,21 @@ import {
 import { Textarea } from "./ui/textarea.js";
 import "./result-review.css";
 
-type Outcome = {
-  tone: "success" | "error" | "warning";
-  title?: string;
-  message: string;
-  details?: OutcomeField[];
-};
+type Respond = Extract<OperatorCommand, { type: "result-review.respond" }>;
+type Outcome =
+  | {
+      kind: "recorded" | "unknown";
+      message: string;
+      details?: OutcomeField[];
+    }
+  /** Refused: worded once the refreshed review shows why. */
+  | { kind: "refused" };
 
 /**
  * The decision-focused review of one result: the decision and the lead's recommendation, what
  * changed, criteria, evidence and remaining uncertainty, then the response. Key it by review so a
- * draft never moves to another one; a draft survives a refused send.
+ * draft never moves to another one; a draft survives a refused send, and `drafts` keeps it while
+ * the operator moves between reviews.
  */
 export function ResultReviewPanel({
   client,
@@ -42,6 +46,7 @@ export function ResultReviewPanel({
   onChanged,
   showDecision = true,
   readOnly = false,
+  drafts,
 }: {
   client: OperatorClient;
   session: Session;
@@ -51,14 +56,22 @@ export function ResultReviewPanel({
   /** Off where the surrounding pane already names the decision. */
   showDecision?: boolean;
   readOnly?: boolean;
+  /** Unsent drafts by review, kept across selections by the owning view. */
+  drafts?: Map<string, string>;
 }) {
-  const [draft, setDraft] = useState(""),
-    [pending, setPending] = useState<OperatorCommand | null>(null),
+  const [draft, setDraftState] = useState(() => drafts?.get(reviewId) ?? ""),
+    [pending, setPending] = useState<Respond | null>(null),
     [busy, setBusy] = useState(false),
     [outcome, setOutcome] = useState<Outcome | null>(null),
     [criteriaOpen, setCriteriaOpen] = useState(false),
     noteId = useId(),
     helpId = useId();
+  const setDraft = (value: string) => {
+    setDraftState(value);
+    if (!drafts) return;
+    if (value) drafts.set(reviewId, value);
+    else drafts.delete(reviewId);
+  };
   const review = task.resultReviews?.find((r) => r.reviewId === reviewId);
   if (!review) return <p>This review request is unavailable.</p>;
   const taskId = task.task.id,
@@ -67,8 +80,8 @@ export function ResultReviewPanel({
     status = reviewStatus(review),
     uncertainty = uncertaintyLines(review.uncertainties),
     text = draft.trim();
-  const send = async (response: "reviewed" | "feedback") => {
-    const command: OperatorCommand = pending ?? {
+  const send = async (response: Respond["response"]) => {
+    const command: Respond = pending ?? {
       type: "result-review.respond",
       key: randomUUID(),
       taskId,
@@ -86,12 +99,11 @@ export function ResultReviewPanel({
         setPending(null);
         setDraft("");
         setOutcome({
-          tone: "success",
+          kind: "recorded",
           message:
-            command.type === "result-review.respond" &&
             command.response === "feedback"
               ? "Feedback sent to the lead."
-              : command.type === "result-review.respond" && command.message
+              : command.message
                 ? "Marked reviewed; your note was sent to the lead."
                 : "Marked reviewed. Nothing was sent to the lead.",
           details: [
@@ -104,24 +116,20 @@ export function ResultReviewPanel({
         onChanged();
       } else if (result.state === "unknown") {
         setOutcome({
-          tone: "warning",
-          title: "Reply unavailable.",
+          kind: "unknown",
           message: "Retry to check whether the same response was recorded.",
         });
       } else {
         setPending(null);
-        setOutcome({
-          tone: "error",
-          title: "This review is no longer current.",
-          message:
-            "Nothing was recorded. Your draft is kept; check the review's state before responding.",
-        });
+        setOutcome({ kind: "refused" });
         onChanged();
       }
     } finally {
       setBusy(false);
     }
   };
+  const retrying = (response: Respond["response"]) =>
+    pending?.response === response;
   return (
     <section
       className="result-review"
@@ -156,6 +164,7 @@ export function ResultReviewPanel({
       </div>
       <div>
         <h4 className="small-heading">What changed and why</h4>
+        <p className="metadata muted">{reportedByLead}</p>
         <Literal text={result?.summary} />
         <ActionLink
           variant="secondary"
@@ -167,19 +176,24 @@ export function ResultReviewPanel({
         </ActionLink>
       </div>
       {meta && (
-        <CriteriaRows
-          data={task}
-          resultId={review.resultId}
-          sourceId={meta.metadata.sourceId}
-          more={{
-            open: criteriaOpen,
-            onToggle: (event) => setCriteriaOpen(event.currentTarget.open),
-          }}
-        />
+        <div>
+          <p className="metadata muted">Criterion outcomes: {reportedByLead}</p>
+          <CriteriaRows
+            data={task}
+            resultId={review.resultId}
+            sourceId={meta.metadata.sourceId}
+            more={{
+              open: criteriaOpen,
+              onToggle: (event) => setCriteriaOpen(event.currentTarget.open),
+            }}
+          />
+        </div>
       )}
       <div>
         <h4 className="small-heading">Evidence</h4>
-        <p className="metadata muted">{reportedByLead}</p>
+        <p className="metadata muted">
+          {reportedByLead}; head comparisons are cab's
+        </p>
         {missingEvidence(task, review.resultId) ?? (
           <ReviewEvidence
             data={task}
@@ -234,49 +248,56 @@ export function ResultReviewPanel({
             <Button
               variant="secondary"
               onClick={() => void send("reviewed")}
-              disabled={Boolean(
-                pending &&
-                  pending.type === "result-review.respond" &&
-                  pending.response !== "reviewed",
-              )}
+              disabled={Boolean(pending) && !retrying("reviewed")}
             >
-              {pending?.type === "result-review.respond" &&
-              pending.response === "reviewed"
-                ? "Retry Mark reviewed"
-                : "Mark reviewed"}
+              {retrying("reviewed") ? "Retry Mark reviewed" : "Mark reviewed"}
             </Button>
             <Button
               onClick={() => void send("feedback")}
-              disabled={
-                !text ||
-                Boolean(
-                  pending &&
-                    pending.type === "result-review.respond" &&
-                    pending.response !== "feedback",
-                )
-              }
+              disabled={!text || (Boolean(pending) && !retrying("feedback"))}
             >
-              {pending?.type === "result-review.respond" &&
-              pending.response === "feedback"
-                ? "Retry Send feedback"
-                : "Send feedback"}
+              {retrying("feedback") ? "Retry Send feedback" : "Send feedback"}
             </Button>
           </div>
         </fieldset>
       )}
-      {review.status !== "pending" && text && (
+      {review.status !== "pending" && text && !pending && (
         <div>
           <h4 className="small-heading">Your unsent draft</h4>
           <Literal text={draft} />
         </div>
       )}
-      {outcome && (
+      {outcome?.kind === "recorded" && (
         <ActionOutcome
-          tone={outcome.tone}
-          title={outcome.title}
+          tone="success"
           message={outcome.message}
           details={outcome.details}
           focus
+        />
+      )}
+      {outcome?.kind === "unknown" && (
+        <ActionOutcome
+          tone="warning"
+          title="Reply unavailable."
+          message={outcome.message}
+          focus
+        />
+      )}
+      {outcome?.kind === "refused" && (
+        <ActionOutcome
+          tone="error"
+          focus
+          {...(review.status === "pending"
+            ? {
+                title: "The response was not recorded.",
+                message:
+                  "The lead cannot receive a note or feedback now, or this view is out of date. Your draft is kept; Mark reviewed without a note records the review without sending anything.",
+              }
+            : {
+                title: "This review is no longer current.",
+                message:
+                  "Nothing was recorded. Your draft is kept below; check the review's state before responding.",
+              })}
         />
       )}
       <p className="metadata">
