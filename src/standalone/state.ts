@@ -3985,15 +3985,21 @@ export class ExecutionState {
         AND receipt.terminationMethod = 'mac-pid-absent-same-boot'
         AND NOT EXISTS (SELECT 1 FROM execution_capacity_reservations WHERE workId = receipt.workId)
         AND NOT EXISTS (SELECT 1 FROM execution_pending_effects WHERE workId = receipt.workId AND state = 'pending')
-        AND NOT EXISTS (SELECT 1 FROM execution_stop_targets WHERE taskId = request.taskId AND terminalState != 'completed')
-        AND NOT EXISTS (SELECT 1 FROM task_writer_holds WHERE taskId = request.taskId${options.allowOperatorStop ? " AND holdKind IS NOT 'operator-stop'" : ""})
+        -- allowOperatorStop: another turn the Stop interrupted and that ended failed does not
+        -- hold this proof; its own target, or any uncertain one, still does.
+        AND NOT EXISTS (SELECT 1 FROM execution_stop_targets WHERE taskId = request.taskId AND terminalState != 'completed'
+          AND (? = 0 OR workId = receipt.workId OR terminalState = 'unknown'))
+        AND NOT EXISTS (SELECT 1 FROM task_writer_holds WHERE taskId = request.taskId
+          AND (? = 0 OR holdKind IS NOT 'operator-stop'))
         AND NOT EXISTS (SELECT 1 FROM task_writer_ambiguity_holds WHERE taskId = request.taskId)
         AND NOT EXISTS (SELECT 1 FROM task_archival_holds WHERE taskId = request.taskId)
         AND NOT EXISTS (SELECT 1 FROM task_work_revision_ambiguities WHERE assignmentId = request.assignmentId)
         AND NOT EXISTS (SELECT 1 FROM execution_request_refusals WHERE workId = receipt.workId)`)
-      .get(z.string().min(1).max(512).parse(workId)) as
-      | Record<string, string | number | null>
-      | undefined;
+      .get(
+        z.string().min(1).max(512).parse(workId),
+        Number(options.allowOperatorStop === true),
+        Number(options.allowOperatorStop === true),
+      ) as Record<string, string | number | null> | undefined;
     if (
       !row ||
       !z

@@ -186,3 +186,38 @@ test("a writer ambiguity hold still keeps a recovered delegate from being withdr
       .blockers.includes("ownership-hold"),
   );
 });
+
+test("another turn a Stop interrupted only holds a recovered delegate's withdrawal while its outcome is unknown", async (t) => {
+  const w = await boundWorld(t);
+  const service = w.s.f.service;
+  const delegateId = await recoveredDelegate(w);
+  await service.stopTask(w.g.taskId);
+  // The Stop interrupted the lead's turn: its target records how that turn ended.
+  const target = (terminalState: "failed" | "unknown") =>
+    w.s.f.seedPersistedState((db) =>
+      db
+        .prepare(
+          `INSERT OR REPLACE INTO execution_stop_targets
+          (taskId, workId, interruptState, terminalState, requestedAt, origin)
+          VALUES (?, ?, 'acknowledged', ?, 1, 'operator')`,
+        )
+        .run(w.g.taskId, w.g.workId, terminalState),
+    );
+  const blockers = () =>
+    startedOf(service).coordination.delegateStatus(delegateId).blockers;
+  const strict = () =>
+    startedOf(service).state.reconciledAssignmentProof(
+      String(
+        service
+          .turnRequests()
+          .find((r) => r.assignmentId === delegateId && r.state === "held")
+          ?.workId,
+      ),
+    );
+  target("unknown");
+  assert.ok(blockers().includes("held-execution"), String(blockers()));
+  target("failed");
+  assert.deepEqual(blockers(), []);
+  // Recovery callers keep the strict proof while the task is stopped.
+  assert.equal(strict(), undefined);
+});
