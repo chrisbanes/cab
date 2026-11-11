@@ -7,6 +7,7 @@ import {
   type ReactNode,
   useCallback,
   useEffect,
+  useId,
   useLayoutEffect,
   useRef,
   useState,
@@ -800,7 +801,8 @@ function InboxVisibility({
     [busy, setBusy] = useState(false),
     [recorded, setRecorded] = useState(false),
     [revealed, setRevealed] = useState(false),
-    refocus = useRef(false);
+    refocus = useRef(false),
+    noteId = useId();
   const lifecycle = item.lifecycle;
   if (!lifecycle) return null;
   const action = lifecycle.status === "dismissed" ? "restore" : "dismiss";
@@ -865,8 +867,9 @@ function InboxVisibility({
           </Button>
         ) : revealed || pending ? (
           <>
+            <label htmlFor={noteId}>Dismissal note (optional)</label>
             <Textarea
-              aria-label="Dismissal note (optional)"
+              id={noteId}
               maxLength={4096}
               value={note}
               disabled={busy || !!pending}

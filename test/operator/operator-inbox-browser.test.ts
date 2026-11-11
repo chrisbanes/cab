@@ -2380,6 +2380,13 @@ for (const viewport of [
     assert.equal(await note.count(), 0);
     await dismiss.click();
     await note.waitFor();
+    assert.equal(
+      await page
+        .locator("label", { hasText: "Dismissal note (optional)" })
+        .isVisible(),
+      true,
+    );
+    assert.equal(await note.evaluate((e) => e.tagName), "TEXTAREA");
     await page.getByRole("button", { name: "Cancel", exact: true }).click();
     assert.equal(await note.count(), 0);
     assert.equal(
