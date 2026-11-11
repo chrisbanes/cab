@@ -1,16 +1,21 @@
 import { createHash, randomUUID } from "node:crypto";
 import { assignmentDetailSchema } from "../operator/contracts.js";
 import { uuidArg } from "./browse.js";
-import { positiveIntFlag } from "./configure.js";
+import { exactCommand, positiveIntFlag } from "./configure.js";
 import { CliError } from "./connections.js";
 import { receiptLines } from "./operation.js";
 import { keyValues } from "./render.js";
+import { connectWrite, TASK_WRITE, writeOutput } from "./task-write.js";
 import {
+  chooseKey,
   optionalRequestId,
   sendCommand,
   type WriteCommand,
   withConflictRemedy,
 } from "./write.js";
+
+export const withdrawFinalNote =
+  "Withdrawal is final: the delegate produces no result and nothing restores it. To redo the work, the lead delegates again.";
 
 export const adoptCommands = new Map<string, WriteCommand>([
   [
@@ -88,6 +93,97 @@ export const adoptCommands = new Map<string, WriteCommand>([
             "Adoption is one-way: to return to older text, restore it as a new revision and adopt again.",
           ].join("\n"),
         };
+      },
+    },
+  ],
+  [
+    "assignment withdraw",
+    {
+      usage:
+        "assignment withdraw ASSIGNMENT_ID --reason TEXT [--request-id UUID]",
+      positionals: 1,
+      flags: ["reason", "request-id"],
+      async run(ctx) {
+        const id = uuidArg(ctx.positionals[2] ?? "", "ASSIGNMENT_ID");
+        const reason = ctx.values.reason?.trim() ?? "";
+        if (!reason || reason.length > 2000)
+          throw new CliError(
+            "usage",
+            "--reason TEXT is required: why this delegate will not finish (at most 2000 characters).",
+          );
+        const session = await connectWrite(ctx, [
+          ...TASK_WRITE,
+          "assignment.read",
+        ]);
+        const read = (
+          await session.client.get(
+            `/api/operator/assignments/${id}`,
+            assignmentDetailSchema,
+          )
+        ).data;
+        const type = "assignment.withdraw";
+        const scope = `task:${read.taskId}`;
+        // The intent is this assignment and reason; the version read only fences the first send.
+        const { key, digest, reused } = await chooseKey(
+          ctx,
+          session,
+          { scope, type },
+          { assignmentId: id, reason },
+        );
+        const withdrawal = read.withdrawal;
+        if (!reused && withdrawal && !withdrawal.available)
+          throw new CliError(
+            "conflict",
+            `Assignment ${id} cannot be withdrawn: ${withdrawal.refusal?.text ?? "the service refused it."}`,
+            { fix: `Run 'cab assignment get ${id}' for its current state.` },
+          );
+        const command = {
+          type,
+          taskId: read.taskId,
+          assignmentId: id,
+          expectedVersion: read.version,
+          reason,
+        };
+        const { receipt, request } = await withConflictRemedy(
+          () =>
+            sendCommand(ctx, session, {
+              scope,
+              type,
+              key,
+              digest,
+              resource: id,
+              command: exactCommand(command, key),
+              match: (r) =>
+                r.kind === "assignment-withdraw" && r.assignmentId === id,
+            }),
+          {
+            subject: `Assignment ${id}`,
+            sent: undefined,
+            read: `cab assignment get ${id}`,
+            current: () =>
+              session.client
+                .get(`/api/operator/assignments/${id}`, assignmentDetailSchema)
+                .then((a) => ({
+                  version: a.data.version,
+                  state: a.data.state,
+                })),
+          },
+        );
+        const withdrawn =
+          receipt.kind === "assignment-withdraw" ? receipt : undefined;
+        return writeOutput({
+          request,
+          receipt,
+          reused,
+          effect: "saved",
+          summary: "Withdrew the delegate",
+          lines: [
+            ["Assignment", id],
+            ["Lead", withdrawn?.leadAssignmentId ?? ""],
+            ["Reason", reason],
+          ],
+          notes: [withdrawFinalNote],
+        });
       },
     },
   ],

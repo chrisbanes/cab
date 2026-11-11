@@ -63,6 +63,7 @@ const documentedWrites = [
   "capacity prepare",
   "capacity apply",
   "assignment apply-current",
+  "assignment withdraw",
   "operation get",
   "task create",
   "task configure",

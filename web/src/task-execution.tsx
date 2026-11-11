@@ -34,6 +34,7 @@ import {
   DialogTrigger,
 } from "./ui/dialog.js";
 import { NativeSelect } from "./ui/native-select.js";
+import { Textarea } from "./ui/textarea.js";
 
 type Data = TaskRead["data"];
 
@@ -361,6 +362,141 @@ export function TaskExecution({
         onChanged={onChanged}
       />
     </section>
+  );
+}
+
+export const withdrawFinalText =
+  "Withdrawing ends this delegate for good. It produces no result and no longer holds back its lead. Nothing restores it: to redo the work, the lead delegates again. Its conversation and workspace stay as history.";
+
+/**
+ * Withdraw an idle delegate that will not finish, with a required reason. Final: the dialog
+ * opens on Cancel, and an unconfirmed send stays checkable without sending twice.
+ */
+export function WithdrawDelegate({
+  readOnly = false,
+  assignment,
+  taskId,
+  client,
+  session,
+  onChanged,
+}: {
+  readOnly?: boolean;
+  assignment: Data["assignments"][number];
+  taskId: string;
+  client: OperatorClient;
+  session: Session;
+  onChanged: () => void;
+}) {
+  const assignmentId = assignment.assignmentId;
+  const [open, setOpen] = useState(false),
+    [reason, setReason] = useState("");
+  const cancel = useRef<HTMLButtonElement>(null);
+  const { entry, send, sending, outcome, uncertain, clear } = useCommandSend(
+    client,
+    session,
+    `${taskId}:withdraw:${assignmentId}`,
+    (c, r) =>
+      c.type === "assignment.withdraw" &&
+      r.kind === "assignment-withdraw" &&
+      r.key === c.key &&
+      r.assignmentId === c.assignmentId,
+    (kind) => {
+      if (kind === "recorded" || kind === "conflict") onChanged();
+    },
+    readOnly,
+  );
+  if (!assignment.withdrawal?.available && !open && !uncertain) return null;
+  return (
+    <Dialog
+      open={open}
+      onOpenChange={(next) => {
+        setOpen(next);
+        if (!next && !uncertain) clear();
+      }}
+    >
+      <DialogTrigger asChild>
+        <Button variant="secondary" disabled={readOnly}>
+          Withdraw…
+        </Button>
+      </DialogTrigger>
+      <DialogContent
+        role="alertdialog"
+        className="stop-dialog"
+        onOpenAutoFocus={(event) => {
+          event.preventDefault();
+          cancel.current?.focus();
+        }}
+      >
+        <DialogTitle>
+          Withdraw {assignment.name ?? "this delegate"}?
+        </DialogTitle>
+        <DialogDescription className="body">
+          {withdrawFinalText}
+        </DialogDescription>
+        {outcome?.kind !== "recorded" && !uncertain && (
+          <Textarea
+            aria-label="Reason for withdrawing (required)"
+            maxLength={2000}
+            value={reason}
+            disabled={Boolean(sending)}
+            onChange={(event) => setReason(event.target.value)}
+          />
+        )}
+        <SendFeedback
+          entry={entry}
+          outcome={outcome}
+          recorded="Withdrawn. It no longer holds back its lead."
+          conflict="Not withdrawn: the delegate changed since it was read or can no longer be withdrawn."
+          check={() => void send()}
+          review={{ label: "Review current state", onClick: clear }}
+        />
+        <div className="stop-dialog-actions">
+          {outcome?.kind !== "recorded" && !uncertain && (
+            <Button
+              variant="destructive"
+              disabled={Boolean(sending) || readOnly || !reason.trim()}
+              onClick={() =>
+                void send(
+                  operatorCommandSchema.parse({
+                    type: "assignment.withdraw",
+                    key: randomUUID(),
+                    taskId,
+                    assignmentId,
+                    expectedVersion: assignment.version,
+                    reason: reason.trim(),
+                  }),
+                )
+              }
+            >
+              {sending ? "Withdrawing…" : "Withdraw delegate"}
+            </Button>
+          )}
+          <DialogClose asChild>
+            <Button ref={cancel} type="button" variant="secondary">
+              {outcome?.kind === "recorded" ? "Close" : "Cancel"}
+            </Button>
+          </DialogClose>
+        </div>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+/** Who withdrew an assignment, when and why. */
+export function WithdrawalRecord({
+  record,
+}: {
+  record: NonNullable<
+    NonNullable<Data["assignments"][number]["withdrawal"]>["record"]
+  >;
+}) {
+  return (
+    <p data-withdrawal-record>
+      Withdrawn by {record.actor === "lead" ? "its lead" : "the operator"} on{" "}
+      {new Date(record.withdrawnAt).toLocaleString()}:{" "}
+      {record.reason ?? "reason withheld"}. Final; the lead delegates again to
+      redo the work.
+    </p>
   );
 }
 

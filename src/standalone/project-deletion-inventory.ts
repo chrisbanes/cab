@@ -124,6 +124,22 @@ export const projectDeletionInventory = {
     columns: ["assignmentId", "delegatedAt"],
     ownership: "assignmentId in A",
   },
+  assignment_withdrawals: {
+    columns: [
+      "assignmentId",
+      "taskId",
+      "actor",
+      "leadAssignmentId",
+      "priorState",
+      "reason",
+      "withdrawnAt",
+    ],
+    ownership: "assignmentId in A or taskId in T",
+  },
+  coordination_undeliverable_inbox_events: {
+    columns: ["eventId", "assignmentId", "reason"],
+    ownership: "eventId in E or assignmentId in A",
+  },
   coordination_delivery_batches: {
     columns: [
       "batchId",

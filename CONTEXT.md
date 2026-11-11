@@ -246,6 +246,10 @@ _Avoid_: Profile alone, bot identity or assignment when referring to the agent
 A durable unit of work delegated to an agent within a task that can continue across agent conversations.
 _Avoid_: Step when referring to delegated work
 
+**Delegate withdrawal**:
+The final ending of an idle delegated assignment that will not finish, by its requesting lead or the operator. A withdrawn assignment produces no result and no longer holds back its lead. Work that is live, held, uncertain or waiting on an open request cannot be withdrawn.
+_Avoid_: Cancel, supersede or stop when referring to a withdrawal
+
 **Assignment assignee**:
 The agent tasked with carrying out an assignment and returning its result.
 _Avoid_: Task owner when referring to the agent executing an assignment

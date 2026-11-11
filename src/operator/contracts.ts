@@ -1350,6 +1350,16 @@ export const requestRefusalSchema = z
   })
   .strict();
 export type RequestRefusal = z.infer<typeof requestRefusalSchema>;
+/** A delegate withdrawal: who ended it, when and why. Final; nothing restores it. */
+export const assignmentWithdrawalSchema = z
+  .object({
+    actor: z.enum(["operator", "lead"]),
+    leadAssignmentId: uuid,
+    priorState: z.enum(["pending", "running"]),
+    reason: safeText,
+    withdrawnAt: time,
+  })
+  .strict();
 export const assignmentSchema = z
   .object({
     assignmentId: uuid,
@@ -1364,7 +1374,26 @@ export const assignmentSchema = z
     resultRecipientDisposition: safeText.optional(),
     waitReason: safeText.optional(),
     version: revision,
-    state: z.enum(["pending", "running", "completed", "held", "cancelled"]),
+    state: z.enum([
+      "pending",
+      "running",
+      "completed",
+      "held",
+      "cancelled",
+      "withdrawn",
+    ]),
+    /** Absent from older services. `available` says whether the operator can withdraw it now. */
+    withdrawal: z
+      .object({
+        record: assignmentWithdrawalSchema.nullable(),
+        available: z.boolean(),
+        refusal: z
+          .object({ code: z.string(), text: z.string() })
+          .strict()
+          .optional(),
+      })
+      .strict()
+      .optional(),
     profileRevision: revision,
     instructionsRevision: revision,
     currentProfileRevision: revision,
@@ -2253,6 +2282,8 @@ export const assignmentHistorySchema = envelope(
       ),
       omittedItemCount: time,
       omittedTurnCount: z.number().int().nonnegative(),
+      /** Set once the assignment was withdrawn; absent from older services. */
+      withdrawal: assignmentWithdrawalSchema.optional(),
     })
     .strict(),
 );
@@ -3610,6 +3641,17 @@ export const operatorCommandSchema = z.discriminatedUnion("type", [
       workId: z.string().min(1).max(512),
     })
     .strict(),
+  // Ends an idle delegate for good: no result, no restore.
+  z
+    .object({
+      ...base,
+      type: z.literal("assignment.withdraw"),
+      taskId: uuid,
+      assignmentId: uuid,
+      expectedVersion: revision,
+      reason: z.string().trim().min(1).max(2000),
+    })
+    .strict(),
   // Replaces every assignment's conversation and queues a fresh first turn for the lead.
   z
     .object({
@@ -4777,6 +4819,17 @@ export const commandReceiptSchema = z.discriminatedUnion("kind", [
     .strict(),
   z
     .object({
+      kind: z.literal("assignment-withdraw"),
+      key: uuid,
+      recorded: z.literal(true),
+      taskId: uuid,
+      assignmentId: uuid,
+      leadAssignmentId: uuid,
+      withdrawnAt: time,
+    })
+    .strict(),
+  z
+    .object({
       kind: z.literal("task-reset"),
       key: uuid,
       recorded: z.literal(true),
@@ -5428,7 +5481,13 @@ export const configurationImpactSchema = envelope(
               taskId: uuid,
               projectId: uuid,
               profileId: uuid,
-              state: z.enum(["pending", "running", "completed", "held"]),
+              state: z.enum([
+                "pending",
+                "running",
+                "completed",
+                "held",
+                "withdrawn",
+              ]),
               lead: z.boolean(),
               bound: z
                 .object({

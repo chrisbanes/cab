@@ -52,6 +52,19 @@ export const coordinationTools: readonly RuntimeToolDefinition[] = [
   },
   {
     type: "function",
+    name: "cab_withdraw_delegate",
+    description:
+      "Withdraw an idle delegate you requested that will not finish, so it stops holding back your report. Final: no result and no restore; delegate again to redo the work. Refused while it has a live, held or uncertain execution, an ownership or recovery hold, an open question or approval, or unfinished delegates of its own.",
+    inputSchema: object(
+      {
+        assignmentId: uuid,
+        reason: { type: "string", minLength: 1, maxLength: 2000 },
+      },
+      ["assignmentId", "reason"],
+    ),
+  },
+  {
+    type: "function",
     name: "cab_report_result",
     description:
       "Persist the assignment's final result for its requester. This is not a progress update: finish work and ask any needed cab questions before reporting. Result persistence does not end the runtime turn; the assignment completes only after a successful terminal with no outstanding questions or delegated work. End your turn after reporting unless you still need a durable cab action. Use cab_ask_question for questions, never native asynchronous input tools.",
@@ -122,6 +135,8 @@ export function dispatchCoordinationTool(
       return store.requestFollowUp(call);
     case "cab_request_completion":
       return store.requestTaskCompletion(call);
+    case "cab_withdraw_delegate":
+      return store.withdrawDelegate(call);
     default:
       return { text: "Unknown coordination tool", success: false };
   }

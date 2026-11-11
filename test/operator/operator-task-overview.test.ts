@@ -9,6 +9,7 @@ import { optionalSummary } from "../../web/src/composer-summary.js";
 import { emptyInput } from "../../web/src/composer-state.js";
 import {
   assignmentRow,
+  blockedLeadDelegates,
   briefParts,
   criterionRows,
   originLabel,
@@ -491,6 +492,57 @@ test("stopConsequences counts unfinished delegated assignments", () => {
     "This task's assignments are affected.",
   );
   assert.equal(stopConsequences(data([], true, true)).held, true);
+});
+
+test("blocked-lead delegates are unfinished, withdrawable and not the lead; withdrawn ones are not counted", () => {
+  const lead = randomUUID();
+  const a = (
+    state: string,
+    available: boolean | undefined,
+    id = randomUUID(),
+  ) =>
+    ({
+      assignmentId: id,
+      state,
+      ...(available === undefined
+        ? {}
+        : { withdrawal: { record: null, available } }),
+    }) as unknown as Data["assignments"][number];
+  const idle = a("running", true),
+    pending = a("pending", true);
+  const assignments = [
+    a("running", true, lead),
+    idle,
+    pending,
+    a("running", false),
+    a("held", true),
+    a("withdrawn", false),
+    a("completed", false),
+    a("pending", undefined),
+  ];
+  assert.deepEqual(
+    blockedLeadDelegates({ leadAssignmentId: lead, assignments }),
+    [idle, pending],
+  );
+  assert.equal(
+    stopConsequences({
+      lead: { name: "Mira" },
+      leadAssignmentId: lead,
+      assignments,
+      execution: { holds: { ...holds, stop: false } },
+    } as unknown as Data).affected,
+    "Mira (lead) and 5 delegated assignments are affected.",
+  );
+  assert.equal(
+    assignmentRow(
+      {
+        ...a("withdrawn", false),
+        runtime: { harness: "codex" },
+      } as Data["assignments"][number],
+      [],
+    ).state,
+    "Withdrawn",
+  );
 });
 
 test("assignmentRow names requester, destination, wait and short id", () => {

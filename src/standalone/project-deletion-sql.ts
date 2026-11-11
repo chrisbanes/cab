@@ -49,6 +49,18 @@ export const projectDeletionStatements = [
     sql: "DELETE FROM coordination_completion_requests WHERE taskId IN (SELECT value FROM json_each(:tasks))",
   },
   {
+    table: "assignment_withdrawals",
+    where:
+      "assignmentId IN (SELECT value FROM json_each(:assignments)) OR taskId IN (SELECT value FROM json_each(:tasks))",
+    sql: "DELETE FROM assignment_withdrawals WHERE assignmentId IN (SELECT value FROM json_each(:assignments)) OR taskId IN (SELECT value FROM json_each(:tasks))",
+  },
+  {
+    table: "coordination_undeliverable_inbox_events",
+    where:
+      "eventId IN (SELECT value FROM json_each(:events)) OR assignmentId IN (SELECT value FROM json_each(:assignments))",
+    sql: "DELETE FROM coordination_undeliverable_inbox_events WHERE eventId IN (SELECT value FROM json_each(:events)) OR assignmentId IN (SELECT value FROM json_each(:assignments))",
+  },
+  {
     table: "coordination_delegations",
     where: "assignmentId IN (SELECT value FROM json_each(:assignments))",
     sql: "DELETE FROM coordination_delegations WHERE assignmentId IN (SELECT value FROM json_each(:assignments))",

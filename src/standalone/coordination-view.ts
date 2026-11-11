@@ -880,6 +880,7 @@ export class CoordinationView {
         };
       case "approval-superseded":
       case "source-hold-released":
+      case "delegate-withdrawn":
         return {
           ...base,
           text: z

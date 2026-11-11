@@ -119,6 +119,7 @@ export type Values = {
   kind?: string | undefined;
   status?: string | undefined;
   note?: string | undefined;
+  reason?: string | undefined;
   severity?: string | undefined;
   follow?: boolean | undefined;
   yes?: boolean | undefined;

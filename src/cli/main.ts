@@ -401,6 +401,7 @@ export const OPTIONS = {
   kind: { type: "string" },
   status: { type: "string" },
   note: { type: "string" },
+  reason: { type: "string" },
   severity: { type: "string" },
   follow: { type: "boolean" },
   yes: { type: "boolean" },

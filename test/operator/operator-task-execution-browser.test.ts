@@ -692,3 +692,114 @@ test(
     );
   },
 );
+
+test("a blocked lead's idle delegate is withdrawn with a reason after a final-ending confirmation", async (_t, j) => {
+  const f = await j.start("fixture.create", () =>
+    createOperatorFixture(null, undefined, undefined, j.fixtureOptions),
+  );
+  let browser: Browser | undefined;
+  j.cleanup(
+    (primary) => f.close(browser, primary),
+    "fixture.close",
+    () => f.lifecycle.steps,
+  );
+  const a = await seedReviewTask(f, "Withdraw project", "Withdraw task");
+  const d = f.service.domain(),
+    delegateId = randomUUID();
+  d.execute({
+    type: "assignment.create",
+    actor: "agent",
+    key: randomUUID(),
+    projectId: a.projectId,
+    taskId: a.taskId,
+    assignmentId: delegateId,
+    profileId: a.profileId,
+    brief: "Stranded delegated work",
+    resultDestination: "requester",
+    requesterAssignmentId: a.assignmentId,
+  });
+  const web = await j.start("fixture.web", () => f.startWeb());
+  browser = await j.start("browser.launch", () => chromium.launch());
+  const page = await browser.newPage({
+    viewport: { width: 1366, height: 900 },
+  });
+  j.observe(page);
+  page.setDefaultTimeout(5000);
+  const commands: Record<string, unknown>[] = [];
+  page.on("request", (r) => {
+    if (r.method() === "POST" && r.url().endsWith("/api/operator/commands"))
+      commands.push(r.postDataJSON());
+  });
+  await signIn(page, web.origin, web.password, `/tasks/${a.taskId}`);
+  const fold = page.locator("details.inspector-fold");
+  if ((await fold.getAttribute("open")) === null)
+    await fold.locator("> summary").click();
+  const blocked = page.locator("[data-blocked-lead]");
+  await blocked
+    .getByText("The lead is waiting on delegates that will not finish.")
+    .waitFor();
+
+  // Cancel sends nothing; Confirm stays off until a reason is entered.
+  const withdraw = blocked.getByRole("button", { name: "Withdraw…" });
+  await withdraw.click();
+  const dialog = page.getByRole("alertdialog");
+  await dialog.getByText(/ends this delegate for good/).waitFor();
+  await dialog.getByText(/the lead delegates again/).waitFor();
+  await page.waitForFunction(
+    () => document.activeElement?.textContent === "Cancel",
+  );
+  const confirm = dialog.getByRole("button", { name: "Withdraw delegate" });
+  assert.equal(await confirm.isDisabled(), true);
+  await dialog.getByRole("button", { name: "Cancel" }).click();
+  await dialog.waitFor({ state: "detached" });
+  assert.equal(commands.length, 0);
+
+  // A lost reply is checked with the same key, never sent anew.
+  let armed = true;
+  await page.route("**/api/operator/commands", async (route) => {
+    if (
+      armed &&
+      route.request().postData()?.includes('"assignment.withdraw"')
+    ) {
+      armed = false;
+      await route.fetch();
+      await route.abort();
+    } else await route.fallback();
+  });
+  await withdraw.click();
+  await dialog
+    .getByLabel("Reason for withdrawing (required)")
+    .fill("Replaced by a new delegate");
+  assert.equal(await confirm.isDisabled(), false);
+  await confirm.click();
+  const check = dialog.getByRole("button", { name: "Check whether it saved" });
+  await check.waitFor();
+  assert.equal(d.assignment(delegateId).state, "withdrawn");
+  await check.click();
+  // Recorded: the delegate is no longer withdrawable, so its panel row and dialog go.
+  await blocked.waitFor({ state: "detached" });
+  const sent = commands.filter((c) => c.type === "assignment.withdraw");
+  assert.equal(sent.length, 2);
+  assert.equal(sent[0]?.key, sent[1]?.key);
+  assert.equal(sent[0]?.reason, "Replaced by a new delegate");
+  assert.equal(sent[0]?.assignmentId, delegateId);
+  assert.equal(sent[0]?.expectedVersion, 1);
+  await page.unroute("**/api/operator/commands");
+
+  // The row reads Withdrawn with its record.
+  const card = page.locator("#assignments > details.overview-disclosure");
+  if ((await card.getAttribute("open")) === null)
+    await card.locator("> summary").click();
+  await card
+    .getByText(/^Withdrawn · /)
+    .first()
+    .waitFor();
+  const facts = page
+    .locator("details.assignment-facts")
+    .filter({ hasText: "Stranded delegated work" });
+  await facts.locator("> summary").click();
+  await facts
+    .locator("[data-withdrawal-record]")
+    .getByText(/Withdrawn by the operator on .*: Replaced by a new delegate/)
+    .waitFor();
+});

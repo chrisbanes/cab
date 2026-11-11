@@ -360,6 +360,7 @@ import {
   type TaskControlReceipt,
   type WorkspaceRecheckReceipt,
   type TaskResetReceipt,
+  type AssignmentWithdrawReceipt,
   type TaskExecutionBinding,
   type TaskExecutionBindingRecord,
   type TaskExecutionContext,
@@ -6064,6 +6065,51 @@ export class StandaloneService {
   /** Whether the operator can reset the task now, and why not. */
   resetAvailability(taskId: string) {
     return resetAvailability(this.resetFacts(taskId));
+  }
+
+  /** The withdrawal record and whether the operator could withdraw the assignment now. */
+  assignmentWithdrawal(assignmentId: string) {
+    const { coordination } = this.started();
+    const record = coordination.assignmentWithdrawal(assignmentId) ?? null;
+    const availability = coordination.withdrawalAvailability(assignmentId);
+    return {
+      record,
+      available: availability.available,
+      ...(availability.available
+        ? {}
+        : { refusal: { code: availability.code, text: availability.text } }),
+    };
+  }
+
+  /**
+   * Ends an idle delegate for good and tells its lead. Not undone: to redo the work, the lead
+   * delegates again. Refusals throw `DelegateWithdrawalRefusedError` and record nothing.
+   */
+  withdrawDelegate(command: {
+    key: string;
+    taskId: string;
+    assignmentId: string;
+    expectedVersion: number;
+    reason: string;
+  }): AssignmentWithdrawReceipt {
+    const { state, coordination } = this.started();
+    const { receipt, replayed } = state.recordAssignmentWithdrawal(
+      command,
+      () => {
+        const withdrawal = coordination.withdrawDelegateWithinTransaction({
+          assignmentId: command.assignmentId,
+          actor: "operator",
+          expectedVersion: command.expectedVersion,
+          reason: command.reason,
+        });
+        return {
+          leadAssignmentId: withdrawal.leadAssignmentId,
+          withdrawnAt: withdrawal.withdrawnAt,
+        };
+      },
+    );
+    if (!replayed) this.wakeAfterCommit();
+    return receipt;
   }
 
   /**

@@ -83,6 +83,10 @@ export type StartAgainReceipt = Extract<
   { kind: "start-again" }
 >;
 export type TaskResetReceipt = Extract<CommandReceipt, { kind: "task-reset" }>;
+export type AssignmentWithdrawReceipt = Extract<
+  CommandReceipt,
+  { kind: "assignment-withdraw" }
+>;
 
 const stopTargetColumns = `(
       taskId TEXT NOT NULL,
@@ -1228,11 +1232,14 @@ export class ExecutionState {
     material: {
       type: string;
       taskId: string;
-      expectedVersion: number;
+      /** The task version; required unless `fenceTaskVersion` is false. */
+      expectedVersion?: number;
       [field: string]: unknown;
     },
     keyValue: string,
     receiptOf: (base: { key: string; recorded: true; taskId: string }) => R,
+    /** False when `expectedVersion` fences another record, which `receiptOf` checks. */
+    fenceTaskVersion = true,
   ): { receipt: R; replayed: boolean } {
     const id = z.string().uuid().parse(material.taskId);
     const key = z.string().uuid().parse(keyValue);
@@ -1254,7 +1261,10 @@ export class ExecutionState {
       const row = this.db
         .prepare("SELECT version FROM domain_tasks WHERE id = ?")
         .get(id) as { version: number } | undefined;
-      if (row?.version !== material.expectedVersion)
+      if (
+        !row ||
+        (fenceTaskVersion && row.version !== material.expectedVersion)
+      )
         throw new DomainConflictError("Task version conflict");
       const receipt = receiptOf({ key, recorded: true, taskId: id });
       this.db
@@ -1333,6 +1343,38 @@ export class ExecutionState {
       },
       command.key,
       (base) => ({ kind: "task-reset" as const, ...base, ...record() }),
+    );
+  }
+
+  /**
+   * `expectedVersion` is the assignment's and fences only the first application, which
+   * `record` re-checks; the key replays the same withdrawal whatever version a retry read.
+   */
+  recordAssignmentWithdrawal(
+    command: {
+      key: string;
+      taskId: string;
+      assignmentId: string;
+      expectedVersion: number;
+      reason: string;
+    },
+    record: () => { leadAssignmentId: string; withdrawnAt: number },
+  ): { receipt: AssignmentWithdrawReceipt; replayed: boolean } {
+    return this.recordReceipted(
+      {
+        type: "assignment.withdraw",
+        taskId: command.taskId,
+        assignmentId: command.assignmentId,
+        reason: command.reason,
+      },
+      command.key,
+      (base) => ({
+        kind: "assignment-withdraw" as const,
+        ...base,
+        assignmentId: command.assignmentId,
+        ...record(),
+      }),
+      false,
     );
   }
 
