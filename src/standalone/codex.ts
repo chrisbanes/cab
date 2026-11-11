@@ -666,8 +666,9 @@ export interface RuntimeTurnPolicy {
    */
   localListening?: boolean;
   /**
-   * Skip the harness sandbox, captured at admission; set only on a task turn of the setting's
-   * project. A draft turn never carries it. The runtime translates it per harness.
+   * Skip the harness sandbox: set when the turn was admitted at the unsandboxed sandbox level,
+   * which only a task turn can be. A draft turn never carries it. The runtime translates it per
+   * harness.
    */
   skipSandbox?: boolean;
 }

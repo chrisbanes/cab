@@ -30,10 +30,10 @@ const allowed: Record<string, { reason: string; lines?: string[] }> = {
       ': "Local listening is disabled for this project\'s Claude Code task turns; Codex turns can listen only with command network access.";',
     ],
   },
-  [join("src", "operator", "skip-sandbox-copy.ts")]: {
-    reason: "the Codex grant line of the skip-sandbox setting",
+  [join("src", "operator", "sandbox-level-copy.ts")]: {
+    reason: "the Codex grant line of the unsandboxed sandbox level",
     lines: [
-      '"A project that skips the sandbox runs its Codex task turns with sandbox policy dangerFullAccess; the approval policy stays never. Draft, read-only and unbound turns never skip it.";',
+      '"A project at the unsandboxed level runs its Codex task turns with sandbox policy dangerFullAccess; the approval policy stays never. Draft, read-only and unbound turns stay strict.";',
     ],
   },
   [join("src", "core", "execution-runtime.ts")]: {

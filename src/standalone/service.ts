@@ -95,6 +95,7 @@ import {
   DomainStaleDispositionError,
   DomainStore,
 } from "../core/domain.js";
+import type { SandboxLevel } from "../core/sandbox-level.js";
 import {
   type SupportedRuntimeSettings,
   supportedRuntimeSettingsSchema,
@@ -3364,12 +3365,10 @@ export class StandaloneService {
     return intent ? this.started().state.localListening(intent.id) : null;
   }
 
-  /** Skip-sandbox a work's turn was admitted with; null when no admission recorded it. */
-  dangerouslySkipSandboxFor(workId: string): boolean | null {
+  /** Sandbox level a work's turn was admitted with; null when no admission recorded it. */
+  sandboxLevelFor(workId: string): SandboxLevel | null {
     const intent = this.executionForWork(workId);
-    return intent
-      ? this.started().state.dangerouslySkipSandbox(intent.id)
-      : null;
+    return intent ? this.started().state.sandboxLevel(intent.id) : null;
   }
 
   recoveryFor(
@@ -9644,7 +9643,7 @@ export class StandaloneService {
             // sandboxed turn keeps `failIfUnavailable: true`.
             const skipSandbox =
               request.projectId !== null &&
-              state.skipSandboxApplies(intent.id, request.projectId);
+              state.unsandboxedApplies(intent.id, request.projectId);
             return preflight({
               workspace: workspaceKey,
               ...(settings ? { settings } : {}),
@@ -10024,8 +10023,9 @@ export class StandaloneService {
       // Synchronous and caught: recorded before submission, never delaying it.
       if (diagnostics)
         this.recordDiagnosticInputs(diagnostics, request, promptParts, prompt);
-      // Passed only when network access, local listening, skip-sandbox or Git roots apply, so otherwise keeps
-      // today's call shapes. A draft turn is always read-only with network, listening and skip-sandbox off.
+      // Passed only when network access, local listening, an unsandboxed level or Git roots apply, so
+      // otherwise keeps today's call shapes. A draft turn is always read-only, strict, with network
+      // and listening off.
       const binding = request.taskId
         ? this.started().workspaceBindings.get(request.taskId)
         : undefined;
@@ -10035,7 +10035,7 @@ export class StandaloneService {
           : [];
       const networkAccess = state.commandNetworkAccess(intent.id) === true;
       const localListening = state.localListening(intent.id) === true;
-      const skipSandbox = state.dangerouslySkipSandbox(intent.id) === true;
+      const skipSandbox = state.sandboxLevel(intent.id) === "unsandboxed";
       const policy: RuntimeTurnPolicy | undefined = request.draftTurn
         ? { networkAccess: false, access: "read-only" }
         : networkAccess ||

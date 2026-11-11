@@ -855,6 +855,24 @@ function restoreDraftingSchema25(db: DatabaseSync) {
     DROP TABLE drafting_runs_new;`);
 }
 
+/** Level 32 replaced the skip-sandbox booleans with the sandbox level; the prior DDL verbatim. */
+const undoSandboxLevel = `DROP TABLE project_sandbox_level;
+    DROP TABLE execution_intent_sandbox_level;
+    CREATE TABLE project_dangerously_skip_sandbox (
+          projectId TEXT PRIMARY KEY REFERENCES domain_projects(id),
+          enabled INTEGER NOT NULL CHECK(enabled IN (0, 1))
+        );
+    CREATE TABLE execution_intent_dangerously_skip_sandbox (
+      intentId TEXT PRIMARY KEY REFERENCES execution_intents(id),
+      enabled INTEGER NOT NULL CHECK(enabled IN (0, 1))
+    );`;
+
+/** Level 32 changed only the sandbox setting tables; then level 31 is undone. */
+function undoLevel32(db: DatabaseSync) {
+  db.exec(undoSandboxLevel);
+  undoLevel31(db);
+}
+
 /** Level 31 added only the result review table; then level 30 is undone. */
 function undoLevel31(db: DatabaseSync) {
   db.exec("DROP TABLE coordination_result_reviews");
@@ -929,6 +947,8 @@ function restoreRequestSchema21(db: DatabaseSync) {
 
 /** The schema digest each migration level created. Append an entry with every level bump. */
 const SCHEMA_PINS: Record<number, string> = {
+  // The skip-sandbox booleans become the sandbox level.
+  32: "bb66c2e6fa83032ecf21112535bf7cdc2d804aeb706314378bdbd5cac0413b14",
   // Result review requests.
   31: "3e1f1837f1922efdeb55b28417abf39772cdf1eaa91dded882662a4d693900d6",
   // Held-turn interrupts and releases.
@@ -1050,6 +1070,12 @@ test("reasoning migration protects the level 19 schema before adding either tabl
         VALUES (?, 'retained-work', 'Retained prompt', '/retained/workspace', 'completed',
           'retained-thread', 'retained-turn', 'chatgpt', 'workspaceWrite', 'never')`)
         .run(intentId);
+      undoLevel32(before);
+      restoreRequestSchema21(before);
+      restoreDraftingSchema25(before);
+      before.exec(
+        `${undoLevel28}${undoLevel24}DROP TABLE inbox_lifecycle_receipts; DROP TABLE inbox_lifecycle; DROP TABLE project_reasoning_summaries; DROP TABLE execution_intent_reasoning_summaries; DROP TABLE execution_pre_turn_refusals`,
+      );
       before
         .prepare(
           "INSERT INTO project_dangerously_skip_sandbox (projectId, enabled) VALUES (?, 1)",
@@ -1060,12 +1086,6 @@ test("reasoning migration protects the level 19 schema before adding either tabl
           "INSERT INTO execution_intent_dangerously_skip_sandbox (intentId, enabled) VALUES (?, 1)",
         )
         .run(intentId);
-      undoLevel31(before);
-      restoreRequestSchema21(before);
-      restoreDraftingSchema25(before);
-      before.exec(
-        `${undoLevel28}${undoLevel24}DROP TABLE inbox_lifecycle_receipts; DROP TABLE inbox_lifecycle; DROP TABLE project_reasoning_summaries; DROP TABLE execution_intent_reasoning_summaries; DROP TABLE execution_pre_turn_refusals`,
-      );
     } finally {
       before.close();
     }
@@ -1079,16 +1099,34 @@ test("reasoning migration protects the level 19 schema before adding either tabl
           turn: db
             .prepare("SELECT * FROM execution_intents WHERE id = ?")
             .get(intentId),
-          skipSandboxProject: db
-            .prepare(
-              "SELECT enabled FROM project_dangerously_skip_sandbox WHERE projectId = ?",
-            )
-            .get(projectId),
-          skipSandboxTurn: db
-            .prepare(
-              "SELECT enabled FROM execution_intent_dangerously_skip_sandbox WHERE intentId = ?",
-            )
-            .get(intentId),
+          // The skip-sandbox booleans before level 32, the sandbox levels after it.
+          sandbox: db
+            .prepare("SELECT 1 FROM sqlite_schema WHERE name = ?")
+            .get("project_sandbox_level")
+            ? [
+                db
+                  .prepare(
+                    "SELECT level FROM project_sandbox_level WHERE projectId = ?",
+                  )
+                  .get(projectId)?.level,
+                db
+                  .prepare(
+                    "SELECT level FROM execution_intent_sandbox_level WHERE intentId = ?",
+                  )
+                  .get(intentId)?.level,
+              ]
+            : [
+                db
+                  .prepare(
+                    "SELECT enabled FROM project_dangerously_skip_sandbox WHERE projectId = ?",
+                  )
+                  .get(projectId)?.enabled,
+                db
+                  .prepare(
+                    "SELECT enabled FROM execution_intent_dangerously_skip_sandbox WHERE intentId = ?",
+                  )
+                  .get(intentId)?.enabled,
+              ],
           tables: db
             .prepare(
               "SELECT name FROM sqlite_schema WHERE name IN ('project_reasoning_summaries', 'execution_intent_reasoning_summaries') ORDER BY name",
@@ -1101,6 +1139,7 @@ test("reasoning migration protects the level 19 schema before adding either tabl
     };
     const retained = read(database);
     assert.deepEqual(retained.tables, []);
+    assert.deepEqual(retained.sandbox, [1, 1]);
     await assert.rejects(
       run(dirs.data, MIGRATION_LEVEL, (point) => {
         if (point === "after-startup-snapshot-record") {
@@ -1126,8 +1165,7 @@ test("reasoning migration protects the level 19 schema before adding either tabl
     const migrated = read(database);
     assert.deepEqual(migrated.project, retained.project);
     assert.deepEqual(migrated.turn, retained.turn);
-    assert.deepEqual(migrated.skipSandboxProject, retained.skipSandboxProject);
-    assert.deepEqual(migrated.skipSandboxTurn, retained.skipSandboxTurn);
+    assert.deepEqual(migrated.sandbox, ["unsandboxed", "unsandboxed"]);
     assert.deepEqual(
       migrated.tables.map((row) => row.name),
       ["execution_intent_reasoning_summaries", "project_reasoning_summaries"],
@@ -1173,7 +1211,7 @@ test("pre-turn refusal migration snapshots the level 20 schema and adds its tabl
     await run(dirs.data, 20);
     const database = join(dirs.data, "standalone.sqlite");
     const before = new DatabaseSync(database);
-    undoLevel31(before);
+    undoLevel32(before);
     restoreRequestSchema21(before);
     restoreDraftingSchema25(before);
     before.exec(
@@ -1299,13 +1337,102 @@ test("local listening migration snapshots level 14 and adds both tables empty, s
   }
 });
 
-test("skip sandbox migration snapshots level 16 and adds both tables empty, so every project stays off", async () => {
+test("sandbox level migration maps level 31 skip-sandbox rows and drops the old tables", async () => {
+  const dirs = layout();
+  try {
+    await run(dirs.data, 31);
+    const database = join(dirs.data, "standalone.sqlite");
+    const projects = [randomUUID(), randomUUID(), randomUUID()],
+      intents = [randomUUID(), randomUUID(), randomUUID()];
+    const before = new DatabaseSync(database);
+    try {
+      const domain = new DomainStore(before);
+      for (const [index, projectId] of projects.entries())
+        domain.execute({
+          type: "project.create",
+          actor: "operator",
+          key: randomUUID(),
+          projectId,
+          name: `Sandbox project ${index}`,
+          leadProfileId: null,
+          instructions: "Retained instructions",
+        });
+      for (const intentId of intents)
+        before
+          .prepare(
+            `INSERT INTO execution_intents
+          (id, workId, prompt, workspace, state, accountType, sandbox, approval)
+          VALUES (?, ?, 'p', '/w', 'completed', 'chatgpt', 'workspaceWrite', 'never')`,
+          )
+          .run(intentId, randomUUID());
+      before.exec(undoSandboxLevel);
+      // On, off, and (the third of each) no row.
+      for (const [index, enabled] of [1, 0].entries()) {
+        before
+          .prepare(
+            "INSERT INTO project_dangerously_skip_sandbox (projectId, enabled) VALUES (?, ?)",
+          )
+          .run(projects[index]!, enabled);
+        before
+          .prepare(
+            "INSERT INTO execution_intent_dangerously_skip_sandbox (intentId, enabled) VALUES (?, ?)",
+          )
+          .run(intents[index]!, enabled);
+      }
+    } finally {
+      before.close();
+    }
+    assert.equal(schemaDigest(dirs.data), SCHEMA_PINS[31]);
+    await run(dirs.data);
+    const snapshot = readStartupState(dirs.data)?.snapshot;
+    assert.equal(snapshot?.from, 31);
+    assert.ok(snapshot?.path);
+    assert.equal(schemaDigest(snapshot.path), SCHEMA_PINS[31]);
+    const current = new DatabaseSync(database, { readOnly: true });
+    try {
+      const domain = new DomainStore(current);
+      assert.deepEqual(
+        projects.map((projectId) => domain.sandboxLevel(projectId)),
+        ["unsandboxed", "strict", "strict"],
+      );
+      assert.deepEqual(
+        intents.map(
+          (intentId) =>
+            (
+              current
+                .prepare(
+                  "SELECT level FROM execution_intent_sandbox_level WHERE intentId = ?",
+                )
+                .get(intentId) as { level: string } | undefined
+            )?.level ?? null,
+        ),
+        ["unsandboxed", "strict", null],
+      );
+      assert.deepEqual(
+        current
+          .prepare(
+            "SELECT name FROM sqlite_schema WHERE name IN ('project_dangerously_skip_sandbox', 'execution_intent_dangerously_skip_sandbox')",
+          )
+          .all(),
+        [],
+      );
+      assert.deepEqual(current.prepare("PRAGMA foreign_key_check").all(), []);
+    } finally {
+      current.close();
+    }
+    assert.equal(recordedLevel(dirs.data), MIGRATION_LEVEL);
+  } finally {
+    dirs.cleanup();
+  }
+});
+
+test("sandbox level migration snapshots level 16 and adds both tables empty, so every project stays strict", async () => {
   const dirs = layout();
   try {
     await run(dirs.data, 16);
     const before = new DatabaseSync(join(dirs.data, "standalone.sqlite"));
     before.exec(
-      "DROP TABLE project_dangerously_skip_sandbox; DROP TABLE execution_intent_dangerously_skip_sandbox",
+      "DROP TABLE project_sandbox_level; DROP TABLE execution_intent_sandbox_level",
     );
     before.close();
     await run(dirs.data);
@@ -1321,8 +1448,8 @@ test("skip sandbox migration snapshots level 16 and adds both tables empty, so e
     });
     try {
       for (const table of [
-        "project_dangerously_skip_sandbox",
-        "execution_intent_dangerously_skip_sandbox",
+        "project_sandbox_level",
+        "execution_intent_sandbox_level",
       ]) {
         assert.equal(
           prior
@@ -1335,6 +1462,16 @@ test("skip sandbox migration snapshots level 16 and adds both tables empty, so e
           0,
         );
       }
+      for (const table of [
+        "project_dangerously_skip_sandbox",
+        "execution_intent_dangerously_skip_sandbox",
+      ])
+        assert.equal(
+          current
+            .prepare("SELECT name FROM sqlite_schema WHERE name = ?")
+            .get(table),
+          undefined,
+        );
       assert.deepEqual(current.prepare("PRAGMA foreign_key_check").all(), []);
     } finally {
       prior.close();
@@ -1407,7 +1544,7 @@ test("Inbox lifecycle migration snapshots level 22 and initializes both tables w
     await run(dirs.data, 22);
     const database = join(dirs.data, "standalone.sqlite"),
       before = new DatabaseSync(database);
-    undoLevel31(before);
+    undoLevel32(before);
     before.exec(
       `${undoLevel28}${undoLevel24}DROP TABLE inbox_lifecycle_receipts; DROP TABLE inbox_lifecycle`,
     );
@@ -1441,7 +1578,7 @@ test("request-only refusal migration snapshots level 21 and preserves restart li
   try {
     await run(dirs.data, 21);
     const db = new DatabaseSync(join(dirs.data, "standalone.sqlite"));
-    undoLevel31(db);
+    undoLevel32(db);
     restoreRequestSchema21(db);
     restoreDraftingSchema25(db);
     db.exec(
@@ -1495,7 +1632,7 @@ test("withdrawn-state migration rebuilds level 28 assignments and keeps every ro
       profileId = randomUUID(),
       children = [randomUUID(), randomUUID(), randomUUID()];
     try {
-      undoLevel31(before);
+      undoLevel32(before);
       const domain = new DomainStore(before);
       domain.execute({
         type: "profile.create",
@@ -1614,7 +1751,7 @@ test("withdrawn-state migration refuses an assignment schema it does not recogni
     await run(dirs.data, 28);
     const database = join(dirs.data, "standalone.sqlite");
     const before = new DatabaseSync(database);
-    undoLevel31(before);
+    undoLevel32(before);
     rebuildAssignmentCheck(
       before,
       "CHECK(state IN ('pending','running','completed','held'))",

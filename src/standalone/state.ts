@@ -44,6 +44,7 @@ import {
   executionHarnessSchema,
 } from "./execution-harness.js";
 import { transaction, type Database } from "../core/store.js";
+import type { SandboxLevel } from "../core/sandbox-level.js";
 import type { ReconciledAssignmentProof } from "../core/coordination.js";
 import type {
   RecoveryRecord,
@@ -679,12 +680,13 @@ export class ExecutionState {
       intentId TEXT PRIMARY KEY REFERENCES execution_intents(id),
       enabled INTEGER NOT NULL CHECK(enabled IN (0, 1))
     );
-    CREATE TABLE IF NOT EXISTS project_dangerously_skip_sandbox (
-      projectId TEXT PRIMARY KEY, enabled INTEGER NOT NULL CHECK(enabled IN (0, 1))
+    CREATE TABLE IF NOT EXISTS project_sandbox_level (
+      projectId TEXT PRIMARY KEY,
+      level TEXT NOT NULL CHECK(level IN ('strict', 'unsandboxed'))
     );
-    CREATE TABLE IF NOT EXISTS execution_intent_dangerously_skip_sandbox (
+    CREATE TABLE IF NOT EXISTS execution_intent_sandbox_level (
       intentId TEXT PRIMARY KEY REFERENCES execution_intents(id),
-      enabled INTEGER NOT NULL CHECK(enabled IN (0, 1))
+      level TEXT NOT NULL CHECK(level IN ('strict', 'unsandboxed'))
     );
     CREATE TABLE IF NOT EXISTS execution_retry_chains (
       chainId TEXT PRIMARY KEY REFERENCES execution_intents(workId),
@@ -842,6 +844,14 @@ export class ExecutionState {
     INSERT OR IGNORE INTO execution_power_supervision (singleton) VALUES (1);
     INSERT OR IGNORE INTO scheduler_capacity_limits (singleton, globalLimit)
       VALUES (1, 6)`);
+    // Level 32: an admitted skip-sandbox boolean becomes the admitted level, then its table goes.
+    if (this.hasTable("execution_intent_dangerously_skip_sandbox"))
+      transaction(this.db, () =>
+        this.db.exec(`INSERT OR IGNORE INTO execution_intent_sandbox_level (intentId, level)
+          SELECT intentId, CASE enabled WHEN 1 THEN 'unsandboxed' ELSE 'strict' END
+          FROM execution_intent_dangerously_skip_sandbox;
+          DROP TABLE execution_intent_dangerously_skip_sandbox;`),
+      );
     const recoveryIdentityColumns = this.db
       .prepare("PRAGMA table_info(execution_recovery_identities)")
       .all() as Array<{ name: string }>;
@@ -2096,21 +2106,22 @@ export class ExecutionState {
     return row ? row.enabled === 1 : null;
   }
 
-  /** Skip-sandbox the turn was admitted with; null when no admission recorded it. */
-  dangerouslySkipSandbox(intentId: string): boolean | null {
+  /** Sandbox level the turn was admitted with; null when no admission recorded it. */
+  sandboxLevel(intentId: string): SandboxLevel | null {
     const row = this.db
       .prepare(
-        "SELECT enabled FROM execution_intent_dangerously_skip_sandbox WHERE intentId = ?",
+        "SELECT level FROM execution_intent_sandbox_level WHERE intentId = ?",
       )
-      .get(intentId) as { enabled: number } | undefined;
-    return row ? row.enabled === 1 : null;
+      .get(intentId) as { level: SandboxLevel } | undefined;
+    return row?.level ?? null;
   }
 
   /**
-   * Whether admitting this intent now would record skip-sandbox on: the project setting is on,
-   * the work has a task binding and it is not a draft turn. Admission uses the same condition.
+   * Whether admitting this intent now would record `unsandboxed`: the project level is
+   * unsandboxed, the work has a task binding and it is not a draft turn. Admission uses the same
+   * condition.
    */
-  skipSandboxApplies(intentId: string, projectId: string): boolean {
+  unsandboxedApplies(intentId: string, projectId: string): boolean {
     const work = this.db
       .prepare("SELECT workId FROM execution_intents WHERE id = ?")
       .get(intentId) as { workId: string } | undefined;
@@ -2119,9 +2130,9 @@ export class ExecutionState {
       (
         this.db
           .prepare(`SELECT EXISTS (
-            SELECT 1 FROM project_dangerously_skip_sandbox p
+            SELECT 1 FROM project_sandbox_level p
             JOIN task_execution_bindings b ON b.workId = ?
-            WHERE p.projectId = ? AND p.enabled = 1
+            WHERE p.projectId = ? AND p.level = 'unsandboxed'
             ${this.hasTurnRequests ? "AND NOT EXISTS (SELECT 1 FROM turn_requests r WHERE r.workId = ? AND r.draftTurn = 1)" : ""}
           ) AS applies`)
           .get(
@@ -6187,11 +6198,10 @@ export class ExecutionState {
             .prepare("SELECT workId FROM execution_intents WHERE id = ?")
             .get(id) as { workId: string }
         ).workId;
-        // Only a Codex task turn can run with command network access, only a Claude
-        // task turn with local listening, and a task turn of either harness with
-        // skip-sandbox: drafting runs have no binding and stay off, as does the other
-        // harness. Writes execution_intent_network_access,
-        // execution_intent_local_listening and execution_intent_dangerously_skip_sandbox.
+        // Only a Codex task turn can run with command network access and only a Claude
+        // task turn with local listening: drafting runs have no binding and stay off, as
+        // does the other harness. Writes execution_intent_network_access and
+        // execution_intent_local_listening.
         for (const [intentTable, projectTable, harness] of [
           [
             "execution_intent_network_access",
@@ -6203,18 +6213,13 @@ export class ExecutionState {
             "project_local_listening",
             "claude",
           ],
-          [
-            "execution_intent_dangerously_skip_sandbox",
-            "project_dangerously_skip_sandbox",
-            "any",
-          ],
         ] as const)
           this.db
             .prepare(`INSERT OR REPLACE INTO ${intentTable} (intentId, enabled)
           SELECT ?, EXISTS (
             SELECT 1 FROM ${projectTable} p
             JOIN task_execution_bindings b ON b.workId = ?
-            WHERE p.projectId = ? AND p.enabled = 1 ${harness === "any" ? "" : `AND b.harness = '${harness}'`})
+            WHERE p.projectId = ? AND p.enabled = 1 AND b.harness = '${harness}')
             ${
               // A draft turn never gets any of the expansions.
               this.hasTurnRequests
@@ -6239,6 +6244,19 @@ export class ExecutionState {
             workId,
             options.projectId,
             ...(this.hasTurnRequests ? [workId] : []),
+          );
+        // A task turn of either harness takes the project's level; draft turns and drafting
+        // runs stay strict.
+        this.db
+          .prepare(
+            "INSERT OR REPLACE INTO execution_intent_sandbox_level (intentId, level) VALUES (?, ?)",
+          )
+          .run(
+            id,
+            options.projectId !== null &&
+              this.unsandboxedApplies(id, options.projectId)
+              ? "unsandboxed"
+              : "strict",
           );
         const retryGeneration = this.db
           .prepare(`SELECT chainId FROM execution_retry_generations

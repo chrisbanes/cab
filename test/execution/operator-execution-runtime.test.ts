@@ -16,10 +16,10 @@ import {
   localListeningLimit,
 } from "../../src/operator/local-listening-copy.js";
 import {
-  claudeSkipSandboxLine,
-  codexSkipSandboxLine,
-  skipSandboxRiskLines,
-} from "../../src/operator/skip-sandbox-copy.js";
+  claudeUnsandboxedLine,
+  codexUnsandboxedLine,
+  unsandboxedRiskLines,
+} from "../../src/operator/sandbox-level-copy.js";
 import {
   executionSummary,
   failureNotice,
@@ -405,7 +405,7 @@ test("both harnesses' disclosures name the writable Git paths and their limits",
   }
 });
 
-test("both harnesses' disclosures state the skip-sandbox grant and risks within the disclosure caps", () => {
+test("both harnesses' disclosures state the unsandboxed grant and risks within the disclosure caps", () => {
   const claude = claudePolicyDisclosure(
     {
       writableRoots: ["/w", "/tmp/ens-0123"],
@@ -429,18 +429,18 @@ test("both harnesses' disclosures state the skip-sandbox grant and risks within 
   assert.deepEqual(policyDisclosureSchema.parse(shared), shared);
   const codex = codexPolicyDisclosure();
   assert.match(
-    codexSkipSandboxLine,
+    codexUnsandboxedLine,
     /dangerFullAccess.*approval policy stays never/,
   );
-  assert.match(claudeSkipSandboxLine, /sandbox disabled/);
-  assert.ok(claude.lines.includes(claudeSkipSandboxLine));
-  assert.ok(codex.lines.includes(codexSkipSandboxLine));
+  assert.match(claudeUnsandboxedLine, /sandbox disabled/);
+  assert.ok(claude.lines.includes(claudeUnsandboxedLine));
+  assert.ok(codex.lines.includes(codexUnsandboxedLine));
   for (const disclosure of [claude, codex]) {
-    for (const risk of skipSandboxRiskLines)
+    for (const risk of unsandboxedRiskLines)
       assert.ok(disclosure.lines.includes(risk));
     assert.deepEqual(policyDisclosureSchema.parse(disclosure), disclosure);
   }
-  const risks = skipSandboxRiskLines.join(" ");
+  const risks = unsandboxedRiskLines.join(" ");
   for (const word of [
     /full filesystem, process, network and credential access/,
     /issue and pull request bodies/,

@@ -16,11 +16,11 @@ import {
   turnLocalListeningLine,
 } from "../../src/operator/local-listening-copy.js";
 import {
-  projectSkipSandboxLine,
-  skipSandboxAppliesNote,
-  skipSandboxSupersededLine,
-  turnSkipSandboxLine,
-} from "../../src/operator/skip-sandbox-copy.js";
+  projectSandboxLevelLine,
+  sandboxLevelAppliesNote,
+  unsandboxedSupersededLine,
+  turnSandboxLevelLine,
+} from "../../src/operator/sandbox-level-copy.js";
 import {
   diagnosticCaptureAppliesNote,
   diagnosticCaptureLine,
@@ -229,18 +229,19 @@ test("project and profile change lists name each change without private values",
   assert.deepEqual(listening(true, false), ["Local listening disabled"]);
   assert.deepEqual(listening(true, true), []);
   assert.deepEqual(listening(undefined, true), []);
-  const skip = (saved: boolean | undefined, next: boolean) =>
+  const sandbox = (saved: "strict" | "unsandboxed" | undefined, next: string) =>
     projectChanges(
-      {
-        ...c,
-        ...(saved === undefined ? {} : { dangerouslySkipSandbox: saved }),
-      },
-      { name: "Atlas", leadProfileId: mira, dangerouslySkipSandbox: next },
+      { ...c, ...(saved === undefined ? {} : { sandbox: saved }) },
+      { name: "Atlas", leadProfileId: mira, sandbox: next },
     );
-  assert.deepEqual(skip(false, true), ["Skip sandbox enabled"]);
-  assert.deepEqual(skip(true, false), ["Skip sandbox disabled"]);
-  assert.deepEqual(skip(true, true), []);
-  assert.deepEqual(skip(undefined, true), []);
+  assert.deepEqual(sandbox("strict", "unsandboxed"), [
+    "Sandbox level: Strict → Unsandboxed (dangerous)",
+  ]);
+  assert.deepEqual(sandbox("unsandboxed", "strict"), [
+    "Sandbox level: Unsandboxed (dangerous) → Strict",
+  ]);
+  assert.deepEqual(sandbox("unsandboxed", "unsandboxed"), []);
+  assert.deepEqual(sandbox(undefined, "unsandboxed"), []);
   // Diagnostic capture lists the change in both directions, and nothing for a mode the service did not report.
   const capture = (saved: "enhanced" | "baseline" | undefined, next: string) =>
     projectChanges(
@@ -1769,23 +1770,32 @@ test("local listening reads the saved setting, what applies and each turn's admi
   );
 });
 
-test("skip sandbox reads the saved setting, what applies and each turn's admission", () => {
+test("the sandbox level reads the saved level, what applies and each turn's admission", () => {
   assert.equal(
-    projectSkipSandboxLine(false),
-    "Skip sandbox is disabled for this project.",
+    projectSandboxLevelLine("strict"),
+    "The sandbox level is strict for this project.",
   );
-  assert.match(projectSkipSandboxLine(true), /enabled.*both harnesses/);
-  assert.match(skipSandboxAppliesNote, /admitted after the change/);
   assert.match(
-    skipSandboxSupersededLine,
-    /^Superseded while skipping the sandbox/,
+    projectSandboxLevelLine("unsandboxed"),
+    /unsandboxed.*both harnesses/,
   );
-  assert.equal(turnSkipSandboxLine(true), "Admitted with the sandbox skipped.");
+  assert.match(sandboxLevelAppliesNote, /admitted after the change/);
+  assert.match(
+    unsandboxedSupersededLine,
+    /^Superseded while the sandbox level is unsandboxed/,
+  );
   assert.equal(
-    turnSkipSandboxLine(false),
-    "Admitted with the sandbox in force.",
+    turnSandboxLevelLine("unsandboxed"),
+    "Admitted at the unsandboxed sandbox level.",
   );
-  assert.match(turnSkipSandboxLine(null), /No skip-sandbox admission recorded/);
+  assert.equal(
+    turnSandboxLevelLine("strict"),
+    "Admitted at the strict sandbox level.",
+  );
+  assert.match(
+    turnSandboxLevelLine(null),
+    /No sandbox level admission recorded/,
+  );
 });
 
 test("diagnostic capture reads the saved mode, when a change applies and that stored diagnostics stay", () => {

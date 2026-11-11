@@ -14,10 +14,11 @@ import {
 } from "../operator/contracts.js";
 import { commandNetworkDisclosure } from "../operator/command-network-copy.js";
 import {
-  skipSandboxGrantLines,
-  skipSandboxRisk,
-  skipSandboxSupersededLine,
-} from "../operator/skip-sandbox-copy.js";
+  sandboxLevelLabels,
+  unsandboxedGrantLines,
+  unsandboxedRisk,
+  unsandboxedSupersededLine,
+} from "../operator/sandbox-level-copy.js";
 import { taskColumn } from "../operator/task-presentation.js";
 import {
   anyNull,
@@ -39,7 +40,7 @@ import { closureSuffix } from "./task-write.js";
 import { isoTime, keyValues, oneLine, table, unavailable } from "./render.js";
 
 const API = "/api/operator";
-const skipped = " (superseded by skip sandbox)";
+const superseded = " (superseded by the unsandboxed level)";
 const query = (params: Record<string, string | number | undefined>) =>
   new URLSearchParams(
     Object.entries(params).flatMap(([k, v]) =>
@@ -229,7 +230,7 @@ const projectGet: BrowseCommand = {
               ? "not reported"
               : d.commandNetworkAccess
                 ? "enabled"
-                : "disabled") + (d.dangerouslySkipSandbox ? skipped : ""),
+                : "disabled") + (d.sandbox === "unsandboxed" ? superseded : ""),
           ],
           [
             "Local listening",
@@ -237,15 +238,13 @@ const projectGet: BrowseCommand = {
               ? "not reported"
               : d.localListening
                 ? "enabled"
-                : "disabled") + (d.dangerouslySkipSandbox ? skipped : ""),
+                : "disabled") + (d.sandbox === "unsandboxed" ? superseded : ""),
           ],
           [
-            "Skip sandbox",
-            d.dangerouslySkipSandbox === undefined
+            "Sandbox level",
+            d.sandbox === undefined
               ? "not reported"
-              : d.dangerouslySkipSandbox
-                ? "enabled"
-                : "disabled",
+              : sandboxLevelLabels[d.sandbox],
           ],
           [
             "Stacking",
@@ -291,11 +290,11 @@ const projectGet: BrowseCommand = {
             ]
           : []),
         commandNetworkDisclosure,
-        ...(d.dangerouslySkipSandbox
+        ...(d.sandbox === "unsandboxed"
           ? [
-              ...skipSandboxGrantLines,
-              skipSandboxSupersededLine,
-              skipSandboxRisk,
+              ...unsandboxedGrantLines,
+              unsandboxedSupersededLine,
+              unsandboxedRisk,
             ]
           : []),
         "",

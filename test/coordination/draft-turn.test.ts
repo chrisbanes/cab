@@ -101,7 +101,7 @@ test("a draft turn runs read-only with network off and leaves the lead pending",
     expectedVersion: Number(domain.project(task.projectId).version),
     commandNetworkAccess: true,
     localListening: true,
-    dangerouslySkipSandbox: true,
+    sandbox: "unsandboxed",
   });
   const before = await task.api.readTask(task.taskId);
   assert.deepEqual(before.data.draftTurn, { available: true });
@@ -127,7 +127,7 @@ test("a draft turn runs read-only with network off and leaves the lead pending",
   assert.ok(running);
   assert.equal(f.service.commandNetworkAccessFor(running.workId), false);
   assert.equal(f.service.localListeningFor(running.workId), false);
-  assert.equal(f.service.dangerouslySkipSandboxFor(running.workId), false);
+  assert.equal(f.service.sandboxLevelFor(running.workId), "strict");
   // Never activated: the lead stays pending and has no ordinary work.
   assert.equal(domain.assignment(task.assignmentId).state, "pending");
   assert.equal(

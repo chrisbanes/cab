@@ -666,10 +666,10 @@ name, version and preview digest. The service rechecks every confirmation atomic
    local listening the same way. It applies to Claude Code task turns admitted
    afterwards; running turns keep their policy.
 
-   `project prepare PROJECT_ID --dangerously-skip-sandbox true|false` changes the
-   project's skip-sandbox setting the same way. It applies to task turns of both
-   harnesses admitted afterwards; running turns keep their policy. The flag is explicit and
-   asks no confirmation; Settings confirms when it is turned on.
+   `project prepare PROJECT_ID --sandbox strict|unsandboxed` changes the project's
+   sandbox level the same way. It applies to task turns of both harnesses admitted
+   afterwards; running turns keep their policy. The flag is explicit and asks no
+   confirmation; Settings confirms a change to `unsandboxed`.
 
    Retention: items older than `CAB_DIAGNOSTIC_RETENTION_DAYS` (1–365,
    default 30) are deleted hourly; beyond `CAB_DIAGNOSTIC_STORAGE_MIB`

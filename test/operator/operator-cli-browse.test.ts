@@ -1,8 +1,8 @@
 import {
-  claudeSkipSandboxLine,
-  codexSkipSandboxLine,
-  skipSandboxSupersededLine,
-} from "../../src/operator/skip-sandbox-copy.js";
+  claudeUnsandboxedLine,
+  codexUnsandboxedLine,
+  unsandboxedSupersededLine,
+} from "../../src/operator/sandbox-level-copy.js";
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import { test } from "node:test";
@@ -708,7 +708,7 @@ test("assignment get states local listening for a Claude assignment only", async
   assert.doesNotMatch(await lines(seed.betaSharedTaskId), /local listening/i);
 });
 
-test("assignment get states skip sandbox for both harnesses", async (t) => {
+test("assignment get states the admitted sandbox level for both harnesses", async (t) => {
   const { s, seed, h, ok } = await setup(t);
   // A Claude assignment not yet admitted, and Beta's Codex lead.
   const claudeId = randomUUID();
@@ -730,14 +730,15 @@ test("assignment get states skip sandbox for both harnesses", async (t) => {
     const human = (await h.run(["assignment", "get", id])).out;
     assert.ok(
       human.includes(
-        "No skip-sandbox admission recorded; the project's setting at admission applies.",
+        "No sandbox level admission recorded; the project's level at admission applies.",
       ),
       human,
     );
   }
-  // An admitted-on turn states its own harness's grant, and only that one.
+  // An unsandboxed turn states its own harness's grant, and only that one.
   const a = (await ok(["assignment", "get", codexId])).data;
   const workId = randomUUID();
+  const intentId = randomUUID();
   s.f.seedPersistedState((db) => {
     db.exec("PRAGMA foreign_keys = OFF");
     db.prepare(
@@ -754,44 +755,54 @@ test("assignment get states skip sandbox for both harnesses", async (t) => {
       a.instructionsRevision,
       a.profileRevision,
     );
-    const intentId = randomUUID();
     db.prepare(
       "INSERT INTO execution_intents (id,workId,prompt,workspace,state,accountType,sandbox,approval) VALUES (?,?,'p','/w','completed','chatgpt','workspaceWrite','never')",
     ).run(intentId, workId);
     db.prepare(
-      "INSERT INTO execution_intent_dangerously_skip_sandbox (intentId, enabled) VALUES (?, 1)",
+      "INSERT INTO execution_intent_sandbox_level (intentId, level) VALUES (?, 'unsandboxed')",
     ).run(intentId);
   });
   const on = (await h.run(["assignment", "get", codexId])).out;
-  assert.ok(on.includes("Admitted with the sandbox skipped."), on);
-  assert.ok(on.includes(codexSkipSandboxLine), on);
-  assert.ok(!on.includes(claudeSkipSandboxLine), on);
-  assert.ok(on.includes(skipSandboxSupersededLine), on);
+  assert.ok(on.includes("Admitted at the unsandboxed sandbox level."), on);
+  assert.ok(on.includes(codexUnsandboxedLine), on);
+  assert.ok(!on.includes(claudeUnsandboxedLine), on);
+  assert.ok(on.includes(unsandboxedSupersededLine), on);
+  // A strict admission states its level and no grant.
+  s.f.seedPersistedState((db) => {
+    db.prepare(
+      "UPDATE execution_intent_sandbox_level SET level = 'strict' WHERE intentId = ?",
+    ).run(intentId);
+  });
+  const strict = (await h.run(["assignment", "get", codexId])).out;
+  assert.ok(strict.includes("Admitted at the strict sandbox level."), strict);
+  assert.ok(!strict.includes(codexUnsandboxedLine), strict);
+  assert.ok(!strict.includes(unsandboxedSupersededLine), strict);
 });
 
-test("project get shows skip sandbox and marks network access and local listening superseded when on", async (t) => {
+test("project get shows the sandbox level and marks network access and local listening superseded when unsandboxed", async (t) => {
   const { seed, h, d } = await setup(t);
   const row = (out: string, label: string) =>
     out.split("\n").find((l) => l.startsWith(`${label}:`)) ?? "";
   const get = async () => (await h.run(["project", "get", seed.alphaId])).out;
   let out = await get();
-  assert.match(row(out, "Skip sandbox"), /disabled/);
+  assert.match(row(out, "Sandbox level"), /:\s+Strict$/);
   assert.doesNotMatch(out, /superseded/i);
+  assert.ok(!out.includes(codexUnsandboxedLine));
   d.execute({
     type: "project.configure",
     actor: "operator",
     key: randomUUID(),
     projectId: seed.alphaId,
     expectedVersion: Number(d.project(seed.alphaId).version),
-    dangerouslySkipSandbox: true,
+    sandbox: "unsandboxed",
   });
   out = await get();
-  assert.match(row(out, "Skip sandbox"), /enabled/);
+  assert.match(row(out, "Sandbox level"), /:\s+Unsandboxed \(dangerous\)$/);
   assert.match(row(out, "Command network access"), /superseded/);
   assert.match(row(out, "Local listening"), /superseded/);
   assert.match(out, /full filesystem, process, network and credential access/);
-  assert.ok(out.includes(codexSkipSandboxLine));
-  assert.ok(out.includes(claudeSkipSandboxLine));
+  assert.ok(out.includes(codexUnsandboxedLine));
+  assert.ok(out.includes(claudeUnsandboxedLine));
 });
 
 test("task get names the lead assignment, execution and who acts next", async (t) => {

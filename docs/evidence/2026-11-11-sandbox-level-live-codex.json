@@ -1,0 +1,110 @@
+{
+  "candidate": "7d5cf810d31ec34c4240039ac9c5a1c67334d35c",
+  "harness": "codex",
+  "node": "v26.13.0",
+  "runtime": {
+    "launcherSha256": "50ab38ba21d0d9f8346f32f41848382f15b556190f3c7a07e885a4fb73e379c8",
+    "version": "codex-cli 0.167.0-alpha.3.2"
+  },
+  "cells": [
+    {
+      "sandbox": "strict",
+      "admittedSandbox": "strict",
+      "startTurnCalls": [
+        {
+          "policy": null
+        }
+      ],
+      "wire": [
+        {
+          "sandboxPolicy": {
+            "type": "workspaceWrite",
+            "writableRoots": [
+              "<redacted>/data/workspaces/4c0033af-f008-46ed-9d18-ecff9342f39c"
+            ],
+            "networkAccess": false,
+            "excludeSlashTmp": true,
+            "excludeTmpdirEnvVar": true
+          },
+          "approvalPolicy": "never"
+        }
+      ],
+      "refusedTurns": 1,
+      "task": {
+        "state": "completed",
+        "reason": null,
+        "steps": {
+          "chromium": "browserType.launch: EPERM: operation not permitted, mkdtemp '/var/folders/k6/qdrr06ls5zv2cp7076j6qnmw0000gn/T/playwright-artifacts-QNjpPF'",
+          "emulator": "emulator exited:  exit=SIGILL Command failed: ~/Library/Android/sdk/platform-tools/adb -s emulator-5580 shell getprop sys.boot_completed * daemon not running; starting now at tcp:5037 11-11 23:18:56.313 14931 675305481 F adb : main.cpp:54 cannot open /var/folders/k6/qdrr06ls5zv2cp7076j6qnmw0000gn/T//adb.501.log: Operation not permitted ADB server didn't ACK Full server startup log: /var/folders/k6/qdrr0"
+        }
+      },
+      "checks": {
+        "turnCompleted": true,
+        "oneTurn": true,
+        "admitted": true,
+        "runtimePolicy": true,
+        "wirePolicy": true,
+        "chromium": true,
+        "emulator": true
+      },
+      "cleanup": {
+        "serviceStopped": true,
+        "emulatorKilled": false,
+        "fixtureRemoved": true
+      },
+      "failure": null,
+      "pass": true
+    },
+    {
+      "sandbox": "unsandboxed",
+      "admittedSandbox": "unsandboxed",
+      "startTurnCalls": [
+        {
+          "policy": {
+            "networkAccess": false,
+            "skipSandbox": true
+          }
+        }
+      ],
+      "wire": [
+        {
+          "sandboxPolicy": {
+            "type": "dangerFullAccess"
+          },
+          "approvalPolicy": "never"
+        }
+      ],
+      "refusedTurns": 1,
+      "task": {
+        "state": "completed",
+        "reason": null,
+        "steps": {
+          "chromium": "ok",
+          "emulator": "ok"
+        }
+      },
+      "checks": {
+        "turnCompleted": true,
+        "oneTurn": true,
+        "admitted": true,
+        "runtimePolicy": true,
+        "wirePolicy": true,
+        "chromium": true,
+        "emulator": true
+      },
+      "cleanup": {
+        "serviceStopped": true,
+        "emulatorKilled": false,
+        "fixtureRemoved": true
+      },
+      "failure": null,
+      "pass": true
+    }
+  ],
+  "verdict": {
+    "offBlocked": true,
+    "onWorks": true
+  },
+  "pass": true,
+  "failure": null
+}

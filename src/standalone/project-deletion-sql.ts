@@ -281,11 +281,6 @@ export const projectDeletionStatements = [
     sql: "DELETE FROM execution_capacity_reservations WHERE projectId = :projectId OR workId IN (SELECT value FROM json_each(:work))",
   },
   {
-    table: "execution_intent_dangerously_skip_sandbox",
-    where: "intentId IN (SELECT value FROM json_each(:intents))",
-    sql: "DELETE FROM execution_intent_dangerously_skip_sandbox WHERE intentId IN (SELECT value FROM json_each(:intents))",
-  },
-  {
     table: "execution_intent_local_listening",
     where: "intentId IN (SELECT value FROM json_each(:intents))",
     sql: "DELETE FROM execution_intent_local_listening WHERE intentId IN (SELECT value FROM json_each(:intents))",
@@ -294,6 +289,11 @@ export const projectDeletionStatements = [
     table: "execution_intent_reasoning_summaries",
     where: "intentId IN (SELECT value FROM json_each(:intents))",
     sql: "DELETE FROM execution_intent_reasoning_summaries WHERE intentId IN (SELECT value FROM json_each(:intents))",
+  },
+  {
+    table: "execution_intent_sandbox_level",
+    where: "intentId IN (SELECT value FROM json_each(:intents))",
+    sql: "DELETE FROM execution_intent_sandbox_level WHERE intentId IN (SELECT value FROM json_each(:intents))",
   },
   {
     table: "execution_intent_network_access",
@@ -435,11 +435,6 @@ export const projectDeletionStatements = [
     sql: "DELETE FROM project_command_network_access WHERE projectId = :projectId",
   },
   {
-    table: "project_dangerously_skip_sandbox",
-    where: "projectId = :projectId",
-    sql: "DELETE FROM project_dangerously_skip_sandbox WHERE projectId = :projectId",
-  },
-  {
     table: "project_diagnostic_capture",
     where: "projectId = :projectId",
     sql: "DELETE FROM project_diagnostic_capture WHERE projectId = :projectId",
@@ -468,6 +463,11 @@ export const projectDeletionStatements = [
     table: "project_routing",
     where: "projectId = :projectId",
     sql: "DELETE FROM project_routing WHERE projectId = :projectId",
+  },
+  {
+    table: "project_sandbox_level",
+    where: "projectId = :projectId",
+    sql: "DELETE FROM project_sandbox_level WHERE projectId = :projectId",
   },
   {
     table: "project_stacking",

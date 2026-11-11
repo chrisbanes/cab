@@ -29,6 +29,8 @@ import {
   type RepositoryBaseMode,
 } from "../../src/core/github-source-contracts.js";
 import { diagnosticCaptureLabels, plural } from "./settings-view.js";
+import { sandboxLevelLabels } from "../../src/operator/sandbox-level-copy.js";
+import type { SandboxLevel } from "../../src/core/sandbox-level.js";
 
 export type Values = Record<string, string | boolean | string[]>;
 export type ProjectConfigurationData = z.infer<
@@ -109,12 +111,12 @@ export function projectChanges(
   )
     lines.push(`Local listening ${v.localListening ? "enabled" : "disabled"}`);
   if (
-    v.dangerouslySkipSandbox !== undefined &&
-    data.dangerouslySkipSandbox !== undefined &&
-    Boolean(v.dangerouslySkipSandbox) !== data.dangerouslySkipSandbox
+    v.sandbox !== undefined &&
+    data.sandbox !== undefined &&
+    v.sandbox !== data.sandbox
   )
     lines.push(
-      `Skip sandbox ${v.dangerouslySkipSandbox ? "enabled" : "disabled"}`,
+      `Sandbox level: ${sandboxLevelLabels[data.sandbox]} → ${sandboxLevelLabels[v.sandbox as SandboxLevel]}`,
     );
   const mode = diagnosticCaptureLabels;
   const reasoning =
