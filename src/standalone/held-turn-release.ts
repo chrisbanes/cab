@@ -16,9 +16,11 @@ export interface HeldTurnReleaseHost {
   ): void;
   /** The runtime durably reported this exact turn's terminal. */
   turnEnded(candidate: HeldTurnCandidate): boolean;
-  /** The recorded process was verified to have exited (false for Claude, which has none). */
+  /** The recorded process of the turn (Codex App Server or the Claude turn's CLI) exited. */
   processExited(workId: string): Promise<boolean>;
   release(workId: string, basis: HeldTurnReleaseBasis): boolean;
+  /** Released turns no later activity has held again, read once at start. */
+  releasedTurns(): { harness: string; threadId: string; turnId: string }[];
   released(workId: string, basis: HeldTurnReleaseBasis): void;
   failed(error: unknown): void;
 }
@@ -44,6 +46,9 @@ const defaultClock: SupervisorClock = {
   },
 };
 
+const turnKey = (harness: string, threadId: string, turnId: string) =>
+  JSON.stringify([harness, threadId, turnId]);
+
 interface Watch {
   /** The turn last interrupted; `undefined` before the first interrupt. */
   interrupted: string | null | undefined;
@@ -60,6 +65,10 @@ interface Watch {
  */
 export class HeldTurnRelease {
   private readonly watches = new Map<string, Watch>();
+  /** Watched work by `harness:thread:turn`, so raw runtime activity needs no database read. */
+  private readonly watchedTurns = new Map<string, string>();
+  /** Released turns by the same key: activity for one holds the task again. */
+  private readonly releasedTurns: Set<string>;
   private readonly controller = new AbortController();
   private readonly clock: SupervisorClock;
   private readonly quietMs: number;
@@ -76,6 +85,25 @@ export class HeldTurnRelease {
     this.quietMs = options.quietMs ?? 30 * 60_000;
     this.pollMs = options.pollMs ?? 60_000;
     this.wallNow = options.wallNow ?? Date.now;
+    this.releasedTurns = new Set(
+      host.releasedTurns().map((t) => turnKey(t.harness, t.threadId, t.turnId)),
+    );
+  }
+
+  /**
+   * Raw runtime activity for one harness's turn: a watched turn's quiet period starts again.
+   * Returns whether the turn was released, so the caller can hold the task again.
+   */
+  noteTurnActivity(harness: string, threadId: string, turnId: string): boolean {
+    const key = turnKey(harness, threadId, turnId);
+    const workId = this.watchedTurns.get(key);
+    if (workId) this.noteActivity(workId);
+    return this.releasedTurns.has(key);
+  }
+
+  /** The released turn was held again; its later activity needs no second hold. */
+  forgetReleased(harness: string, threadId: string, turnId: string): void {
+    this.releasedTurns.delete(turnKey(harness, threadId, turnId));
   }
 
   /** Checks held turns every poll interval until `stop`. */
@@ -159,6 +187,13 @@ export class HeldTurnRelease {
     const live = new Set(candidates.map((candidate) => candidate.workId));
     for (const workId of this.watches.keys())
       if (!live.has(workId)) this.watches.delete(workId);
+    this.watchedTurns.clear();
+    for (const candidate of candidates)
+      if (candidate.turnId !== null)
+        this.watchedTurns.set(
+          turnKey(candidate.harness, candidate.threadId, candidate.turnId),
+          candidate.workId,
+        );
     for (const candidate of candidates) {
       if (this.controller.signal.aborted) return;
       const now = this.clock.monotonicNow();
@@ -215,6 +250,15 @@ export class HeldTurnRelease {
           : undefined);
       if (basis && this.host.release(candidate.workId, basis)) {
         this.watches.delete(candidate.workId);
+        if (candidate.turnId !== null) {
+          const key = turnKey(
+            candidate.harness,
+            candidate.threadId,
+            candidate.turnId,
+          );
+          this.watchedTurns.delete(key);
+          this.releasedTurns.add(key);
+        }
         this.host.released(candidate.workId, basis);
       }
     }

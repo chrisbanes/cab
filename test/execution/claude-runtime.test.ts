@@ -611,6 +611,40 @@ test("a subagent's prose is not the lead's conversation", {
   }
 });
 
+test("every SDK message of a turn, presented or not, is activity of that turn", {
+  skip: slashTmpDenied(),
+}, async () => {
+  const f = fixture({
+    scripts: [
+      async function* (session) {
+        yield init(sessionOf(session));
+        // A partial stream event is not presented as conversation, but it is activity.
+        yield {
+          type: "stream_event",
+          uuid: "partial",
+          parent_tool_use_id: null,
+          event: { type: "content_block_delta" },
+        };
+        yield result(sessionOf(session));
+      },
+    ],
+  });
+  const activity: { threadId: string; turnId: string }[] = [];
+  f.runtime.onTurnActivity((turn) => activity.push(turn));
+  try {
+    await f.runtime.start();
+    const threadId = await f.runtime.startThread(f.workspace, []);
+    const turnId = await f.turn(threadId);
+    await f.runtime.waitForTurn(threadId, turnId).catch(() => undefined);
+    assert.ok(activity.length >= 2, JSON.stringify(activity));
+    assert.ok(
+      activity.every((a) => a.threadId === threadId && a.turnId === turnId),
+    );
+  } finally {
+    await f.cleanup();
+  }
+});
+
 test("losing the Claude process mid-tool reports an anomaly and never a terminal", {
   skip: slashTmpDenied(),
 }, async () => {

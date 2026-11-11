@@ -5503,6 +5503,25 @@ export class ExecutionState {
     );
   }
 
+  /** Released held turns with a saved turn, for activity matching kept in memory. */
+  releasedHeldTurns(): { harness: string; threadId: string; turnId: string }[] {
+    if (!this.hasTurnRequests) return [];
+    return (
+      this.db
+        .prepare(`SELECT workId, harness, threadId, turnId
+          FROM execution_held_turn_releases
+          WHERE basis IS NOT NULL AND turnId IS NOT NULL`)
+        .all() as {
+        workId: string;
+        harness: string;
+        threadId: string;
+        turnId: string;
+      }[]
+    )
+      .filter((row) => this.heldTurnReleased(row.workId))
+      .map(({ harness, threadId, turnId }) => ({ harness, threadId, turnId }));
+  }
+
   /** A held request Start again may queue afresh: refused before it ran, or a released held turn. */
   startAgainTarget(workId: string): boolean {
     return this.refusedBeforeStart(workId) || this.heldTurnReleased(workId);

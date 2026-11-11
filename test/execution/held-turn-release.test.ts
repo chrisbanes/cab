@@ -36,6 +36,12 @@ class HeldTurnRuntime extends BoundRuntime {
   onConversationEvent(listener: (event: RuntimeConversationEvent) => void) {
     this.conversation = listener;
   }
+  activity: ((turn: { threadId: string; turnId: string }) => void) | undefined;
+  onTurnActivity(
+    listener: (turn: { threadId: string; turnId: string }) => void,
+  ) {
+    this.activity = listener;
+  }
   override async waitForTurn(threadId: string, turnId: string) {
     // The seed turn and the held turn behave as `BoundRuntime`; a later turn runs until finished.
     if (this.turnInvocations.length <= (this.seedConversation ? 2 : 1))
@@ -387,4 +393,42 @@ test("activity another harness's runtime reports for a turn changes nothing", as
     undefined,
   );
   assert.ok(w.s.f.service.heldTurnReleased(w.g.workId));
+});
+
+test("a held turn streaming only raw deltas stays held past 30 minutes; a delta after release holds the task again", async (t) => {
+  const w = await heldWorld(t);
+  await settle(() => w.rows().release !== null);
+  assert.ok(w.runtime.activity, "the runtime exposes raw turn activity");
+  const delta = () =>
+    w.runtime.activity?.({ threadId: w.g.threadId, turnId: w.g.turnId });
+  // Output or reasoning deltas that no conversation event presents still count as activity.
+  for (let elapsed = 0; elapsed < 50; elapsed += 20) {
+    await w.advance(20 * minute);
+    delta();
+  }
+  await w.advance(29 * minute);
+  assert.equal(w.rows().release?.basis, null, "still running past 30 minutes");
+  assert.ok(w.rows().capacity);
+  await w.advance(minute);
+  await w.released();
+  assert.equal(w.rows().release?.basis, "quiet-period");
+
+  // A delta after the release is a survivor: the task is held again.
+  delta();
+  await settle(
+    () =>
+      w
+        .db()
+        .prepare("SELECT 1 FROM task_writer_ambiguity_holds WHERE taskId=?")
+        .get(w.g.taskId) !== undefined,
+  );
+  assert.equal(
+    w
+      .db()
+      .prepare(
+        "SELECT state FROM execution_pending_effects WHERE workId=? AND effectKey='known-survivor'",
+      )
+      .get(w.g.workId)?.state,
+    "pending",
+  );
 });

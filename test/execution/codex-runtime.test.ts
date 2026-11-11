@@ -580,6 +580,7 @@ async function captureTwoTurns(
   firstStatus: "completed" | "failed";
   secondStatus: "completed" | "failed";
   captured: RuntimeConversationEvent[];
+  activity: { threadId: string; turnId: string }[];
 }> {
   const root = mkdtempSync(join(tmpdir(), rootPrefix));
   const executable = join(root, "fake-codex.mjs");
@@ -613,7 +614,9 @@ async function captureTwoTurns(
   const captured: RuntimeConversationEvent[] = [];
   const anomalies: unknown[] = [];
   let stage = "runtime-start";
+  const activity: { threadId: string; turnId: string }[] = [];
   runtime.onConversationEvent?.((event) => captured.push(event));
+  runtime.onTurnActivity?.((turn) => activity.push(turn));
   runtime.onTerminalAnomaly((anomaly) => anomalies.push(anomaly));
   try {
     await bounded(runtime.start(), 3000);
@@ -639,7 +642,7 @@ async function captureTwoTurns(
       runtime.waitForTurn("thread-1", secondTurnId),
       3000,
     );
-    return { firstStatus, secondStatus, captured };
+    return { firstStatus, secondStatus, captured, activity };
   } catch (error) {
     const records = runtimeFixtures.get(runtime)?.terminalRecords() ?? [];
     throw new Error(
@@ -651,6 +654,38 @@ async function captureTwoTurns(
     rmSync(root, { recursive: true, force: true });
   }
 }
+
+test("every raw turn message, output and reasoning deltas and server requests included, is turn activity", async () => {
+  const delta = (method: string, turnId: string) => ({
+    method,
+    params: { threadId: "thread-1", turnId, itemId: "item-1", delta: "x" },
+  });
+  const result = await captureTwoTurns(
+    "cab-codex-turn-activity-",
+    "activity-turn-1",
+    "activity-turn-2",
+    [
+      delta("item/commandExecution/outputDelta", "activity-turn-1"),
+      delta("item/reasoning/textDelta", "activity-turn-1"),
+      // A server request naming the turn is activity too, whatever cab answers.
+      {
+        id: 901,
+        method: "mcpServer/elicitation/request",
+        params: { threadId: "thread-1", turnId: "activity-turn-1" },
+      },
+      turnCompletedEvent("activity-turn-1"),
+    ],
+    [turnCompletedEvent("activity-turn-2")],
+  );
+  assert.equal(result.firstStatus, "completed");
+  // The deltas are activity of their turn although no conversation event presents them.
+  const first = result.activity.filter((a) => a.turnId === "activity-turn-1");
+  assert.ok(first.length >= 4, JSON.stringify(result.activity));
+  assert.ok(
+    result.activity.every((a) => a.threadId === "thread-1"),
+    JSON.stringify(result.activity),
+  );
+});
 
 function itemStartedEvent(turnId: string, itemId: string) {
   return {

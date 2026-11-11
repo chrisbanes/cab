@@ -85,6 +85,11 @@ for (const harness of ["codex", "claude"] as const)
       mode: "unknown",
       heldTurnRelease: { clock, wallNow: clock.wallNow },
     });
+    // The pending release is reported once a sweep watches the held turn, just after the hold.
+    await until(
+      () => w.s.f.service.heldTurnReleasesBy(w.g.workId) !== undefined,
+      "cab watches the held turn",
+    );
     const c = await w.cli();
     let result = await c.cli("ro", ["recovery", "get", w.g.assignmentId]);
     assert.equal(result.code, 0, result.err);

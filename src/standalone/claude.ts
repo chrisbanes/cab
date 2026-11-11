@@ -684,6 +684,10 @@ export class ClaudeRuntime implements Runtime {
   }) => void;
   private conversation?: (event: RuntimeConversationEvent) => void;
   private diagnostic?: (event: RuntimeDiagnosticEvent) => void;
+  private turnActivity?: (activity: {
+    threadId: string;
+    turnId: string;
+  }) => void;
 
   constructor(private readonly options: ClaudeRuntimeOptions) {}
 
@@ -711,6 +715,11 @@ export class ClaudeRuntime implements Runtime {
   }
   onDiagnosticEvent(listener: (event: RuntimeDiagnosticEvent) => void): void {
     this.diagnostic = listener;
+  }
+  onTurnActivity(
+    listener: (activity: { threadId: string; turnId: string }) => void,
+  ): void {
+    this.turnActivity = listener;
   }
 
   /** Terminal evidence is bound to this per-start generation. */
@@ -1406,12 +1415,19 @@ export class ClaudeRuntime implements Runtime {
     generation: string,
   ): Promise<void> {
     try {
-      for await (const message of stream)
+      for await (const message of stream) {
+        // Every SDK message of the turn, before any projection, is activity of that turn.
+        try {
+          this.turnActivity?.({ threadId: turn.threadId, turnId: turn.turnId });
+        } catch {
+          // Activity is observational; it never alters the turn.
+        }
         if (!this.accept(turn, message)) {
           turn.malformed = true;
           turn.abort.abort();
           break;
         }
+      }
     } catch {
       // An error result throws after it is yielded; outcome is decided below.
     }

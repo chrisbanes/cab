@@ -2730,6 +2730,10 @@ export class StandaloneService {
           this.wakeScheduler(0, generation),
         );
     });
+    // Raw runtime activity, before presentation filtering, keeps a held turn's quiet period.
+    runtime.onTurnActivity?.(({ threadId, turnId }) =>
+      this.noteTurnActivity(harness, state, threadId, turnId),
+    );
     runtime.onConversationEvent?.((event) => {
       this.noteTurnActivity(harness, state, event.threadId, event.turnId);
       if (acceptsNew() && !foreign(event.threadId, event.turnId))
@@ -2774,6 +2778,13 @@ export class StandaloneService {
     turnId: string | undefined,
   ): void {
     if (!threadId || !turnId) return;
+    // In memory on the hot path: only activity for a released turn reads the database. With
+    // no release instance (shutdown drain, startup) every activity is checked in the database.
+    if (
+      this.heldTurns &&
+      !this.heldTurns.noteTurnActivity(harness, threadId, turnId)
+    )
+      return;
     try {
       for (const item of state.executionsForTerminalIdentity(
         threadId,
@@ -2781,7 +2792,6 @@ export class StandaloneService {
       )) {
         // A runtime naming another harness's turn is refused; it is no activity of that turn.
         if (state.workHarness(item.workId) !== harness) continue;
-        this.heldTurns?.noteActivity(item.workId);
         // Only a released turn is resolved-failed with its request still held.
         if (
           item.state === "resolved-failed" &&
@@ -2792,6 +2802,7 @@ export class StandaloneService {
             "runtime activity after held-turn release",
           );
       }
+      this.heldTurns?.forgetReleased(harness, threadId, turnId);
     } catch (error) {
       process.stderr.write(
         `${JSON.stringify({ event: "held-turn-activity-failed", error: String(error).slice(0, 500) })}\n`,
@@ -3604,6 +3615,7 @@ export class StandaloneService {
         recordInterrupt: (candidate, interruptState) =>
           state.recordHeldTurnInterrupt(candidate, interruptState),
         turnEnded: (candidate) => state.heldTurnEnded(candidate),
+        releasedTurns: () => state.releasedHeldTurns(),
         processExited: (workId) => supervisor.processExited(workId),
         release: (workId, basis) =>
           state.releaseHeldTurn(
