@@ -3280,8 +3280,10 @@ repository). The lead integrates it locally, validates, and sends a new request,
 usual approval and is checked again. A check that cannot be made is held as
 `publication-conflict-unproved` with its reason (`target-unavailable`, `target-unidentified`,
 `fetch-failed`, `too-large`, `credential-unavailable` or `computation-failed`),
-never reported as a conflict. The target can move after the check; the merge-time gate remains
-the code host's.
+never reported as a conflict. A workspace started from a link ref that names no branch on the
+code host (a tag, a commit or a local-only branch name) has no target to check, so its pushes
+are held this way until a change request or stacked blocker supplies one. The target can move
+after the check; the merge-time gate remains the code host's.
 
 On a GitLab link all three branch actions (these two and `branch.adopt`) follow the same
 lifecycle. Before any push or fetch cab reads the project by its numeric ID and requires the
