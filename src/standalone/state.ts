@@ -3942,6 +3942,8 @@ export class ExecutionState {
   /** Recheck the distinct bound-turn or pre-turn proof on every use. */
   reconciledAssignmentProof(
     workId: string,
+    /** Withdrawal only: an operator Stop alone does not hold the proof. */
+    options: { allowOperatorStop?: boolean } = {},
   ): ReconciledAssignmentProof | undefined {
     if (!this.hasTurnRequests) return undefined;
     const row = this.db
@@ -3984,7 +3986,7 @@ export class ExecutionState {
         AND NOT EXISTS (SELECT 1 FROM execution_capacity_reservations WHERE workId = receipt.workId)
         AND NOT EXISTS (SELECT 1 FROM execution_pending_effects WHERE workId = receipt.workId AND state = 'pending')
         AND NOT EXISTS (SELECT 1 FROM execution_stop_targets WHERE taskId = request.taskId AND terminalState != 'completed')
-        AND NOT EXISTS (SELECT 1 FROM task_writer_holds WHERE taskId = request.taskId)
+        AND NOT EXISTS (SELECT 1 FROM task_writer_holds WHERE taskId = request.taskId${options.allowOperatorStop ? " AND holdKind IS NOT 'operator-stop'" : ""})
         AND NOT EXISTS (SELECT 1 FROM task_writer_ambiguity_holds WHERE taskId = request.taskId)
         AND NOT EXISTS (SELECT 1 FROM task_archival_holds WHERE taskId = request.taskId)
         AND NOT EXISTS (SELECT 1 FROM task_work_revision_ambiguities WHERE assignmentId = request.assignmentId)

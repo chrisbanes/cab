@@ -1266,9 +1266,9 @@ export class StandaloneService {
         db,
         domain,
         (workId) => state.isNeverAdmittedRefusedAssignmentWork(workId),
-        (workId) =>
+        (workId, options) =>
           (this.callbacks.get(workId)?.size ?? 0) === 0
-            ? state.reconciledAssignmentProof(workId)
+            ? state.reconciledAssignmentProof(workId, options)
             : undefined,
         (workId) => state.refusedBeforeStart(workId),
       );

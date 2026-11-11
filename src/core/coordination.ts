@@ -612,6 +612,7 @@ export class CoordinationStore {
     isNeverAdmittedRefusedAssignmentWork?: (workId: string) => boolean,
     private readonly reconciledAssignmentProof?: (
       workId: string,
+      options?: { allowOperatorStop?: boolean },
     ) => ReconciledAssignmentProof | undefined,
     private readonly refusedBeforeStart?: (workId: string) => boolean,
   ) {
@@ -1560,12 +1561,14 @@ export class CoordinationStore {
     );
     const taskId = String(assignment.taskId);
     // A turn recovered with no successor is proved by its validated recovery receipt; the
-    // proof itself requires no writer holds of any kind (an operator Stop included), no
-    // pending effects and no live callbacks.
+    // proof requires no writer-ownership or ambiguity hold (an operator Stop alone is
+    // allowed, as for withdrawal), no pending effects and no live callbacks.
     const settled = (workId: string) =>
       this.isHistoricalWorkResolved(workId) ||
       Boolean(this.refusedBeforeStart?.(workId)) ||
-      Boolean(this.reconciledAssignmentProof?.(workId));
+      Boolean(
+        this.reconciledAssignmentProof?.(workId, { allowOperatorStop: true }),
+      );
     const blockers = new Set<DelegateBlocker>();
     const intents = this.db
       .prepare(`SELECT intent.workId, intent.state,

@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import { test } from "node:test";
 import { OperatorApi } from "../../src/standalone/operator-api.js";
+import { db } from "../fixtures/refused-turn.js";
 import { startedOf } from "../fixtures/service-internals.js";
 import { until } from "../fixtures/until.js";
 import { boundWorld } from "./bound-turn-recovery-fixture.js";
@@ -113,4 +114,75 @@ test("a delegate whose interrupted turn was recovered with no successor, and its
   assert.equal(coordination.isHistoricalWorkResolved(workId), false);
   assert.equal(coordination.isWithdrawnWork(workId), true);
   assert.equal(coordination.isWithdrawnWork(w.g.workId), false);
+});
+
+/** A delegate of the lead whose interrupted turn was recovered with no successor. */
+async function recoveredDelegate(w: Awaited<ReturnType<typeof boundWorld>>) {
+  const service = w.s.f.service;
+  await recoverHeldTurn(w, w.g.assignmentId);
+  const delegateId = randomUUID();
+  w.command({
+    type: "assignment.create",
+    actor: "agent",
+    projectId: w.g.projectId,
+    taskId: w.g.taskId,
+    assignmentId: delegateId,
+    profileId: String(service.domain().assignment(w.g.assignmentId).profileId),
+    brief: "Delegated work",
+    resultDestination: "requester",
+    requesterAssignmentId: w.g.assignmentId,
+  });
+  await recoverHeldTurn(w, delegateId);
+  return delegateId;
+}
+
+test("an operator Stop alone does not keep a recovered delegate from being withdrawn", async (t) => {
+  const w = await boundWorld(t);
+  const service = w.s.f.service;
+  const delegateId = await recoveredDelegate(w);
+  await service.stopTask(w.g.taskId);
+  assert.ok(
+    db(service)
+      .prepare(
+        "SELECT 1 FROM task_writer_holds WHERE taskId = ? AND holdKind = 'operator-stop'",
+      )
+      .get(w.g.taskId),
+    "the task is stopped",
+  );
+  const api = new OperatorApi(service);
+  const read = await api.readAssignment(delegateId);
+  assert.equal(
+    read.data.withdrawal?.available,
+    true,
+    JSON.stringify(read.data.withdrawal),
+  );
+  await api.execute({
+    type: "assignment.withdraw",
+    key: randomUUID(),
+    taskId: w.g.taskId,
+    assignmentId: delegateId,
+    expectedVersion: read.data.version,
+    reason: "Recovered while the task was stopped",
+  });
+  assert.equal(service.domain().assignment(delegateId).state, "withdrawn");
+});
+
+test("a writer ambiguity hold still keeps a recovered delegate from being withdrawn", async (t) => {
+  const w = await boundWorld(t);
+  const service = w.s.f.service;
+  const delegateId = await recoveredDelegate(w);
+  w.s.f.seedPersistedState((db) =>
+    db
+      .prepare(
+        "INSERT INTO task_writer_ambiguity_holds (taskId, reason) VALUES (?, 'Writer identity is ambiguous')",
+      )
+      .run(w.g.taskId),
+  );
+  const read = await new OperatorApi(service).readAssignment(delegateId);
+  assert.equal(read.data.withdrawal?.available, false);
+  assert.ok(
+    startedOf(service)
+      .coordination.delegateStatus(delegateId)
+      .blockers.includes("ownership-hold"),
+  );
 });
