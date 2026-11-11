@@ -122,7 +122,7 @@
     width: 44px;
     height: 44px;
     border: 1px solid var(--line-strong);
-    border-radius: 6px;
+    border-radius: var(--radius-md);
     color: var(--fg);
     cursor: pointer;
     list-style: none;
@@ -146,7 +146,7 @@
     min-width: 200px;
     padding: var(--space-8);
     border: 1px solid var(--line-strong);
-    border-radius: 8px;
+    border-radius: var(--radius-xl);
     background: var(--surface);
   }
 
@@ -358,7 +358,7 @@ a.task-source-chip:hover {
   margin: 0;
   padding: var(--space-12) var(--space-16);
   border: 1px solid var(--line);
-  border-radius: 8px;
+  border-radius: var(--radius-xl);
   background: var(--surface);
 }
 
@@ -427,7 +427,7 @@ a.task-source-chip:hover {
 .task-inspector {
   min-width: 0;
   border: 1px solid var(--line);
-  border-radius: 8px;
+  border-radius: var(--radius-xl);
   background: var(--surface);
   font-size: var(--type-xs);
 }
@@ -1006,14 +1006,14 @@ a.task-source-chip:hover {
 .conv-operator {
   padding: 10px var(--space-12);
   border: 1px solid var(--line-strong);
-  border-radius: 8px;
+  border-radius: var(--radius-xl);
   background: var(--raised);
 }
 
 .conv-request {
   padding: 10px var(--space-12);
   border: 1px solid var(--line);
-  border-radius: 8px;
+  border-radius: var(--radius-xl);
 }
 
 .conv-request[data-status="open"] {
@@ -1035,7 +1035,7 @@ a.task-source-chip:hover {
 
 .conv-raw {
   padding: var(--space-8);
-  border-radius: 6px;
+  border-radius: var(--radius-md);
   background: var(--raised);
   font-family: var(--font-mono);
   font-size: 12px;
@@ -1048,7 +1048,7 @@ a.task-source-chip:hover {
   align-items: center;
   gap: var(--space-8);
   padding: var(--space-8);
-  border-radius: 6px;
+  border-radius: var(--radius-md);
   background: var(--raised);
   color: var(--fg-2);
   font-size: var(--type-xs);
@@ -1117,7 +1117,7 @@ a.task-source-chip:hover {
 .conv-gap {
   padding: var(--space-8) var(--space-12);
   border: 1px dashed var(--line-strong);
-  border-radius: 6px;
+  border-radius: var(--radius-md);
   color: var(--fg-2);
   font-size: var(--type-xs);
 }
@@ -1142,7 +1142,7 @@ a.task-source-chip:hover {
 .conv-delegation {
   min-width: 0;
   border: 1px solid var(--line);
-  border-radius: 8px;
+  border-radius: var(--radius-xl);
   background: var(--surface);
 }
 
@@ -1315,7 +1315,7 @@ a.task-source-chip:hover {
   min-width: max-content;
   padding: var(--space-8);
   border: 1px solid var(--line-strong);
-  border-radius: 8px;
+  border-radius: var(--radius-xl);
   background: var(--raised);
   list-style: none;
 }
@@ -1349,7 +1349,7 @@ a.task-source-chip:hover {
   min-height: 0;
   height: 32px;
   border: 1px solid var(--line-strong);
-  border-radius: 6px;
+  border-radius: var(--radius-md);
   color: var(--fg);
   list-style: none;
 }
@@ -1368,7 +1368,7 @@ a.task-source-chip:hover {
   padding: 8px;
   background: var(--surface);
   border: 1px solid var(--line);
-  border-radius: 8px;
+  border-radius: var(--radius-xl);
 }
 .task-strip a.task-next {
   color: var(--attn);

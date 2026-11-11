@@ -465,6 +465,38 @@ for (const colorScheme of ["light", "dark"] as const) {
   });
 }
 
+for (const colorScheme of ["light", "dark"] as const) {
+  test(`the tree takes its change and selection colours from the tokens (${colorScheme})`, async (_t, j) => {
+    const { page } = await start(j, { colorScheme });
+    await openPane(page);
+    // A token resolved against the root, in the computed-colour format the rows report.
+    const token = (name: string) =>
+      page.evaluate((n) => {
+        const probe = document.createElement("span");
+        probe.style.color = `var(${n})`;
+        document.documentElement.append(probe);
+        const resolved = getComputedStyle(probe).color;
+        probe.remove();
+        return resolved;
+      }, name);
+    const letter = (path: string) =>
+      computed(
+        changedFile(pane(page), path).locator('[data-item-section="git"]'),
+        "color",
+      );
+    assert.equal(await letter("guide.md"), await token("--accent-text"));
+    assert.equal(await letter("notes.md"), await token("--ok"));
+    const row = changedFile(pane(page), "guide.md");
+    await row.click();
+    await row.and(pane(page).locator('[aria-selected="true"]')).waitFor();
+    await row.focus();
+    assert.equal(
+      await row.evaluate((el) => getComputedStyle(el, "::before").outlineColor),
+      await token("--focus"),
+    );
+  });
+}
+
 test(
   "the pane opens, resizes, keeps its width and returns focus in WebKit",
   { browserEngine: "webkit" },

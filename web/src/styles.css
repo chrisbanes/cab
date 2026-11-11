@@ -966,7 +966,7 @@ nav {
 }
 .task-workspace details {
   border: 1px solid var(--color-border);
-  border-radius: 6px;
+  border-radius: var(--radius-md);
   padding: 12px;
   margin: 8px 0;
 }
@@ -989,7 +989,7 @@ nav {
 }
 .workspace-attention {
   border: 1px solid var(--color-border);
-  border-radius: 8px;
+  border-radius: var(--radius-xl);
   padding: 16px;
   background: var(--color-card);
 }
@@ -1001,7 +1001,7 @@ nav {
 .artifact-comparisons figure {
   margin: 0;
   border: 1px solid var(--color-border);
-  border-radius: 6px;
+  border-radius: var(--radius-md);
   padding: 12px;
 }
 .artifact-comparisons img {
@@ -1031,7 +1031,7 @@ nav {
   margin: 20px 0 28px;
   padding: 16px;
   border: 1px solid var(--color-border);
-  border-radius: 8px;
+  border-radius: var(--radius-xl);
   background: var(--color-card);
 }
 .workspace-changes > h4 {
@@ -1116,7 +1116,7 @@ nav {
 .changes-workbench-split {
   min-height: 360px;
   max-height: 75vh;
-  border-radius: 8px;
+  border-radius: var(--radius-xl);
   background: var(--color-card);
   overflow: hidden;
 }
@@ -1196,6 +1196,21 @@ nav {
   --trees-border-color-override: var(--color-border);
   --trees-selected-bg-override: var(--color-accent);
   --trees-focus-ring-color-override: var(--color-ring);
+  --trees-accent-override: var(--focus);
+  --trees-selected-fg-override: var(--fg);
+  --trees-selected-focused-border-color-override: var(--focus);
+  --trees-git-added-color-override: var(--ok);
+  --trees-status-added-override: var(--ok);
+  --trees-git-deleted-color-override: var(--risk);
+  --trees-status-deleted-override: var(--risk);
+  --trees-git-modified-color-override: var(--accent-text);
+  --trees-status-modified-override: var(--accent-text);
+  --trees-git-renamed-color-override: var(--accent-text);
+  --trees-status-renamed-override: var(--accent-text);
+  --trees-git-ignored-color-override: var(--fg-3);
+  --trees-status-ignored-override: var(--fg-3);
+  --trees-git-untracked-color-override: var(--fg-3);
+  --trees-status-untracked-override: var(--fg-3);
 }
 .changes-rail h5 {
   margin: 0 12px 8px;
@@ -1264,13 +1279,13 @@ nav {
   padding: 8px 12px;
   border: 1px solid var(--color-border);
   border-left: 3px solid var(--color-primary);
-  border-radius: 6px;
+  border-radius: var(--radius-md);
 }
 .changes-pending-turn {
   padding: 12px;
   margin: 12px 0;
   border: 1px solid var(--color-border);
-  border-radius: 6px;
+  border-radius: var(--radius-md);
 }
 .changes-pending-turn h5 {
   margin-top: 0;
@@ -1301,7 +1316,7 @@ nav {
 .file-reading-area {
   min-width: 0;
   border: 1px solid var(--color-border);
-  border-radius: 8px;
+  border-radius: var(--radius-xl);
   background: var(--color-card);
 }
 .file-rail {
@@ -1501,7 +1516,7 @@ nav {
   white-space: pre;
   padding: 12px;
   border: 1px solid var(--color-border);
-  border-radius: 6px;
+  border-radius: var(--radius-md);
   background: var(--background);
   font-family: var(--font-mono);
   font-size: var(--type-xs);
@@ -1510,7 +1525,7 @@ nav {
   max-width: 100%;
   overflow-x: auto;
   border: 1px solid var(--color-border);
-  border-radius: 6px;
+  border-radius: var(--radius-md);
   background: var(--background);
 }
 .file-source-lines {
@@ -1606,7 +1621,7 @@ nav {
 .file-markdown pre {
   padding: 12px;
   border: 1px solid var(--color-border);
-  border-radius: 6px;
+  border-radius: var(--radius-md);
   background: var(--background);
 }
 .file-markdown code {
@@ -1635,7 +1650,7 @@ nav {
   min-height: 180px;
   overflow: auto;
   border: 1px solid var(--color-border);
-  border-radius: 6px;
+  border-radius: var(--radius-md);
   background: var(--background);
   overscroll-behavior: contain;
 }
@@ -2037,7 +2052,7 @@ textarea[data-auto-grow="true"] {
   margin-top: 8px;
   padding: 12px;
   border: 1px solid var(--border);
-  border-radius: 8px;
+  border-radius: var(--radius-xl);
 }
 .review-comments {
   display: grid;
@@ -2054,7 +2069,7 @@ textarea[data-auto-grow="true"] {
   overflow: auto;
   margin: 4px 0;
   padding: 8px;
-  border-radius: 6px;
+  border-radius: var(--radius-md);
   background: var(--muted);
   white-space: pre;
 }

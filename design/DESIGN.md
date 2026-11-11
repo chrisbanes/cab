@@ -103,7 +103,10 @@ badge with a symbol and a word.
 Project identity uses a small square dot per project, coloured from `--accent-text`,
 `--fg-2` and `--fg-3`; it is never a state colour.
 
-Code and evidence views take their colours from the tokens in both themes. Diffs
+Code and evidence views take their colours from the tokens in both themes; the
+changed-files tree uses `--ok` for added, `--risk` for deleted, `--accent-text` for
+modified and renamed, `--fg-3` for ignored and untracked, and `--focus` for the
+selected row's focus border. Diffs
 render with `@pierre/diffs` in Geist Mono 12/20: syntax colouring for the common
 languages in `web/src/shiki-langs.ts` (others render as plain text), word-level
 emphasis inside changed lines, wrapped long lines and the library's light or dark

@@ -16,7 +16,7 @@
   container-type: inline-size;
   padding: var(--space-12);
   border: 1px solid var(--line);
-  border-radius: 8px;
+  border-radius: var(--radius-xl);
   background: var(--surface);
 }
 
