@@ -2407,18 +2407,14 @@ for (const viewport of [
   });
 }
 
-test("Inbox evidence icons stay attached and Open task has no icon", async (_t, j) => {
+test("Inbox in-app links carry no external-link icon", async (_t, j) => {
   const { page } = await openInbox(j, 1, { width: 1366, height: 900 });
   await page.locator(".inbox-context-evidence a").first().waitFor();
-  for (const link of await page.locator(".inbox-context-evidence a").all()) {
-    const gap = await link.evaluate((a) => {
-      const svg = a.querySelector("svg")!.getBoundingClientRect();
-      const text = document.createRange();
-      text.selectNodeContents(a.querySelector(".inbox-nowrap") ?? a);
-      const last = [...text.getClientRects()].pop()!;
-      return Math.abs(svg.top - last.top);
-    });
-    assert.ok(gap <= 2, `icon top ${gap}px from its text`);
-  }
-  assert.equal(await page.locator(".inbox-open-task svg").count(), 0);
+  for (const link of [
+    page.locator(".inbox-context-task"),
+    page.getByRole("link", { name: "Task evidence", exact: true }),
+    page.getByRole("link", { name: "Requesting conversation", exact: true }),
+    page.locator(".inbox-open-task"),
+  ])
+    assert.equal(await link.locator("svg").count(), 0);
 });
