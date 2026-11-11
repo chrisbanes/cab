@@ -284,9 +284,8 @@ export function Inbox({
   // Keep the queue's own scroll across detail visits (a hidden queue forgets its offset), and
   // again once a remount's first read has rows to scroll.
   const hasRows = rows.length > 0;
-  // biome-ignore lint/correctness/useExhaustiveDependencies: reapplies when rows first arrive.
   useLayoutEffect(() => {
-    if (queue.current && !(single && urlId))
+    if (queue.current && hasRows && !(single && urlId))
       queue.current.scrollTop = state.scrollTop;
   }, [state, single, urlId, hasRows]);
   // Returning from the phone detail focuses the opened row, or the row now at its place.

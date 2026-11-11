@@ -197,10 +197,11 @@ fixed application dimensions.
 - **Inbox keys:** from 761px, J and K select the next and previous request in the
   queue's displayed order, like the Next request and Previous request buttons
   (`aria-keyshortcuts`, titles "Next request (J)" and "Previous request (K)"); the queue
-  caption says "J and K move between requests". They follow the focus-mode key's rules
-  and are also ignored in menus, on repeat and during composition. After a key move the
+  caption says "J and K move between requests". They follow the focus-mode key's rules,
+  and are also ignored in menus. After a key move the
   request heading takes focus with a visible `--focus` ring and its row scrolls into
-  view; a click keeps focus where it was. Phones have no keys.
+  view. A click keeps focus where it was, except that a request with an unfinished
+  answer returns focus to the field last used in it. Phones have no keys.
 
 ## Shared components
 

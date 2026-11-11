@@ -1324,6 +1324,11 @@ test("Previous/Next continue from the selection's former place once it leaves th
     ids(queueSteps(rows("x", "y", "a", "c"), "s", anchor("s", 1, "a", "b"))),
     ["a", "c"],
   );
+  // Its former Previous and the rows above left (say, filtered out): nothing is above its Next.
+  assert.deepEqual(
+    ids(queueSteps(rows("c", "d"), "s", anchor("s", 2, "a", "c"))),
+    [undefined, "c"],
+  );
   // A row inserted above keeps the neighbour-id targets.
   assert.deepEqual(ids(queueSteps(rows("new", "a", "c"), "b", middle)), [
     "a",

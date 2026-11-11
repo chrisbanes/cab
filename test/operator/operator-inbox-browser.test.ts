@@ -2667,6 +2667,15 @@ test("J and K step through the queue with a visible focus on the request, and ne
   assert.equal(await previous.getAttribute("aria-keyshortcuts"), "K");
   assert.equal(await next.getAttribute("aria-keyshortcuts"), "J");
   await page.getByText("J and K move between requests.").waitFor();
+  // An open menu keeps its own letters.
+  await page
+    .getByRole("button", { name: "Operator account", exact: true })
+    .press("Enter");
+  await page.getByRole("menu").getByRole("menuitem").first().waitFor();
+  await page.keyboard.press("j");
+  await settle(page);
+  assert.equal(request(), order[0]);
+  await page.keyboard.press("Escape");
   assert.deepEqual(posts, []);
 });
 
