@@ -50,8 +50,10 @@ test("a native result records each repository's HEAD, branch and dirty flag", as
     },
   );
 
-  // An untracked file makes the result dirty.
+  // An untracked file makes the result dirty; replaying the callback records nothing new.
   const dirty = await captureNativeResult(f, { repository: true });
+  await f.runtime.callTool(dirty.call).catch(() => undefined);
+  assert.equal(recorded(f, dirty.seeded.taskId, dirty.resultId).length, 1);
   assert.equal(
     recorded(f, dirty.seeded.taskId, dirty.resultId)[0]?.dirty,
     true,

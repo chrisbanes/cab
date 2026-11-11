@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
-import { writeFile } from "node:fs/promises";
+import { rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { test } from "node:test";
 import { startCliService } from "../fixtures/operator-cli.js";
@@ -108,6 +108,13 @@ test("a committed artifact is served from the recorded commit once the workspace
   assert.deepEqual(Buffer.from(await r.arrayBuffer()), png);
   assert.equal(r.headers.get("x-cab-evidence-source"), "recorded-commit");
   assert.equal(r.headers.get("x-cab-sha256"), digest(png));
+
+  // Removed from the worktree, the file is still at the recorded commit.
+  await rm(native.artifactPath!);
+  r = await s.bearer(token, path);
+  assert.equal(r.status, 200);
+  assert.deepEqual(Buffer.from(await r.arrayBuffer()), png);
+  assert.equal(r.headers.get("x-cab-evidence-source"), "recorded-commit");
 
   // After cleanup the worktree is gone; the repository still holds the commit.
   worktreeGit(native.worktree, "checkout", "--quiet", "--", ".");

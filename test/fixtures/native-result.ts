@@ -166,5 +166,6 @@ export async function captureNativeResult(
     artifactPath: withArtifact ? artifactPath : undefined,
     originalArtifact: withArtifact ? png : undefined,
     resultId: recorded.resultId,
+    call,
   };
 }

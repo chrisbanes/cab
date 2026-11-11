@@ -6685,12 +6685,13 @@ export class OperatorApi {
       };
     } catch (error) {
       if (error instanceof OperatorApiError) throw error;
-      // The workspace copy moved on or is gone: serve the bytes the result's recorded commit holds.
+      // The workspace copy moved on or is gone (including a missing file's ENOENT): serve the
+      // bytes the result's recorded commit holds, which the fallback verifies again.
       const committed =
         error instanceof ArtifactUnavailable &&
-        (error.reason === "unavailable" || error.reason === "mismatch")
-          ? await this.readCommittedArtifact(taskId, artifactId)
-          : undefined;
+        (error.reason === "redacted" || error.reason === "unsupported")
+          ? undefined
+          : await this.readCommittedArtifact(taskId, artifactId);
       if (committed) return committed;
       throw new OperatorApiError(
         error instanceof ArtifactUnavailable && error.reason === "mismatch"
@@ -6743,7 +6744,7 @@ export class OperatorApi {
         !artifactBytesMatch(file, body) ||
         visibility !== this.visibilityToken()
       )
-        return undefined;
+        continue;
       return {
         body,
         type: file.mime,

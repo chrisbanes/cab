@@ -392,7 +392,7 @@ export const resultWorkspaceObservationSchema = z
     observedAt: z.number().int().nonnegative(),
   })
   .strict();
-const resultWorkspaceObservationsSchema = z
+export const resultWorkspaceObservationsSchema = z
   .array(resultWorkspaceObservationSchema)
   .max(20);
 /** A repository's HEAD, branch (null when detached) and dirty flag when a result was recorded. */

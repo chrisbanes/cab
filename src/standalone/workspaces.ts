@@ -30,7 +30,10 @@ import { runGit } from "./git-process.js";
 import { safeBranchName } from "../core/delivery.js";
 import type { BranchFetch, FetchBranchResult } from "./git-fetch.js";
 import { provedAncestor, verifierGit } from "./push-verification.js";
-import type { ResultWorkspaceObservation } from "../core/coordination.js";
+import {
+  resultWorkspaceObservationsSchema,
+  type ResultWorkspaceObservation,
+} from "../core/coordination.js";
 import { maxErrorMessageBytes } from "./service-log.js";
 
 const maxGitOutputBytes = 1024 * 1024;
@@ -960,6 +963,7 @@ export class WorkspaceManager implements TaskWorkspaceLifecycle {
     repository: TaskWorkspaceRepository,
     work: PendingResultWork,
   ): Promise<boolean> {
+    this.assertNotCancelled();
     const git = verifierGit(
       repository.workspacePath,
       this.gitCancellation.signal,
@@ -1008,14 +1012,20 @@ export class WorkspaceManager implements TaskWorkspaceLifecycle {
         "--abbrev-ref",
         "HEAD",
       );
-      const status = await this.git(
+      // Only whether there is output matters: output past a small cap is dirty.
+      const status = await this.gitBytes(
         at,
         "result-observe",
+        4096,
         "status",
         "--porcelain=v1",
         "--untracked-files=all",
         "--ignore-submodules=dirty",
-      );
+      ).catch((error: unknown) => {
+        if (error instanceof WorkspaceGitError && error.kind === "output-limit")
+          return Buffer.from("?");
+        throw error;
+      });
       observations.push({
         repositoryId: repository.repositoryId,
         headCommit,
@@ -1024,7 +1034,7 @@ export class WorkspaceManager implements TaskWorkspaceLifecycle {
         observedAt: Date.now(),
       });
     }
-    return observations;
+    return resultWorkspaceObservationsSchema.parse(observations);
   }
 
   /**
