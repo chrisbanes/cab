@@ -344,12 +344,11 @@ export class DeliveryCoordinator {
   }
   /**
    * The change request target a publication is checked against: the bound change request's
-   * accepted base, else the stacked blocker's branch, else the workspace's resolved remote base,
-   * else the repository link's branch. Null when none names a branch, such as an explicit commit.
+   * accepted base, else the stacked blocker's branch, else the branch the workspace started from.
+   * Null when none names a branch, such as an explicit commit.
    */
   private publicationTargetBranch(
     taskId: string,
-    projectId: string,
     repositoryId: string,
     baseBranch: string | null,
   ): string | null {
@@ -358,13 +357,8 @@ export class DeliveryCoordinator {
       return bound.acceptedBaseRef;
     const stacked = this.options.stackedPrBase?.(taskId, repositoryId);
     if (stacked?.repositoryId === repositoryId) return stacked.branch;
-    return (
-      baseBranch ??
-      acceptableBaseRefs(this.codeHost(projectId, repositoryId).ref).find(
-        (ref) => ref !== "HEAD",
-      ) ??
-      null
-    );
+    // Never the link's current ref: a bound workspace's target does not move with settings.
+    return baseBranch;
   }
   /** Internal service wiring; the operator journal owns Unstack authority and every send. */
   unstackProviderFor(taskId: string): CodeHostDeliveryProvider {
@@ -946,7 +940,6 @@ export class DeliveryCoordinator {
           branch: workspace
             ? this.publicationTargetBranch(
                 caller.taskId,
-                caller.projectId,
                 action.target.repositoryId,
                 workspace.baseBranch,
               )

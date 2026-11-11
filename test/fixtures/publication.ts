@@ -19,7 +19,10 @@ import {
   type DeliveryCoordinatorOptions,
 } from "../../src/standalone/delivery.js";
 import type { PushOutcome } from "../../src/standalone/git-push.js";
-import type { AdoptFunction } from "../../src/standalone/git-fetch.js";
+import type {
+  AdoptFunction,
+  FetchBranchFunction,
+} from "../../src/standalone/git-fetch.js";
 import {
   GitHubHttpDeliveryProvider,
   type PushFunction,
@@ -253,6 +256,7 @@ export function publicationWorld(
 
   // The task's target branch is the source checkout's `main`, fetched as from the code host.
   const target = localBranchFetch(tree.source);
+  let targetOverride: FetchBranchFunction | undefined;
   let observed: PrDeliveryObservation | undefined;
   const wakes: Array<{ reason: string; identity: string }> = [];
   const caller: DeliveryCaller = {
@@ -277,7 +281,7 @@ export function publicationWorld(
       adopt,
       "github.com",
       undefined,
-      target.fetchBranch,
+      (request) => (targetOverride ?? target.fetchBranch)(request),
     );
     const provider = Object.assign(Object.create(real), {
       async inspectPr() {
@@ -366,6 +370,10 @@ export function publicationWorld(
   return {
     ...tree,
     targetFetches: target.requests,
+    /** Replaces the code host's fetch of the target branch; undefined restores it. */
+    setTargetFetch: (fetchBranch: FetchBranchFunction | undefined) => {
+      targetOverride = fetchBranch;
+    },
     outsideMaterial,
     overwrite,
     adoptOutside,

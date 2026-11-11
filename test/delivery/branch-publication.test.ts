@@ -704,7 +704,73 @@ test("a check that cannot be made holds the push as unproved, never as a conflic
   assert.equal(missing.observation?.reason, "publication-conflict-unproved");
   assert.equal(missing.observation?.conflictCheck, "target-unavailable");
   assert.equal(missing.observation?.conflict, undefined);
+  git(world.source, "branch", "-m", "renamed", "main");
+  // Each failure is reported as its own reason; only Git's conflict exit is a conflict.
+  for (const [fetched, reason] of [
+    [{ kind: "fetch-failed" }, "fetch-failed"],
+    [{ kind: "too-large" }, "too-large"],
+    [{ kind: "not-attempted" }, "credential-unavailable"],
+    // A target commit the repository lacks makes merge-tree fail, which is not a conflict.
+    [
+      { kind: "fetched", branch: "main", commit: "e".repeat(40) },
+      "computation-failed",
+    ],
+  ] as const) {
+    world.setTargetFetch(async () => fetched);
+    const held = await world.submit("branch.push", sha);
+    assert.equal(held.observation?.conflictCheck, reason, reason);
+    assert.equal(held.observation?.conflict, undefined);
+  }
+  world.setTargetFetch(undefined);
+  // A workspace started at an explicit commit names no target branch to check.
+  const unnamed = await world.submit(
+    "branch.push",
+    sha,
+    world.coordinatorFor(true, false, {
+      taskWorkspace: async () => ({
+        workspacePath: world.workspace,
+        baseCommit: world.base,
+        commonDirectory: resolve(world.source, ".git"),
+        managed: false,
+        baseBranch: null,
+      }),
+    }),
+  );
+  assert.equal(unnamed.observation?.conflictCheck, "target-unidentified");
   assert.deepEqual(world.pushes, []);
+});
+
+test("a GitHub pull request create is checked against its requested base before it is sent", async (t) => {
+  const world = publicationWorld(t, { grants: ["branch.push", "pr.create"] });
+  writeFileSync(resolve(world.workspace, "a.txt"), "task\n");
+  git(world.workspace, "commit", "-q", "-am", "task edit");
+  const sha = git(world.workspace, "rev-parse", "HEAD");
+  assert.equal(
+    (await world.submit("branch.push", sha)).state,
+    "confirmed-success",
+  );
+  git(world.source, "checkout", "-q", "-b", "release");
+  const release = advanceTarget(world, "release\n");
+  git(world.source, "checkout", "-q", "main");
+  const branch = String(
+    world.store.taskBranch(world.taskId, repositoryId)?.branch,
+  );
+  const refused = await world.coordinator.submit(
+    {
+      operationId: randomUUID(),
+      action: {
+        ...prCreate(branch, sha),
+        target: { ...prCreate(branch, sha).target, baseRef: "release" },
+      },
+    },
+    world.caller,
+  );
+  assert.equal(refused.observation?.reason, "publication-target-conflict");
+  assert.equal(refused.observation?.conflict?.targetSha, release);
+  assert.equal(
+    world.requests.some((r) => r.startsWith("POST") && r.endsWith("/pulls")),
+    false,
+  );
 });
 
 test("a stacked dependent's push is checked against its blocker's branch, not the repository's", async (t) => {

@@ -3176,14 +3176,14 @@ Before each push, force-push and `pr.create`, cab fetches the change request tar
 checks that the exact commit merges cleanly into it with `git merge-tree`, which writes no
 worktree, `HEAD` or index ([ADR-1016](adr/1016-ensemble-owned-commit-publication.md)). The
 target is the bound change request's accepted base, else the stacked blocker's branch, else the
-branch the workspace started from, else the link's branch; `pr.create` checks its requested
+branch the workspace started from; `pr.create` checks its requested
 base. A demonstrated conflict refuses the write as `publication-target-conflict`, and the lead's
 result names the target branch and commit, the head commit and the conflicting paths (at most
 50), and where the fetched target is kept (`refs/cab/target/<branch>` in the workspace
 repository). The lead integrates it locally, validates, and sends a new request, which needs its
 usual approval and is checked again. A check that cannot be made is held as
 `publication-conflict-unproved` with its reason (`target-unavailable`, `target-unidentified`,
-`fetch-failed`, `too-large`, `credential-unavailable`, `computation-failed` or `cancelled`),
+`fetch-failed`, `too-large`, `credential-unavailable` or `computation-failed`),
 never reported as a conflict. The target can move after the check; the merge-time gate remains
 the code host's.
 

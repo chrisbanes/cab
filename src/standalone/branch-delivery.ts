@@ -1,6 +1,7 @@
 import { z } from "zod";
 import {
   absentBranchHead,
+  safeBranchName,
   type DeliveryActionRecord,
   type ExternalAction,
   type ProviderActionObservation,
@@ -48,8 +49,7 @@ export type ConflictCheckFailure =
   | "fetch-failed"
   | "too-large"
   | "credential-unavailable"
-  | "computation-failed"
-  | "cancelled";
+  | "computation-failed";
 
 /** What a demonstrated conflict names: the checked pair of commits and the conflicting paths. */
 export interface PublicationConflict {
@@ -100,7 +100,6 @@ export async function checkPublicationTarget(
   remote: BranchRemote,
   target: PublicationTarget,
   commitSha: string,
-  signal?: AbortSignal,
 ): Promise<{
   targetBranch: string;
   targetSha: string;
@@ -110,7 +109,7 @@ export async function checkPublicationTarget(
 }> {
   if (target.commonDirectory === null)
     throw new PublicationConflictUnproved("target-unavailable");
-  if (target.branch === null)
+  if (target.branch === null || !safeBranchName(target.branch))
     throw new PublicationConflictUnproved("target-unidentified");
   const branch = target.branch;
   const destination = target.managed
@@ -125,7 +124,6 @@ export async function checkPublicationTarget(
         have: commitSha,
       })
       .catch(() => ({ kind: "fetch-failed" }) as const);
-    if (signal?.aborted) throw new PublicationConflictUnproved("cancelled");
     if (fetched.kind !== "fetched")
       throw new PublicationConflictUnproved(
         fetched.kind === "unavailable"
@@ -145,21 +143,17 @@ export async function checkPublicationTarget(
         outcome: "clean",
         targetRetained: target.managed,
       };
-    const merged = await withScratchGit(
-      destination,
-      (git) =>
-        git([
-          "merge-tree",
-          "--write-tree",
-          "--name-only",
-          "-z",
-          "--no-messages",
-          fetched.commit,
-          commitSha,
-        ]),
-      signal ? { signal } : {},
+    const merged = await withScratchGit(destination, (git) =>
+      git([
+        "merge-tree",
+        "--write-tree",
+        "--name-only",
+        "-z",
+        "--no-messages",
+        fetched.commit,
+        commitSha,
+      ]),
     ).catch(() => null);
-    if (signal?.aborted) throw new PublicationConflictUnproved("cancelled");
     if (merged?.status === "ok")
       return {
         targetBranch: branch,

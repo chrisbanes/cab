@@ -691,7 +691,6 @@ export const actionObservationSchema = z
         "too-large",
         "credential-unavailable",
         "computation-failed",
-        "cancelled",
       ])
       .optional(),
     /** Epoch ms before which a retryable failure is not re-attempted. */

@@ -7527,12 +7527,8 @@ export class StandaloneService {
           if (drafting.get(runId)?.state !== "queued") return undefined;
           const binding = await draftingWorkspaces.provision(
             runId,
-            // A drafting copy has no managed repository, so it never fetches.
-            repositories.map((repository) =>
-              repository.base
-                ? { ...repository, base: { ...repository.base, fetch: false } }
-                : repository,
-            ),
+            // A drafting copy keeps the source worktree at the link's ref; remote bases are for tasks.
+            repositories.map(({ base: _base, ...repository }) => repository),
           );
           if (binding.state !== "ready")
             throw new Error(binding.reason ?? "Working copy is not ready");
