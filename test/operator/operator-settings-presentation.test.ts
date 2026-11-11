@@ -2409,3 +2409,64 @@ test("starter option names actual runtimes and fails closed for unknown or incom
     "Adds Implementer (Claude) and Reviewer (Claude)",
   );
 });
+
+test("a repository's base change previews its new base with the new-workspaces note and sends both fields", () => {
+  const c = config();
+  const rows = repositoryRowsFrom(c.repositories).repositories;
+  const values = (base: Record<string, unknown>) => ({
+    key: "k",
+    expectedVersion: "2",
+    repositories: JSON.stringify(rows.map((r) => ({ ...r, ...base }))),
+  });
+  const remote = values({
+    ref: "release",
+    baseMode: "remote-branch",
+    fetchBeforeProvisioning: true,
+  });
+  assert.deepEqual(repositoryChanges(c.repositories, remote), [
+    "Ref for acme/atlas: main → release",
+    "Base for acme/atlas: Explicit ref main → Remote branch release · fetch before workspace",
+    "Applies to workspaces created after saving; existing workspaces keep their recorded base.",
+  ]);
+  assert.deepEqual(repositoryCommand(projectId, remote).repositories, [
+    {
+      codeHost: "github",
+      host: "github.com",
+      repositoryId: "acme/atlas",
+      ref: "release",
+      baseMode: "remote-branch",
+      fetchBeforeProvisioning: true,
+    },
+  ]);
+  // A saved remote base reads back into the row, and changing back sends the explicit ref.
+  const saved = {
+    ...c.repositories,
+    links: c.repositories.links.map((l) => ({
+      ...l,
+      baseMode: "remote-default" as const,
+      fetchBeforeProvisioning: true,
+    })),
+  };
+  const back = repositoryRowsFrom(saved).repositories.map((r) => ({
+    ...r,
+    baseMode: "ref",
+    fetchBeforeProvisioning: false,
+  }));
+  const reverted = {
+    key: "k",
+    expectedVersion: "2",
+    repositories: JSON.stringify(back),
+  };
+  assert.deepEqual(repositoryChanges(saved, reverted), [
+    "Base for acme/atlas: Remote default branch · fetch before workspace → Explicit ref main",
+    "Applies to workspaces created after saving; existing workspaces keep their recorded base.",
+  ]);
+  assert.deepEqual(repositoryCommand(projectId, reverted).repositories[0], {
+    codeHost: "github",
+    host: "github.com",
+    repositoryId: "acme/atlas",
+    ref: "main",
+    baseMode: "ref",
+    fetchBeforeProvisioning: false,
+  });
+});

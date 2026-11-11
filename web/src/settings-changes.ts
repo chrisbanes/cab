@@ -335,8 +335,13 @@ export function repositoryRowsFrom(saved: Repositories) {
             repositoryId: r.repositoryId ?? "",
             ref: r.ref ?? "",
             savedRef: r.ref ?? "",
-            baseMode: r.baseMode ?? "ref",
-            fetchBeforeProvisioning: r.fetchBeforeProvisioning ?? false,
+            // Only a non-default base is carried, so an untouched default row sends none.
+            ...((r.baseMode ?? "ref") !== "ref" || r.fetchBeforeProvisioning
+              ? {
+                  baseMode: r.baseMode ?? "ref",
+                  fetchBeforeProvisioning: r.fetchBeforeProvisioning === true,
+                }
+              : {}),
             keep: true,
           },
     ),

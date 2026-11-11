@@ -56,6 +56,21 @@ agent turns run with network off. Delivery scope lives in
   repository with no credential and rehashes every commit it reads, including those
   the alternate supplies, and Git runs against the worktree afterwards only to write an
   cab-owned ref, without its hooks or a credential.
+- Before a push, a force-push or a change request create, cab fetches the change request
+  target branch afresh through the same isolated transport (`ls-remote`, then a bounded fetch
+  of that branch) and computes `git merge-tree --write-tree` of the exact proposed commit
+  against the fetched tip in a scratch repository, which writes no worktree, `HEAD` or index
+  and reads no agent-written configuration. The target is the bound change request's accepted
+  base, else the stacked blocker's branch, else the branch the workspace started from, else
+  the repository link's branch; a create checks its actual requested base. Exit 1 with paths
+  refuses the external write as `publication-target-conflict`, naming the target branch, both
+  commits and up to 50 paths; a managed repository keeps the target at
+  `refs/cab/target/<branch>` for the lead to integrate locally. Any other outcome (no
+  identifiable or available target, a failed, oversized or uncredentialled fetch, a failed or
+  cancelled computation) holds as `publication-conflict-unproved` with its reason, never as a
+  conflict. A clean result is recorded in the before-state and authorizes nothing by itself:
+  the ancestry and lease proofs, approvals and merge-time host checks all still apply. A retry
+  whose branch already holds the commit makes no write and is not re-checked.
 - cab does not delete branches, push tags or forks, or poll for pushes without a
   PR. Merged branches follow the repository's own head-branch deletion setting.
 
@@ -71,6 +86,10 @@ grant: `branch.force-push` naming the outside head overwrites it under a lease o
 head, and `branch.adopt` (grantable with approval only) records it as the branch's own
 after the fetch child proves it descends from the provisioned base. Both bind the branch,
 the outside head and the commit cab last pushed.
+
+The publication check proves only the pair of commits it saw: the target can move after the
+check, so a change request can still conflict later, and the merge-time gate stays with the code
+host.
 
 ## Considered options
 

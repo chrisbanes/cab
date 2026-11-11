@@ -132,7 +132,9 @@ _Avoid_: Forge, Git provider
 **Repository link**:
 A project's binding of a local checkout and base ref to one repository on a code
 host. It belongs to the project, independently of any task source, and grants
-access only to that repository.
+access only to that repository. Its base mode starts new workspaces at the explicit
+ref, a named remote branch or the code host's default branch, optionally fetched
+first; existing workspaces keep the base they were bound to.
 _Avoid_: Source repository when referring to a project's linked repository
 
 **Managed repository**:

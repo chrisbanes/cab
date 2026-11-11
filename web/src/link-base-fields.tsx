@@ -27,6 +27,7 @@ export function LinkBaseFields(p: {
         <NativeSelect
           className="control"
           id={`${p.id}-baseMode`}
+          aria-label="Base"
           value={baseMode}
           disabled={p.disabled}
           onChange={(e) => {
