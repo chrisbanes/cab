@@ -97,7 +97,13 @@ function codexUser(trace) {
     (e) =>
       e.kind === "item" &&
       e.turn === 3 &&
-      !["userMessage", "agentMessage", "reasoning"].includes(e.type),
+      // Shell commands are not permission requests; the model sometimes runs its own.
+      ![
+        "userMessage",
+        "agentMessage",
+        "reasoning",
+        "commandExecution",
+      ].includes(e.type),
   );
   const reply = events.findLast(
     (e) => e.kind === "item" && e.turn === 3 && e.type === "agentMessage",
@@ -153,7 +159,11 @@ function codexAutoReview(trace) {
     out.reviewNotifications = untested("no escalation observed in turn 1", {
       result: results.reviewed ?? null,
     });
-  if (turnDone(1)) {
+  const escalated = events.some(
+    (e) =>
+      e.kind === "request" || (e.kind === "review" && e.phase === "started"),
+  );
+  if (turnDone(1) && escalated) {
     const reached = events.filter((e) => e.kind === "request");
     out.clientEscalationsRecorded = proved({
       requestsReachingClient: reached.length,
@@ -216,7 +226,8 @@ function codexTiming(trace) {
       e.t >= request.t &&
       (answeredAt === undefined || e.t < answeredAt) &&
       ((e.kind === "resolved" && e.requestId === request.id) ||
-        e.kind === "turn"),
+        e.kind === "turn" ||
+        (e.kind === "item" && e.type === "commandExecution")),
   );
   const evidence = {
     heldMs: answeredAt === undefined ? null : answeredAt - request.t,
@@ -290,13 +301,19 @@ function claudeSandbox(trace) {
   const denied = pre.find(
     (e) => e.command?.includes("hook-deny") && e.decision === "deny",
   );
-  if (denied)
-    out.hookDenyPrevents = results["hook-deny"]
-      ? refuted({ result: results["hook-deny"] })
-      : proved({
-          dangerouslyDisableSandbox: denied.dangerouslyDisableSandbox,
-          resultFile: null,
-        });
+  const deniedResult =
+    denied &&
+    events.find(
+      (e) => e.kind === "toolResult" && e.toolUseId === denied.toolUseId,
+    );
+  if (denied && results["hook-deny"])
+    out.hookDenyPrevents = refuted({ result: results["hook-deny"] });
+  else if (deniedResult?.isError)
+    out.hookDenyPrevents = proved({
+      dangerouslyDisableSandbox: denied.dangerouslyDisableSandbox,
+      toolResult: deniedResult.text,
+      resultFile: null,
+    });
   return out;
 }
 
@@ -359,7 +376,9 @@ function claudeAuto(trace) {
     });
   } else if (query?.done) {
     out.hookBeforeClassifier = untested(
-      "no classifier signal observable separately from the hook",
+      events.some((e) => e.subtype === "permission_check_status")
+        ? "classifier signals (system:permission_check_status) not attributable per call"
+        : "no classifier signal observable separately from the hook",
     );
     out.undecidedReachCanUseTool = untested(
       "classifier decided every call; no undecided call elicited",

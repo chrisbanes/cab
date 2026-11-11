@@ -46,7 +46,11 @@ export const CODEX_GROUPS = {
       `${preamble} ${escalate("node chromium.mjs declined")}. Then reply done.`,
       `${preamble} Use your permission-request tool, not the shell, once to request network access and write access to /private/var/empty/cab-probe for this turn. If you have no such tool, substitute nothing and reply exactly NO_PERMISSION_TOOL. Then reply done.`,
     ],
-    answer: (command) => (command.includes("escalated") ? "accept" : "decline"),
+    // Exact command only: the model sometimes runs extra commands of its own.
+    answer: (command) =>
+      /^(\/bin\/zsh -lc )?'?node chromium\.mjs escalated'?$/.test(command)
+        ? "accept"
+        : "decline",
   },
   "codex-auto-review": {
     reviewer: "auto_review",
@@ -75,6 +79,9 @@ export const CODEX_LABELS = [
 ];
 
 class Deadline extends Error {}
+// Unreferenced, so a pending wait never keeps the process alive after output.
+const sleep = (ms, value) =>
+  new Promise((resolve) => setTimeout(resolve, ms, value).unref());
 const short = (value, size = 300) =>
   typeof value === "string" ? value.slice(0, size) : value;
 
@@ -126,6 +133,8 @@ export async function runCodexGroup(
   let turnId;
   let threadId;
   let turnDone;
+  let accepted = false;
+  const completedTurns = new Set();
   let rejectDeadline;
   const deadline = new Promise((_, reject) => {
     rejectDeadline = reject;
@@ -177,10 +186,17 @@ export async function runCodexGroup(
       write(deniedServerRequest(message.id, message.method));
       return;
     }
-    const decision = spec.answer(p.command ?? "");
+    // At most one accept per run, and only for the fixture workspace.
+    const decision =
+      !accepted &&
+      p.cwd === workspace &&
+      spec.answer(p.command ?? "") === "accept"
+        ? "accept"
+        : "decline";
+    if (decision === "accept") accepted = true;
     if (spec.hold) {
       log(`holding approval ${holdMs} ms`);
-      await race(new Promise((resolve) => setTimeout(resolve, holdMs)));
+      await race(sleep(holdMs));
     }
     entry.answer = decision;
     entry.answeredAt = t();
@@ -238,7 +254,9 @@ export async function runCodexGroup(
           ? { text: short(item.text, 200) }
           : {}),
       });
-    } else if (message.method === "turn/completed" && p.turn?.id === turnId) {
+    } else if (message.method === "turn/completed") {
+      // Turns run one at a time; completion can arrive before the turn/start response.
+      completedTurns.add(p.turn?.id);
       record({ turn, kind: "turn", status: p.turn?.status });
       turnDone?.();
     }
@@ -265,7 +283,7 @@ export async function runCodexGroup(
     }
     const response = await request("turn/start", params);
     turnId = response?.turn?.id;
-    await race(done);
+    if (!completedTurns.has(turnId)) await race(done);
   }
 
   async function overrule() {
@@ -335,7 +353,7 @@ export async function runCodexGroup(
             params: { threadId, turnId },
           });
         }),
-        new Promise((resolve) => setTimeout(resolve, 5000)),
+        sleep(5000),
       ]);
   } finally {
     clearTimeout(timer);
@@ -344,16 +362,13 @@ export async function runCodexGroup(
     child.kill("SIGTERM");
     const stopped = await Promise.race([
       exited.then(() => true),
-      new Promise((resolve) => setTimeout(() => resolve(false), 10_000)),
+      sleep(10_000, false),
     ]);
     // Fallback only for the exact child this harness spawned.
     if (!stopped) child.kill("SIGKILL");
     trace.cleanup.appServerStopped =
       stopped ||
-      (await Promise.race([
-        exited.then(() => true),
-        new Promise((resolve) => setTimeout(() => resolve(false), 5000)),
-      ]));
+      (await Promise.race([exited.then(() => true), sleep(5000, false)]));
     for (const label of CODEX_LABELS) {
       const path = join(workspace, `${label}-result.json`);
       if (existsSync(path))

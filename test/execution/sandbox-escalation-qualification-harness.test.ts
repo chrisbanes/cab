@@ -137,6 +137,8 @@ test("classification proves only from present evidence", async () => {
     results: {},
   });
   assert.equal(approved.reviewNotifications.outcome, "untested");
+  // No escalation observed: "nothing reached the client" is not evidence.
+  assert.equal(approved.clientEscalationsRecorded.outcome, "untested");
   assert.equal(approved.overruleAfterDenial.reason, "denial not elicited");
   assert.equal(approved.retryReviewedAgain.reason, "denial not elicited");
 
@@ -269,6 +271,7 @@ test("codex groups send the granular turn policy, answer only accept or decline,
     deadlineMs: 60_000,
   });
   assert.equal(trace.failure, null);
+  assert.equal(trace.deadline, false);
   assert.deepEqual(trace.turnStart, {
     cwd: ws,
     approvalPolicy: granularPolicy,
@@ -307,6 +310,8 @@ test("codex groups send the granular turn policy, answer only accept or decline,
     holdMs: 200,
     deadlineMs: 60_000,
   });
+  assert.equal(timing.failure, null);
+  assert.equal(timing.deadline, false);
   const request = timing.events.find(
     (e: Event) =>
       e.kind === "request" && e.method !== "item/permissions/requestApproval",

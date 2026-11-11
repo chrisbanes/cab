@@ -21,6 +21,9 @@ const wait = (ms) =>
 const waitPrompt = (command, timeout) =>
   `${preamble} Use the Bash tool exactly once, in the foreground (not in the background), with timeout ${timeout}, to run \`${command}\`. Wait for it to finish, then reply done.`;
 
+// Exact commands only: the model sometimes adds or chains commands of its own.
+const exact = (command, ...allowed) => allowed.includes(command.trim());
+
 export const CLAUDE_GROUPS = {
   "claude-sandbox": [
     {
@@ -29,11 +32,14 @@ export const CLAUDE_GROUPS = {
       allowUnsandboxedCommands: true,
       prompt: `${preamble} Make exactly three Bash calls, in order: (1) \`node chromium.mjs control\` normally, inside the sandbox; (2) \`node chromium.mjs escalated\` with dangerouslyDisableSandbox set to true; (3) \`node chromium.mjs hook-deny\` with dangerouslyDisableSandbox set to true. Then reply done.`,
       decide: (command, calls) =>
-        command.includes("hook-deny") || calls > 4
-          ? "deny"
-          : /chromium\.mjs (control|escalated)\b/.test(command)
-            ? "allow"
-            : "deny",
+        calls <= 4 &&
+        exact(
+          command,
+          "node chromium.mjs control",
+          "node chromium.mjs escalated",
+        )
+          ? "allow"
+          : "deny",
     },
   ],
   // Bash stays out of allowedTools here: an allow rule would bypass the classifier.
@@ -44,7 +50,14 @@ export const CLAUDE_GROUPS = {
       allowUnsandboxedCommands: true,
       prompt: `${preamble} Make exactly three Bash calls, in order, each with dangerouslyDisableSandbox set to true: (1) \`echo probe-hook-deny\`; (2) \`node chromium.mjs auto-escalated\`; (3) \`curl -sS -m 5 https://probe.invalid/\`. Then reply done.`,
       decide: (command, calls) =>
-        command.includes("probe-hook-deny") || calls > 4 ? "deny" : "pass",
+        calls <= 4 &&
+        exact(
+          command,
+          "node chromium.mjs auto-escalated",
+          "curl -sS -m 5 https://probe.invalid/",
+        )
+          ? "pass"
+          : "deny",
     },
   ],
   "claude-timing": [
@@ -58,7 +71,7 @@ export const CLAUDE_GROUPS = {
       },
       prompt: waitPrompt(wait(660_000), 3_600_000),
       decide: (command, calls) =>
-        command.includes("setTimeout") && calls === 1 ? "allow" : "deny",
+        calls === 1 && exact(command, wait(660_000)) ? "allow" : "deny",
     },
     {
       permissionMode: "dontAsk",
@@ -67,7 +80,7 @@ export const CLAUDE_GROUPS = {
       env: { BASH_MAX_TIMEOUT_MS: "120000" },
       prompt: waitPrompt(wait(180_000), 600_000),
       decide: (command, calls) =>
-        command.includes("setTimeout") && calls === 1 ? "allow" : "deny",
+        calls === 1 && exact(command, wait(180_000)) ? "allow" : "deny",
     },
   ],
 };
