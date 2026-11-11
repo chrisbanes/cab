@@ -790,6 +790,8 @@ function restoreRequestSchema21(db: DatabaseSync) {
 
 /** The schema digest each migration level created. Append an entry with every level bump. */
 const SCHEMA_PINS: Record<number, string> = {
+  // Data only: repositories at a delivery preset gain its pr.update-branch grant.
+  25: "c4d5b1034030e6af97c598f25f8882df5517ac74648fc2d1ac36898e56d7e5de",
   // Workspace bindings record whether a hold came only from a failed identity read.
   24: "c4d5b1034030e6af97c598f25f8882df5517ac74648fc2d1ac36898e56d7e5de",
   // Inbox lifecycle and visibility command receipts.
