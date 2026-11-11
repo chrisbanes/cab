@@ -113,8 +113,17 @@ test("classification proves only from present evidence", async () => {
       results: {},
     }).otherKindsRefused.outcome;
   assert.equal(turn3({ type: "webSearch" }), "untested");
+  // A permission-request call proves refusal only when its output shows one.
   assert.equal(
     turn3({ type: "functionCallOutput", name: "request_permissions" }),
+    "untested",
+  );
+  assert.equal(
+    turn3({
+      type: "functionCallOutput",
+      name: "functions.request_permissions",
+      output: "Permission request denied: request_permissions is disabled",
+    }),
     "proved",
   );
 
@@ -200,7 +209,7 @@ test("classification proves only from present evidence", async () => {
         kind: "hook",
         event: "PostToolUse",
         toolUseId: "a",
-        response: "probe-exit=0",
+        response: '{"stdout":"probe-exit=0"}',
       },
       {
         t: 700_000,
@@ -252,6 +261,33 @@ test("classification proves only from present evidence", async () => {
     results: {},
   });
   assert.equal(unrequested.envClampsLargerRequest.outcome, "refuted");
+  // A command killed at a 600 s limit echoes its own text, marker included: not proof.
+  const killed = classify("claude-timing", {
+    events: [
+      {
+        t: 0,
+        query: 1,
+        kind: "hook",
+        event: "PreToolUse",
+        toolUseId: "a",
+        command: wait(660_000),
+        timeout: 3_600_000,
+      },
+      {
+        t: 600_400,
+        query: 1,
+        kind: "hook",
+        event: "PostToolUseFailure",
+        toolUseId: "a",
+        response: JSON.stringify(
+          `Command timed out after 600000ms: ${wait(660_000)}`,
+        ),
+      },
+    ],
+    queries: [],
+    results: {},
+  });
+  assert.equal(killed.ceilingAboveDefault.outcome, "refuted");
   assert.equal(timed.sixtyMinuteBoundary.outcome, "untested");
 
   const deniedByMode = classify("claude-sandbox", {
@@ -409,6 +445,22 @@ test("codex groups send the granular turn policy, answer only accept or decline,
   });
   assert.match(failedTurn.failure, /turn 1 ended failed/);
   assert.ok(failedTurn.events.every((e: Event) => e.turn === 1));
+
+  // After codex-timing's held decline, a failed turn is the measured outcome.
+  rmSync(logPath, { force: true });
+  const failedAfterHold = await runCodexGroup("codex-timing", {
+    executable: process.execPath,
+    args: [...fake, "failed-turns"],
+    env: process.env,
+    workspace: ws,
+    holdMs: 200,
+    deadlineMs: 60_000,
+  });
+  assert.equal(failedAfterHold.failure, null);
+  assert.equal(
+    classify("codex-timing", failedAfterHold).turnContinuesAfterDecline.outcome,
+    "refuted",
+  );
 });
 
 test("claude auto group sends auto mode with unsandboxed commands allowed and records the hook deny before any classifier signal", async (t) => {

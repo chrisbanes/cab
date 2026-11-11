@@ -77,6 +77,8 @@ const evidence = {
   claude: null,
   confounds: {},
 };
+// Evidence names its candidate SHA, so it must run from exactly that tree.
+if (!evidence.candidateClean) refuse("the checkout has uncommitted changes");
 let claudeExecutable;
 if (codex) {
   const rules = join(
@@ -187,9 +189,13 @@ if (trace.prerequisite) {
   process.exit(2);
 }
 const outcomes = classify(group, trace);
+// `classify` fills unobserved sub-contracts with a fallback; a run passes only when
+// every outcome was decided from its evidence.
 const pass =
   SUB_CONTRACTS[group].every((key) => outcomes[key]?.outcome) &&
-  Object.values(outcomes).every((o) => o.reason !== "deadline") &&
+  Object.values(outcomes).every(
+    (o) => o.reason !== "deadline" && o.reason !== "not observed",
+  ) &&
   Object.values(cleanup).every(Boolean) &&
   !trace.failure &&
   !trace.deadline;

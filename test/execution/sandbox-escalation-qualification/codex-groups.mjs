@@ -250,7 +250,9 @@ export async function runCodexGroup(
         ...(item.type === "agentMessage"
           ? { text: short(item.text, 200) }
           : {}),
-        ...(item.type === "functionCallOutput" ? { name: item.name } : {}),
+        ...(item.type === "functionCallOutput"
+          ? { name: item.name, output: short(String(item.output ?? ""), 200) }
+          : {}),
       });
     } else if (message.method === "turn/completed") {
       // Turns run one at a time; completion can arrive before the turn/start response.
@@ -283,8 +285,12 @@ export async function runCodexGroup(
     turnId = response?.turn?.id;
     if (!completedTurns.has(turnId)) await race(done);
     // A failed or interrupted turn did not run its probe as asked: stop and fail the run.
+    // After codex-timing's held decline, the turn's status is the measured outcome instead.
     const status = completedTurns.get(turnId);
-    if (status !== "completed") throw new Error(`turn ${turn} ended ${status}`);
+    const measured =
+      spec.hold && trace.events.some((e) => e.answeredAt !== undefined);
+    if (status !== "completed" && !measured)
+      throw new Error(`turn ${turn} ended ${status}`);
   }
 
   async function overrule() {

@@ -127,7 +127,13 @@ function codexUser(trace) {
       e.kind === "item" &&
       e.turn === 3 &&
       e.type === "functionCallOutput" &&
-      e.name === "request_permissions",
+      e.name?.replace(/^functions\./, "") === "request_permissions",
+  );
+  // A call proves refusal only when its output shows one; it could have been granted.
+  const refusals = attempts.filter((e) =>
+    /\b(denied|declined|rejected|refused|not (allowed|permitted|approved))\b/i.test(
+      e.output ?? "",
+    ),
   );
   const reply = events.findLast(
     (e) => e.kind === "item" && e.turn === 3 && e.type === "agentMessage",
@@ -136,10 +142,14 @@ function codexUser(trace) {
     out.otherKindsRefused = refuted({
       reachedClient: others.map((r) => r.method),
     });
-  else if (attempts.length > 0)
+  else if (refusals.length > 0)
     out.otherKindsRefused = proved({
-      attemptItems: attempts.map((e) => `${e.type}:${e.name}`),
+      attempts: refusals.map((e) => ({ name: e.name, output: e.output })),
       reachedClient: [],
+    });
+  else if (attempts.length > 0)
+    out.otherKindsRefused = untested("attempt seen, refusal not shown", {
+      attempts: attempts.map((e) => ({ name: e.name, output: e.output })),
     });
   else if (events.some((e) => e.kind === "turn" && e.turn === 3))
     out.otherKindsRefused = untested(
@@ -306,7 +316,9 @@ function claudeSandbox(trace) {
         : untested("escalated call wrote no result", legs)
       : ran(results.control)
         ? untested("sandboxed control also launched Chromium", legs)
-        : blocked(results.control) && ran(results.escalated)
+        : escalated.dangerouslyDisableSandbox &&
+            blocked(results.control) &&
+            ran(results.escalated)
           ? proved(legs)
           : refuted(legs);
   }
@@ -480,11 +492,20 @@ function waitCall(events, query, ms) {
   );
   if (!post && !result) return null;
   const end = post?.t ?? result.t;
-  const output = `${post?.response ?? ""} ${result?.text ?? ""}`;
+  let response = null;
+  try {
+    response = JSON.parse(post?.response ?? "null");
+  } catch {}
+  // The command text itself contains the marker, so only the exact stdout counts.
+  const stdout =
+    typeof response?.stdout === "string" ? response.stdout : result?.text;
   return {
     requestedTimeout: pre.timeout ?? null,
     elapsedMs: end - pre.t,
-    exitedZero: output.includes("probe-exit=0"),
+    exitedZero: stdout?.trim() === "probe-exit=0",
+    timedOut:
+      response?.timedOutAfterMs !== undefined ||
+      response?.backgroundTaskId !== undefined,
     response: post?.response ?? result?.text,
   };
 }
@@ -515,7 +536,9 @@ function claudeTiming(trace) {
   if (first)
     out.ceilingAboveDefault =
       first.requestedTimeout === 3_600_000 &&
-      first.elapsedMs > 600_000 &&
+      // Beyond any 600 s limit, finished in the foreground with its own output.
+      first.elapsedMs >= 655_000 &&
+      !first.timedOut &&
       first.exitedZero
         ? proved(first)
         : refuted(first);
