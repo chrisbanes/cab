@@ -360,30 +360,38 @@ function claudeAuto(trace) {
           ? refuted(evidence)
           : untested("no tool result for the denied call", evidence);
   }
-  if (asked.length > 0) {
-    const order = asked.map((e) => ({
-      toolUseId: e.toolUseId,
-      hookAtMs: pre.find((h) => h.toolUseId === e.toolUseId)?.t ?? null,
-      canUseToolAtMs: e.t,
+  // Ordering needs a classifier signal that names its call; canUseTool can follow a
+  // classifier that ran before the hook, so it proves nothing about ordering.
+  const signals = events.flatMap((e) => {
+    const id =
+      e.subtype === "permission_check_status" &&
+      /"tool_use_id":"([^"]+)"/.exec(e.detail ?? "")?.[1];
+    return id ? [{ toolUseId: id, signalAtMs: e.t }] : [];
+  });
+  if (signals.length > 0) {
+    const order = signals.map((s) => ({
+      ...s,
+      hookAtMs: pre.find((h) => h.toolUseId === s.toolUseId)?.t ?? null,
     }));
     out.hookBeforeClassifier = order.every(
-      (o) => o.hookAtMs !== null && o.hookAtMs <= o.canUseToolAtMs,
+      (o) => o.hookAtMs !== null && o.hookAtMs <= o.signalAtMs,
     )
       ? proved({ order })
       : refuted({ order });
-    out.undecidedReachCanUseTool = proved({
-      commands: asked.map((e) => e.command),
-    });
-  } else if (query?.done) {
+  } else if (query?.done)
     out.hookBeforeClassifier = untested(
       events.some((e) => e.subtype === "permission_check_status")
         ? "classifier signals (system:permission_check_status) not attributable per call"
         : "no classifier signal observable separately from the hook",
     );
+  if (asked.length > 0)
+    out.undecidedReachCanUseTool = proved({
+      commands: asked.map((e) => e.command),
+    });
+  else if (query?.done)
     out.undecidedReachCanUseTool = untested(
       "classifier decided every call; no undecided call elicited",
     );
-  }
   const passed = pre.filter((e) => e.decision === "pass");
   const decisions = passed.map((e) => ({
     command: e.command,

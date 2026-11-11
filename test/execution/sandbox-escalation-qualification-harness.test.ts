@@ -405,6 +405,12 @@ test("claude auto group sends auto mode with unsandboxed commands allowed and re
       await bash("t2", "curl -sS -m 5 https://probe.invalid/"),
       {},
     );
+    // A classifier signal that names its call, after that call's hook.
+    yield {
+      type: "system",
+      subtype: "permission_check_status",
+      tool_use_id: "t2",
+    };
     const asked = await options.canUseTool(
       "Bash",
       { command: "curl -sS -m 5 https://probe.invalid/" },
@@ -448,6 +454,29 @@ test("claude auto group sends auto mode with unsandboxed commands allowed and re
     "undecidedReachCanUseTool",
   ])
     assert.equal(outcomes[key].outcome, "proved", key);
+  // canUseTool order alone is no evidence that the hook preceded the classifier.
+  const unattributed = classify("claude-auto", {
+    ...trace,
+    events: trace.events.filter(
+      (e: Event) => e.subtype !== "permission_check_status",
+    ),
+  });
+  assert.equal(unattributed.hookBeforeClassifier.outcome, "untested");
+  assert.equal(unattributed.undecidedReachCanUseTool.outcome, "proved");
+
+  // A query that throws runs no probe and must fail the run.
+  // biome-ignore lint/correctness/useYield: the fake fails before yielding.
+  async function* throwingQuery() {
+    throw new Error("transport closed");
+  }
+  const failed = await runClaudeGroup("claude-sandbox", {
+    query: throwingQuery,
+    workspace: ws,
+    env: {},
+    executable: "/fake/claude",
+    deadlineMs: 10_000,
+  });
+  assert.match(failed.failure, /query 1: transport closed/);
 
   const token = "sk-fake-token-value";
   const root = join(homedir(), ".cache", "cab-sandbox-escalation-x");
