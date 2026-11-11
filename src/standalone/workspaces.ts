@@ -2080,3 +2080,29 @@ function capBytes(text: string, maxBytes: number): string {
 function messageOf(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
+
+/**
+ * The repository base a task's change request may target: the branch its workspace's remote base
+ * resolved to, or, for a stacked dependent (which starts at its blocker's head), its blocker's,
+ * up the stack. Falls back to the repository link's ref, so explicit-ref links are unchanged.
+ */
+export function taskRepositoryBase(
+  bindings: Pick<WorkspaceBindingStore, "get">,
+  stackedDependency: (
+    taskId: string,
+  ) => { blockerTaskId: string; repositoryId: string } | null,
+  taskId: string,
+  repositoryId: string,
+  linkRef: string | null | undefined,
+): string | null | undefined {
+  // A stack is short; the bound also ends a cycle a corrupt edge could form.
+  for (let id: string | undefined = taskId, hops = 0; id && hops < 32; hops++) {
+    const base = bindings
+      .get(id)
+      ?.repositories.find((r) => r.repositoryId === repositoryId)?.baseBranch;
+    if (base) return base;
+    const edge = stackedDependency(id);
+    id = edge?.repositoryId === repositoryId ? edge.blockerTaskId : undefined;
+  }
+  return linkRef;
+}

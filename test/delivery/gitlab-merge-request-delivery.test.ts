@@ -392,7 +392,8 @@ test("a merge request retargeted to another branch is held even when the lower o
 test("a retarget to the branch the workspace's remote base resolved to is accepted although the link saved another", async (t) => {
   const w = await gitlabWorld(t);
   try {
-    // The code host's default moved from the saved `main` to `release` before the workspace started.
+    // The code host's default moved from the saved `main` to `release` before the workspace started,
+    // so provisioning recorded `release` as the workspace's base, as a remote-default link does.
     git(w.source, "branch", "release", "main");
     w.f.readDb((db) => {
       const row = db

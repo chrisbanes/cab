@@ -11,7 +11,10 @@ import {
 } from "../core/project-lifecycle.js";
 import type { Database } from "../core/store.js";
 import type { CodeHostDeliveryProvider } from "./code-host.js";
-import type { SqliteWorkspaceBindingStore } from "./workspaces.js";
+import {
+  type SqliteWorkspaceBindingStore,
+  taskRepositoryBase,
+} from "./workspaces.js";
 
 /** Called only inside the service-owned ProjectWrites lease, already registered before any await. */
 export async function adoptMergedStackRebase(input: {
@@ -59,7 +62,15 @@ export async function adoptMergedStackRebase(input: {
     p.state !== "OPEN" ||
     p.merged ||
     p.baseRef !== bound.acceptedBaseRef ||
-    !acceptableBaseRefs(link.ref).includes(p.baseRef) ||
+    !acceptableBaseRefs(
+      taskRepositoryBase(
+        workspaces,
+        (id) => domain.stackedDependency(id),
+        taskId,
+        edge.repositoryId,
+        link.ref,
+      ),
+    ).includes(p.baseRef) ||
     !branch?.lastPushedSha ||
     branch.branch !== p.headRef ||
     branch.outsideHeadSha !== p.headSha ||

@@ -392,6 +392,7 @@ import {
   type TaskWorkspaceRepositoryInput,
   type WorkspaceCleanupEvidence,
   WorkspaceManager,
+  taskRepositoryBase,
   type WorkspaceManagerOptions,
 } from "./workspaces.js";
 
@@ -1539,10 +1540,13 @@ export class StandaloneService {
           },
           taskWorkspace,
           remoteBaseBranch: (taskId, repositoryId) =>
-            workspaceBindings
-              .get(taskId)
-              ?.repositories.find((r) => r.repositoryId === repositoryId)
-              ?.baseBranch ?? null,
+            taskRepositoryBase(
+              workspaceBindings,
+              (id) => domain.stackedDependency(id),
+              taskId,
+              repositoryId,
+              null,
+            ) ?? null,
           projectWrite: (taskId, run) =>
             this.withProjectWrite(
               taskProjectId(db, taskId),
