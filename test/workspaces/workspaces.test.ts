@@ -7,6 +7,7 @@ import {
   realpathSync,
   readFileSync,
   rmSync,
+  symlinkSync,
   writeFileSync,
 } from "node:fs";
 import {
@@ -61,6 +62,9 @@ function fixture(options: WorkspaceManagerOptions = {}) {
     workspaceRoot,
     get manager() {
       return manager;
+    },
+    get db() {
+      return db;
     },
     reopen(managerOptions: WorkspaceManagerOptions = options) {
       db.close();
@@ -1012,9 +1016,11 @@ test("a legacy binding table migrates git uncertainty to false", () => {
       createdAt TEXT NOT NULL,
       updatedAt TEXT NOT NULL
     )`);
-    db.prepare(`INSERT INTO task_workspace_bindings
+    db.prepare(
+      `INSERT INTO task_workspace_bindings
       (taskId, workspaceId, path, repositories, state, reason, createdAt, updatedAt)
-      VALUES (?, ?, ?, '[]', 'held', 'legacy hold', ?, ?)`).run(
+      VALUES (?, ?, ?, '[]', 'held', 'legacy hold', ?, ?)`,
+    ).run(
       "legacy-task",
       randomUUID(),
       join(root, "workspace"),
@@ -1110,6 +1116,7 @@ test("restored managed bindings reject source-root identity before path access",
     state: "held",
     reason: "An unrelated persisted hold must not bypass identity validation",
     gitUncertain: false,
+    holdReleasable: false,
     createdAt: new Date(0).toISOString(),
     updatedAt: new Date(0).toISOString(),
   };
@@ -1125,6 +1132,10 @@ test("restored managed bindings reject source-root identity before path access",
     },
     markGitUncertain: (_taskId, reason) => {
       binding = { ...binding, state: "held", reason, gitUncertain: true };
+      return binding;
+    },
+    holdForIdentityRead: (_taskId, reason) => {
+      binding = { ...binding, state: "held", reason, holdReleasable: true };
       return binding;
     },
   };
@@ -1470,5 +1481,345 @@ test("cab's Git never runs the configuration of a submodule an agent staged in i
     assert.equal(exists(marker), false);
   } finally {
     close();
+  }
+});
+
+/** A ready workspace whose next identity read fails with a certain Git exit. */
+async function identityReadHold(
+  f: ReturnType<typeof fixture>,
+  controlled: ReturnType<typeof controlledGit>,
+  taskId: string,
+  options: WorkspaceManagerOptions = {},
+) {
+  const source = repository(f.root, `source-${taskId}`);
+  const ready = await f.manager.provision(taskId, [
+    { repositoryId: "repo", path: source },
+  ]);
+  const repo = ready.repositories[0];
+  assert.ok(repo);
+  controlled.setRule({
+    commandPrefix: "rev-parse --show-toplevel",
+    cwd: repo.workspacePath,
+    behavior: "fail",
+    stderr: "fatal: transient identity failure",
+  });
+  const manager = f.reopen({
+    gitExecutable: controlled.executable,
+    ...options,
+  });
+  const held = await manager.get(taskId);
+  return { manager, held, repo, source };
+}
+
+test("an identity-read hold names the Git failure and is released once the worktree passes", {
+  skip: processIdentityDenied(),
+}, async (t) => {
+  for (const route of ["startup", "admission", "command"] as const) {
+    await t.test(route, async () => {
+      const controlled = controlledGit();
+      const f = fixture();
+      try {
+        const { held } = await identityReadHold(f, controlled, "identity-task");
+        assert.equal(held?.state, "held");
+        assert.equal(held?.holdReleasable, true);
+        assert.equal(held?.gitUncertain, false);
+        const reason = held?.reason ?? "";
+        assert.match(
+          reason,
+          /^Task workspace unavailable: Git could not read the worktree identity for repo at /,
+        );
+        for (const part of [
+          "git rev-parse --show-toplevel",
+          "exited 128",
+          "fatal: transient identity failure",
+          "cab task workspace-recheck identity-task",
+        ])
+          assert.ok(reason.includes(part), `${part} in ${reason}`);
+        assert.doesNotMatch(reason, /Incomplete workspace files/);
+
+        controlled.setRule(undefined);
+        const manager = f.reopen({ gitExecutable: controlled.executable });
+        if (route === "startup") {
+          await manager.recover();
+          assert.equal((await manager.get("identity-task"))?.reason, null);
+          assert.equal(
+            (await manager.forExecution("identity-task")).state,
+            "ready",
+          );
+        } else if (route === "admission") {
+          // A read never rechecks a held binding or launches Git for it.
+          const starts = controlled.events().length;
+          assert.equal((await manager.get("identity-task"))?.state, "held");
+          assert.equal(controlled.events().length, starts);
+          assert.equal(
+            (await manager.forExecution("identity-task")).state,
+            "ready",
+          );
+        } else {
+          const released = await manager.recheck("identity-task");
+          assert.equal(released.outcome, "released");
+          assert.equal(released.binding.state, "ready");
+          assert.equal(
+            (await manager.recheck("identity-task")).outcome,
+            "ready",
+          );
+        }
+        const stored = await f.reopen().get("identity-task");
+        assert.equal(stored?.state, "ready");
+        assert.equal(stored?.holdReleasable, false);
+      } finally {
+        try {
+          await controlled.cleanup();
+        } finally {
+          f.close();
+        }
+      }
+    });
+  }
+});
+
+test("a persistent identity-read failure stays held through every recheck", {
+  skip: processIdentityDenied(),
+}, async () => {
+  const controlled = controlledGit();
+  const f = fixture();
+  try {
+    const { manager, held } = await identityReadHold(
+      f,
+      controlled,
+      "persistent-task",
+    );
+    await new Promise((resolve) => setTimeout(resolve, 5));
+    await manager.recover();
+    const after = await manager.get("persistent-task");
+    assert.equal(after?.state, "held");
+    assert.equal(after?.holdReleasable, true);
+    assert.ok((after?.updatedAt ?? "") > (held?.updatedAt ?? ""));
+    await assert.rejects(
+      manager.forExecution("persistent-task"),
+      /Git could not read the worktree identity/,
+    );
+    const rechecked = await manager.recheck("persistent-task");
+    assert.equal(rechecked.outcome, "still-held");
+    assert.match(
+      rechecked.binding.reason ?? "",
+      /fatal: transient identity failure/,
+    );
+  } finally {
+    try {
+      await controlled.cleanup();
+    } finally {
+      f.close();
+    }
+  }
+});
+
+test("an uncertain recheck makes an identity-read hold need a person", {
+  skip: processIdentityDenied(),
+}, async () => {
+  const controlled = controlledGit();
+  const f = fixture();
+  try {
+    const { repo } = await identityReadHold(f, controlled, "uncertain-task");
+    controlled.setRule({
+      commandPrefix: "rev-parse --show-toplevel",
+      cwd: repo.workspacePath,
+      behavior: "stall",
+    });
+    const manager = f.reopen({
+      gitExecutable: controlled.executable,
+      gitTimeoutMs: { "repository-identity": 50 },
+      gitTerminationGraceMs: termGraceMs,
+      gitTerminationObservationMs: 40,
+    });
+    const rechecked = await manager.recheck("uncertain-task");
+    assert.equal(rechecked.outcome, "still-held");
+    assert.equal(rechecked.binding.gitUncertain, true);
+    assert.equal(rechecked.binding.holdReleasable, false);
+    assert.equal(
+      rechecked.binding.reason,
+      "Workspace Git timed-out during repository-identity",
+    );
+    controlled.setRule(undefined);
+    const healthy = f.reopen({ gitExecutable: controlled.executable });
+    await healthy.recover();
+    assert.equal((await healthy.get("uncertain-task"))?.state, "held");
+  } finally {
+    try {
+      await controlled.cleanup();
+    } finally {
+      f.close();
+    }
+  }
+});
+
+test("holds that need a person are never released by startup, admission or the command", {
+  skip: processIdentityDenied(),
+}, async (t) => {
+  const scenarios: Array<{
+    name: string;
+    hold: (
+      f: ReturnType<typeof fixture>,
+      binding: TaskWorkspaceBinding,
+    ) => Promise<void>;
+  }> = [
+    {
+      name: "interrupted cleanup",
+      hold: async (f) => {
+        f.db.exec(
+          "UPDATE task_workspace_bindings SET state = 'archiving', reason = NULL",
+        );
+        await f.reopen().recover();
+      },
+    },
+    {
+      name: "stored path mismatch",
+      hold: async (f, binding) => {
+        f.db
+          .prepare("UPDATE task_workspace_bindings SET path = ?")
+          .run(`${binding.path}-moved`);
+        await f.reopen().recover();
+      },
+    },
+    {
+      name: "another repository",
+      hold: async (f, binding) => {
+        const repo = binding.repositories[0];
+        assert.ok(repo);
+        rmSync(repo.workspacePath, { recursive: true });
+        execFileSync("git", ["init", "--quiet", repo.workspacePath]);
+        await f.manager.get(binding.taskId);
+        // A later healthy worktree must not lift the hold.
+        rmSync(repo.workspacePath, { recursive: true });
+        git(
+          repo.sourcePath,
+          "worktree",
+          "add",
+          "--force",
+          "--detach",
+          repo.workspacePath,
+        );
+      },
+    },
+    {
+      name: "managed-root change",
+      hold: async (f, binding) => {
+        const copy = `${binding.path}-copy`;
+        execFileSync("cp", ["-R", binding.path, copy]);
+        const original = `${binding.path}-original`;
+        execFileSync("mv", [binding.path, original]);
+        symlinkSync(copy, binding.path);
+        await f.manager.get(binding.taskId);
+      },
+    },
+    {
+      name: "git uncertain",
+      hold: async (f) => {
+        f.db.exec(
+          "UPDATE task_workspace_bindings SET state = 'held', reason = 'Workspace Git timed-out during repository-identity', gitUncertain = 1, holdReleasable = 1",
+        );
+      },
+    },
+  ];
+  for (const scenario of scenarios) {
+    await t.test(scenario.name, async () => {
+      const f = fixture();
+      try {
+        const source = repository(f.root, "source");
+        const binding = await f.manager.provision("person-task", [
+          { repositoryId: "repo", path: source },
+        ]);
+        await scenario.hold(f, binding);
+        const manager = f.reopen();
+        const held = await manager.get("person-task");
+        assert.equal(held?.state, "held", held?.reason ?? "");
+        if (scenario.name !== "git uncertain")
+          assert.equal(held?.holdReleasable, false);
+        await manager.recover();
+        assert.equal((await manager.get("person-task"))?.state, "held");
+        await assert.rejects(manager.forExecution("person-task"));
+        const rechecked = await manager.recheck("person-task");
+        assert.equal(rechecked.outcome, "not-releasable");
+        assert.equal(rechecked.binding.reason, held?.reason);
+        assert.equal((await manager.get("person-task"))?.state, "held");
+      } finally {
+        f.close();
+      }
+    });
+  }
+});
+
+test("an empty worktree directory keeps the missing-files wording", async () => {
+  const f = fixture();
+  try {
+    const source = repository(f.root, "source");
+    const binding = await f.manager.provision("empty-task", [
+      { repositoryId: "repo", path: source },
+    ]);
+    const repo = binding.repositories[0];
+    assert.ok(repo);
+    rmSync(repo.workspacePath, { recursive: true });
+    mkdirSync(repo.workspacePath);
+    const held = await f.manager.get("empty-task");
+    assert.equal(held?.state, "held");
+    assert.equal(held?.holdReleasable, false);
+    assert.match(held?.reason ?? "", /Missing workspace for repository repo/);
+    assert.doesNotMatch(held?.reason ?? "", /Git could not read/);
+  } finally {
+    f.close();
+  }
+});
+
+test("existing identity-read holds become releasable once, when the column is added", () => {
+  const root = mkdtempSync(join(tmpdir(), "cab-workspace-migration-"));
+  const db = new DatabaseSync(join(root, "legacy.sqlite"));
+  try {
+    db.exec(`CREATE TABLE task_workspace_bindings (
+      taskId TEXT PRIMARY KEY,
+      workspaceId TEXT NOT NULL UNIQUE,
+      path TEXT NOT NULL UNIQUE,
+      repositories TEXT NOT NULL,
+      state TEXT NOT NULL,
+      reason TEXT,
+      gitUncertain INTEGER NOT NULL DEFAULT 0,
+      createdAt TEXT NOT NULL,
+      updatedAt TEXT NOT NULL
+    )`);
+    const identity =
+      "Task workspace unavailable: Incomplete workspace files for R at /x";
+    const rows = [
+      ["identity", "held", 0, identity, true],
+      ["other", "held", 0, "legacy hold", false],
+      ["uncertain", "held", 1, identity, false],
+      ["ready", "ready", 0, null, false],
+    ] as const;
+    for (const [taskId, state, gitUncertain, reason] of rows)
+      db.prepare(
+        `INSERT INTO task_workspace_bindings
+        (taskId, workspaceId, path, repositories, state, reason, gitUncertain, createdAt, updatedAt)
+        VALUES (?, ?, ?, '[]', ?, ?, ?, ?, ?)`,
+      ).run(
+        taskId,
+        randomUUID(),
+        join(root, taskId),
+        state,
+        reason,
+        gitUncertain,
+        "2026-10-01T00:00:00.000Z",
+        "2026-10-01T00:00:00.000Z",
+      );
+    const store = new SqliteWorkspaceBindingStore(db);
+    for (const [taskId, , , , releasable] of rows)
+      assert.equal(store.get(taskId)?.holdReleasable, releasable, taskId);
+    db.exec(
+      "UPDATE task_workspace_bindings SET holdReleasable = 0 WHERE taskId = 'identity'",
+    );
+    assert.equal(
+      new SqliteWorkspaceBindingStore(db).get("identity")?.holdReleasable,
+      false,
+    );
+  } finally {
+    db.close();
+    rmSync(root, { recursive: true, force: true });
   }
 });

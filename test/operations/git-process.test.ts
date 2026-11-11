@@ -67,14 +67,15 @@ test("input reaches stdin and is closed", async (t) => {
   ]);
 });
 
-test("a non-zero exit returns its code and stdout", async (t) => {
-  const { executable } = script(t, "printf partial; exit 3");
+test("a non-zero exit returns its code, stdout and stderr", async (t) => {
+  const { executable } = script(t, "printf partial; printf boom >&2; exit 3");
   const result = await run({ executable });
   assert.equal(result.status, "exit");
   if (result.status !== "exit") return;
   assert.equal(result.exitCode, 3);
   assert.equal(result.childExitObserved, true);
   assert.equal(result.stdout.toString("utf8"), "partial");
+  assert.equal(result.stderr.toString("utf8"), "boom");
 });
 
 test("a stalled child is stopped at its deadline and its exit is observed", async (t) => {

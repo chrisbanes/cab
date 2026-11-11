@@ -15,8 +15,12 @@ import { join } from "node:path";
 export type ControlledGitRule = {
   commandPrefix: string;
   cwd?: string;
-  behavior: "stall" | "complete-then-stall" | "overflow";
+  behavior: "stall" | "complete-then-stall" | "overflow" | "fail";
   holdPipe?: boolean;
+  /** `fail` only: written to stderr before exiting without running Git. */
+  stderr?: string;
+  /** `fail` only; defaults to 128. */
+  exitCode?: number;
 };
 
 export type ControlledGitEvent = {
@@ -130,7 +134,11 @@ if (control.behavior && command.startsWith(control.commandPrefix) && (!control.c
     writeEvent({ event: "ready", pid: process.pid, operation });
     setInterval(() => {}, 1000);
   };
-  if (control.behavior === "stall") {
+  if (control.behavior === "fail") {
+    writeEvent({ event: "finish", pid: process.pid, operation, elapsedMs: Date.now() - startedAt, exitCode: control.exitCode ?? 128 });
+    process.stderr.write((control.stderr ?? "fatal: controlled identity failure") + "\\n");
+    process.exit(control.exitCode ?? 128);
+  } else if (control.behavior === "stall") {
     hang();
   } else if (control.behavior === "complete-then-stall") {
     const result = spawnSync(realGit, args, { encoding: "buffer", maxBuffer: 2 * 1024 * 1024 });

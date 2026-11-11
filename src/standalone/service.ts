@@ -342,6 +342,7 @@ import {
   type StartAgainReceipt,
   type StopTarget,
   type TaskControlReceipt,
+  type WorkspaceRecheckReceipt,
   type TaskResetReceipt,
   type TaskExecutionBinding,
   type TaskExecutionBindingRecord,
@@ -559,6 +560,14 @@ const draftingUnverifiedReason = "Waiting to confirm the runtime stopped";
 const draftingNotStartedReason = "The lead's turn could not start";
 const draftingCleanupReason = "Waiting to remove the working copy";
 const draftingWorkspaceFailedReason = "The working copy could not be prepared";
+
+/** A workspace recheck that released nothing and recorded no receipt. */
+export class WorkspaceRecheckRefusedError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "WorkspaceRecheckRefusedError";
+  }
+}
 
 /** Why `configureRuntime` refused before saving anything (ADR-1012). */
 export class RuntimeConfigurationRefusedError extends Error {
@@ -5658,6 +5667,44 @@ export class StandaloneService {
           );
       }
     }
+    return receipt;
+  }
+
+  /** Receipted operator recheck of a held workspace; a replay runs no Git. */
+  async recheckTaskWorkspace(command: {
+    key: string;
+    taskId: string;
+  }): Promise<WorkspaceRecheckReceipt> {
+    this.domain().task(command.taskId);
+    const { state, workspaces, workspaceBindings } = this.started();
+    const prior = state.workspaceRecheckReplay(command);
+    if (prior) return prior;
+    if (!workspaceBindings.get(command.taskId))
+      throw new WorkspaceRecheckRefusedError(
+        "This task has no workspace to recheck.",
+      );
+    const { outcome, binding } = await workspaces.recheck(command.taskId);
+    const reason =
+      binding.reason?.replace(/^Task workspace unavailable: /, "") ??
+      `the workspace is ${binding.state}`;
+    if (outcome === "still-held")
+      throw new WorkspaceRecheckRefusedError(
+        `Task workspace is still unavailable: ${reason}`,
+      );
+    if (outcome === "not-releasable")
+      throw new WorkspaceRecheckRefusedError(
+        `This workspace hold needs a person's judgement and cannot be rechecked: ${reason}`,
+      );
+    const { receipt, replayed } = state.recordWorkspaceRecheck(
+      command,
+      outcome === "released",
+    );
+    const generation = this.generation;
+    // Post-commit, as for Resume: the queued turn waits in admission for the next pass.
+    if (!replayed && receipt.released && generation)
+      this.observeBackgroundFailure(generation, "domain-wake", () =>
+        this.wakeScheduler(0, generation),
+      );
     return receipt;
   }
 

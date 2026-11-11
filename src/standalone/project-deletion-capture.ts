@@ -139,6 +139,7 @@ export async function captureDeletionCleanup(
           state: row.state,
           reason: row.reason,
           gitUncertain: row.gitUncertain === 1,
+          holdReleasable: row.holdReleasable === 1,
           createdAt: row.createdAt,
           updatedAt: row.updatedAt,
         });

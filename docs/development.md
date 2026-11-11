@@ -763,6 +763,14 @@ name, version and preview digest. The service rechecks every confirmation atomic
      the operator Stop and lists the holds that remain by the UI's names (`Task hold`, `Ownership held`). Both are receipted
      `task.stop`/`task.resume` commands; the web UI's Stop and the retained forms
      use the same hold.
+   - `task workspace-recheck TASK_ID` reruns the worktree identity check of a
+     workspace held only because Git could not read that identity, and returns it
+     to ready when the check passes (effect `saved`; `none` when it was already
+     ready). It is the receipted `task.workspace.recheck` command and takes no
+     evidence. A check that still fails, and a hold that needs a person's
+     judgement (interrupted cleanup, a path or repository mismatch, uncertain Git),
+     exit with the conflict code and the reason, recording nothing. The service
+     also rechecks such holds at startup and before admitting a turn.
 
    Output names the effect (`data.effect`): `saved`, `queued` (admission and holds
    still decide), `cancellation-requested` or `none`. These writes reuse a journal

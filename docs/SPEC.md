@@ -1042,6 +1042,9 @@ do not automatically delete
 workspaces. Retain until operator archival by default; automatic cleanup requires
 confirmed delivery and preservation checks for uncommitted work, handoffs and
 reconciliation evidence. Missing workspaces hold affected execution visibly.
+A workspace held only because Git could not read its worktree identity is rechecked
+at startup, before admitting a turn and by `task workspace-recheck`, and returns to
+ready once the check passes; every other workspace hold still needs a person.
 
 Every Git subprocess the service starts (workspace provisioning, cleanup and
 identity checks, file and comparison reads, setup probes and repository

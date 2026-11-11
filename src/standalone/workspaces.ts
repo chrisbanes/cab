@@ -27,6 +27,7 @@ import { realpathSync } from "node:fs";
 import { z } from "zod";
 import { transaction, type Database } from "../core/store.js";
 import { runGit } from "./git-process.js";
+import { maxErrorMessageBytes } from "./service-log.js";
 
 const maxGitOutputBytes = 1024 * 1024;
 const maxTimerMs = 2_147_483_647;
@@ -84,6 +85,8 @@ export const taskWorkspaceSchema = z.object({
   state: workspaceStateSchema,
   reason: z.string().nullable(),
   gitUncertain: z.boolean(),
+  /** Held only because Git could not read a worktree's identity, so cab may recheck it. */
+  holdReleasable: z.boolean(),
   createdAt: z.string().datetime(),
   updatedAt: z.string().datetime(),
 });
@@ -96,6 +99,7 @@ const storedWorkspaceSchema = z.object({
   state: z.string(),
   reason: z.string().nullable(),
   gitUncertain: z.union([z.literal(0), z.literal(1)]),
+  holdReleasable: z.union([z.literal(0), z.literal(1)]),
   createdAt: z.string(),
   updatedAt: z.string(),
 });
@@ -281,7 +285,22 @@ export interface WorkspaceBindingStore {
     reason: string | null,
   ): TaskWorkspaceBinding;
   markGitUncertain(taskId: string, reason: string): TaskWorkspaceBinding;
+  /** Holds the binding as releasable: only a failed worktree identity read caused it. */
+  holdForIdentityRead(taskId: string, reason: string): TaskWorkspaceBinding;
 }
+
+export type WorkspaceRecheckOutcome = {
+  outcome: "released" | "ready" | "still-held" | "not-releasable";
+  binding: TaskWorkspaceBinding;
+};
+
+/** What an exited Git child reported; kept out of the message, which stays a fixed code. */
+type GitExitDetail = {
+  exitCode: number | null;
+  stderr: string;
+  /** The subcommand arguments, without `-C <cwd>`. */
+  args: readonly string[];
+};
 
 class WorkspaceGitError extends Error {
   readonly uncertain: boolean;
@@ -292,11 +311,33 @@ class WorkspaceGitError extends Error {
     readonly childExitObserved: boolean,
     readonly childExitSignal: NodeJS.Signals | null,
     readonly childStarted: boolean,
+    readonly exit?: GitExitDetail,
   ) {
     super(`Workspace Git ${kind} during ${operation}`);
     this.name = "WorkspaceGitError";
     this.uncertain = kind !== "failed" || (childStarted && !childExitObserved);
   }
+}
+
+/** Git could not read an existing, non-empty worktree's identity; the files may be intact. */
+class WorktreeIdentityReadError extends Error {
+  constructor(repository: TaskWorkspaceRepository, cause: unknown) {
+    const exit = cause instanceof WorkspaceGitError ? cause.exit : undefined;
+    const detail = exit
+      ? `git ${exit.args.join(" ")} exited ${exit.exitCode ?? "without a code"}: ${capBytes(exit.stderr, maxErrorMessageBytes / 2)}`
+      : messageOf(cause);
+    super(
+      `Git could not read the worktree identity for ${repository.repositoryId} at ${repository.workspacePath}: ${detail}`,
+    );
+    this.name = "WorktreeIdentityReadError";
+  }
+}
+
+/** A hold cab may lift itself by rechecking; every other hold needs a person. */
+function releasable(binding: TaskWorkspaceBinding): boolean {
+  return (
+    binding.state === "held" && binding.holdReleasable && !binding.gitUncertain
+  );
 }
 
 class WorkspaceManagerCancelledError extends Error {
@@ -305,6 +346,10 @@ class WorkspaceManagerCancelledError extends Error {
     this.name = "WorkspaceManagerCancelledError";
   }
 }
+
+/** Placed where SQLite's ADD COLUMN puts it, so a migrated table's schema text equals a fresh one's. */
+const holdReleasableColumn =
+  "holdReleasable INTEGER NOT NULL DEFAULT 0 CHECK(holdReleasable IN (0,1))";
 
 /** Call after Store.ensureHost; owns only the workspace-binding table. */
 export class SqliteWorkspaceBindingStore implements WorkspaceBindingStore {
@@ -328,7 +373,7 @@ export class SqliteWorkspaceBindingStore implements WorkspaceBindingStore {
       gitUncertain INTEGER NOT NULL DEFAULT 0 CHECK(gitUncertain IN (0,1)),
       createdAt TEXT NOT NULL,
       updatedAt TEXT NOT NULL
-    )`);
+    , ${holdReleasableColumn})`);
     const columns = this.db
       .prepare(`PRAGMA table_info(${this.table})`)
       .all() as Array<{ name: string }>;
@@ -336,6 +381,19 @@ export class SqliteWorkspaceBindingStore implements WorkspaceBindingStore {
       this.db.exec(`ALTER TABLE ${this.table}
         ADD COLUMN gitUncertain INTEGER NOT NULL DEFAULT 0
         CHECK(gitUncertain IN (0,1))`);
+    if (!columns.some(({ name }) => name === "holdReleasable")) {
+      // Runs once, with the column: holds written before it was recorded keep their old wording.
+      const migrate = () => {
+        this.db.exec(
+          `ALTER TABLE ${this.table} ADD COLUMN ${holdReleasableColumn}`,
+        );
+        this.db.exec(`UPDATE ${this.table} SET holdReleasable = 1
+          WHERE state = 'held' AND gitUncertain = 0
+            AND reason LIKE 'Task workspace unavailable: Incomplete workspace files for %'`);
+      };
+      if (this.db.isTransaction) migrate();
+      else transaction(this.db, migrate);
+    }
   }
 
   writable(taskId: string): boolean {
@@ -494,7 +552,7 @@ export class SqliteWorkspaceBindingStore implements WorkspaceBindingStore {
     assertOwnedTaskWritable(this.db, taskId);
     this.db
       .prepare(
-        `UPDATE ${this.table} SET state = ?, reason = ?, updatedAt = ? WHERE taskId = ?`,
+        `UPDATE ${this.table} SET state = ?, reason = ?, holdReleasable = 0, updatedAt = ? WHERE taskId = ?`,
       )
       .run(state, reason, new Date().toISOString(), taskId);
     return this.get(taskId) ?? this.invalidRow();
@@ -504,7 +562,17 @@ export class SqliteWorkspaceBindingStore implements WorkspaceBindingStore {
     assertOwnedTaskWritable(this.db, taskId);
     this.db
       .prepare(
-        `UPDATE ${this.table} SET state = 'held', reason = ?, gitUncertain = 1, updatedAt = ? WHERE taskId = ?`,
+        `UPDATE ${this.table} SET state = 'held', reason = ?, gitUncertain = 1, holdReleasable = 0, updatedAt = ? WHERE taskId = ?`,
+      )
+      .run(reason, new Date().toISOString(), taskId);
+    return this.get(taskId) ?? this.invalidRow();
+  }
+
+  holdForIdentityRead(taskId: string, reason: string): TaskWorkspaceBinding {
+    assertOwnedTaskWritable(this.db, taskId);
+    this.db
+      .prepare(
+        `UPDATE ${this.table} SET state = 'held', reason = ?, holdReleasable = 1, updatedAt = ? WHERE taskId = ?`,
       )
       .run(reason, new Date().toISOString(), taskId);
     return this.get(taskId) ?? this.invalidRow();
@@ -516,6 +584,7 @@ export class SqliteWorkspaceBindingStore implements WorkspaceBindingStore {
       ...stored,
       repositories: JSON.parse(stored.repositories),
       gitUncertain: stored.gitUncertain === 1,
+      holdReleasable: stored.holdReleasable === 1,
     });
   }
 
@@ -650,7 +719,12 @@ export class WorkspaceManager implements TaskWorkspaceLifecycle {
   async forExecution(taskId: string): Promise<TaskWorkspaceBinding> {
     if (this.store.writable?.(taskId) === false)
       throw new ProjectArchivedError();
-    const binding = await this.get(taskId);
+    const id = z.string().trim().min(1).max(512).parse(taskId);
+    const binding = await this.withTaskLock(id, async () => {
+      const current = this.store.get(id);
+      if (current && releasable(current)) return this.recheckHeld(current);
+      return current?.state === "ready" ? this.validateReady(current) : current;
+    });
     if (!binding) throw new Error(`Task ${taskId} has no workspace binding`);
     if (binding.state !== "ready")
       throw new Error(
@@ -675,6 +749,8 @@ export class WorkspaceManager implements TaskWorkspaceLifecycle {
           await this.provisionBinding(binding);
         } else if (binding.state === "ready") {
           await this.validateReady(binding);
+        } else if (releasable(binding)) {
+          await this.recheckHeld(binding);
         } else if (binding.state === "archiving") {
           this.store.update(
             binding.taskId,
@@ -684,6 +760,39 @@ export class WorkspaceManager implements TaskWorkspaceLifecycle {
         }
       });
     }
+  }
+
+  /** Reruns the identity check for an operator; only a releasable hold can be lifted. */
+  async recheck(taskId: string): Promise<WorkspaceRecheckOutcome> {
+    if (this.store.writable?.(taskId) === false)
+      throw new ProjectArchivedError();
+    const id = z.string().trim().min(1).max(512).parse(taskId);
+    return this.withTaskLock(id, async () => {
+      const binding = this.store.get(id);
+      if (!binding) throw new Error(`Task ${id} has no workspace binding`);
+      if (binding.state !== "ready" && !releasable(binding))
+        return { outcome: "not-releasable", binding };
+      const checked =
+        binding.state === "ready"
+          ? await this.validateReady(binding)
+          : await this.recheckHeld(binding);
+      if (checked.state !== "ready")
+        return { outcome: "still-held", binding: checked };
+      return {
+        outcome: binding.state === "ready" ? "ready" : "released",
+        binding: checked,
+      };
+    });
+  }
+
+  /** Call under the task lock with a releasable hold; ready again only when every check passes. */
+  private async recheckHeld(
+    binding: TaskWorkspaceBinding,
+  ): Promise<TaskWorkspaceBinding> {
+    const checked = await this.validateReady(binding);
+    return checked === binding
+      ? this.store.update(binding.taskId, "ready", null)
+      : checked;
   }
 
   archiveAndCleanup(
@@ -1249,6 +1358,14 @@ export class WorkspaceManager implements TaskWorkspaceLifecycle {
     } catch (error) {
       if (isUncertainGitError(error) && error.uncertain)
         return this.store.markGitUncertain(binding.taskId, error.message);
+      if (error instanceof WorktreeIdentityReadError)
+        return this.store.holdForIdentityRead(
+          binding.taskId,
+          capBytes(
+            `Task workspace unavailable: ${error.message}. Run 'cab task workspace-recheck ${binding.taskId}' after fixing the cause.`,
+            maxErrorMessageBytes,
+          ),
+        );
       return this.store.update(
         binding.taskId,
         "held",
@@ -1529,6 +1646,11 @@ export class WorkspaceManager implements TaskWorkspaceLifecycle {
             childExitObserved: result.childExitObserved,
             childExitSignal: result.signal,
             started: true,
+            exit: {
+              exitCode: result.exitCode,
+              stderr: result.stderr.toString("utf8").trim(),
+              args,
+            },
           }
         : {
             kind: result.kind,
@@ -1543,6 +1665,7 @@ export class WorkspaceManager implements TaskWorkspaceLifecycle {
       failure.childExitObserved,
       failure.childExitSignal,
       failure.started,
+      "exit" in failure ? failure.exit : undefined,
     );
   }
 
@@ -1617,9 +1740,7 @@ export class WorkspaceManager implements TaskWorkspaceLifecycle {
         throw error;
       const entries = await readdir(repository.workspacePath);
       if (entries.length > 0)
-        throw new Error(
-          `Incomplete workspace files for ${repository.repositoryId} are preserved at ${repository.workspacePath}`,
-        );
+        throw new WorktreeIdentityReadError(repository, error);
       return false;
     }
   }
@@ -1764,6 +1885,7 @@ function reportGitFailure(
   childExitObserved: boolean,
   childExitSignal: NodeJS.Signals | null,
   childStarted: boolean,
+  exit?: GitExitDetail,
 ): WorkspaceGitError {
   const error = new WorkspaceGitError(
     operation,
@@ -1771,6 +1893,7 @@ function reportGitFailure(
     childExitObserved,
     childExitSignal,
     childStarted,
+    exit,
   );
   try {
     observer?.({
@@ -1828,6 +1951,14 @@ async function lstatIfExists(path: string) {
     if ((error as NodeJS.ErrnoException).code === "ENOENT") return undefined;
     throw error;
   }
+}
+
+/** `text` cut to at most `maxBytes` UTF-8 bytes, at a word boundary. */
+function capBytes(text: string, maxBytes: number): string {
+  const bytes = Buffer.from(text, "utf8");
+  if (bytes.length <= maxBytes) return text;
+  // Drop the cut word too: a partial path would no longer match its redaction.
+  return bytes.subarray(0, maxBytes).toString("utf8").replace(/\S*$/, "");
 }
 
 function messageOf(error: unknown): string {

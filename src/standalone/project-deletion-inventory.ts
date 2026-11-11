@@ -683,6 +683,7 @@ export const projectDeletionInventory = {
       "gitUncertain",
       "createdAt",
       "updatedAt",
+      "holdReleasable",
     ],
     ownership:
       "taskId in D (binding key is run identity; capture before delete)",
@@ -1632,6 +1633,7 @@ export const projectDeletionInventory = {
       "gitUncertain",
       "createdAt",
       "updatedAt",
+      "holdReleasable",
     ],
     ownership: "taskId in T",
   },
