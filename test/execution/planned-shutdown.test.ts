@@ -1149,7 +1149,12 @@ for (const harness of ["codex", "claude"] as const) {
       const restarted = box.track(serviceFor(box.root, restartedRuntimes));
       await restarted.start();
       await startedOf(restarted).scheduler.wake();
-      assert.equal(stateOf(restarted, task.workId), "held");
+      // The callback ended with the old process, so the reported end releases the held turn
+      // for Start again; a survivor or pending effect keeps it held.
+      assert.equal(
+        stateOf(restarted, task.workId),
+        risk === "callback" ? "resolved-failed" : "held",
+      );
       assert.deepEqual(restartedRuntimes[harness].startedTurns, []);
     });
   }

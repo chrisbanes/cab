@@ -192,12 +192,20 @@ class NativeRuntime implements Runtime {
 function command(service: StandaloneService, body: Record<string, unknown>) {
   return service.domain().execute({ key: randomUUID(), ...body } as never);
 }
+/** The fixture runtime's process stays live, so a held turn waits for its quiet period. */
+const liveProcess = {
+  async verify() {
+    return { kind: "unknown" as const, reason: "Fixture runtime is live" };
+  },
+};
+
 async function fixture(
   options: {
     early?: boolean;
     claude?: boolean;
     questionText?: string;
     terminationVerifier?: StandaloneServiceOptions["terminationVerifier"];
+    heldTurnRelease?: false;
   } = {},
 ) {
   const root = mkdtempSync(join(tmpdir(), "cab-native-service-"));
@@ -215,9 +223,8 @@ async function fixture(
     {
       power: { enabled: false },
       supervisor: { observationMs: 5 },
-      ...(options.terminationVerifier
-        ? { terminationVerifier: options.terminationVerifier }
-        : {}),
+      terminationVerifier: options.terminationVerifier ?? liveProcess,
+      ...(options.heldTurnRelease === false ? { heldTurnRelease: false } : {}),
       ...(options.claude ? { runtimeHarnesses: ["codex", "claude"] } : {}),
     },
   );
@@ -481,7 +488,7 @@ for (const boundary of ["request", "answer", "intent", "write"] as const)
         join(f.root, "data"),
         () => restored,
         undefined,
-        { power: { enabled: false } },
+        { power: { enabled: false }, terminationVerifier: liveProcess },
       );
       await replacement.start();
       const record = runtimeQuestion(replacement, f.taskId);
@@ -494,6 +501,11 @@ for (const boundary of ["request", "answer", "intent", "write"] as const)
       );
       assert.equal(restored.turns, 0);
       assert.equal(restored.replies, 0);
+      // The stopped runtime reported the turn ended, so cab released it for Start again.
+      assert.equal(
+        replacement.startAgainAvailability(f.taskId).available,
+        true,
+      );
       restored.onOutcome?.({
         ...{
           requestId: 1,
@@ -507,13 +519,13 @@ for (const boundary of ["request", "answer", "intent", "write"] as const)
         reason: "Delayed old resolution",
       });
       assert.equal(restored.replies, 0);
-      assert.equal(replacement.list()[0]?.state, "held");
+      assert.equal(replacement.list()[0]?.state, "resolved-failed");
     } finally {
       await replacement?.stop();
       await f.close();
     }
   });
-test("failed durable native receipt commit keeps ownership held and releases the callback", async () => {
+test("failed durable native receipt commit releases the callback, then the ended turn", async () => {
   const f = await fixture();
   try {
     const db = new (await import("node:sqlite")).DatabaseSync(
@@ -543,10 +555,16 @@ test("failed durable native receipt commit keeps ownership held and releases the
     assert.equal(f.service.list()[0]?.state, "held");
     f.runtime.terminal.resolve("completed");
     await until(() => activeWorkIdsOf(f.service).length === 0);
-    assert.equal(f.service.list()[0]?.state, "held");
+    // The runtime reported the turn ended, so held-turn release frees it; the
+    // uncertain native delivery stays recorded on the question.
+    await until(() => f.service.list()[0]?.state === "resolved-failed");
+    assert.match(
+      String(f.service.list()[0]?.reason),
+      /reported the turn ended/,
+    );
     assert.equal(
-      f.service.list()[0]?.reason,
-      "Native receipt could not be durably committed",
+      runtimeQuestion(f.service, f.taskId).deliveryState,
+      "uncertain",
     );
   } finally {
     await f.close();
@@ -555,6 +573,8 @@ test("failed durable native receipt commit keeps ownership held and releases the
 for (const mode of ["unavailable", "uncertain"] as const)
   test(`native ${mode} outcome releases its waiter so a reconciled assignment offers continuation without restart`, async () => {
     const f = await fixture({
+      // An earlier build: the receipt below reconciles the held turn.
+      heldTurnRelease: false,
       terminationVerifier: {
         async verify(identity) {
           return {

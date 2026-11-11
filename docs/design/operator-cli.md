@@ -664,55 +664,46 @@ create's marker and text, and `publish-abandon` warns that a duplicate may exist
 live under `delivery` because the task area's usage block stays within one screen. Creating the
 issue is irreversible from cab; closing it on GitHub is the only recovery.
 
-Recovery drives the release and the existing evidence-bearing operations through receipted
-commands on `POST /api/operator/commands`, scoped `assignment:<id>`:
-`recovery.release`, `recovery.pre-turn.recover`, `recovery.no-turn.recover`,
-`recovery.bound-turn.recover` and `recovery.conversation.replace`.
+Recovery drives the release through the receipted `recovery.release` command on
+`POST /api/operator/commands`, scoped `assignment:<id>`.
 `recovery.release {assignmentId, workId, workRevision, requestSequence}` binds the generation
-the operator read; the others carry `assignmentId` and the existing service command's fields.
-The API checks the work is bound to that assignment and calls the unchanged service method
-with exactly the inner command the retained `/runtime/control/*` session routes pass, so a key
-recorded through either entry point replays through the other. Receipts are
-`recovery-release {path, assignmentId, workId, refusalId}`, `recovery-resolution
-{path, assignmentId, workId, receiptId, state: "reconciled"}` and
-`conversation-replacement {assignmentId, revision}`; a key recorded by the retired
-`recovery.pre-turn.adopt` or `recovery.no-turn.adopt` still reads back as
-`recovery-adoption {path, assignmentId, workId, witnessId}`, but neither type is accepted.
-Definite refusals (stale or mismatched identity, unverified termination, an existing or
-missing witness, a saved thread or turn, an independent hold, a reconciled or released
-generation, stale replacement versions, unresolved execution, a task hold, a key reused for
-other material or another type) are `409`; malformed commands are `400`; other failures stay
-`command-outcome-unknown`.
+the operator read; the API checks the work is bound to that assignment and calls the
+unchanged service method with exactly the inner command the retained session routes pass, so
+a key recorded through either entry point replays through the other. Its receipt is
+`recovery-release {path, assignmentId, workId, refusalId}`. Keys recorded by the retired
+`recovery.pre-turn.recover`, `recovery.no-turn.recover` and `recovery.bound-turn.recover`
+commands still read back as `recovery-resolution {path, assignmentId, workId, receiptId,
+state: "reconciled"}`, `recovery.conversation.replace` as `conversation-replacement
+{assignmentId, revision}`, and `recovery.pre-turn.adopt` or `recovery.no-turn.adopt` as
+`recovery-adoption {path, assignmentId, workId, witnessId}`; none of these types is
+accepted. Definite refusals (stale or mismatched identity, a saved thread or turn, an
+independent hold, a released generation, a key reused for other material or another type)
+are `409`; malformed commands are `400`; other failures stay `command-outcome-unknown`.
 `GET /api/operator/assignments/:id/recovery-options` (read scope) lists the
 assignment's own generations (newest 20, filtered before the bound; writer, capacity
 and uncertainty holds are this assignment's, Stop and task holds task-wide) with the
-exact identity each command binds and advisory per-path
-eligibility with closed blockers (`not-held`, `ownership-released`,
-`context-unavailable`, `thread-bound`, `turn-bound`, `independent-hold`, `callback-pending`,
-`known-survivor`, `project-archived`, `witness-missing`, `witness-present`, `other-witness`,
-`already-reconciled`, `identity-withheld`, `task-held`, `unresolved-execution`, plus the
-termination blockers `termination-live`, `termination-conflict`, `termination-unknown` and
-`identity-changed` that the recover paths share with bound-turn recovery). A path is eligible
-only when the checks its command runs can pass: `release` needs a held generation that still
-holds capacity, has no saved thread or turn, no witness, no independent hold (a Stop target,
-even after Resume, a task hold or a pending effect) and a writable project; the recover
-paths need the stored process proven ended. It discloses the held process identity to both
-credential scopes as permitted diagnostic content; a string redaction would change reads
-`null` and blocks the paths that would send it.
+exact identity the release binds and its advisory eligibility with closed blockers
+(`not-held`, `ownership-released`, `context-unavailable`, `thread-bound`, `turn-bound`,
+`independent-hold`, `callback-pending`, `known-survivor`, `project-archived`,
+`already-reconciled`, `identity-withheld`, …). `release` is eligible only for a held
+generation that still holds capacity, has no saved thread or turn, no independent hold (a
+Stop target, even after Resume, a task hold or a pending effect) and a writable project; a
+recorded witness does not block it. `restart {eligible, blockedBy, releasePending}` reports
+Start again for the assignment: the task's Start again reason (or `other-assignment`), and
+while cab is releasing a held turn its work, interrupt state and latest release time. It
+discloses the held process identity to both credential scopes as permitted diagnostic
+content; a string redaction would change reads `null` and blocks the release.
 `recovery release ASSIGNMENT_ID [--work WORK_ID] [--yes] [--request-id UUID]` picks the held
 generation (`--work` names one when several are held). Without `--yes` it prints the release
 eligibility or each blocker and writes nothing; with `--yes` it sends `recovery.release` bound
 to that read under the default journal key rule, exits 4 naming the blockers when the service
-refuses, and settles a lost reply like `recovery submit`. `recovery prepare` writes an
-`cab.cli.recovery/v1` document (owner-only, at most 512 KiB, canonical-JSON
-SHA-256 digest) for the other paths from that read plus a strict
-`cab.cli.recovery-evidence/v1` operator file; its assertions remain operator assertions the
-service cannot verify. `recovery submit` uses the default journal key rule: an identical
-rerun replays, and a definitely refused key is not reused. Release, recovery and replacement
-are irreversible; none resumes or dispatches work. Release leaves Start again available;
-continuation after recovery still needs replacement plus a new message. Operator Stop/Resume
-are unchanged; there is no force unlock, release by time or acknowledgement, and no route for
-the keyless bound-turn recovery.
+refuses, and settles a lost reply by rerunning with the same key.
+`recovery restart ASSIGNMENT_ID [--yes] [--work WORK_ID] [--request-id UUID]` reads the
+recovery options and the task; without `--yes` it previews the Start again target and sends
+nothing, and with `--yes` it sends the task's `task.start-again` exactly as `task start-again`
+does. It adds no service command. Release is irreversible and resumes nothing; Start again
+continues the task. Operator Stop/Resume are unchanged and there is no force unlock: a held
+turn is released only by held-turn release (reported end, verified exit or the quiet period).
 
 ## Acceptance scenarios
 

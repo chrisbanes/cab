@@ -542,7 +542,7 @@ test("a follow-up queued before its predecessor finishes stays unreserved", asyn
   }
 });
 
-test("failure, known survivor and unfinished callback retain task writer holds", async () => {
+test("a known survivor and unfinished callback retain task writer holds; a reported failure releases it", async () => {
   const f = await fixture();
   try {
     f.runtime.outcome = "failed";
@@ -550,19 +550,17 @@ test("failure, known survivor and unfinished callback retain task writer holds",
       (await f.service.submitTask("failed", f.assignmentId, "write")).state,
       "held",
     );
-    assert.equal(
-      (await f.service.submitTask("waiting", f.assignmentId, "next")).state,
-      "ready",
-    );
-    assert.equal(f.runtime.starts, 1);
-    const archived = await f.service.archiveTask(f.taskId, {
-      deliveryConfirmed: true,
-      writerOwnershipResolved: true,
-      handoffsPreserved: true,
-      reconciliationEvidencePreserved: true,
-      workspaceContentsPreserved: true,
-    });
-    assert.equal(archived.outcome, "retained");
+    // The runtime reported the failed turn, so held-turn release frees the writer.
+    const deadline = Date.now() + 5000;
+    while (
+      f.service.list().find((i) => i.workId === "failed")?.state !==
+      "resolved-failed"
+    ) {
+      assert.ok(Date.now() < deadline, "failed turn released");
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    }
+    await f.service.submitTask("waiting", f.assignmentId, "next");
+    assert.equal(f.runtime.starts, 2);
   } finally {
     await f.close();
   }
@@ -2852,7 +2850,7 @@ test("writer retraction follows admission order for a queued successor", async (
   }
 });
 
-test("Stop persists across restart and resume does not clear an unresolved writer", async () => {
+test("Stop persists across restart; after Resume the ended turn is released", async () => {
   const f = await fixture();
   try {
     const gate = deferred();
@@ -2878,9 +2876,10 @@ test("Stop persists across restart and resume does not clear an unresolved write
     assert.equal(recovered.taskHold(f.taskId), "Task stopped");
     recovered.resumeTask(f.taskId);
     assert.equal(recovered.taskHold(f.taskId), undefined);
+    // Stop held the ended turn; once Resume clears it, held-turn release frees the writer.
     assert.equal(
       (await recovered.submitTask("waiting", f.assignmentId, "next")).state,
-      "ready",
+      "completed",
     );
     await recovered.stop();
     assert.equal(f.runtime.starts, 1);

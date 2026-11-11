@@ -658,18 +658,42 @@ export async function cliGeneration(
 ) {
   const w = await servedGeneration(t, mode);
   const o = await loginCli(t, w.s);
-  /** Writes an operator evidence file with the evidence schema and `body`. */
-  const evidenceFile = (body: Record<string, unknown>) =>
-    o.file(
-      `${randomUUID()}.json`,
-      JSON.stringify({ schema: "cab.cli.recovery-evidence/v1", ...body }),
-    );
-  const receiptEvidence = {
-    receipt: {
-      termination: { kind: "process-exit" },
-      effects: "settled",
-      workspace: "preserved",
-    },
-  };
-  return { ...w, ...o, evidenceFile, receiptEvidence };
+  return { ...w, ...o };
+}
+
+/**
+ * Records a recovery receipt as an earlier build's retired recover command did, replaying a
+ * recorded key, so tests can hold the legacy reconciled generations that still read back.
+ */
+export async function reconcileAsBefore(
+  service: StandaloneService,
+  command: {
+    key: string;
+    receipt: Parameters<
+      ReturnType<typeof startedOf>["supervisor"]["resolveHeldExecution"]
+    >[0];
+    assignmentId?: string;
+  },
+) {
+  const { state, supervisor } = startedOf(service);
+  const scope =
+    command.receipt.kind === "bound-turn"
+      ? "recover-bound-turn"
+      : command.receipt.kind === "no-turn-submission"
+        ? "recover-no-turn"
+        : "recover";
+  return (
+    state.preTurnCommandReplay(scope, command) ??
+    supervisor.resolveHeldExecution(command.receipt, command)
+  );
+}
+
+/** The retired conversation-replacement command, as an earlier build recorded it. */
+export function replaceConversationAsBefore(
+  service: StandaloneService,
+  command: Parameters<
+    ReturnType<typeof startedOf>["state"]["replaceConversationCommand"]
+  >[0],
+) {
+  return startedOf(service).state.replaceConversationCommand(command);
 }

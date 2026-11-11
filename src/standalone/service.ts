@@ -290,15 +290,8 @@ import {
   type PowerEventSource,
 } from "./power.js";
 import {
-  type BoundTurnRecoveryCommand,
-  boundTurnRecoveryCommandSchema,
-  type NoTurnRecoveryCommand,
-  noTurnRecoveryCommandSchema,
-  type PreTurnRecoveryCommand,
-  preTurnRecoveryCommandSchema,
   type ReleaseCommand,
   releaseCommandSchema,
-  type ReplaceConversationCommand,
 } from "./pre-turn-recovery.js";
 import type { ReleaseBlocker } from "../core/recovery-contracts.js";
 import {
@@ -379,6 +372,10 @@ import {
   type StopObservation,
   type SupervisorClock,
 } from "./supervisor.js";
+import {
+  HeldTurnRelease,
+  type HeldTurnReleaseOptions,
+} from "./held-turn-release.js";
 import { MacProcessTerminationVerifier } from "./termination.js";
 import {
   compareWorkspaceTurnObservations,
@@ -641,6 +638,11 @@ export interface StandaloneServiceOptions {
   conversationHistoryExclusions?: () => readonly string[];
   supervisor?: ExecutionSupervisorOptions;
   terminationVerifier?: TerminationVerifier;
+  /**
+   * Test-only: the held-turn release quiet period, poll interval and clocks; `false` runs
+   * as an earlier build did, so a test can record the receipts that build accepted.
+   */
+  heldTurnRelease?: HeldTurnReleaseOptions | false;
   workspaceManager?: WorkspaceManagerOptions;
   /** Test-only; production uses the fixed 10 minute cap. */
   draftingTimeLimitMs?: number;
@@ -786,7 +788,12 @@ function harnessForWork(
   return state.workHarness(workId);
 }
 
+/** What a released held turn offers: the operator confirms Start again once. */
+const heldTurnReleasedReason =
+  "cab interrupted the held turn and released it; Start again continues the task";
+
 /** The writer and successors whose ownership a terminal conflict or survivor retracts. */
+
 function retractableIds(state: ExecutionState, writer: ExecutionIntent) {
   return state
     .writerAndSuccessors(writer.workId)
@@ -958,17 +965,10 @@ export class StandaloneService {
   private stoppedExclusions: readonly string[] | undefined;
   private readonly active = new Set<Promise<ExecutionIntent>>();
   private readonly activeByWorkId = new Map<string, Promise<ExecutionIntent>>();
+  private heldTurns: HeldTurnRelease | undefined;
   private readonly nativeWaiters = new Map<
     string,
     { workId: string; interactionId: string; resolve: () => void }
-  >();
-  private readonly boundRecoveryRequests = new Map<
-    string,
-    {
-      material: string;
-      generation: ExecutionState;
-      result: Promise<{ id: string; workId: string; state: "reconciled" }>;
-    }
   >();
   private readonly callbacks = new Map<string, Set<Promise<unknown>>>();
   /** Drafting commands in flight, by key. */
@@ -1270,7 +1270,7 @@ export class StandaloneService {
           (this.callbacks.get(workId)?.size ?? 0) === 0
             ? state.reconciledAssignmentProof(workId, options)
             : undefined,
-        (workId) => state.refusedBeforeStart(workId),
+        (workId) => state.startAgainTarget(workId),
       );
       coordination.migrate();
       state.repairRetriedDeliveryBatches();
@@ -1894,6 +1894,17 @@ export class StandaloneService {
         );
       await supervisor.reconcileOnStart();
       this.releaseUnboundHoldsOnStart(state, supervisor);
+      const heldTurns =
+        this.options.heldTurnRelease === false
+          ? undefined
+          : this.heldTurnRelease(
+              state,
+              supervisor,
+              this.options.heldTurnRelease,
+            );
+      this.heldTurns = heldTurns;
+      // Before admission, so a turn proven ended frees capacity before queued work is admitted.
+      await heldTurns?.sweep();
       // Old obsolete requests have no execution generation for recovery release to find.
       let refusedAfter = 0;
       for (;;) {
@@ -2063,6 +2074,7 @@ export class StandaloneService {
       for (const harness of [...this.runtimeUnavailableSince.keys()])
         this.armRuntimeRestart(harness);
       scheduler.start();
+      heldTurns?.start();
       await this.wakeScheduler();
       this.sweepConversationArchives(generation);
       this.timers.add(
@@ -2106,6 +2118,8 @@ export class StandaloneService {
         try {
           for (const timer of this.timers) clearInterval(timer);
           this.timers.clear();
+          this.heldTurns?.stop();
+          this.heldTurns = undefined;
           await this.acquired?.power?.stop().catch(() => {});
           this.acquired?.supervisor?.cancelObservations();
           await this.acquired?.githubSynchronizer?.stop().catch(() => {});
@@ -2600,6 +2614,7 @@ export class StandaloneService {
         !this.runtimeUnavailableSince.has(harness));
     runtime.onUnexpectedRequest((request) => {
       if (!acceptsNew()) return;
+      this.noteTurnActivity(state, request.threadId, request.turnId);
       const denied = `Unexpected runtime request denied: ${request.method}`;
       const active = state
         .activeExecutions()
@@ -2676,6 +2691,11 @@ export class StandaloneService {
     });
     // Before publication no turn of this generation exists to bind a callback to.
     runtime.onUserInputRequest?.((request) => {
+      this.noteTurnActivity(
+        state,
+        request.identity.threadId,
+        request.identity.turnId,
+      );
       if (
         !this.current ||
         !acceptsNew() ||
@@ -2691,14 +2711,17 @@ export class StandaloneService {
       if (!foreign(outcome.threadId, outcome.turnId))
         this.handleUserInputOutcome(outcome);
     });
-    runtime.onToolCall?.((call) =>
-      !this.current || !acceptsNew() || foreign(call.threadId, call.turnId)
+    runtime.onToolCall?.((call) => {
+      this.noteTurnActivity(state, call.threadId, call.turnId);
+      return !this.current ||
+        !acceptsNew() ||
+        foreign(call.threadId, call.turnId)
         ? Promise.resolve({
             text: "Coordination call is not bound to current task work",
             success: false,
           })
-        : this.observeToolCall(call, harness, this.handleToolCall(call)),
-    );
+        : this.observeToolCall(call, harness, this.handleToolCall(call));
+    });
     const generation = this.generation;
     runtime.onAdmissionChange?.(() => {
       if (acceptsNew() && generation)
@@ -2707,10 +2730,12 @@ export class StandaloneService {
         );
     });
     runtime.onConversationEvent?.((event) => {
+      this.noteTurnActivity(state, event.threadId, event.turnId);
       if (acceptsNew() && !foreign(event.threadId, event.turnId))
         this.receiveConversationEvent(event, harness);
     });
     runtime.onDiagnosticEvent?.((event: RuntimeDiagnosticEvent) => {
+      this.noteTurnActivity(state, event.threadId, event.turnId);
       if (acceptsNew() && !foreign(event.threadId, event.turnId))
         this.diagnosticCaptures
           .get(runtimeKey(harness, event.threadId))
@@ -2718,6 +2743,7 @@ export class StandaloneService {
     });
     runtime.onTerminalAnomaly?.((anomaly) => {
       if (!acceptsNew()) return;
+      this.noteTurnActivity(state, anomaly.threadId, anomaly.turnId);
       const matched =
         anomaly.threadId && anomaly.turnId
           ? state
@@ -2734,6 +2760,39 @@ export class StandaloneService {
         });
       }
     });
+  }
+
+  /**
+   * Runtime activity for an exact turn: a held turn's quiet period starts again, and a
+   * released turn is held again as a known survivor, which retracts its successors.
+   */
+  private noteTurnActivity(
+    state: ExecutionState,
+    threadId: string | undefined,
+    turnId: string | undefined,
+  ): void {
+    if (!threadId || !turnId) return;
+    try {
+      for (const item of state.executionsForTerminalIdentity(
+        threadId,
+        turnId,
+      )) {
+        this.heldTurns?.noteActivity(item.workId);
+        // Only a released turn is resolved-failed with its request still held.
+        if (
+          item.state === "resolved-failed" &&
+          state.heldTurnReleased(item.workId)
+        )
+          this.holdKnownSurvivor(
+            item.workId,
+            "runtime activity after held-turn release",
+          );
+      }
+    } catch (error) {
+      process.stderr.write(
+        `${JSON.stringify({ event: "held-turn-activity-failed", error: String(error).slice(0, 500) })}\n`,
+      );
+    }
   }
 
   private runtimeForWork(
@@ -2952,6 +3011,8 @@ export class StandaloneService {
     }
     for (const timer of this.timers) clearInterval(timer);
     this.timers.clear();
+    this.heldTurns?.stop();
+    this.heldTurns = undefined;
     // Before Git cancellation and runtime stop, so interrupted turns can record their end.
     await attempt("execution shutdown drain", () =>
       this.drainExecutionsForShutdown(),
@@ -3475,59 +3536,6 @@ export class StandaloneService {
       () => this.started().supervisor.resolveHeldExecution(receipt),
     );
   }
-  unboundTurnTerminationBlockers(workId: string) {
-    return this.started().supervisor.unboundTurnTerminationBlockers(workId);
-  }
-  boundTurnRecoveryEligibility(workId: string, assignmentId: string) {
-    return this.started().supervisor.boundTurnRecoveryEligibility(
-      workId,
-      assignmentId,
-    );
-  }
-  recoverBoundTurnExecution(command: BoundTurnRecoveryCommand) {
-    const value = boundTurnRecoveryCommandSchema.parse(command);
-    const { state, supervisor } = this.started();
-    const replay = state.preTurnCommandReplay("recover-bound-turn", value);
-    if (replay)
-      return Promise.resolve(
-        z
-          .object({
-            id: z.string().uuid(),
-            workId: z.string().min(1),
-            state: z.literal("reconciled"),
-          })
-          .strict()
-          .parse(replay),
-      );
-    const material = canonicalMaterial(value);
-    const pending = this.boundRecoveryRequests.get(value.key);
-    if (pending) {
-      if (pending.material !== material || pending.generation !== state)
-        throw new RecoveryRejectedError(
-          "Recovery command key is already pending with different material or service generation",
-        );
-      return pending.result;
-    }
-    const result: Promise<{ id: string; workId: string; state: "reconciled" }> =
-      Promise.resolve()
-        .then(() =>
-          this.withProjectWrite(
-            workProjectId(this.cache!, value.receipt.workId),
-            "callback",
-            () => supervisor.resolveHeldExecution(value.receipt, value),
-          ),
-        )
-        .finally(() => {
-          if (this.boundRecoveryRequests.get(value.key)?.result === result)
-            this.boundRecoveryRequests.delete(value.key);
-        });
-    this.boundRecoveryRequests.set(value.key, {
-      material,
-      generation: state,
-      result,
-    });
-    return result;
-  }
   /** Every check a release runs, read without changing anything. */
   releaseBlockers(workId: string): ReleaseBlocker[] {
     const { state, supervisor } = this.started();
@@ -3563,6 +3571,84 @@ export class StandaloneService {
     this.wakeAfterCommit();
     return result;
   }
+  /** Held-turn release bound to start-up's own components; it never stops a runtime. */
+  private heldTurnRelease(
+    state: ExecutionState,
+    supervisor: ExecutionSupervisor,
+    options: HeldTurnReleaseOptions | undefined,
+  ): HeldTurnRelease {
+    return new HeldTurnRelease(
+      {
+        candidates: () =>
+          state
+            .heldTurnReleaseCandidates()
+            .filter((candidate) => state.projectWorkWritable(candidate.workId)),
+        blockers: (workId) => [
+          ...state.heldTurnBlockers(workId),
+          ...this.releaseInProcessBlockers(workId, supervisor),
+        ],
+        interrupt: (candidate) => {
+          const runtime = this.runtimes.get(candidate.harness);
+          if (!runtime || this.runtimeUnavailableSince.has(candidate.harness))
+            return Promise.reject(new Error("Runtime unavailable"));
+          return this.untilFailure(
+            runtime,
+            runtime.interruptTurn(candidate.threadId, candidate.turnId),
+            runtimeFailedError,
+          );
+        },
+        recordInterrupt: (candidate, interruptState) =>
+          state.recordHeldTurnInterrupt(candidate, interruptState),
+        turnEnded: (candidate) => state.heldTurnEnded(candidate),
+        processExited: (workId) => supervisor.processExited(workId),
+        release: (workId, basis) =>
+          state.releaseHeldTurn(
+            workId,
+            basis,
+            this.releaseInProcessBlockers(workId, supervisor),
+          ),
+        released: (workId, basis) => {
+          process.stderr.write(
+            `${JSON.stringify({ event: "held-turn-released", workId, basis })}\n`,
+          );
+          // A release frees capacity for queued work.
+          if (this.current) this.wakeAfterCommit();
+        },
+        failed: (error) =>
+          process.stderr.write(
+            `${JSON.stringify({ event: "held-turn-release-failed", error: String(error).slice(0, 500) })}\n`,
+          ),
+      },
+      options,
+    );
+  }
+
+  heldTurnReleased(workId: string): boolean {
+    return this.started().state.heldTurnReleased(workId);
+  }
+
+  /** When a held turn waiting for release ends its quiet period, if it is waiting. */
+  heldTurnReleasesBy(workId: string): number | undefined {
+    return this.heldTurns?.releasesBy(workId);
+  }
+
+  /** The assignment's newest request when it is a held turn cab is releasing. */
+  heldTurnReleasePending(assignmentId: string) {
+    const request = this.started().schedulerStore.latest(assignmentId);
+    const releasesBy = request && this.heldTurnReleasesBy(request.workId);
+    const release =
+      releasesBy !== undefined &&
+      request &&
+      this.started().state.heldTurnRelease(request.workId);
+    return release && release.basis === null
+      ? {
+          workId: request.workId,
+          interruptState: release.interruptState,
+          releasesBy,
+        }
+      : undefined;
+  }
+
   /**
    * Before admission: releases every held generation whose saved thread and turn are
    * null and that nothing else holds. Any other generation is left exactly as it was.
@@ -3586,54 +3672,6 @@ export class StandaloneService {
         `${JSON.stringify({ event: "held-generation-released", workId, reason: "no thread binding was saved, so no turn was sent" })}\n`,
       );
     }
-  }
-  recoverPreTurnExecution(command: PreTurnRecoveryCommand) {
-    const value = preTurnRecoveryCommandSchema.parse(command);
-    const replay = this.started().state.preTurnCommandReplay("recover", value);
-    if (replay)
-      return Promise.resolve(
-        z
-          .object({
-            id: z.string().uuid(),
-            workId: z.string().min(1),
-            state: z.literal("reconciled"),
-          })
-          .strict()
-          .parse(replay),
-      );
-    return this.withProjectWrite(
-      workProjectId(this.cache!, value.receipt.workId),
-      "callback",
-      () =>
-        this.started().supervisor.resolveHeldExecution(value.receipt, value),
-    );
-  }
-  recoverNoTurnExecution(command: NoTurnRecoveryCommand) {
-    const value = noTurnRecoveryCommandSchema.parse(command);
-    const replay = this.started().state.preTurnCommandReplay(
-      "recover-no-turn",
-      value,
-    );
-    if (replay)
-      return Promise.resolve(
-        z
-          .object({
-            id: z.string().uuid(),
-            workId: z.string().min(1),
-            state: z.literal("reconciled"),
-          })
-          .strict()
-          .parse(replay),
-      );
-    return this.withProjectWrite(
-      workProjectId(this.cache!, value.receipt.workId),
-      "callback",
-      () =>
-        this.started().supervisor.resolveHeldExecution(value.receipt, value),
-    );
-  }
-  replaceConversationCommand(command: ReplaceConversationCommand) {
-    return this.started().state.replaceConversationCommand(command);
   }
   recoveryMaterial(workId: string) {
     return this.started().state.recoveryMaterial(workId);
@@ -5166,6 +5204,8 @@ export class StandaloneService {
         request?.state === "held" &&
         request.kind === "assignment" &&
         state.refusedBeforeStart(request.workId);
+      const released =
+        request?.state === "held" && state.heldTurnReleased(request.workId);
       const notStarted =
         request?.state === "held" && this.notStartedWork(request.workId);
       const settledDraft =
@@ -5182,13 +5222,15 @@ export class StandaloneService {
       )
         held.push(String(domain.profile(String(a.profileId)).name));
       // A temporary callback blocks Start again, not the durable refusal episode.
-      if (refused && request && !request.draftTurn)
+      if ((refused || released) && request && !request.draftTurn)
         conditions.push({
           code: "not-started",
           key: `refused:${request.workId}`,
-          reason: notStarted
-            ? "Refused before it started; nothing ran"
-            : "Refused request is waiting for execution ownership to settle",
+          reason: !notStarted
+            ? "Refused request is waiting for execution ownership to settle"
+            : released
+              ? heldTurnReleasedReason
+              : "Refused before it started; nothing ran",
         });
     }
     if (this.hasNonStopTaskHold(taskId))
@@ -5955,7 +5997,7 @@ export class StandaloneService {
       !request.draftTurn &&
       !this.callbacks.get(workId)?.size &&
       !this.started().supervisor.hasKnownRisk(workId) &&
-      this.started().state.refusedBeforeStart(workId)
+      this.started().state.startAgainTarget(workId)
     );
   }
 
@@ -6330,10 +6372,11 @@ export class StandaloneService {
     state.holdKnownSurvivor({
       workId,
       reason: holdReason,
-      reconciledContinuation:
-        intent.state === "reconciled" &&
-        coordination.recoveryDispositionForWork(workId) ===
-          "operator-reconciled",
+      continuation:
+        (intent.state === "reconciled" &&
+          coordination.recoveryDispositionForWork(workId) ===
+            "operator-reconciled") ||
+        state.heldTurnReleased(workId),
       holdIds: retractableIds(state, intent),
     });
     supervisor.recordSurvivorEvidence(workId);
@@ -6346,6 +6389,8 @@ export class StandaloneService {
       ? this.projectWrites!.begin(projectId, "callback")
       : undefined;
     const state = executions.byWorkId(workId)?.state;
+    const released = executions.heldTurnReleased(workId);
+    this.heldTurns?.noteActivity(workId);
     // Tracked first: a failed hold write must not leave the callback unseen.
     const set = this.callbacks.get(workId) ?? new Set<Promise<unknown>>();
     set.add(callback);
@@ -6359,6 +6404,7 @@ export class StandaloneService {
       .catch(() => {});
     if (
       state === "completed" ||
+      released ||
       (state === "reconciled" &&
         coordination.recoveryDispositionForWork(workId) ===
           "operator-reconciled")
@@ -8130,6 +8176,8 @@ export class StandaloneService {
     if (!this.current) return;
     // Never rejects; a pass already running runs once more after it.
     void this.current.statusMappingWriter.run();
+    // A cleared hold (Resume, a settled callback) can let a held turn release now.
+    void this.heldTurns?.sweep();
     // Every settled turn and resolved hold wakes the scheduler: a drained runtime stops here.
     this.stopDrainedRuntimes();
     const {

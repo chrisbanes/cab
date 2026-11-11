@@ -86,10 +86,14 @@ export function executionStatus(
     execution.state === "uncertain" &&
     execution.reasonCodes.includes("runtime-unconfirmed")
       ? "Admitted; runtime state is not confirmed"
-      : execution.state === "waiting" &&
-          execution.reasonCodes.includes("admission-blocked")
-        ? "Waiting; blocked from admission"
-        : stateLabels[execution.state];
+      : execution.reasonCodes.includes("turn-release-pending")
+        ? "Held; cab interrupted the turn and releases it when it ends"
+        : execution.reasonCodes.includes("held-turn-released")
+          ? "Released; the held turn was interrupted"
+          : execution.state === "waiting" &&
+              execution.reasonCodes.includes("admission-blocked")
+            ? "Waiting; blocked from admission"
+            : stateLabels[execution.state];
   // A running turn owns its writer and capacity; any other hold, or one left behind, is held.
   const leftover =
     Object.values(holds).some(Boolean) && settled.has(execution.state);
@@ -131,7 +135,7 @@ export const admissionLine = (admission: Data["admission"]) =>
 export const evidenceWarning =
   "Recorded identities, observations, receipts and dispositions are evidence only; they do not prove that a process has terminated or that all effects have been released.";
 export const resumeWarning =
-  "Effects may continue while an execution is stopping. Resume clears only the Stop. Elapsed time, interruption acknowledgement and Resume do not resolve writer ownership; use independent recovery evidence before allowing another writer.";
+  "Effects may continue while an execution is stopping. Resume clears only the Stop. cab releases a held turn's writer only after it interrupts the turn and the runtime reports its end, its process is verified to have exited, or 30 minutes pass with no event for it.";
 
 /** What the evidence list says above its records: unavailable, none, or how many are omitted. */
 export function evidenceNotice(recovery: Recovery | undefined): string | null {

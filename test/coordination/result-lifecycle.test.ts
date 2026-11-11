@@ -186,8 +186,12 @@ for (const ending of [
         assert.equal(d.assignment(a.assignmentId).state, "running");
         assert.equal(d.task(a.taskId).state, "open");
       } else if (ending === "failed") {
+        // The runtime reported the failed turn, so held-turn release frees it for Start
+        // again; the reported result stays undelivered with the assignment still running.
         await until(
-          () => f.service.executionForWork(work.workId)?.state === "held",
+          () =>
+            f.service.executionForWork(work.workId)?.state ===
+            "resolved-failed",
         );
         assert.equal(d.assignment(a.assignmentId).state, "running");
         const record = f.service.recoveryFor(
@@ -195,8 +199,8 @@ for (const ending of [
           1,
           work.workId,
         )[0]!;
-        assert.equal(record.holds.writer, true);
-        assert.equal(record.holds.capacity, true);
+        assert.equal(record.holds.writer, false);
+        assert.equal(record.holds.capacity, false);
       } else {
         await until(() => d.assignment(a.assignmentId).state === "completed");
         const late = await f.runtime.callTool({

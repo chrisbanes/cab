@@ -5,6 +5,8 @@ import { join } from "node:path";
 import { test } from "node:test";
 import { tmpdir } from "../fixtures/temp.js";
 import {
+  reconcileAsBefore,
+  replaceConversationAsBefore,
   adoptAsBefore,
   bindLegacyHold,
   failing,
@@ -172,6 +174,8 @@ async function heldFixture(
       new StandaloneService(join(directory, "data"), () => runtime, undefined, {
         power: { enabled: false },
         routingClient: null,
+        // An earlier build: these generations reconcile through recorded receipts.
+        heldTurnRelease: false,
         terminationVerifier: {
           async verify(identity) {
             return verified
@@ -1240,8 +1244,8 @@ test("positively rejected archived resume stays held until keyed recovery, conve
     f.pause(true);
     const recoveryCommand = preTurnRecovery(f);
     const concurrent = await Promise.all([
-      f.service.recoverPreTurnExecution(recoveryCommand),
-      f.service.recoverPreTurnExecution(recoveryCommand),
+      reconcileAsBefore(f.service, recoveryCommand),
+      reconcileAsBefore(f.service, recoveryCommand),
     ]);
     assert.deepEqual(
       concurrent[0],
@@ -1371,7 +1375,7 @@ test("a pre-turn witness adopted by an earlier build recovers with immutable com
     const recovery = preTurnRecovery(f, adopted.witnessId);
     f.setVerified(false);
     await assert.rejects(
-      service.recoverPreTurnExecution(recovery),
+      reconcileAsBefore(service, recovery),
       /termination could not be verified/,
     );
     assert.equal(
@@ -1398,16 +1402,16 @@ test("a pre-turn witness adopted by an earlier build recovers with immutable com
       { ...recovery.receipt, effects: "unknown" },
     ])
       await assert.rejects(async () =>
-        service.recoverPreTurnExecution({
+        reconcileAsBefore(service, {
           key: randomUUID(),
           receipt,
         } as PreTurnRecoveryCommand),
       );
-    const resolved = await service.recoverPreTurnExecution(recovery);
-    assert.deepEqual(await service.recoverPreTurnExecution(recovery), resolved);
+    const resolved = await reconcileAsBefore(service, recovery);
+    assert.deepEqual(await reconcileAsBefore(service, recovery), resolved);
     await assert.rejects(
       async () =>
-        service.recoverPreTurnExecution({
+        reconcileAsBefore(service, {
           ...recovery,
           receipt: { ...recovery.receipt, workspace: "reconciled" },
         }),
@@ -1419,21 +1423,15 @@ test("a pre-turn witness adopted by an earlier build recovers with immutable com
       expectedAssignmentVersion: Number(f.old.assignmentVersion),
       expectedConversationRevision: 1,
     };
-    const api = new OperatorApi(service, [f.directory]);
-    const receipt = await api.execute({
-      type: "recovery.conversation.replace",
-      ...replace,
+    assert.deepEqual(replaceConversationAsBefore(service, replace), {
+      revision: 2,
     });
-    assert.deepEqual(
-      await api.execute({ type: "recovery.conversation.replace", ...replace }),
-      receipt,
-    );
-    assert.deepEqual(service.replaceConversationCommand(replace), {
+    assert.deepEqual(replaceConversationAsBefore(service, replace), {
       revision: 2,
     });
     assert.throws(
       () =>
-        service.replaceConversationCommand({
+        replaceConversationAsBefore(service, {
           ...replace,
           expectedConversationRevision: 2,
         }),
@@ -1441,7 +1439,7 @@ test("a pre-turn witness adopted by an earlier build recovers with immutable com
     );
     assert.throws(
       () =>
-        service.replaceConversationCommand({ ...replace, key: randomUUID() }),
+        replaceConversationAsBefore(service, { ...replace, key: randomUUID() }),
       /stale/,
     );
     const fresh = await service
@@ -1454,8 +1452,8 @@ test("a pre-turn witness adopted by an earlier build recovers with immutable com
     await service.stop();
     service = f.makeService();
     await service.start();
-    assert.deepEqual(await service.recoverPreTurnExecution(recovery), resolved);
-    assert.deepEqual(service.replaceConversationCommand(replace), {
+    assert.deepEqual(await reconcileAsBefore(service, recovery), resolved);
+    assert.deepEqual(replaceConversationAsBefore(service, replace), {
       revision: 2,
     });
     assert.deepEqual(
@@ -1493,7 +1491,7 @@ test("a pre-turn witness adopted by an earlier build recovers with immutable com
     await service.start();
     assert.equal(service.domain().task(f.taskId).state, "done");
     assert.deepEqual(audit(service, f.old.workId), retained);
-    assert.deepEqual(await service.recoverPreTurnExecution(recovery), resolved);
+    assert.deepEqual(await reconcileAsBefore(service, recovery), resolved);
     assert.equal(f.runtime.turns, 2);
   } finally {
     await close(f, service);
@@ -1520,7 +1518,7 @@ test("ambiguous resume errors and mismatched structured identities retain admitt
         assert.equal(record.holds.capacity, true);
         assert.equal(f.runtime.turns, 1);
         await assert.rejects(async () =>
-          f.service.recoverPreTurnExecution({
+          reconcileAsBefore(f.service, {
             key: randomUUID(),
             receipt: {
               ...f.receipt,
@@ -1534,7 +1532,7 @@ test("ambiguous resume errors and mismatched structured identities retain admitt
         );
         assert.throws(
           () =>
-            f.service.replaceConversationCommand({
+            replaceConversationAsBefore(f.service, {
               key: randomUUID(),
               assignmentId: required(f.old.assignmentId),
               expectedAssignmentVersion: 1,
@@ -1760,7 +1758,7 @@ test("pre-turn continuation revalidates witness, receipt, effects and current ad
       const f = await heldFixture(true);
       try {
         f.pause(true);
-        await f.service.recoverPreTurnExecution(preTurnRecovery(f));
+        await reconcileAsBefore(f.service, preTurnRecovery(f));
         f.service.replaceConversation(required(f.old.assignmentId));
         const event = await f.service
           .coordinationView()
@@ -1852,7 +1850,7 @@ test("late callback and known survivor persistently invalidate pre-turn continua
       const callback = deferred();
       try {
         f.pause(true);
-        await service.recoverPreTurnExecution(preTurnRecovery(f));
+        await reconcileAsBefore(service, preTurnRecovery(f));
         service.replaceConversation(required(f.old.assignmentId));
         await service.coordinationView().postOperatorMessage(f.message);
         const retained = audit(service, f.old.workId);
@@ -1931,46 +1929,34 @@ test("late callback and known survivor persistently invalidate pre-turn continua
     });
 });
 
-test("structured pre-turn witness survives restart before recovery without automatic dispatch", async () => {
+test("a structured pre-turn witness survives restart, which releases its generation for Start again", async () => {
   const f = await heldFixture(true);
   let service = f.service;
   try {
     f.pause(true);
-    const before = required(
-      service.recoveryView().find((r) => r.workId === f.old.workId),
-    ).preTurnRejection;
-    const recovery = preTurnRecovery(f);
+    const witness = () =>
+      // biome-ignore lint/complexity/useLiteralKeys: private member access for tests
+      (startedOf(service).state["db"] as DatabaseSync)
+        .prepare("SELECT * FROM execution_pre_turn_rejections WHERE workId=?")
+        .get(f.old.workId);
+    const before = witness();
+    assert.ok(before);
     await service.stop();
     service = f.makeService();
     await service.start();
-    assert.deepEqual(
-      service.recoveryView().find((r) => r.workId === f.old.workId)
-        ?.preTurnRejection,
-      before,
-    );
-    assert.equal(f.runtime.turns, 1);
+    // The witness stays as evidence; it no longer blocks the release.
+    assert.deepEqual(witness(), before);
+    assert.equal(f.runtime.turns, 1, "no automatic dispatch");
     assert.equal(
       service.recoveryView().find((r) => r.workId === f.old.workId)?.holds
         .capacity,
-      true,
+      false,
     );
-    await service.recoverPreTurnExecution(recovery);
-    assert.equal(f.runtime.turns, 1);
-    service.replaceConversationCommand({
-      key: randomUUID(),
+    assert.deepEqual(service.startAgainAvailability(f.taskId), {
+      available: true,
       assignmentId: required(f.old.assignmentId),
-      expectedAssignmentVersion: 1,
-      expectedConversationRevision: 1,
+      workId: f.old.workId,
     });
-    await service.coordinationView().postOperatorMessage(f.message);
-    f.runtime.rejectResume = false;
-    f.pause(false, service);
-    await until(
-      () => service.domain().task(f.taskId).state === "done",
-      "restarted pre-turn completion",
-    );
-    assert.equal(f.runtime.turns, 2);
-    assert.equal(f.runtime.threads, 2);
   } finally {
     await close(f, service);
   }
@@ -2102,7 +2088,7 @@ test("R4 witness storage initialization preserves existing R2 and R3 receipt and
       try {
         f.pause(true);
         if (preTurn) {
-          await service.recoverPreTurnExecution(preTurnRecovery(f));
+          await reconcileAsBefore(service, preTurnRecovery(f));
           service.replaceConversation(required(f.old.assignmentId));
         } else await service.resolveHeldExecution(f.receipt);
         await service.coordinationView().postOperatorMessage(f.message);

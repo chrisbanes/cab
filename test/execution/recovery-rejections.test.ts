@@ -1,5 +1,3 @@
-import { boundWorld } from "./bound-turn-recovery-fixture.js";
-import { until } from "../fixtures/until.js";
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import { mkdtempSync, rmSync } from "node:fs";
@@ -19,6 +17,7 @@ import {
 import { RecoveryRejectedError } from "../../src/standalone/recovery-types.js";
 import { StandaloneService } from "../../src/standalone/service.js";
 import {
+  replaceConversationAsBefore,
   controllableVerifier,
   type GenerationMode,
   generationRuntime,
@@ -50,7 +49,7 @@ async function world(t: T, mode: GenerationMode) {
   });
   const g = await holdGeneration(service, runtime, mode);
   const replace = (fields: Record<string, number> = {}, key = randomUUID()) =>
-    service.replaceConversationCommand({
+    replaceConversationAsBefore(service, {
       key,
       assignmentId: g.assignmentId,
       expectedAssignmentVersion: 1,
@@ -87,8 +86,8 @@ async function rejected(action: () => unknown, message: string | RegExp) {
 
 const mismatchRelease = "Release does not match the held generation read";
 
-test("no-turn release, recovery and replacement refusals are typed with their existing messages", async (t) => {
-  const { service, g, verifier, replace, stop } = await world(t, "no-turn");
+test("release refusals are typed with their existing messages, and a witness no longer blocks release", async (t) => {
+  const { service, g, stop } = await world(t, "no-turn");
   const release = {
     key: randomUUID(),
     assignmentId: g.assignmentId,
@@ -110,103 +109,19 @@ test("no-turn release, recovery and replacement refusals are typed with their ex
         }),
       mismatchRelease,
     );
-  // Recovery without a witness.
-  await rejected(
-    () => service.recoverNoTurnExecution(g.recovery(randomUUID()) as never),
-    "No-turn recovery requires its exact persisted witness and keyed command",
-  );
-  await rejected(() => replace(), "Assignment has unresolved execution");
-  const adopted = { witnessId: g.adoptAsBefore() };
-  await rejected(
-    () => service.releaseUnboundHold(release),
-    "Release blocked: witness-present",
-  );
-  const recovery = g.recovery(adopted.witnessId) as never as Parameters<
-    typeof service.recoverNoTurnExecution
-  >[0];
-  for (const [mode, message] of [
-    ["unknown", "Original process termination could not be verified"],
-    [
-      "conflict",
-      "Process termination evidence conflicts with the stored identity",
-    ],
-    [
-      "other-identity",
-      "Verified termination proof has a different process identity",
-    ],
-  ] as const) {
-    verifier.set(mode);
-    await rejected(
-      () => service.recoverNoTurnExecution({ ...recovery, key: randomUUID() }),
-      message,
-    );
-  }
-  verifier.set("verified");
+  // A witness an earlier build's adoption recorded stays as evidence only.
+  g.adoptAsBefore();
+  const released = service.releaseUnboundHold(release);
+  assert.deepEqual(service.releaseUnboundHold(release), released);
   await rejected(
     () =>
-      service.recoverNoTurnExecution({
-        ...recovery,
-        receipt: {
-          ...recovery.receipt,
-          processIdentity: { ...g.processIdentity, bootId: "other-boot" },
-        },
-      }),
-    "Recovery receipt generation or execution identity does not match",
-  );
-  await rejected(
-    () =>
-      service.recoverNoTurnExecution({
-        ...recovery,
-        key: randomUUID(),
-        receipt: { ...recovery.receipt, witnessId: randomUUID() },
-      }),
-    "No-turn recovery requires its exact persisted witness and keyed command",
-  );
-  await service.recoverNoTurnExecution(recovery);
-  await rejected(
-    () =>
-      service.recoverNoTurnExecution({
-        ...recovery,
-        receipt: { ...recovery.receipt, workspace: "reconciled" },
+      service.releaseUnboundHold({
+        ...release,
+        requestSequence: g.requestSequence + 1,
       }),
     "Pre-turn command key was reused with different material",
   );
-  await rejected(
-    () => service.recoverNoTurnExecution({ ...recovery, key: randomUUID() }),
-    "Execution generation is not held for recovery",
-  );
-  // Replacement: stale material, an operator Stop, then key reuse after success.
-  await rejected(
-    () => replace({ expectedAssignmentVersion: 2 }),
-    "Conversation replacement material is stale",
-  );
-  await rejected(
-    () => replace({ expectedConversationRevision: 2 }),
-    "Conversation replacement material is stale",
-  );
-  await service.controlTask({
-    type: "task.stop",
-    key: randomUUID(),
-    taskId: g.taskId,
-  });
-  await rejected(() => replace(), "Task remains held for recovery");
-  await service.controlTask({
-    type: "task.resume",
-    key: randomUUID(),
-    taskId: g.taskId,
-  });
-  const key = randomUUID();
-  assert.deepEqual(replace({}, key), { revision: 2 });
-  assert.deepEqual(replace({}, key), { revision: 2 });
-  await rejected(
-    () => replace({ expectedConversationRevision: 2 }, key),
-    "Pre-turn command key was reused with different material",
-  );
-  // A key recorded by one recovery type conflicts under another.
-  await rejected(
-    () => service.recoverNoTurnExecution({ ...recovery, key }),
-    "Pre-turn command key was reused with different material",
-  );
+  assert.equal(service.startAgainAvailability(g.taskId).available, true);
   // Malformed input stays a validation error; infrastructure failure stays untyped.
   assert.throws(
     () =>
@@ -224,47 +139,42 @@ test("no-turn release, recovery and replacement refusals are typed with their ex
   );
 });
 
-test("witnessed pre-turn generations refuse release, and an earlier adoption key keeps its scope", async (t) => {
+test("witnessed pre-turn generations release, and an earlier adoption key keeps its scope", async (t) => {
   const { service, g } = await world(t, "pre-turn-historical");
   const adoption = g.adoption();
-  const adopted = { witnessId: g.adoptAsBefore(adoption.key) };
-  const release = {
+  g.adoptAsBefore(adoption.key);
+  // The adoption key stays recorded under its own scope.
+  await rejected(
+    () =>
+      service.releaseUnboundHold({
+        key: adoption.key,
+        assignmentId: g.assignmentId,
+        workId: g.workId,
+        workRevision: g.workRevision,
+        requestSequence: g.requestSequence,
+      }),
+    "Pre-turn command key was reused with different material",
+  );
+  service.releaseUnboundHold({
     key: randomUUID(),
     assignmentId: g.assignmentId,
     workId: g.workId,
     workRevision: g.workRevision,
     requestSequence: g.requestSequence,
-  };
-  await rejected(
-    () => service.releaseUnboundHold(release),
-    "Release blocked: witness-present",
-  );
-  await rejected(
-    () =>
-      service.recoverPreTurnExecution({
-        ...(g.recovery(adopted.witnessId) as never as Parameters<
-          typeof service.recoverPreTurnExecution
-        >[0]),
-        key: adoption.key,
-      }),
-    "Pre-turn command key was reused with different material",
-  );
+  });
+  assert.equal(service.startAgainAvailability(g.taskId).available, true);
 
   const runtime = await world(t, "pre-turn-runtime");
-  await rejected(
-    () =>
-      runtime.service.releaseUnboundHold({
-        ...release,
-        workId: runtime.g.workId,
-        assignmentId: runtime.g.assignmentId,
-        workRevision: runtime.g.workRevision,
-        requestSequence: runtime.g.requestSequence,
-      }),
-    "Release blocked: witness-present",
-  );
-  await rejected(
-    () => runtime.replace(),
-    "Assignment has unresolved execution",
+  runtime.service.releaseUnboundHold({
+    key: randomUUID(),
+    workId: runtime.g.workId,
+    assignmentId: runtime.g.assignmentId,
+    workRevision: runtime.g.workRevision,
+    requestSequence: runtime.g.requestSequence,
+  });
+  assert.equal(
+    runtime.service.startAgainAvailability(runtime.g.taskId).available,
+    true,
   );
 });
 
@@ -365,245 +275,3 @@ test("core recovery bodies accept and reject exactly what the standalone schemas
   // The standalone form requires its key.
   assert.equal(releaseCommandSchema.safeParse(release).success, false);
 });
-
-for (const harness of ["codex", "claude"] as const)
-  test(`${harness}: bound receipts refuse stale identities and forged assertions`, async (t) => {
-    const w = await boundWorld(t, harness);
-    const base = w.recovery();
-    for (const changed of [
-      { workRevision: base.receipt.workRevision + 1 },
-      { requestSequence: base.receipt.requestSequence + 1 },
-      { threadId: "another-thread" },
-      { turnId: "another-turn" },
-      {
-        processIdentity: {
-          ...base.receipt.processIdentity,
-          processId: "other",
-        },
-      },
-      {
-        processIdentity: {
-          ...base.receipt.processIdentity,
-          processStartedAt: "reused birth",
-        },
-      },
-      {
-        processIdentity: {
-          ...base.receipt.processIdentity,
-          bootId: "another boot",
-        },
-      },
-    ])
-      await rejected(
-        () =>
-          w.s.f.service.recoverBoundTurnExecution({
-            ...base,
-            key: randomUUID(),
-            receipt: { ...base.receipt, ...changed },
-          }),
-        /identity does not match/,
-      );
-    await rejected(
-      () =>
-        w.s.f.service.recoverBoundTurnExecution({
-          ...base,
-          assignmentId: randomUUID(),
-        }),
-      /context-unavailable/,
-    );
-    assert.equal(w.checks(), 0);
-    for (const changed of [
-      { effects: undefined },
-      { workspace: undefined },
-      { termination: { kind: "acknowledged" } },
-      { effects: "unsettled" },
-      { witnessId: randomUUID() },
-      { kind: undefined },
-    ]) {
-      await assert.rejects(async () =>
-        w.s.f.service.recoverBoundTurnExecution({
-          ...base,
-          key: randomUUID(),
-          receipt: { ...base.receipt, ...changed },
-        } as never),
-      );
-    }
-    for (const mode of [
-      "unknown",
-      "live",
-      "conflict",
-      "other-identity",
-    ] as const) {
-      w.setMode(mode);
-      await rejected(
-        () => w.s.f.service.recoverBoundTurnExecution(w.recovery()),
-        /termination|proof/i,
-      );
-    }
-    const record = w.s.f.service
-      .recoveryForTask(w.g.taskId)
-      .find((r) => r.workId === w.g.workId);
-    assert.ok(record?.holds.writer && record.holds.capacity);
-    assert.equal(record?.receipt, null);
-    assert.equal(w.runtime.turnInvocations.length, 1);
-  });
-
-for (const risk of ["callback", "pending-effect", "survivor"] as const)
-  test(`bound recovery rejects ${risk} and persists known survivor refusal across restart`, async (t) => {
-    const w = await boundWorld(t);
-    let release!: () => void;
-    const pending = new Promise<void>((resolve) => {
-      release = resolve;
-    });
-    if (risk === "callback")
-      w.s.f.service.registerExecutionCallback(w.g.workId, pending);
-    if (risk === "pending-effect")
-      w.s.f.seedPersistedState((db) =>
-        db
-          .prepare(
-            "INSERT INTO execution_pending_effects (workId,effectKey,state,reason) VALUES (?,'external-write','pending','pending')",
-          )
-          .run(w.g.workId),
-      );
-    if (risk === "survivor")
-      w.s.f.service.holdKnownSurvivor(w.g.workId, "owned unfinished fixture");
-    await rejected(
-      () => w.s.f.service.recoverBoundTurnExecution(w.recovery()),
-      /callback-pending|pending-effects|known-survivor/,
-    );
-    assert.equal(w.checks(), 0);
-    release();
-    if (risk === "survivor") {
-      await w.s.restart();
-      await rejected(
-        () => w.s.f.service.recoverBoundTurnExecution(w.recovery()),
-        /known-survivor/,
-      );
-      assert.equal(w.checks(), 0);
-    }
-    assert.equal(
-      w.s.f.service
-        .recoveryForTask(w.g.taskId)
-        .find((r) => r.workId === w.g.workId)?.receipt,
-      null,
-    );
-  });
-
-test("a known survivor whose observation write fails still refuses bound recovery, in process and after restart", async (t) => {
-  const w = await boundWorld(t);
-  w.s.f.seedPersistedState((db) =>
-    db.exec(`CREATE TRIGGER fail_survivor_observation
-      BEFORE INSERT ON execution_recovery_observations WHEN NEW.kind = 'known-survivor'
-      BEGIN SELECT RAISE(ABORT, 'observation write failed'); END`),
-  );
-  w.s.f.service.holdKnownSurvivor(w.g.workId, "observation write fails");
-  const refused = async () => {
-    assert.ok(
-      (
-        await w.s.f.service.boundTurnRecoveryEligibility(
-          w.g.workId,
-          w.g.assignmentId,
-        )
-      ).includes("known-survivor"),
-    );
-    await rejected(
-      () => w.s.f.service.recoverBoundTurnExecution(w.recovery()),
-      /known-survivor/,
-    );
-  };
-  await refused();
-  w.s.f.seedPersistedState((db) =>
-    assert.equal(
-      db
-        .prepare(
-          "SELECT count(*) AS n FROM execution_recovery_observations WHERE workId = ? AND kind = 'known-survivor'",
-        )
-        .get(w.g.workId)?.n,
-      0,
-      "the observation really failed",
-    ),
-  );
-  await w.s.restart();
-  await refused();
-  assert.equal(w.checks(), 0, "no termination check before refusal");
-  assert.equal(
-    w.s.f.service
-      .recoveryForTask(w.g.taskId)
-      .find((r) => r.workId === w.g.workId)?.receipt,
-    null,
-  );
-});
-
-test("a survivor hold whose durable write fails still refuses bound recovery in the same process", async (t) => {
-  const w = await boundWorld(t);
-  w.s.f.seedPersistedState((db) =>
-    db.exec(`CREATE TRIGGER fail_survivor_marker
-      BEFORE INSERT ON execution_pending_effects WHEN NEW.effectKey = 'known-survivor'
-      BEGIN SELECT RAISE(ABORT, 'survivor marker write failed'); END`),
-  );
-  assert.throws(
-    () => w.s.f.service.holdKnownSurvivor(w.g.workId, "marker write fails"),
-    /survivor marker write failed/,
-  );
-  assert.ok(
-    (
-      await w.s.f.service.boundTurnRecoveryEligibility(
-        w.g.workId,
-        w.g.assignmentId,
-      )
-    ).includes("known-survivor"),
-  );
-  await rejected(
-    () => w.s.f.service.recoverBoundTurnExecution(w.recovery()),
-    /known-survivor/,
-  );
-  assert.equal(w.checks(), 0);
-});
-
-for (const risk of ["callback", "effect", "revision"] as const)
-  test(`bound recovery rechecks ${risk} after asynchronous exit verification`, async (t) => {
-    const w = await boundWorld(t);
-    let release!: () => void;
-    w.setGate(
-      new Promise<void>((resolve) => {
-        release = resolve;
-      }),
-    );
-    const attempt = w.s.f.service.recoverBoundTurnExecution(w.recovery());
-    await until(() => w.checks() === 1, "verification in flight");
-    let finish!: () => void;
-    if (risk === "callback")
-      w.s.f.service.registerExecutionCallback(
-        w.g.workId,
-        new Promise<void>((resolve) => {
-          finish = resolve;
-        }),
-      );
-    if (risk === "effect")
-      w.s.f.seedPersistedState((db) =>
-        db
-          .prepare(
-            "INSERT INTO execution_pending_effects (workId,effectKey,state,reason) VALUES (?,'late-external','pending','late')",
-          )
-          .run(w.g.workId),
-      );
-    if (risk === "revision")
-      w.s.f.seedPersistedState((db) =>
-        db
-          .prepare(
-            "UPDATE task_work_revisions SET workRevision=workRevision+1 WHERE workId=?",
-          )
-          .run(w.g.workId),
-      );
-    release();
-    await rejected(
-      () => attempt,
-      /callback-pending|pending-effects|identity-changed/,
-    );
-    finish?.();
-    const record = w.s.f.service
-      .recoveryForTask(w.g.taskId)
-      .find((r) => r.workId === w.g.workId);
-    assert.ok(record?.holds.writer && record.holds.capacity);
-    assert.equal(record?.receipt, null);
-  });

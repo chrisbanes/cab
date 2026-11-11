@@ -44,7 +44,7 @@ export function withdrawalRefusalText(
   code: DelegateWithdrawalRefusal,
   assignmentId: string,
 ): string {
-  const recovery = `the operator can inspect it with cab recovery get ${assignmentId} and release it with cab recovery release ${assignmentId}`;
+  const recovery = `the service releases a held turn itself once it ends or goes quiet, and the operator can follow it with cab recovery get ${assignmentId} (cab recovery release ${assignmentId} applies only to a generation that never sent a turn); withdraw it once released`;
   const taskRecovery =
     "the operator can find the held assignment with cab recovery get ASSIGNMENT_ID and release it with cab recovery release";
   switch (code) {
@@ -96,7 +96,7 @@ function blockingDelegateLine(delegate: DelegateStatus): string {
     return `${id} ${delegate.state}; has unfinished delegates of its own; withdraw or finish those first`;
   if (first === "ownership-hold")
     return `${id} ${delegate.state}; task ownership or recovery hold; ask the operator to release it (cab recovery release)`;
-  return `${id} ${delegate.state}; ${first === "uncertain-execution" ? "uncertain execution" : "held execution"}; ask the operator to recover it (cab recovery get ${delegate.assignmentId})`;
+  return `${id} ${delegate.state}; ${first === "uncertain-execution" ? "uncertain execution" : "held execution"}; the service releases it once it ends or goes quiet (cab recovery get ${delegate.assignmentId}); withdraw it then`;
 }
 
 /** The lead's report refusal while delegates remain unfinished; capped for the tool reply. */

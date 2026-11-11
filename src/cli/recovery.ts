@@ -1,38 +1,25 @@
 import { requestRefusalText } from "../operator/task-restart-copy.js";
-import { randomUUID } from "node:crypto";
 import type { z } from "zod";
-import {
-  type RecoveryPath,
-  recoveryCommandTypes,
-  recoveryPaths,
-  recoveryRequirements,
-} from "../core/recovery-contracts.js";
-import {
-  type CommandReceipt,
-  recoveryOptionsSchema,
-} from "../operator/contracts.js";
+import { recoveryCommandTypes } from "../core/recovery-contracts.js";
+import { recoveryOptionsSchema } from "../operator/contracts.js";
 import {
   type BrowseCommand,
   browseOutput,
   type CoverageGap,
   coverage,
-  enumArg,
   uuidArg,
 } from "./browse.js";
-import { canonicalJson } from "./change-document.js";
-import { exactCommand, positiveIntFlag, requireOut } from "./configure.js";
+import { exactCommand } from "./configure.js";
 import { CliError } from "./connections.js";
 import { receiptLines } from "./operation.js";
-import {
-  type PreparedPath,
-  preparedPaths,
-  readEvidenceFile,
-  readRecoveryDocument,
-  RECOVERY_SCHEMA,
-  writeRecoveryDocument,
-} from "./recovery-document.js";
 import { isoTime, keyValues, table } from "./render.js";
-import { connectWrite, type Effect, writeOutput } from "./task-write.js";
+import {
+  connectWrite,
+  readTask,
+  sendStartAgain,
+  TASK_WRITE,
+  writeOutput,
+} from "./task-write.js";
 import type { ServiceClient } from "./transport.js";
 import {
   requestKey,
@@ -45,9 +32,9 @@ type Options = z.infer<typeof recoveryOptionsSchema>["data"];
 type RecordView = Options["records"][number];
 const READ = ["cli.identity", "assignment.read", "recovery.read"] as const;
 const IRREVERSIBLE =
-  "Release, recovery and conversation replacement cannot be undone, and none of them resumes the task or dispatches work.";
+  "Release cannot be undone and does not resume the task; Start again continues it.";
 const NOTHING_INFERRED =
-  "Eligibility is advisory; the service re-checks identity, termination and replay. The CLI never infers review, termination, settled effects or workspace state, and there is no force unlock.";
+  "Eligibility is advisory; the service re-checks identity and replay. The service interrupts a held turn and releases it when the runtime reports its end, its process is verified to have exited, or 30 minutes pass with no event for it. There is no force unlock.";
 
 const readOptions = (client: ServiceClient, assignmentId: string) =>
   client.get(
@@ -60,21 +47,6 @@ const holdsText = (holds: Record<string, boolean>) =>
     .filter(([, held]) => held)
     .map(([name]) => name)
     .join(", ") || "none";
-
-/** The operator inputs each path needs, from the shared command schemas. */
-function requirementText(path: RecoveryPath) {
-  const r = recoveryRequirements[path];
-  if (path === "conversation-replace")
-    return "--expected-version, --expected-conversation-revision";
-  if (path === "release") return "confirmation (--yes)";
-  return [
-    ...(r.evidence.length ? [`evidence: ${r.evidence.join(", ")}`] : []),
-    ...(r.attestations.length
-      ? [`attestations (each true): ${r.attestations.join(", ")}`]
-      : []),
-    ...(r.receipt.length ? [`receipt: ${r.receipt.join(", ")}`] : []),
-  ].join("; ");
-}
 
 function recordLines(r: RecordView): string[] {
   return [
@@ -120,12 +92,11 @@ function recordLines(r: RecordView): string[] {
       ],
     ]),
     table(
-      ["PATH", "ELIGIBLE", "BLOCKED BY", "REQUIRES"],
+      ["PATH", "ELIGIBLE", "BLOCKED BY"],
       r.paths.map((p) => [
         p.path,
         p.eligible ? "yes" : "no",
         p.blockedBy.join(", ") || "-",
-        requirementText(p.path),
       ]),
     ),
   ];
@@ -147,11 +118,8 @@ const recoveryGet: BrowseCommand = {
     const id = uuidArg(ctx.positionals[2] ?? "", "ASSIGNMENT_ID");
     const read = await readOptions(await ctx.connect(), id);
     const d = read.data;
-    const requirements = Object.fromEntries(
-      recoveryPaths.map((p) => [p, recoveryRequirements[p]]),
-    );
     return browseOutput(ctx, {
-      data: { ...d, requirements },
+      data: d,
       observedAt: read.observedAt,
       gaps: optionGaps(d),
       notes: [NOTHING_INFERRED],
@@ -163,12 +131,7 @@ const recoveryGet: BrowseCommand = {
           ["Version", String(d.assignmentVersion)],
           ["Conversation", `revision ${d.conversationRevision}`],
           ["Held", d.held ? `yes: ${holdsText(d.holds)}` : "no"],
-          [
-            "Replacement",
-            d.replacement.eligible
-              ? `eligible at version ${d.replacement.expectedAssignmentVersion}, conversation revision ${d.replacement.expectedConversationRevision}`
-              : `blocked by ${d.replacement.blockedBy.join(", ")}`,
-          ],
+          ["Start again", restartText(d.restart)],
         ]),
         ...(d.requestRefusal
           ? [
@@ -183,8 +146,8 @@ const recoveryGet: BrowseCommand = {
         ...(d.omittedCount ? [`(${d.omittedCount} older omitted)`] : []),
         "",
         IRREVERSIBLE,
-        "Release with: cab recovery release ASSIGNMENT_ID [--work WORK_ID] --yes",
-        "Prepare other paths with: cab recovery prepare PATH ASSIGNMENT_ID --work WORK_ID --evidence-file FILE --out FILE",
+        `Start again with: cab recovery restart ${d.assignmentId} --yes`,
+        `Release a generation that never sent a turn with: cab recovery release ${d.assignmentId} [--work WORK_ID] --yes`,
       ].join("\n"),
     });
   },
@@ -194,253 +157,15 @@ export const recoveryBrowseCommands = new Map<string, BrowseCommand>([
   ["recovery get", recoveryGet],
 ]);
 
-type GenerationPath = Exclude<PreparedPath, "conversation-replace">;
+const RELEASED =
+  "Not resumed; nothing was dispatched. Writer and capacity are released; continue with 'cab recovery restart' or 'cab task start-again'.";
 
-/** The exact command for one generation path: observed identity plus the operator's evidence. */
-function buildCommand(
-  path: GenerationPath,
-  assignmentId: string,
-  record: RecordView,
-  evidence: Record<string, unknown>,
-) {
-  const type = recoveryCommandTypes[path];
-  const generation = {
-    workId: record.workId,
-    workRevision: record.generation.workRevision,
-    requestSequence: record.generation.requestSequence,
-    processIdentity: record.process,
-  };
-  if (path === "bound-turn-recover")
-    return {
-      type,
-      assignmentId,
-      receipt: {
-        kind: "bound-turn",
-        ...generation,
-        threadId: record.threadId,
-        turnId: record.turnId,
-        ...(evidence.receipt as Record<string, unknown>),
-      },
-    };
-  return {
-    type,
-    assignmentId,
-    receipt: {
-      kind:
-        path === "pre-turn-recover"
-          ? "pre-turn-rejection"
-          : "no-turn-submission",
-      witnessId:
-        path === "pre-turn-recover"
-          ? record.witnesses.preTurn?.id
-          : record.witnesses.noTurn?.id,
-      ...generation,
-      threadId: null,
-      turnId: null,
-      ...(evidence.receipt as Record<string, unknown>),
-    },
-  };
-}
-
-function assertionLines(path: PreparedPath, command: Record<string, unknown>) {
-  const c = command as Record<string, Record<string, unknown>>;
-  if (path === "conversation-replace")
-    return [
-      `Replaces the conversation of ${c.assignmentId} at assignment version ${c.expectedAssignmentVersion}, conversation revision ${c.expectedConversationRevision}.`,
-    ];
-  const r = c.receipt ?? {};
-  return [
-    `Reconciles ${r.workId} after verified termination of process ${JSON.stringify(r.processIdentity)}; capacity is released, the request stays held.`,
-    `You assert: termination ${JSON.stringify(r.termination)}, effects ${String(r.effects)}, workspace ${String(r.workspace)}.`,
-  ];
-}
-
-async function prepare(ctx: Parameters<WriteCommand["run"]>[0]) {
-  if (ctx.positionals[2] === "release")
-    throw new CliError(
-      "usage",
-      "release is not prepared: run 'cab recovery release ASSIGNMENT_ID'.",
-    );
-  const path = enumArg(
-    ctx.positionals[2],
-    preparedPaths,
-    "PATH",
-  ) as PreparedPath;
-  const assignmentId = uuidArg(ctx.positionals[3] ?? "", "ASSIGNMENT_ID");
-  const out = requireOut(ctx);
-  let evidence: Record<string, unknown> = {};
-  let expected: { version: number; revision: number } | undefined;
-  if (path === "conversation-replace") {
-    if (
-      ctx.values.work !== undefined ||
-      ctx.values["evidence-file"] !== undefined
-    )
-      throw new CliError(
-        "usage",
-        "conversation-replace takes no --work or --evidence-file.",
-      );
-    const version = positiveIntFlag(
-      ctx.values["expected-version"],
-      "expected-version",
-    );
-    const revision = positiveIntFlag(
-      ctx.values["expected-conversation-revision"],
-      "expected-conversation-revision",
-    );
-    if (version === undefined || revision === undefined)
-      throw new CliError(
-        "usage",
-        "--expected-version N and --expected-conversation-revision N are required.",
-      );
-    expected = { version, revision };
-  } else {
-    if (ctx.values.work === undefined)
-      throw new CliError("usage", "--work WORK_ID is required.");
-    if (ctx.values["evidence-file"] === undefined)
-      throw new CliError("usage", "--evidence-file FILE is required.");
-    if (
-      ctx.values["expected-version"] !== undefined ||
-      ctx.values["expected-conversation-revision"] !== undefined
-    )
-      throw new CliError(
-        "usage",
-        "--expected-version and --expected-conversation-revision apply to conversation-replace only.",
-      );
-    evidence = await readEvidenceFile(
-      ctx.values["evidence-file"],
-      path as GenerationPath,
-    );
-  }
-  const session = await ctx.connect(READ);
-  const read = await readOptions(session.client, assignmentId);
-  const d = read.data;
-  let record: RecordView | undefined;
-  let blockedBy: string[];
-  if (path === "conversation-replace") {
-    blockedBy = d.replacement.blockedBy;
-    if (
-      expected &&
-      (expected.version !== d.assignmentVersion ||
-        expected.revision !== d.conversationRevision)
-    )
-      throw new CliError(
-        "conflict",
-        `The assignment is at version ${d.assignmentVersion}, conversation revision ${d.conversationRevision}. Review 'cab recovery get ${assignmentId}' and prepare again. Nothing was written.`,
-        {
-          fix: `Run 'cab recovery get ${assignmentId}', then prepare again with the version and conversation revision it shows.`,
-        },
-      );
-  } else {
-    record = d.records.find((r) => r.workId === ctx.values.work);
-    if (!record)
-      throw new CliError(
-        "invalid-input",
-        `Work ${ctx.values.work} is not a listed recovery generation of ${assignmentId}. Nothing was written.`,
-      );
-    blockedBy = record.paths.find((p) => p.path === path)?.blockedBy ?? [
-      "context-unavailable",
-    ];
-  }
-  if (blockedBy.length)
-    throw new CliError(
-      "conflict",
-      `${path} is not eligible now: blocked by ${blockedBy.join(", ")}. Nothing was written.`,
-      {
-        fix: `Run 'cab recovery get ${assignmentId}' to see what blocks it, then prepare again once it is clear.`,
-      },
-    );
-  const exact = exactCommand(
-    record
-      ? buildCommand(path as GenerationPath, assignmentId, record, evidence)
-      : {
-          type: recoveryCommandTypes[path],
-          assignmentId,
-          expectedAssignmentVersion: d.assignmentVersion,
-          expectedConversationRevision: d.conversationRevision,
-        },
-    randomUUID(),
-  );
-  const { key: _key, ...command } = exact;
-  const preview = [...assertionLines(path, command), IRREVERSIBLE];
-  const { path: file, document } = await writeRecoveryDocument(out, {
-    schema: RECOVERY_SCHEMA,
-    path,
-    preparedAt: ctx.deps.now(),
-    service: {
-      installationId: session.identity.service.installationId,
-      origin: session.identity.service.origin,
-    },
-    target: {
-      scope: `assignment:${assignmentId}`,
-      assignmentId,
-      taskId: d.taskId,
-      projectId: d.projectId,
-      workId: record?.workId ?? null,
-    },
-    bound: {
-      assignmentVersion: d.assignmentVersion,
-      conversationRevision: d.conversationRevision,
-      workRevision: record?.generation.workRevision ?? null,
-      requestSequence: record?.generation.requestSequence ?? null,
-      observedAt: read.observedAt,
-    },
-    command,
-    preview: { lines: preview },
-  });
-  return {
-    data: { file, document },
-    coverage: coverage(ctx.deps.now(), optionGaps(d)),
-    human: [
-      `Prepared ${path} for assignment ${assignmentId} on ${session.name} (${document.service.origin}, installation ${document.service.installationId}).`,
-      `Wrote ${file} (digest ${document.digest}). Nothing was sent.`,
-      `Bound to observations at ${isoTime(read.observedAt)}; the service rechecks every value.`,
-      "",
-      ...preview,
-      "",
-      `Submit with: cab recovery submit --file ${file}`,
-    ].join("\n"),
-  };
-}
-
-/** What remains after each path; replacement is done once, then only a new message is needed. */
-const NEXT_STEP: Record<RecoveryPath, string> = {
-  release:
-    "Not resumed; nothing was dispatched. Writer and capacity are released; continue with Start again ('cab task start-again').",
-  "pre-turn-recover":
-    "Not resumed; nothing was dispatched. Continuation needs conversation replacement ('cab recovery prepare conversation-replace') and then a new 'cab task message'.",
-  "no-turn-recover":
-    "Not resumed; nothing was dispatched. Continuation needs conversation replacement ('cab recovery prepare conversation-replace') and then a new 'cab task message'.",
-  "bound-turn-recover":
-    "Not resumed; nothing was dispatched. Continue explicitly with a new 'cab task message' only when all independent holds allow it.",
-  "conversation-replace":
-    "Not resumed; nothing was dispatched. The conversation is replaced; do not replace it again. Continue with a new 'cab task message'.",
-};
-
-const EFFECT: Record<RecoveryPath, Effect> = {
-  release: "completed",
-  "pre-turn-recover": "completed",
-  "no-turn-recover": "completed",
-  "bound-turn-recover": "completed",
-  "conversation-replace": "saved",
-};
-
-function matches(
-  receipt: CommandReceipt,
-  path: RecoveryPath,
-  assignmentId: string,
-  workId: string | null,
-) {
-  if (receipt.kind === "conversation-replacement")
-    return (
-      path === "conversation-replace" && receipt.assignmentId === assignmentId
-    );
-  return (
-    (receipt.kind === "recovery-release" ||
-      receipt.kind === "recovery-resolution") &&
-    receipt.path === path &&
-    receipt.assignmentId === assignmentId &&
-    receipt.workId === workId
-  );
+/** Whether Start again is offered, a held turn is still being released, or what blocks it. */
+function restartText(r: Options["restart"]) {
+  if (r.eligible) return "eligible";
+  if (r.releasePending)
+    return `pending: the service interrupted the held turn (${r.releasePending.interruptState}) and expects to release it by ${isoTime(r.releasePending.releasesBy)} unless activity continues`;
+  return `blocked by ${r.blockedBy.join(", ")}`;
 }
 
 /** A best-effort post-read: blockers and the latest observations, never hiding the result. */
@@ -462,97 +187,11 @@ async function afterLines(
               .map((p) => `${p.path}: blocked by ${p.blockedBy.join(", ")}`),
           ]
         : []),
-      `conversation-replace: ${d.replacement.eligible ? "eligible" : `blocked by ${d.replacement.blockedBy.join(", ")}`}`,
+      `Start again: ${restartText(d.restart)}`,
     ];
   } catch {
     return ["Current recovery state could not be read."];
   }
-}
-
-async function submit(ctx: Parameters<WriteCommand["run"]>[0]) {
-  if (!ctx.values.file) throw new CliError("usage", "--file FILE is required.");
-  const document = await readRecoveryDocument(ctx.values.file);
-  const invalidDocument = () =>
-    new CliError(
-      "change-document-invalid",
-      "Recovery document rejected: its command, path and target disagree.",
-    );
-  let exact: Record<string, unknown>;
-  try {
-    exact = exactCommand(document.command, randomUUID());
-  } catch {
-    throw invalidDocument();
-  }
-  const { key: _key, ...command } = exact;
-  const receiptWork = (command.receipt as { workId?: unknown } | undefined)
-    ?.workId;
-  if (
-    command.type !== recoveryCommandTypes[document.path] ||
-    canonicalJson(command) !== canonicalJson(document.command) ||
-    command.assignmentId !== document.target.assignmentId ||
-    document.target.scope !== `assignment:${document.target.assignmentId}` ||
-    (command.workId ?? receiptWork ?? null) !== document.target.workId
-  )
-    throw invalidDocument();
-  const session = await connectWrite(ctx, [...READ, "recovery.write"]);
-  if (
-    session.identity.service.installationId !== document.service.installationId
-  )
-    throw new CliError(
-      "wrong-service",
-      `This recovery was prepared for installation ${document.service.installationId} (${document.service.origin}), not ${session.identity.service.installationId}. Nothing was sent.`,
-    );
-  const identity = {
-    scope: document.target.scope,
-    type: String(command.type),
-  };
-  const { key, digest, state, reached } = await requestKey(
-    ctx,
-    session,
-    identity,
-    [document.digest],
-  );
-  const { assignmentId, workId } = document.target;
-  let sent: Awaited<ReturnType<typeof sendCommand>>;
-  try {
-    sent = await sendCommand(ctx, session, {
-      ...identity,
-      key,
-      digest,
-      resource: assignmentId,
-      command: { ...command, key },
-      match: (r) => matches(r, document.path, assignmentId, workId),
-    });
-  } catch (error) {
-    if (error instanceof CliError && error.code === "conflict")
-      throw new CliError(
-        "conflict",
-        [
-          `The service refused ${document.path}; nothing was applied and request ${key} will not be reused.`,
-          "Missing, expired or stale evidence is not a successful recovery; the task is not resumed.",
-          ...(await afterLines(session, assignmentId, workId)),
-        ].join("\n"),
-        {
-          ...error.extra,
-          fix: `Run 'cab recovery get ${assignmentId}', then prepare a new document with 'cab recovery prepare'.`,
-        },
-      );
-    throw error;
-  }
-  return writeOutput({
-    request: sent.request,
-    receipt: sent.receipt,
-    reused: reached && state?.state !== "recorded",
-    effect: EFFECT[document.path],
-    summary: `Submitted ${document.path} for assignment ${assignmentId}`,
-    lines: receiptLines(sent.receipt),
-    notes: [
-      NEXT_STEP[document.path],
-      ...(await afterLines(session, assignmentId, workId)),
-      IRREVERSIBLE,
-    ],
-    data: { file: ctx.values.file, digest: document.digest },
-  });
 }
 
 /**
@@ -643,7 +282,10 @@ async function release(ctx: Parameters<WriteCommand["run"]>[0]) {
       digest,
       resource: assignmentId,
       command: exactCommand(command, key),
-      match: (r) => matches(r, "release", assignmentId, workId),
+      match: (r) =>
+        r.kind === "recovery-release" &&
+        r.assignmentId === assignmentId &&
+        r.workId === workId,
     });
   } catch (error) {
     if (error instanceof CliError && error.code === "conflict")
@@ -664,12 +306,12 @@ async function release(ctx: Parameters<WriteCommand["run"]>[0]) {
     request: sent.request,
     receipt: sent.receipt,
     reused: reached && state?.state !== "recorded",
-    effect: EFFECT.release,
+    effect: "completed",
     summary: `Released ${target} of assignment ${assignmentId}`,
     lines: receiptLines(sent.receipt),
     notes: [
       ...explanation,
-      NEXT_STEP.release,
+      RELEASED,
       ...(await afterLines(session, assignmentId, workId)),
       IRREVERSIBLE,
     ],
@@ -677,25 +319,53 @@ async function release(ctx: Parameters<WriteCommand["run"]>[0]) {
   });
 }
 
+/**
+ * Start again for the assignment, after one confirmation: the same `task.start-again` the
+ * task page and `cab task start-again` send. Without --yes it previews and sends nothing.
+ */
+async function restart(ctx: Parameters<WriteCommand["run"]>[0]) {
+  const assignmentId = uuidArg(ctx.positionals[2] ?? "", "ASSIGNMENT_ID");
+  const session = ctx.values.yes
+    ? await connectWrite(ctx, [...READ, ...TASK_WRITE])
+    : await ctx.connect([...READ, "task.read"]);
+  const d = (await readOptions(session.client, assignmentId)).data;
+  const task = (await readTask(session, d.taskId)).data;
+  // A named work lets the service decide, so a retry with its --request-id replays.
+  const workId =
+    ctx.values.work ??
+    (d.restart.eligible && task.startAgain?.available
+      ? task.startAgain.workId
+      : undefined);
+  if (!workId)
+    throw new CliError(
+      "conflict",
+      `Start again is not available for ${assignmentId}: ${restartText(d.restart)}. Nothing was sent.`,
+      {
+        fix: d.restart.releasePending
+          ? `Wait for the release, then run 'cab recovery restart ${assignmentId} --yes' again.`
+          : `Run 'cab recovery get ${assignmentId}' and 'cab task get ${d.taskId}' to see what holds it.`,
+      },
+    );
+  if (!ctx.values.yes)
+    return {
+      data: { assignmentId, taskId: d.taskId, workId },
+      coverage: coverage(ctx.deps.now(), optionGaps(d)),
+      human: [
+        `Start again queues ${workId} of task ${d.taskId} afresh at the current revisions and continues the assignment's conversation.`,
+        `Confirm with: cab recovery restart ${assignmentId} --yes`,
+        "Nothing was sent.",
+      ].join("\n"),
+    };
+  return sendStartAgain(
+    ctx,
+    session as Session,
+    d.taskId,
+    Number(task.task.version),
+    workId,
+  );
+}
+
 export const recoveryWriteCommands = new Map<string, WriteCommand>([
-  [
-    "recovery prepare",
-    {
-      usage:
-        "recovery prepare PATH ASSIGNMENT_ID --out FILE (--work WORK_ID --evidence-file FILE | --expected-version N --expected-conversation-revision N)",
-      positionals: 2,
-      expects:
-        "--expected-version and --expected-conversation-revision: the assignment's version and conversation revision ('cab recovery get ASSIGNMENT_ID'); required for conversation-replace, refused for the other paths.",
-      flags: [
-        "out",
-        "work",
-        "evidence-file",
-        "expected-version",
-        "expected-conversation-revision",
-      ],
-      run: prepare,
-    },
-  ],
   [
     "recovery release",
     {
@@ -707,12 +377,13 @@ export const recoveryWriteCommands = new Map<string, WriteCommand>([
     },
   ],
   [
-    "recovery submit",
+    "recovery restart",
     {
-      usage: "recovery submit --file FILE [--request-id UUID]",
-      positionals: 0,
-      flags: ["file", "request-id"],
-      run: submit,
+      usage:
+        "recovery restart ASSIGNMENT_ID [--yes] [--work WORK_ID] [--request-id UUID]",
+      positionals: 1,
+      flags: ["yes", "work", "request-id"],
+      run: restart,
     },
   ],
 ]);

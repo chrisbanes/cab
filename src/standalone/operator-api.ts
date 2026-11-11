@@ -2047,7 +2047,7 @@ export class OperatorApi {
       });
     });
   }
-  /** Only a held Claude execution's failure is reported; Codex presentation is unchanged. */
+  /** Only a held or released Claude execution's failure is reported; Codex presentation is unchanged. */
   private generation(
     request: {
       workId: string;
@@ -2114,6 +2114,14 @@ export class OperatorApi {
           this.service.notStartedWork(s.request.workId)
       : this.service.latestNotStarted(s.assignmentId);
   }
+  private released(s: ReturnType<OperatorApi["selection"]>) {
+    const request = s.request ?? this.service.latestTurnRequest(s.assignmentId);
+    return (
+      request?.state === "held" &&
+      this.service.notStartedWork(request.workId) &&
+      this.service.heldTurnReleased(request.workId)
+    );
+  }
   private unresolvedHeldRequest(s: ReturnType<OperatorApi["selection"]>) {
     const request = s.request ?? this.service.latestTurnRequest(s.assignmentId);
     return (
@@ -2167,6 +2175,14 @@ export class OperatorApi {
     ) {
       state = "uncertain";
       reasonCodes.push(holds.task ? "task-held" : "recovery-held");
+      if (
+        selections.some(
+          (s) =>
+            s.request &&
+            this.service.heldTurnReleasesBy(s.request.workId) !== undefined,
+        )
+      )
+        reasonCodes.push("turn-release-pending");
     } else if (
       selections.some(
         (s) => s.request?.state === "active" && s.intent?.state === "running",
@@ -2187,7 +2203,11 @@ export class OperatorApi {
     else if (task.state === "cancelled") state = "cancelled";
     else if (selections.some((s) => this.notStarted(s))) {
       state = "not-started";
-      reasonCodes.push("refused-before-start");
+      reasonCodes.push(
+        selections.some((s) => this.released(s))
+          ? "held-turn-released"
+          : "refused-before-start",
+      );
     } else if (this.domain().project(String(task.projectId)).paused) {
       state = "paused";
       reasonCodes.push("project-paused");
@@ -4392,7 +4412,8 @@ export class OperatorApi {
                     instructionsRevision: request.instructionsRevision,
                     profileRevision: request.profileRevision,
                   },
-                  s.intent?.state === "held",
+                  s.intent?.state === "held" ||
+                    this.service.heldTurnReleased(request.workId),
                 )
               : null,
         };

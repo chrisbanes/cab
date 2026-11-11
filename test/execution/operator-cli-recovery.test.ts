@@ -1,13 +1,12 @@
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import { test } from "node:test";
-import { recoveryRequirements } from "../../src/core/recovery-contracts.js";
 import { fakeServer, harness } from "../fixtures/cli-harness.js";
 import { databaseDigest } from "../fixtures/database-digest.js";
 import { seedOperatorRecovery } from "../fixtures/operator-web.js";
 import { cliGeneration } from "../fixtures/recovery-generations.js";
 
-test("recovery get shows identity, holds, paths and required inputs on both credentials", async (t) => {
+test("recovery get shows identity, holds, the release path and Start again on both credentials", async (t) => {
   const w = await cliGeneration(t, "no-turn");
   const before = databaseDigest(w.s.f);
   for (const connection of ["ro", "rw"] as const) {
@@ -15,7 +14,11 @@ test("recovery get shows identity, holds, paths and required inputs on both cred
     assert.equal(r.code, 0, r.err);
     const out = r.json();
     assert.equal(out.data.assignmentId, w.g.assignmentId);
-    assert.deepEqual(out.data.requirements, recoveryRequirements);
+    assert.deepEqual(out.data.restart, {
+      eligible: false,
+      blockedBy: ["submission-interrupted"],
+      releasePending: null,
+    });
     const record = out.data.records.find(
       (x: { workId: string }) => x.workId === w.g.workId,
     );
@@ -36,11 +39,11 @@ test("recovery get shows identity, holds, paths and required inputs on both cred
     `Work: +${w.g.workId}`,
     `Process: +${w.g.processIdentity.processId} started`,
     "Reason: +Runtime submission or observation uncertain: Error: Runtime stopped",
-    "release +yes +- +confirmation \\(--yes\\)",
-    "no-turn-recover +no +witness-missing +receipt: termination, effects, workspace",
-    "Release with: cab recovery release ASSIGNMENT_ID",
-    "Replacement: +blocked by unresolved-execution",
-    "there is no force unlock",
+    "release +yes +-",
+    `Release a generation that never sent a turn with: cab recovery release ${w.g.assignmentId}`,
+    "Start again: +blocked by submission-interrupted",
+    `Start again with: cab recovery restart ${w.g.assignmentId} --yes`,
+    "no force unlock",
     "cannot be undone",
   ])
     assert.match(human.out, new RegExp(text), text);

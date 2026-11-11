@@ -222,10 +222,18 @@ and roles.
 _Avoid_: Agent concurrency setting in the agent revision
 
 **Start again**:
-The operator action that queues an assignment's request again when it was refused before it
-ran, at admission or before any turn was submitted, at the current revisions. The refused
-request stays as history.
+The operator action that queues an assignment's request again at the current revisions,
+after one confirmation, when it was refused before it ran (at admission or before any turn
+was submitted) or its held turn was released. It continues the assignment's conversation.
+The refused or released request stays as history.
 _Avoid_: Retry, which resends work that may have run
+
+**Held-turn release**:
+cab interrupts a held turn and releases its writer ownership and capacity once the runtime
+reports the turn ended, its process is verified to have exited, or 30 minutes pass with no
+event or callback for it; a turn whose ID was never saved releases only on a verified process
+exit. Independent holds win. Later activity for the turn holds the task again.
+_Avoid_: Recovery receipt, force unlock
 
 **Reset task**:
 The operator action that replaces every assignment's conversation and starts the project

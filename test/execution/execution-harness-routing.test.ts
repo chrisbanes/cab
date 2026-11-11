@@ -506,7 +506,7 @@ test("a Claude unexpected request holds only its work with neutral text", async 
   }
 });
 
-test("a Claude transient failure is held without retry", async () => {
+test("a Claude transient failure is released for Start again without retry", async () => {
   const root = mkdtempSync(join(tmpdir(), "cab-harness-retry-"));
   const runtimes = fakes();
   const service = open(join(root, "data"), runtimes);
@@ -519,7 +519,11 @@ test("a Claude transient failure is held without retry", async () => {
     runtimes.claude.failNextTurn = true;
     const { assignmentIds } = await task(service, projectId, [worker]);
     const workId = initial(assignmentIds[0] ?? "");
-    await waitUntil(() => intent(service, workId)?.state === "held", describe);
+    // The runtime reported the failed turn, so cab releases it rather than retrying.
+    await waitUntil(
+      () => intent(service, workId)?.state === "resolved-failed",
+      describe,
+    );
     await new Promise((resolve) => setTimeout(resolve, 50));
     assert.equal(
       count(service, "SELECT COUNT(*) AS n FROM execution_retry_resolutions"),

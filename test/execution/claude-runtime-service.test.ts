@@ -914,14 +914,18 @@ test("an invalid Claude token fails the turn visibly as unauthorized and is not 
   ]);
   const { projectId, worker } = run.setup();
   const { taskId, workId } = await run.claudeTask(projectId, worker);
-  await waitUntil(() => run.intent(workId)?.state === "held", run.describe);
+  // The runtime reported the failed turn, so cab releases it; it is never retried.
+  await waitUntil(
+    () => run.intent(workId)?.state === "resolved-failed",
+    run.describe,
+  );
   {
     const base = run.intent(workId)?.workspace;
     t.after(() => releaseTemporaryBase(base));
   }
   assert.equal(
     run.intent(workId)?.reason,
-    "Bound turn failed or was interrupted",
+    "Held turn released: the runtime reported the turn ended",
   );
   const evidence = run
     .db()
@@ -1028,7 +1032,7 @@ for (const verified of [true, false])
     }
   });
 
-test("a restart with a running Claude execution holds it as unknown", {
+test("a restart after a crash releases a Claude turn whose per-turn process exited", {
   skip: slashTmpDenied(),
 }, async (t) => {
   const scripts: Script[] = [
@@ -1045,7 +1049,8 @@ test("a restart with a running Claude execution holds it as unknown", {
   t.after(() => releaseTemporaryBase(workspace));
   const identity = run.recovery(workId)?.processIdentity;
   assert.ok(identity);
-  // A crash leaves no planned-shutdown interrupt, so the restart cannot release it.
+  // A crash leaves no planned-shutdown interrupt; the verified exit of the turn's own
+  // Claude process releases it.
   await stopWithoutDrain(run.service);
   const restarted = claudeHarness(join(run.root, "data"), [], {
     selfTest: true,
@@ -1054,14 +1059,14 @@ test("a restart with a running Claude execution holds it as unknown", {
   t.after(() => restarted.service.stop().catch(() => {}));
   await restarted.service.start();
   const record = restarted.recovery(workId);
-  assert.equal(record?.intent.state, "held");
+  assert.equal(record?.intent.state, "resolved-failed");
   assert.deepEqual(
     record?.observations.map((observation) => observation.kind),
-    ["unknown"],
+    ["unknown", "termination-verified", "held-turn-released"],
   );
   assert.deepEqual(
     [record?.holds.writer, record?.holds.capacity, record?.holds.uncertainty],
-    [true, true, true],
+    [false, false, false],
   );
 });
 

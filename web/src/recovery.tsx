@@ -19,7 +19,9 @@ import {
   type CommandReceipt,
   type HarnessStatus,
   type OperatorCommand,
+  taskSchema,
 } from "../../src/operator/contracts.js";
+import { StartAgainAction } from "./task-restart.js";
 import { CommandLifecycle } from "./command-lifecycle.js";
 import { ActionOutcome, detailRows } from "./action-feedback.js";
 import { failureCause } from "./outcome-copy.js";
@@ -665,10 +667,6 @@ function RecoveryRecord({ r }: { r: RecoveryRecordData }) {
   );
 }
 
-type BoundCommand = Extract<
-  OperatorCommand,
-  { type: "recovery.bound-turn.recover" }
->;
 type RecoveryOptions = ReturnType<typeof recoveryOptionsSchema.parse>["data"];
 
 type ReleaseCommand = Extract<OperatorCommand, { type: "recovery.release" }>;
@@ -676,8 +674,7 @@ type ReleaseCommand = Extract<OperatorCommand, { type: "recovery.release" }>;
 const releasedMessage =
   "Released. Writer and capacity are free and the task offers Start again. No work was started.";
 
-/** Held generations cab can prove never sent a turn: release them for Start again. */
-/** One recovery-options read shared by the Release and bound-turn panels. */
+/** One recovery-options read shared by the Release and Start again panels. */
 function useRecoveryOptions(p: SettingsProps & { assignmentId: string }) {
   const loader = useCallback(
     (signal: AbortSignal) =>
@@ -697,7 +694,7 @@ function useRecoveryOptions(p: SettingsProps & { assignmentId: string }) {
 }
 type RecoveryOptionsResource = ReturnType<typeof useRecoveryOptions>;
 
-/** The release and bound-turn panels over one recovery-options read. */
+/** The release and Start again panels over one recovery-options read. */
 function RecoveryActions(
   p: SettingsProps & {
     assignmentId: string;
@@ -708,8 +705,8 @@ function RecoveryActions(
   const resource = useRecoveryOptions(p);
   return (
     <>
+      <RestartRecovery {...p} resource={resource} />
       <ReleaseRecovery {...p} resource={resource} />
-      <BoundTurnRecovery {...p} resource={resource} />
     </>
   );
 }
@@ -725,7 +722,7 @@ function ReleaseRecovery(
   const shown = useRef<RecoveryOptions["records"] | null>(null);
   if (shown.current === null && resource.state.data)
     shown.current = resource.state.data.data.records.filter(
-      (r) => r.intentState === "held",
+      (r) => r.intentState === "held" && r.threadId === null,
     );
   if (shown.current?.length === 0) return null;
   return (
@@ -974,372 +971,59 @@ function ReleaseForm(
   );
 }
 
-/** One original command stays frozen until its receipt has been checked. */
-function BoundTurnRecovery(
+/**
+ * Start again for this assignment's task, the same action the task page, Inbox and Home offer.
+ * While cab is still releasing a held turn it shows the latest release time instead.
+ */
+function RestartRecovery(
   p: SettingsProps & {
-    assignmentId: string;
-    projectId: string;
     taskId: string;
     resource: RecoveryOptionsResource;
   },
 ) {
-  const { resource } = p;
-  // Keep the original bounded identities, including an unknown command whose record later disappears.
-  const shown = useRef<RecoveryOptions["records"] | null>(null);
-  if (shown.current === null && resource.state.data)
-    shown.current = resource.state.data.data.records;
+  const loader = useCallback(
+    (signal: AbortSignal) =>
+      p.client.read(`/api/operator/tasks/${p.taskId}`, taskSchema, signal),
+    [p.client, p.taskId],
+  );
+  const task = useOperatorResource(
+    `${p.session.csrfToken}:${p.taskId}`,
+    loader,
+  );
+  const restart = p.resource.state.data?.data.restart;
+  const offered = task.state.data?.data.startAgain;
+  if (!restart?.releasePending && !restart?.eligible && !offered?.available)
+    return null;
   return (
     <Panel
-      title="Reconcile a bound turn"
-      description="Reconciliation is durable and cannot be undone. It releases only this execution's ownership; it never resumes work."
+      title="Start again"
+      description="cab interrupts a held turn and releases its writer and capacity when the runtime reports the turn ended, its process is verified to have exited, or 30 minutes pass with no event for it. Start again then continues the task's conversation."
     >
-      <ResourceStatus
-        label="Recovery eligibility"
-        state={resource.state}
-        retry={resource.refresh}
-      />
-      {resource.state.data &&
-        shown.current?.map((record) => (
-          <BoundTurnForm
-            key={`${record.workId}:${record.generation.requestSequence}`}
-            {...p}
-            options={resource.state.data!.data}
-            record={record}
-            fresh={resource.state.status === "fresh"}
-            reload={resource.refresh}
+      {restart?.releasePending ? (
+        <p className="body" role="status">
+          Interrupting the held turn; expected to be released by{" "}
+          {new Date(restart.releasePending.releasesBy).toLocaleTimeString([], {
+            hour: "2-digit",
+            minute: "2-digit",
+          })}{" "}
+          unless activity continues.
+        </p>
+      ) : (
+        task.state.data && (
+          <StartAgainAction
+            readOnly={p.readOnly ?? false}
+            client={p.client}
+            session={p.session}
+            task={task.state.data.data}
+            onChanged={() => {
+              task.refresh();
+              p.resource.refresh();
+              p.refresh();
+            }}
           />
-        ))}
-      {shown.current?.length === 0 && (
-        <p className="body">No bound recovery identity is available.</p>
+        )
       )}
     </Panel>
-  );
-}
-
-const boundIdentity = (
-  r: RecoveryOptions["records"][number],
-  options: RecoveryOptions,
-) =>
-  JSON.stringify([
-    options.assignmentId,
-    options.projectId,
-    options.taskId,
-    options.assignmentVersion,
-    options.conversationRevision,
-    r.workId,
-    r.generation,
-    r.process,
-    r.threadId,
-    r.turnId,
-  ]);
-
-function BoundTurnForm(
-  p: SettingsProps & {
-    assignmentId: string;
-    projectId: string;
-    taskId: string;
-    options: RecoveryOptions;
-    record: RecoveryOptions["records"][number];
-    fresh: boolean;
-    reload: () => void;
-  },
-) {
-  const fieldId = useId();
-  const [termination, setTermination] = useState(false),
-    [effects, setEffects] = useState(false),
-    [workspace, setWorkspace] = useState(""),
-    [review, setReview] = useState<BoundCommand | null>(null),
-    [lifecycle] = useState(() => new CommandLifecycle<BoundCommand>()),
-    [pending, setPending] = useState(false),
-    [message, setMessage] = useState(""),
-    [receipt, setReceipt] = useState<CommandReceipt | null>(null),
-    [retry, setRetry] = useState(false),
-    trigger = useRef<HTMLButtonElement>(null),
-    initial = useRef(boundIdentity(p.record, p.options)),
-    current = useRef(true);
-  useEffect(
-    () => () => {
-      current.current = false;
-    },
-    [],
-  );
-  const frozen = lifecycle.frozen;
-  const latest = p.options.records.find(
-    (r) =>
-      r.workId === p.record.workId &&
-      r.generation.requestSequence === p.record.generation.requestSequence,
-  );
-  const path = latest?.paths.find((r) => r.path === "bound-turn-recover");
-  const identityChanged =
-    !latest || boundIdentity(latest, p.options) !== initial.current;
-  const completeIdentity = Boolean(
-    p.record.workId &&
-      p.record.generation.workRevision &&
-      p.record.threadId &&
-      p.record.turnId &&
-      p.record.process,
-  );
-  const allowed =
-    !p.readOnly &&
-    p.fresh &&
-    !identityChanged &&
-    completeIdentity &&
-    p.options.assignmentId === p.assignmentId &&
-    p.options.projectId === p.projectId &&
-    p.options.taskId === p.taskId &&
-    p.options.gaps.length === 0 &&
-    path?.eligible;
-  const matches = (r: CommandReceipt, c: BoundCommand) =>
-    r.kind === "recovery-resolution" &&
-    r.path === "bound-turn-recover" &&
-    r.assignmentId === c.assignmentId &&
-    r.key === c.key &&
-    r.workId === c.receipt.workId;
-  const send = async (c: BoundCommand) => {
-    if (p.readOnly) return;
-    if (!lifecycle.frozen) lifecycle.restoreUnknown(c);
-    const original = lifecycle.begin();
-    if (!original) return;
-    setReview(null);
-    setPending(true);
-    setRetry(false);
-    const authenticated = p.client.captureAuthenticationScope();
-    const result = await p.client.command(original, p.session.csrfToken);
-    if (!current.current || !authenticated()) return;
-    const disposition = lifecycle.settle(result, (command, receipt) =>
-      matches(receipt, command),
-    );
-    if (disposition === "recorded" && result.state === "recorded") {
-      setReceipt(result.receipt);
-      setMessage(
-        "Execution reconciled. No work was started. Review the task's remaining holds before an explicit continuation.",
-      );
-      p.reload();
-      p.refresh();
-    } else
-      setMessage(
-        result.state === "unknown" || result.state === "recorded"
-          ? "Outcome unknown. Check the original receipt before retrying. Your original evidence and request key are frozen."
-          : `Recovery refused (${result.code}). Your original evidence and request key are retained. Check the receipt before retrying.`,
-      );
-    setPending(false);
-  };
-  const check = async () => {
-    if (!frozen) return;
-    setPending(true);
-    setRetry(false);
-    const authenticated = p.client.captureAuthenticationScope();
-    try {
-      const result = await p.client.operation({
-        scope: `assignment:${frozen.assignmentId}`,
-        type: frozen.type,
-        key: frozen.key,
-      });
-      if (!current.current || !authenticated()) return;
-      if (
-        result.data.state === "recorded" &&
-        matches(result.data.receipt, frozen)
-      ) {
-        lifecycle.settle(
-          { state: "recorded", receipt: result.data.receipt },
-          (command, receipt) => matches(receipt, command),
-        );
-        setReceipt(result.data.receipt);
-        setMessage(
-          "Execution reconciled. No work was started. Review the task's remaining holds before an explicit continuation.",
-        );
-        p.reload();
-        p.refresh();
-      } else if (result.data.state === "not-recorded") {
-        setMessage(
-          p.readOnly
-            ? "No receipt is recorded. This project is archived; retry is disabled and the original request is kept."
-            : "No receipt is recorded. You may retry only the exact original command; the service will recheck its proof.",
-        );
-        setRetry(true);
-      } else
-        setMessage(
-          "The receipt does not match this recovery. Keep the original evidence and inspect the operation.",
-        );
-    } catch {
-      if (current.current && authenticated())
-        setMessage(
-          "Receipt readback unavailable. Keep the original evidence; retry remains blocked.",
-        );
-    }
-    if (current.current && authenticated()) setPending(false);
-  };
-  const prepare = () => {
-    const r = p.record;
-    if (!allowed || !termination || !effects || !workspace || !r.process)
-      return;
-    const parsed = operatorCommandSchema.safeParse({
-      type: "recovery.bound-turn.recover",
-      key: randomUUID(),
-      assignmentId: p.assignmentId,
-      receipt: {
-        kind: "bound-turn",
-        workId: r.workId,
-        workRevision: r.generation.workRevision,
-        requestSequence: r.generation.requestSequence,
-        threadId: r.threadId,
-        turnId: r.turnId,
-        processIdentity: r.process,
-        termination: { kind: "process-exit" },
-        effects: "settled",
-        workspace,
-      },
-    });
-    if (parsed.success && parsed.data.type === "recovery.bound-turn.recover")
-      setReview(parsed.data);
-  };
-  return (
-    <section
-      className="settings-row"
-      aria-label={`Bound turn ${p.record.generation.requestSequence}`}
-    >
-      <p className="body">
-        Work{" "}
-        <span className="identifier">{p.record.workId ?? "Unavailable"}</span> ·
-        revision {p.record.generation.workRevision ?? "Unavailable"} · request{" "}
-        {p.record.generation.requestSequence}
-      </p>
-      <p className="body identifier">
-        Thread {p.record.threadId ?? "Unavailable"} · turn{" "}
-        {p.record.turnId ?? "Unavailable"}
-      </p>
-      <p className="body identifier">
-        Process {p.record.process?.processId ?? "Unavailable"} · birth{" "}
-        {p.record.process?.processStartedAt ?? "Unavailable"} · boot{" "}
-        {p.record.process?.bootId ?? "Unavailable"}
-      </p>
-      <p className="body">
-        {allowed
-          ? "Eligible for review. This check is advisory; submission verifies the exact identity again."
-          : `Recovery blocked: ${identityChanged ? "identity changed; reload the page before preparing new proof" : [...(path?.blockedBy ?? ["bound-identity-missing"]), ...p.options.gaps].join(", ") || "eligibility unavailable"}.`}
-      </p>
-      <fieldset
-        disabled={Boolean(frozen) || !allowed || pending}
-        className="settings-column"
-      >
-        <legend className="small-heading">Independent evidence</legend>
-        <label className="body check-field" htmlFor={`${fieldId}-termination`}>
-          <Input
-            id={`${fieldId}-termination`}
-            className="native-check size-5 shrink-0 p-0 accent-foreground"
-            type="checkbox"
-            checked={termination}
-            onChange={(e) => setTermination(e.target.checked)}
-          />
-          I independently confirmed this exact process exited
-        </label>
-        <label className="body check-field" htmlFor={`${fieldId}-effects`}>
-          <Input
-            id={`${fieldId}-effects`}
-            className="native-check size-5 shrink-0 p-0 accent-foreground"
-            type="checkbox"
-            checked={effects}
-            onChange={(e) => setEffects(e.target.checked)}
-          />
-          All effects and callbacks are settled
-        </label>
-        <label className="body">
-          Workspace disposition
-          <select
-            className="body"
-            value={workspace}
-            onChange={(e) => setWorkspace(e.target.value)}
-          >
-            <option value="">Choose after inspection</option>
-            <option value="preserved">Preserved</option>
-            <option value="reconciled">Reconciled</option>
-          </select>
-        </label>
-        <Button
-          ref={trigger}
-          type="button"
-          disabled={!termination || !effects || !workspace}
-          onClick={prepare}
-        >
-          Review reconciliation
-        </Button>
-      </fieldset>
-      {frozen && (
-        <details>
-          <summary className="body">
-            Original recovery evidence and request key
-          </summary>
-          <pre className="body whitespace-pre-wrap break-all">
-            {JSON.stringify(frozen, null, 2)}
-          </pre>
-        </details>
-      )}
-      {message && (
-        <p role="status" className="body">
-          {message}
-        </p>
-      )}
-      {receipt?.kind === "recovery-resolution" && (
-        <p className="body identifier">Receipt {receipt.receiptId}</p>
-      )}
-      {frozen && !receipt && (
-        <div className="settings-actions">
-          <Button type="button" disabled={pending} onClick={() => void check()}>
-            Check original receipt
-          </Button>
-          {retry && (
-            <Button
-              type="button"
-              disabled={pending || p.readOnly}
-              onClick={() => void send(frozen)}
-            >
-              Retry exact recovery
-            </Button>
-          )}
-        </div>
-      )}
-      <Dialog
-        open={review !== null}
-        onOpenChange={(open) => !open && setReview(null)}
-      >
-        <DialogContent
-          role="alertdialog"
-          onOpenAutoFocus={(e) => {
-            e.preventDefault();
-            (e.currentTarget as HTMLElement)
-              .querySelector<HTMLElement>("[data-cancel]")
-              ?.focus();
-          }}
-          onCloseAutoFocus={(e) => {
-            e.preventDefault();
-            trigger.current?.focus();
-          }}
-        >
-          <DialogTitle>Reconcile this execution permanently?</DialogTitle>
-          <DialogDescription>
-            Reconciliation cannot be undone. Stop, project pause, approvals and
-            delivery holds remain. This does not resume or start a turn.
-          </DialogDescription>
-          <pre className="metadata whitespace-pre-wrap break-all">
-            {JSON.stringify(review?.receipt, null, 2)}
-          </pre>
-          <div className="stop-dialog-actions">
-            <DialogClose asChild>
-              <Button type="button" variant="secondary" data-cancel>
-                Cancel
-              </Button>
-            </DialogClose>
-            <Button
-              type="button"
-              disabled={!allowed}
-              onClick={() => review && void send(review)}
-            >
-              Confirm reconciliation
-            </Button>
-          </div>
-        </DialogContent>
-      </Dialog>
-    </section>
   );
 }
 
@@ -1398,10 +1082,10 @@ export function AssignmentRecovery(
           </p>
           {data.holds.uncertainty && (
             <Alert variant="destructive" role="alert">
-              <strong>Execution may still be active.</strong> No replacement,
-              successor or follow-up can start until this execution is confirmed
-              ended. Resume does not clear this, and neither does time passing
-              or an acknowledgement.
+              <strong>Execution may still be active.</strong> No successor or
+              follow-up can start until cab releases it: when the runtime
+              reports the turn ended, its process is verified to have exited, or
+              30 minutes pass with no event for it. Resume does not clear this.
             </Alert>
           )}
           <div className="settings-phone-cards">
@@ -1414,7 +1098,7 @@ export function AssignmentRecovery(
               <p className="body">
                 {data.assignment.requestRefusal
                   ? requestRefusalText(data.assignment.requestRefusal)
-                  : "Inspect the execution. Release a generation that never sent a turn, or review the exact bound turn and independent evidence below. Neither resumes work."}
+                  : "cab interrupts a held turn and releases it on its own; then Start again continues the task. Release a generation that never sent a turn below."}
               </p>
               {data.assignment.requestRefusal && (
                 <ActionLink href={`/tasks/${data.taskId}`} variant="secondary">
@@ -1481,8 +1165,8 @@ export function AssignmentRecovery(
                 </ul>
                 <p className="metadata muted">
                   Resume does not release writer ownership, capacity or
-                  uncertainty. Elapsed time or an interruption acknowledgement
-                  does not prove the execution ended.
+                  uncertainty. cab releases a held turn once the runtime reports
+                  it ended, its process exits, or 30 quiet minutes pass.
                 </p>
               </Panel>
               <Panel title="Versions and generation in use">
@@ -1563,9 +1247,8 @@ export function AssignmentRecovery(
               />
               <Panel title="Next supported step">
                 <p className="body">
-                  Inspect the exact execution and review independent evidence
-                  before reconciliation. Remaining task and project holds
-                  require a separate explicit action.
+                  Start again once cab has released the held turn. Remaining
+                  task and project holds require a separate explicit action.
                 </p>
                 <ActionLink href={inspect} className="settings-wide">
                   Inspect execution

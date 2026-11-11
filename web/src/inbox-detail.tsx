@@ -211,8 +211,9 @@ export function InterventionDetail({
       <div className="inbox-approval">
         <div className="inbox-approval-body">
           <p>
-            Nothing ran for this request: it was refused at admission before it
-            started.
+            {start.task.execution.reasonCodes.includes("held-turn-released")
+              ? "cab interrupted this request's held turn and released it."
+              : "Nothing ran for this request: it was refused at admission before it started."}
           </p>
         </div>
         <StartAgainAction {...start} />

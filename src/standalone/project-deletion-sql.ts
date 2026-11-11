@@ -375,6 +375,11 @@ export const projectDeletionStatements = [
     sql: "DELETE FROM execution_retry_resolutions WHERE failedWorkId IN (SELECT value FROM json_each(:work)) OR retryWorkId IN (SELECT value FROM json_each(:work)) OR chainId IN (SELECT value FROM json_each(:work))",
   },
   {
+    table: "execution_held_turn_releases",
+    where: "workId IN (SELECT value FROM json_each(:work))",
+    sql: "DELETE FROM execution_held_turn_releases WHERE workId IN (SELECT value FROM json_each(:work))",
+  },
+  {
     table: "execution_shutdown_resolutions",
     where:
       "interruptedWorkId IN (SELECT value FROM json_each(:work)) OR requeueWorkId IN (SELECT value FROM json_each(:work))",

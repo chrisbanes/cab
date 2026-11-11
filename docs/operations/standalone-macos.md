@@ -679,24 +679,18 @@ are not a guarantee of clean drain. Awaiting exit applies only when cab drains i
 an orderly way. launchd kills a dead job's process group, and these children are
 not in it. So after a service crash, or launchd's SIGKILL at the 20-second exit
 timeout, Codex App Server and Claude Code processes can keep running without cab.
-Their turns stay held, and `cab recovery get` shows the bound-turn path blocked by
-`termination-live`. End each exact process it reports (PID and start time, never a
-name match) and confirm it has exited before bound-turn recovery.
+Their turns stay held. cab interrupts each held turn and releases it when the
+runtime reports the turn ended, the exact recorded process is verified to have exited
+(PID, start time and boot ID), or 30 minutes pass with no event for it; it never kills a
+shared App Server. Ending an exact process it reports (PID and start time, never a name
+match) lets the next start release the turn at once.
 
-For a held bound turn, use `cab recovery get ASSIGNMENT_ID`, then
-`cab recovery prepare bound-turn-recover ASSIGNMENT_ID --work WORK_ID --out FILE
---evidence-file EVIDENCE_FILE` and `cab recovery submit --file FILE`. The evidence
-file's `receipt` asserts `termination: {"kind":"process-exit"}`, `effects: "settled"`
-and `workspace: "preserved"` or `"reconciled"`. The read supplies the exact generation,
-thread, turn and runtime process identity; the service independently verifies exit.
-Settings → Runtime lists assignment recovery destinations; task detail's Recovery
-link exposes the same reviewable operation.
-Review the exact identity and permanent effect before confirming; Cancel records
-nothing. On refusal or lost reply keep the original evidence/key, check the original
-operation receipt, then retry only that exact command if no receipt is recorded.
-Reconciliation cannot be undone and starts no work. Task Stop, project pause,
-approvals and delivery holds remain; inspect and resolve each deliberately before
-an explicit continuation. Never infer termination from silence or an interrupt ack.
+`cab recovery get ASSIGNMENT_ID` shows whether a held turn is still being released and
+by when. Once it is released, `cab recovery restart ASSIGNMENT_ID --yes` (or Start again
+on the task page, Inbox, Home or the recovery page) continues the task in its
+conversation after one confirmation. Settings → Runtime lists assignment recovery
+destinations. Task Stop, project pause, approvals and delivery holds remain; inspect and
+resolve each deliberately. Activity from a released turn holds the task again.
 
 Restart state lives in memory, so a service restart starts afresh. The "next at"
 time is the service's local time on the `/runtime` page and the browser's or
@@ -1256,11 +1250,11 @@ operator auth files, Codex/provider records, logs and external effects. Stored
 workspace paths remain evidence. A managed workspace restored under a different
 installation root is rejected by identity before access to the old path and
 remains held for operator recovery; external workspace contents are not copied.
-Recovery receipts still need to match the persisted execution generation and
-independent Stop, writer and capacity holds. A deterministic fixture proves exact
-receipt reconciliation and one post-restore admission. The disposable launchd
-proof instead preserves a paused project and unready task across restore/restart
-and admits no work; it does not inject a live recovery receipt.
+Held-turn release still checks the persisted execution generation and independent
+Stop, writer and capacity holds after a restore. A deterministic fixture proves exact
+handling of retired receipts an earlier build recorded and one post-restore admission.
+The disposable launchd proof instead preserves a paused project and unready task
+across restore/restart and admits no work.
 
 If backup fails, the source is not changed; a missing owner file is rejected
 before it can be created. An operation-created snapshot path may remain

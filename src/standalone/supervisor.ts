@@ -237,6 +237,19 @@ export class ExecutionSupervisor {
     );
   }
 
+  /**
+   * Whether the work's recorded process is verified to have exited, for held-turn release.
+   * Only a verified exit is recorded, so repeated checks leave no observation noise.
+   */
+  async processExited(workId: string): Promise<boolean> {
+    const stored = this.state.recoveryIdentity(workId);
+    if (!stored?.processIdentity) return false;
+    if ("refusal" in (await this.terminationProof(stored.processIdentity)))
+      return false;
+    this.recordObservation(workId, "termination-verified");
+    return true;
+  }
+
   /** Checks the stored process exit once and records what was observed; refusals carry the reason. */
   private async confirmTermination(
     workId: string,
@@ -356,49 +369,6 @@ export class ExecutionSupervisor {
         ...this.releaseBlockers(workId),
       ]),
     ];
-  }
-
-  /** Advisory only: no observations, ownership release or runtime/model calls. */
-  async boundTurnRecoveryEligibility(
-    workId: string,
-    assignmentId: string,
-  ): Promise<BoundTurnRecoveryBlocker[]> {
-    const blocked = this.boundTurnBlockers(workId, assignmentId);
-    if (blocked.length) return blocked;
-    const before = this.state.recoveryIdentity(workId);
-    if (!before?.processIdentity) return ["bound-identity-missing"];
-    const result = await this.terminationProof(before.processIdentity);
-    const after = this.state.recoveryIdentity(workId);
-    const left = inspectionIdentity(before),
-      right = after && inspectionIdentity(after);
-    if (!left || !right || !exactExecutionIdentity(left, right))
-      return ["identity-changed"];
-    const current = this.boundTurnBlockers(workId, assignmentId);
-    if (current.length) return current;
-    return "refusal" in result ? [result.blocker] : [];
-  }
-
-  /**
-   * Advisory only, for the pre-turn and no-turn recover paths: whether the held
-   * generation's process is proven ended, read as their command reads it.
-   */
-  async unboundTurnTerminationBlockers(
-    workId: string,
-  ): Promise<BoundTurnRecoveryBlocker[]> {
-    const before = this.state.recoveryIdentity(workId);
-    if (!before?.processIdentity) return ["context-unavailable"];
-    const result = await this.terminationProof(before.processIdentity);
-    const after = this.state.recoveryIdentity(workId);
-    if (
-      !after?.processIdentity ||
-      after.workRevision !== before.workRevision ||
-      after.requestSequence !== before.requestSequence ||
-      after.threadId !== before.threadId ||
-      after.turnId !== before.turnId ||
-      !exactProcessIdentity(after.processIdentity, before.processIdentity)
-    )
-      return ["identity-changed"];
-    return "refusal" in result ? [result.blocker] : [];
   }
 
   recordObservation(

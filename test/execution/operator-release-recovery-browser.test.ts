@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import type { Page } from "playwright";
 import {
   browserSuite,
   captureBrowserEvidence,
@@ -10,120 +11,124 @@ import {
 } from "../fixtures/operator-settings.js";
 
 const test = browserSuite("operator-release-recovery-browser");
+const startAgainPanel = (page: Page) =>
+  page.locator("section.settings-panel", {
+    has: page.getByRole("heading", { name: "Start again", exact: true }),
+  });
+type Ids = Awaited<ReturnType<typeof startSettings>>["ids"];
 
-test("Release confirms, keeps the original request on refusal and lost reply, and shows blockers", async (_t, journey) => {
-  const { page, f, ids } = await startSettings(
-    journey,
-    "/assignments/:assignment/recovery",
+/**
+ * The recovery and task reads as a held turn cab released (or is still releasing) presents
+ * them; the service rules behind them are covered in `held-turn-release.test.ts`.
+ */
+async function routeRelease(page: Page, ids: Ids, state: { pending: boolean }) {
+  const workId = `assignment:${ids.assignmentId}:released`;
+  await page.route(
+    "**/api/operator/assignments/*/recovery-options",
+    async (route) => {
+      const response = await route.fetch();
+      const body = await response.json();
+      body.data.restart = state.pending
+        ? {
+            eligible: false,
+            blockedBy: ["execution-unresolved"],
+            releasePending: {
+              workId,
+              interruptState: "acknowledged",
+              releasesBy: Date.UTC(2026, 10, 11, 14, 30),
+            },
+          }
+        : { eligible: true, blockedBy: [], releasePending: null };
+      await route.fulfill({ response, json: body });
+    },
   );
-  const posts: Array<Record<string, unknown>> = [];
-  let blockedBy: string[] = ["thread-bound"],
-    refuse = true,
-    recorded = false;
-  // Only presentation is under test: the release rules have service coverage.
-  await page.route("**/recovery-options", async (route) => {
-    const body = await (await route.fetch()).json();
-    const record = body.data.records[0];
-    record.workId = "held-work";
-    record.intentState = "held";
-    record.generation.workRevision = 1;
-    record.paths = [
-      { path: "release", eligible: blockedBy.length === 0, blockedBy },
-    ];
-    body.data.records = [record];
-    body.data.gaps = [];
-    await route.fulfill({ json: body });
-  });
-  await page.route("**/api/operator/commands", async (route) => {
-    posts.push(route.request().postDataJSON());
-    if (refuse)
-      await route.fulfill({
-        status: 409,
-        json: { error: { code: "conflict", message: "State changed" } },
-      });
-    else {
-      recorded = true;
-      await route.abort("failed");
+  const taskRead = (url: URL) =>
+    url.pathname === `/api/operator/tasks/${ids.taskId}`;
+  await page.route(taskRead, async (route) => {
+    const response = await route.fetch();
+    const body = await response.json();
+    if (!state.pending) {
+      body.data.startAgain = {
+        available: true,
+        assignmentId: ids.assignmentId,
+        workId,
+      };
+      body.data.execution = {
+        ...body.data.execution,
+        state: "not-started",
+        reasonCodes: ["held-turn-released"],
+      };
     }
+    await route.fulfill({ response, json: body });
   });
-  await page.route("**/api/operator/operations?**", async (route) => {
-    const query = new URL(route.request().url()).searchParams;
-    assert.equal(query.get("type"), "recovery.release");
-    assert.equal(query.get("key"), posts[0]?.key);
+  const sent: Record<string, unknown>[] = [];
+  await page.route("**/api/operator/commands", async (route) => {
+    const command = JSON.parse(route.request().postData() ?? "{}");
+    if (command.type !== "task.start-again") return route.fallback();
+    sent.push(command);
     await route.fulfill({
       json: {
-        observedAt: Date.now(),
-        data: recorded
-          ? {
-              state: "recorded",
-              receipt: {
-                kind: "recovery-release",
-                key: posts[0]?.key,
-                recorded: true,
-                path: "release",
-                assignmentId: ids.assignmentId,
-                workId: "held-work",
-                refusalId: "14f1b0e1-3597-4469-9489-c3685e36684b",
-              },
-            }
-          : { state: "not-recorded" },
+        kind: "start-again",
+        key: command.key,
+        recorded: true,
+        taskId: ids.taskId,
+        assignmentId: ids.assignmentId,
+        refusedWorkId: workId,
+        workId: `${workId}:restart`,
       },
     });
   });
-  await page.reload();
-  const panel = page.locator(".settings-panel").filter({
-    has: page.getByRole("heading", {
-      name: "Release a generation that never sent a turn",
-      exact: true,
-    }),
-  });
-  const release = panel.getByRole("button", { name: "Release", exact: true });
-  // A blocked generation names its blockers and can't be released.
-  await panel.getByText("Release blocked: thread-bound.").waitFor();
-  assert.equal(await release.isDisabled(), true);
+  return { workId, sent };
+}
 
-  blockedBy = [];
+test("the recovery page shows a pending release, then the shared Start again decision", async (_t, journey) => {
+  const { page, ids } = await startSettings(
+    journey,
+    "/assignments/:assignment/recovery",
+  );
+  const state = { pending: true };
+  const { workId, sent } = await routeRelease(page, ids, state);
   await page.reload();
-  await panel.getByText(/Eligible: no thread or turn was saved/).waitFor();
-  await release.click();
-  const dialog = page.getByRole("alertdialog");
-  const cancel = dialog.getByRole("button", { name: "Cancel", exact: true });
-  await cancel.waitFor();
+  const panel = startAgainPanel(page);
+  await panel
+    .getByText(/Interrupting the held turn; expected to be released by/)
+    .waitFor();
   assert.equal(
-    await cancel.evaluate((e) => e === document.activeElement),
-    true,
+    await panel.getByRole("button", { name: "Start again" }).count(),
+    0,
   );
-  await captureBrowserEvidence(page, "1366-release-confirm");
-  await page.keyboard.press("Enter");
-  await dialog.waitFor({ state: "hidden" });
-  assert.equal(posts.length, 0, "cancel sends nothing");
+  // No evidence inputs or receipt forms remain.
+  assert.equal(await page.locator("main input, main textarea").count(), 0);
 
-  await release.click();
-  await dialog.getByRole("button", { name: "Confirm release" }).click();
-  await panel.getByText(/Release refused \(conflict\)/).waitFor();
-  assert.equal(posts.length, 1);
-  assert.deepEqual(
-    { ...posts[0], key: undefined },
-    {
-      type: "recovery.release",
-      key: undefined,
-      assignmentId: ids.assignmentId,
-      workId: "held-work",
-      workRevision: 1,
-      requestSequence: posts[0]?.requestSequence,
-    },
-  );
-  await panel.getByRole("button", { name: "Check original receipt" }).click();
-  refuse = false;
-  await panel.getByRole("button", { name: "Retry original release" }).click();
-  await panel.getByText(/Outcome unknown/).waitFor();
-  assert.deepEqual(posts[1], posts[0], "the retry resends the same request");
-  await panel.getByRole("button", { name: "Check original receipt" }).click();
-  await panel.getByText(/Released\. Writer and capacity are free/).waitFor();
-  assert.equal(posts.length, 2);
-  assert.equal(f.runtime.turns, 0, "release starts nothing");
-  await page.setViewportSize(phone);
-  await panel.scrollIntoViewIfNeeded();
+  state.pending = false;
+  await page.reload();
+  await panel.getByRole("button", { name: "Start again" }).waitFor();
+  await panel.getByText("Your decision · released").waitFor();
+  const start = panel.getByRole("button", { name: "Start again" });
+  await start.focus();
+  await page.keyboard.press("Enter");
+  await panel.getByText("Queued again.", { exact: false }).waitFor();
+  assert.equal(sent.length, 1);
+  assert.equal(sent[0]?.workId, workId);
+  assert.equal(sent[0]?.taskId, ids.taskId);
   await noPageOverflow(page);
-  await captureBrowserEvidence(page, "390-release-recorded");
+  await captureBrowserEvidence(page, "1366-recovery-start-again");
+});
+
+test("phone recovery keeps Start again reachable without horizontal scroll", async (_t, journey) => {
+  const { page, ids } = await startSettings(
+    journey,
+    "/assignments/:assignment/recovery",
+    phone,
+  );
+  await routeRelease(page, ids, { pending: false });
+  await page.reload();
+  const start = startAgainPanel(page).getByRole("button", {
+    name: "Start again",
+  });
+  await start.waitFor();
+  const height = await start.evaluate((e) => e.getBoundingClientRect().height);
+  assert.ok(height >= 44, `Start again is ${height}px`);
+  await noPageOverflow(page);
+  await captureBrowserEvidence(page, "390-recovery-start-again");
 });

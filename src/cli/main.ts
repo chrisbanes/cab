@@ -214,14 +214,13 @@ undo (a new push or policy change needs a new settlement).`;
 const RESULT_NOTE = `Results: result deliver sends an undelivered result to the one recipient the service
 permits (a lead or requester); it cannot be redirected or undone, and by itself
 does not complete the task.`;
-const RECOVERY_NOTE = `Recovery: recovery prepare writes an owner-only document from the observed
-generation identity plus your --evidence-file; nothing is inferred, defaulted or
-confirmed by a flag. recovery submit sends it once. recovery release reads whether
-a held generation with no saved thread or turn (so no turn was sent) can be
-released; with --yes it releases it, freeing writer and capacity so Start again
-applies. Release, recovery and conversation replacement cannot be undone, and
-none of them resumes the task or dispatches work; continue with a new task
-message after replacement.`;
+const RECOVERY_NOTE = `Recovery: the service interrupts a held turn and releases its writer and
+capacity when the runtime reports the turn ended, its process is verified to have
+exited, or 30 minutes pass with no event for it. recovery restart then confirms Start again once
+(--yes) and continues the assignment's conversation; it sends the same request as
+task start-again. recovery release reads whether a held generation with no saved
+thread or turn (so no turn was sent) can be released; with --yes it releases it so
+Start again applies. Release cannot be undone and does not resume the task.`;
 
 /** The prose notes that name an area's commands. */
 const LOCAL_ACCESS_NOTE = `Local access uses this OS account with read/write CLI authority, without a token
@@ -432,8 +431,6 @@ export const OPTIONS = {
   "publication-id": { type: "string" },
   issue: { type: "string" },
   work: { type: "string" },
-  "evidence-file": { type: "string" },
-  "expected-conversation-revision": { type: "string" },
 } as const;
 
 export async function main(

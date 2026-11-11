@@ -108,12 +108,25 @@ export function StartAgainAction({
       : undefined;
   return (
     <div className="decision" data-start-again>
-      <p className="small-heading">Your decision · not started</p>
-      <p>
-        This request was refused before it ran, so nothing ran. Start again
-        queues it at the current task, agent and instructions revisions, in the
-        same workspace. Nothing is sent to the lead.
-      </p>
+      {task.execution.reasonCodes.includes("held-turn-released") ? (
+        <>
+          <p className="small-heading">Your decision · released</p>
+          <p>
+            cab interrupted the held turn and released it. Start again queues
+            the request at the current task, agent and instructions revisions,
+            in the same workspace, and continues the conversation.
+          </p>
+        </>
+      ) : (
+        <>
+          <p className="small-heading">Your decision · not started</p>
+          <p>
+            This request was refused before it ran, so nothing ran. Start again
+            queues it at the current task, agent and instructions revisions, in
+            the same workspace. Nothing is sent to the lead.
+          </p>
+        </>
+      )}
       {offer?.available && offer.workId
         ? sent?.kind !== "recorded" &&
           !uncertain && (

@@ -795,7 +795,7 @@ test("a pending cab callback or known survivor keeps the failed generation held"
   }
 });
 
-test("an unresolved assignment effect keeps a transient failure held for recovery", async () => {
+test("a transient failure whose result is unrecorded is released, not retried", async () => {
   const runtime = new RetryFixtureRuntime();
   runtime.failure = transientEvidence();
   const f = await managedFixture(runtime);
@@ -809,10 +809,11 @@ test("an unresolved assignment effect keeps a transient failure held for recover
     const result = f.service.list().find((item) => item.workId === f.workId);
     assert.ok(result);
     await runtime.failureEntered.promise;
+    // The reported end releases the held turn and supersedes its pending result.
     await waitUntil(
       () =>
         f.service.list().find((item) => item.workId === f.workId)?.state ===
-        "held",
+        "resolved-failed",
     );
     assert.equal(runtime.turns, 1);
     assert.equal(f.service.turnRequests().length, 1);
@@ -821,7 +822,7 @@ test("an unresolved assignment effect keeps a transient failure held for recover
         f.service,
         "SELECT state FROM execution_pending_effects WHERE state = 'pending'",
       ).length,
-      1,
+      0,
     );
   } finally {
     await f.close();

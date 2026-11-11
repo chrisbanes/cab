@@ -440,7 +440,7 @@ test("task attention projection pins safety, source holds and operator recovery 
   );
   assert.equal(recovery.pinned, true);
   assert.ok(
-    recovery.rows.some((row) => /Refused before it started/.test(row.title)),
+    recovery.rows.some((row) => /Refused before it ran/.test(row.title)),
   );
 });
 

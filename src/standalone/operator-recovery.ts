@@ -2,6 +2,7 @@ import { z } from "zod";
 import {
   type RecoveryPath,
   recoveryCommandTypes,
+  recoveryPaths,
   replaceConversationBodySchema,
 } from "../core/recovery-contracts.js";
 import {
@@ -89,54 +90,13 @@ export async function recoveryOptions(
         own.intent.reason === own.request?.reason
           ? keep(own.intent.reason, 4000)
           : null;
-      const identityWithheld =
-        !own ||
-        (context !== undefined && exactProcess === null) ||
-        (own.preTurn !== undefined && exactPredecessor === null);
       const threadId = keep(own?.bound?.threadId, 512);
       const turnId = keep(own?.bound?.turnId, 512);
-      const boundWithheld =
-        !own ||
-        (!!own.bound &&
-          ((!!own.bound.threadId && threadId === null) ||
-            (!!own.bound.turnId && turnId === null) ||
-            (!!own.bound.processIdentity && exactProcess === null)));
-      const boundBlocked: Blocker[] =
-        boundWithheld || excluded === undefined
-          ? ["identity-withheld"]
-          : !own?.bound
-            ? ["context-unavailable"]
-            : await service.boundTurnRecoveryEligibility(
-                own.bound.workId,
-                assignmentId,
-              );
       const witnesses = {
         preTurn: r.preTurnRejection
           ? { id: r.preTurnRejection.id, source: r.preTurnRejection.source }
           : null,
         noTurn: r.noTurnSubmission ? { id: r.noTurnSubmission.id } : null,
-      };
-      const reconciled = r.receiptRecorded || r.intentState === "reconciled";
-      const blockers = (path: RecoveryPath): Blocker[] => {
-        if (path === "bound-turn-recover") return boundBlocked;
-        if (path === "release")
-          return !own || r.workId === null
-            ? ["identity-withheld"]
-            : service.releaseBlockers(r.workId);
-        const preTurn = path === "pre-turn-recover";
-        const mine = preTurn ? witnesses.preTurn : witnesses.noTurn;
-        const other = preTurn ? witnesses.noTurn : witnesses.preTurn;
-        const b: Blocker[] = [];
-        if (reconciled) b.push("already-reconciled");
-        else if (r.intentState !== "held") b.push("not-held");
-        else if (!r.holds.capacity || !r.holds.writer)
-          b.push("ownership-released");
-        if (!(preTurn ? own?.preTurn : own?.noTurn))
-          b.push("context-unavailable");
-        if (!mine) b.push("witness-missing");
-        if (other) b.push("other-witness");
-        if (identityWithheld) b.push("identity-withheld");
-        return [...new Set(b)];
       };
       return {
         workId: own ? r.workId : null,
@@ -155,36 +115,19 @@ export async function recoveryOptions(
         witnesses,
         receiptRecorded: r.receiptRecorded,
         workspace: r.workspace,
-        paths: await Promise.all(
-          (
-            [
-              "release",
-              "pre-turn-recover",
-              "no-turn-recover",
-              "bound-turn-recover",
-            ] as const
-          ).map(async (path) => {
-            let blockedBy = blockers(path);
-            // The recover commands verify the exact process ended; so does this advisory read.
-            if (
-              blockedBy.length === 0 &&
-              r.workId !== null &&
-              (path === "pre-turn-recover" || path === "no-turn-recover")
-            )
-              blockedBy = await service.unboundTurnTerminationBlockers(
-                r.workId,
-              );
-            return { path, eligible: blockedBy.length === 0, blockedBy };
-          }),
-        ),
+        paths: recoveryPaths.map((path) => {
+          const blockedBy: Blocker[] =
+            !own || r.workId === null
+              ? ["identity-withheld"]
+              : service.releaseBlockers(r.workId);
+          return { path, eligible: blockedBy.length === 0, blockedBy };
+        }),
       };
     }),
   );
   const facts = service.replacementFacts(assignmentId);
-  const replacementBlockers: Blocker[] = [
-    ...(service.taskHold(taskId) !== undefined ? (["task-held"] as const) : []),
-    ...(facts.unresolvedExecution ? (["unresolved-execution"] as const) : []),
-  ];
+  const startAgain = service.startAgainAvailability(taskId);
+  const pending = service.heldTurnReleasePending(assignmentId);
   return recoveryOptionsSchema.parse({
     data: {
       assignmentId,
@@ -203,11 +146,15 @@ export async function recoveryOptions(
           : withheld
             ? ["content-redacted"]
             : [],
-      replacement: {
-        eligible: replacementBlockers.length === 0,
-        blockedBy: replacementBlockers,
-        expectedAssignmentVersion: assignment.version,
-        expectedConversationRevision: facts.conversationRevision,
+      restart: {
+        eligible:
+          startAgain.available && startAgain.assignmentId === assignmentId,
+        blockedBy: !startAgain.available
+          ? [startAgain.reason]
+          : startAgain.assignmentId === assignmentId
+            ? []
+            : ["other-assignment"],
+        releasePending: pending ?? null,
       },
       records,
     },
@@ -226,14 +173,18 @@ const recoveryTypes: readonly string[] = Object.values(recoveryCommandTypes);
 export const isRecoveryCommand = (c: OperatorCommand): c is RecoveryCommand =>
   recoveryTypes.includes(c.type);
 
-/** Retired adoption commands: no longer accepted, but their recorded receipts still read back. */
-const retiredAdoptionPaths = {
+/** Retired commands: no longer accepted, but their recorded receipts still read back. */
+const retiredRecoveryPaths = {
   "recovery.pre-turn.adopt": "pre-turn-adopt",
   "recovery.no-turn.adopt": "no-turn-adopt",
+  "recovery.pre-turn.recover": "pre-turn-recover",
+  "recovery.no-turn.recover": "no-turn-recover",
+  "recovery.bound-turn.recover": "bound-turn-recover",
+  "recovery.conversation.replace": "conversation-replace",
 } as const;
 type RecoveryReadType =
   | RecoveryCommand["type"]
-  | keyof typeof retiredAdoptionPaths;
+  | keyof typeof retiredRecoveryPaths;
 
 /** Builds the receipt of a recovery command from the service result, as POST and readback do. */
 export function recoveryReceipt(
@@ -247,13 +198,12 @@ export function recoveryReceipt(
     return commandReceiptSchema.parse({
       ...base,
       kind: "recovery-adoption",
-      path: retiredAdoptionPaths[type],
+      path: retiredRecoveryPaths[type],
       workId: result.workId,
       witnessId: result.witnessId,
     });
-  const path = (Object.keys(recoveryCommandTypes) as RecoveryPath[]).find(
-    (p) => recoveryCommandTypes[p] === type,
-  );
+  const path =
+    type === "recovery.release" ? "release" : retiredRecoveryPaths[type];
   return commandReceiptSchema.parse(
     path === "conversation-replace"
       ? { ...base, kind: "conversation-replacement", revision: result.revision }
@@ -277,46 +227,23 @@ export function recoveryReceipt(
 }
 
 /**
- * Runs one recovery command through the unchanged service method with exactly the inner
- * command the retained session routes pass, so a key replays through either entry point.
- * The caller has checked the assignment exists; a work bound elsewhere is a refusal.
+ * Runs one recovery command with exactly the inner command the retained session routes
+ * pass, so a key replays through either entry point. The caller has checked the assignment
+ * exists; a work bound elsewhere is a refusal.
  */
 export async function executeRecovery(
   service: StandaloneService,
   c: RecoveryCommand,
 ): Promise<CommandReceipt> {
-  if (c.type === "recovery.conversation.replace") {
-    const { type: _type, ...command } = c;
-    const result = service.replaceConversationCommand(command);
-    return recoveryReceipt(c.type, c.key, c.assignmentId, result);
-  }
-  const workId = "receipt" in c ? c.receipt.workId : c.workId;
-  if (service.recoveryMaterial(workId)?.assignmentId !== c.assignmentId)
+  if (service.recoveryMaterial(c.workId)?.assignmentId !== c.assignmentId)
     throw new RecoveryRejectedError("Work is not bound to this assignment");
-  let result: Record<string, unknown>;
-  switch (c.type) {
-    case "recovery.release": {
-      const { type: _t, ...command } = c;
-      result = service.releaseUnboundHold(command);
-      break;
-    }
-    case "recovery.pre-turn.recover": {
-      const { type: _t, assignmentId: _a, ...command } = c;
-      result = await service.recoverPreTurnExecution(command);
-      break;
-    }
-    case "recovery.bound-turn.recover": {
-      const { type: _t, ...command } = c;
-      result = await service.recoverBoundTurnExecution(command);
-      break;
-    }
-    case "recovery.no-turn.recover": {
-      const { type: _t, assignmentId: _a, ...command } = c;
-      result = await service.recoverNoTurnExecution(command);
-      break;
-    }
-  }
-  return recoveryReceipt(c.type, c.key, c.assignmentId, result);
+  const { type: _t, ...command } = c;
+  return recoveryReceipt(
+    c.type,
+    c.key,
+    c.assignmentId,
+    service.releaseUnboundHold(command),
+  );
 }
 
 const adoptionResult = z
