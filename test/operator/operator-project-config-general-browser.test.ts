@@ -99,6 +99,11 @@ test("reasoning setting sits beside capture, baseline disables it and deletion w
   await dialog.getByText(/This cannot be undone/).waitFor();
   await page.keyboard.press("Escape");
   await dialog.waitFor({ state: "hidden" });
+  await page.waitForFunction(
+    () =>
+      document.activeElement?.textContent?.trim() ===
+      "Delete collected reasoning…",
+  );
   assert.equal(
     await trigger.evaluate((e) => e === document.activeElement),
     true,
