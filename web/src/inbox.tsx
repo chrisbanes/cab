@@ -55,6 +55,10 @@ import { shortcutApplies } from "./focus-mode.js";
 import { QuestionResponse } from "./question-response.js";
 import { ResultReviewPanel } from "./result-review.js";
 import type { QuestionResponseStates } from "./question-response-state.js";
+import {
+  taskProjectReadOnly,
+  taskReadOnlyNotice,
+} from "./project-lifecycle-model.js";
 import "./inbox.css";
 export class InboxState {
   project = "";
@@ -273,6 +277,11 @@ export function Inbox({
     resource.state.fetchedAt,
     "request",
   );
+  // Only a task read decides: a read still loading, failed or skipped never makes the Inbox read-only.
+  const taskData = task.state.data?.data,
+    projectReadOnly = taskData
+      ? taskProjectReadOnly(taskData.task.projectId, taskData.project)
+      : false;
   // Open the first request once per chosen status when its first fresh read arrives on a wide layout.
   // Keyed by status so a stale effect for the outgoing status cannot use up the next one's auto-open.
   const autoFor = useRef<string | null>(status);
@@ -829,6 +838,9 @@ export function Inbox({
                   onChanged={resource.refresh}
                 />
               )}
+              {projectReadOnly && (
+                <p role="status">{taskReadOnlyNotice(taskData?.project)}</p>
+              )}
               {selected?.lifecycle &&
               selected.lifecycle.status !== "actionable" &&
               // A resolved review still shows its outcome and material.
@@ -855,6 +867,7 @@ export function Inbox({
                     // Without its queue item the pane's heading cannot name the decision.
                     showDecision={!selected}
                     drafts={state.reviewDrafts}
+                    readOnly={projectReadOnly}
                   />
                 ) : (
                   <ResourceStatus
@@ -863,6 +876,13 @@ export function Inbox({
                     label="Review"
                   />
                 )
+              ) : isQuestion && taskId && projectReadOnly ? (
+                <ActionLink
+                  variant="secondary"
+                  href={`/tasks/${taskId}?request=${selectedId}`}
+                >
+                  Open question
+                </ActionLink>
               ) : isQuestion && taskId ? (
                 <QuestionResponse
                   client={client}
@@ -887,7 +907,7 @@ export function Inbox({
                   leftQueue={leftQueue}
                   startKept={startSentFor === taskId}
                   start={
-                    task.state.data
+                    task.state.data && !projectReadOnly
                       ? {
                           client,
                           session,

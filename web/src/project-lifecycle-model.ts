@@ -63,6 +63,13 @@ export function taskProjectReadOnly(
   );
 }
 
+/** Why a task's writes are disabled, once `taskProjectReadOnly` holds. */
+export function taskReadOnlyNotice(project: { archived: boolean } | undefined) {
+  return project?.archived
+    ? "This project is archived. Tasks and history are read-only."
+    : "Project lifecycle is unavailable; writes are disabled.";
+}
+
 /** Public consequences have no private item IDs. Combine identical rows without losing their count. */
 export function groupProjectConsequences<T>(rows: readonly T[]) {
   const groups = new Map<string, { key: string; row: T; count: number }>();

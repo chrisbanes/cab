@@ -64,3 +64,5 @@ The operator CLI is outside the budget: it has no screens.
   [specification](../SPEC.md#task-creation-and-project-setup) gives it one and
   otherwise with the link to what blocks it.
 - An unsupported runtime request stays unresolved and is never converted to chat.
+- In an archived project the Inbox shows the read-only notice and **Open question**,
+  which leads to the task's read-only request view, instead of the answer form.

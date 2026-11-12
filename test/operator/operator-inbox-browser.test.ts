@@ -28,6 +28,7 @@ import {
   seedOwnIntervention,
   seedOwnQuestion,
 } from "../fixtures/questions.js";
+import { refusedTask } from "../fixtures/refused-task.js";
 const test = browserSuite("operator-inbox-browser");
 
 type Fixture = Awaited<ReturnType<typeof createOperatorFixture>>;
@@ -2859,4 +2860,75 @@ test("work through the Inbox: drafts, filters and position survive key moves, ap
       ?.status,
     "open",
   );
+});
+
+test("an archived project's Inbox question and refused request offer no response", async (_t, j) => {
+  const { f, page, web, more } = await openInbox(
+    j,
+    0,
+    { width: 1366, height: 900 },
+    "/inbox",
+    async (f) => ({
+      question: await seedOwnQuestion(f, choiceForm, "Guide task", "Docs"),
+      refused: await refusedTask(f),
+    }),
+  );
+  const posts = commandPosts(page),
+    detail = page.locator(".inbox-detail"),
+    notice = detail.getByText(
+      "This project is archived. Tasks and history are read-only.",
+    );
+  const archiveAndRefresh = async (projectId: string) => {
+    f.seedPersistedState((db) =>
+      db
+        .prepare(
+          "UPDATE domain_projects SET archived=1,version=version+1 WHERE id=?",
+        )
+        .run(projectId),
+    );
+    await page
+      .getByRole("button", { name: "Refresh", exact: true })
+      .first()
+      .click();
+    await notice.waitFor();
+  };
+  const { question, refused } = more;
+  await detail.waitFor();
+  await page.goto(
+    `${web.origin}/inbox?task=${question.taskId}&request=${question.interactionId}`,
+  );
+  await detail.getByRole("button", { name: "Submit answer" }).waitFor();
+  await archiveAndRefresh(question.projectId);
+  assert.equal(
+    await detail.getByRole("button", { name: "Submit answer" }).count(),
+    0,
+  );
+  assert.equal(await detail.locator("input, textarea, select").count(), 0);
+  assert.equal(
+    await detail
+      .getByRole("link", { name: "Open question" })
+      .getAttribute("href"),
+    `/tasks/${question.taskId}?request=${question.interactionId}`,
+  );
+
+  const intervention = (
+    await new OperatorApi(f.service, [f.directory]).readInbox()
+  ).data.items.find(
+    (i) =>
+      i.kind === "intervention" &&
+      i.taskId === refused.taskId &&
+      i.attentionCode === "not-started",
+  );
+  assert.ok(intervention);
+  await page.goto(
+    `${web.origin}/inbox?task=${refused.taskId}&request=${encodeURIComponent(intervention.id)}`,
+  );
+  const startAgain = detail.getByRole("button", {
+    name: "Start again",
+    exact: true,
+  });
+  await startAgain.waitFor();
+  await archiveAndRefresh(refused.projectId);
+  assert.equal(await startAgain.count(), 0);
+  assert.deepEqual(posts, []);
 });
