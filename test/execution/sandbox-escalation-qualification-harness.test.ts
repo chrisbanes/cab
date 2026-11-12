@@ -895,3 +895,193 @@ test("claude auto group sends auto mode with unsandboxed commands allowed and re
   assert.match(text, /claude-1\/<fixture>-ws/);
   assert.ok(!text.includes(homedir().replace(/\//g, "-")));
 });
+
+test("the escalate-approval live run refuses anything but --live --one-attempt and creates nothing", () => {
+  const roots = () =>
+    existsSync(join(homedir(), ".cache"))
+      ? readdirSync(join(homedir(), ".cache")).filter((name) =>
+          name.startsWith("cab-escalate-approval-live-"),
+        )
+      : [];
+  const before = roots();
+  for (const args of [
+    [],
+    ["--live"],
+    ["--one-attempt", "--live"],
+    ["--live", "--one-attempt", "extra"],
+  ]) {
+    const result = spawnSync(
+      process.execPath,
+      [join(directory, "live-escalate-approval.mjs"), ...args],
+      { encoding: "utf8", timeout: 10_000 },
+    );
+    assert.equal(result.status, 2, args.join(" "));
+    assert.match(result.stderr, /Refusing/);
+    assert.equal(result.stdout, "");
+  }
+  assert.deepEqual(roots(), before);
+});
+
+test("the escalate-approval cells prove only from present evidence", async () => {
+  const {
+    approveCell,
+    declineCell,
+    interruptCell,
+    approvalCallbacks,
+    ESCALATION_POLICY,
+  } = await load("escalate-approval-outcomes.mjs");
+  const approve = {
+    wire: {
+      approvalPolicy: ESCALATION_POLICY,
+      approvalsReviewer: "user",
+      sandboxType: "workspaceWrite",
+    },
+    results: { control: "browserType.launch: EPERM", escalated: "ok" },
+    escalations: [
+      {
+        label: "escalated",
+        decider: "operator",
+        decision: "accept",
+        outcome: "approved",
+        exitCode: 0,
+        durationMs: 900,
+      },
+    ],
+    requests: [
+      {
+        itemId: "item-1",
+        command: "/bin/zsh -lc 'node chromium.mjs escalated'",
+      },
+    ],
+    completions: [{ itemId: "item-1", status: "completed", exitCode: 0 }],
+    unexpected: [],
+  };
+  assert.equal(approveCell(approve).outcome, "proved");
+  // The approval's own request and completion are required: without them it is untested.
+  assert.equal(
+    approveCell({ ...approve, requests: [], completions: [] }).outcome,
+    "untested",
+  );
+  assert.equal(
+    approveCell({ ...approve, completions: [] }).outcome,
+    "untested",
+  );
+  // An approved item that did not run refutes it.
+  assert.equal(
+    approveCell({
+      ...approve,
+      completions: [{ itemId: "item-1", status: "declined", exitCode: null }],
+    }).outcome,
+    "refuted",
+  );
+  // No result file is never "ran outside", and a passing control is no sandbox evidence.
+  assert.equal(approveCell({ ...approve, results: {} }).proved, false);
+  assert.equal(
+    approveCell({ ...approve, results: { control: "ok", escalated: "ok" } })
+      .proved,
+    false,
+  );
+  assert.equal(
+    approveCell({ ...approve, unexpected: ["unmatched-native-resolution"] })
+      .proved,
+    false,
+  );
+  assert.equal(
+    approveCell({
+      ...approve,
+      wire: { ...approve.wire, approvalPolicy: "never" },
+    }).proved,
+    false,
+  );
+  const decline = {
+    resume: { ok: true, approvalPolicy: ESCALATION_POLICY },
+    results: { control: "EPERM", escalated: "ok" },
+    escalations: [
+      {
+        label: "declined",
+        decider: "operator",
+        decision: "decline",
+        outcome: "declined",
+        exitCode: null,
+      },
+    ],
+    turnState: "completed",
+    requests: [
+      {
+        itemId: "item-2",
+        command: "/bin/zsh -lc 'node chromium.mjs declined'",
+      },
+    ],
+    completions: [{ itemId: "item-2", status: "declined", exitCode: null }],
+    unexpected: [],
+  };
+  assert.equal(declineCell(decline).outcome, "proved");
+  // The operator's decision and an absent result file alone prove nothing.
+  assert.equal(
+    declineCell({ ...decline, requests: [], completions: [] }).outcome,
+    "untested",
+  );
+  assert.equal(
+    declineCell({ ...decline, completions: [] }).outcome,
+    "untested",
+  );
+  // A declined command whose item ran refutes the refusal.
+  assert.equal(
+    declineCell({
+      ...decline,
+      completions: [{ itemId: "item-2", status: "completed", exitCode: 0 }],
+    }).outcome,
+    "refuted",
+  );
+  assert.equal(declineCell({ ...decline, resume: null }).proved, false);
+  assert.equal(
+    declineCell({ ...decline, resume: { ok: false, error: "schema" } }).proved,
+    false,
+  );
+  assert.equal(
+    declineCell({ ...decline, results: { declined: "ok" } }).proved,
+    false,
+  );
+  // An escalation record without Codex's own request is no observation.
+  assert.equal(
+    interruptCell({
+      escalations: [{ label: "held", outcome: "obsolete" }],
+      resolvedAfterInterrupt: true,
+    }).escalationObserved,
+    false,
+  );
+  assert.deepEqual(interruptCell({}), {
+    escalationObserved: false,
+    withdrawnObsolete: false,
+    resolvedAfterInterrupt: null,
+    unmatchedResolutions: 0,
+  });
+  assert.deepEqual(
+    approvalCallbacks([
+      { itemId: "a", hasApprovalId: false },
+      { itemId: "a", hasApprovalId: true },
+      { itemId: "b", hasApprovalId: false },
+    ]),
+    { requests: 3, withApprovalId: 1, itemsWithSeveral: 1 },
+  );
+});
+
+test("the committed escalate-approval live evidence reclassifies with the current rules", async () => {
+  const { approveCell, declineCell, interruptCell } = await load(
+    "escalate-approval-outcomes.mjs",
+  );
+  const evidence = JSON.parse(
+    readFileSync(
+      resolve("docs/evidence/2026-11-12-escalate-approval-live.json"),
+      "utf8",
+    ),
+  );
+  assert.equal(approveCell(evidence.cells.approve).outcome, "proved");
+  assert.equal(declineCell(evidence.cells.decline).outcome, "proved");
+  assert.deepEqual(interruptCell(evidence.cells.interrupt), {
+    escalationObserved: true,
+    withdrawnObsolete: true,
+    resolvedAfterInterrupt: true,
+    unmatchedResolutions: 0,
+  });
+});

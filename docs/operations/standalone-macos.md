@@ -1142,6 +1142,33 @@ To check what a turn was admitted with, open the assignment's **Effective execut
 the task page, or run `cab assignment get ASSIGNMENT_ID`: it states the sandbox level the turn
 was admitted at. `cab project get PROJECT_ID` shows the project's current sandbox level.
 
+## Approving commands at the escalate-approval level
+
+When a project only occasionally needs a host tool, the **Escalate with approval** sandbox
+level keeps Codex task turns sandboxed and lets a turn ask to run one command outside the
+sandbox. Choose it in the project's Settings, General tab, or run
+`cab project prepare PROJECT_ID --sandbox escalate-approval` and apply the prepared file. It
+needs no confirmation and applies to task turns admitted afterwards. Claude Code task turns in
+the project stay strict for now.
+
+- Each request appears in the Inbox as **Run a command outside the sandbox**, with the command,
+  its working directory relative to the task workspace, the agent's reason and the workspace's
+  HEAD, branch and whether it has uncommitted changes.
+- Approve runs that one command outside the sandbox; decline refuses it. Approve or decline in
+  the Inbox, or with `cab approval decide`. Nothing approves later commands.
+- A request left unanswered for 15 minutes is declined and resolves as expired. One whose turn
+  ends, is stopped or whose runtime or service stops first is withdrawn as obsolete.
+- While a request waits, its turn keeps its capacity slot and its task writer.
+- A command whose text names the task workspace's absolute path is hidden by the privacy rules
+  and cannot be approved; decline it or let it expire.
+
+Read the command before approving: untrusted text such as issue and pull request bodies can
+shape it, and an approved command has the service user's full filesystem, process, network and
+credential access. Processes it starts, such as emulators and browsers, can outlive the turn;
+find and stop them as described for the unsandboxed level. The task's **Execution** tab and
+`cab task get TASK_ID` list each escalation with who decided, the decision, and an approved
+command's exit code and duration.
+
 ## Startup snapshot
 
 Whenever the service starts against an existing database with migrations pending, it

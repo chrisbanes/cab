@@ -1130,7 +1130,7 @@ never changes a Codex turn. Draft turns, drafting runs and turns without a task 
 never listen. Every place the effective policy is shown states what local listening does
 in that harness and that other processes on the host can reach a listening port.
 A project's sandbox level ([ADR-1034](adr/1034-harness-native-sandbox-escalation.md)) is
-`strict`, the default, or `unsandboxed`. At `unsandboxed` a project's task turns run host
+`strict`, the default, `escalate-approval` or `unsandboxed`. At `unsandboxed` a project's task turns run host
 tools that a harness sandbox blocks, such as browsers and Android emulators
 ([ADR-1029](adr/1029-skip-sandbox-for-host-tools.md)).
 A Codex task turn at `unsandboxed` sends `sandboxPolicy: { type: "dangerFullAccess" }` with approval policy
@@ -1151,6 +1151,28 @@ temporary directory, whose qualification depended on the sandbox, no longer hold
 unsandboxed turn. The Claude sandbox self-test does not gate such a turn. Only macOS is qualified. Choosing `unsandboxed` in Settings
 needs a confirmation that states the risk; choosing `strict` applies at once. Every place the
 effective policy is shown states the level, its grant and these risks in that harness.
+At `escalate-approval` a Codex task turn keeps its `workspaceWrite` sandbox policy and sends
+the granular approval policy `{ granular: { sandbox_approval: true, rules: false,
+mcp_elicitations: false, skill_approval: false, request_permissions: false } }` with
+`approvalsReviewer: "user"`; a resumed thread may report `never` or that exact policy, and no other.
+Each `item/commandExecution/requestApproval` of that exact admitted turn becomes an Inbox
+approval with action `sandbox.escalate`, a sandbox escalation. Its material is the command,
+the working directory relative to the task workspace, the agent's reason and the workspace's
+HEAD, branch and uncommitted-changes flag, cut to the 8 KiB approval limit with the cut
+marked. The operator's approve answers `accept` and decline answers `decline`, exactly once;
+cab never answers `acceptForSession` or with an execpolicy amendment, and agents cannot request
+the action themselves. An escalation unanswered for 15 minutes is declined and its Inbox item
+resolves as expired. It is withdrawn as obsolete, unanswered, when its turn ends, is stopped or
+interrupted, when Codex resolves it first, when the runtime is lost, or when the service stops
+or restarts. A waiting escalation holds its turn's slot and writer. Its decision is history
+and never reaches the agent, which learns the outcome from the command itself. Every other
+server request, including a command approval that also asks for network access or extra
+permissions, keeps the unexpected-request denial and hold. Each escalation's evidence (decider,
+decision, delivery, exit code and duration, from Codex when it reports one and otherwise
+measured by the service) is shown on the task's Execution tab and by `cab task get`; no output
+is stored. Claude Code task turns in such a project are admitted `strict` until their harness
+has an escalation seam. An approved command runs with the service user's full access, and
+processes it starts can outlive the turn.
 cab enforces only what it sends the runtime; none of the three settings is an allow-list,
 a proxy or a host filter, and MCP and app tools, web tools and model transport are
 separate surfaces.

@@ -22,6 +22,7 @@ import {
   waitFor,
   worktreeGit,
 } from "../fixtures/native-result.js";
+import { loginCli, serveCli } from "../fixtures/operator-cli.js";
 import {
   createOperatorFixture,
   OperatorFixtureRuntime,
@@ -555,4 +556,126 @@ test("a long command is cut to fit the approval limit and the cut is shown, what
     new TextEncoder().encode(JSON.stringify(material)).byteLength <= 8192,
   );
   assert.equal(approval.approvable, true);
+  // The task read carries the cut marker for the task UI and the CLI.
+  const [escalation] =
+    (await s.api.readTask(s.seeded.taskId)).data.sandboxEscalations ?? [];
+  assert.equal(escalation?.truncated, true);
+});
+
+test("the task read and cab task get show each escalation's command, decision, exit code and duration", async (t) => {
+  const s = await escalationTask(t);
+  const approved = await s.escalate();
+  await s.decide(approved.approval, "approved");
+  s.runtime.emit({
+    kind: "completed",
+    identity: approved.identity,
+    exitCode: 3,
+    durationMs: 1234,
+  });
+  const declined = await s.escalate();
+  await s.decide(declined.approval, "denied");
+  // The lead profile's private instructions in a command withhold its material.
+  const withheld = await s.escalate(
+    undefined,
+    "echo PRIVATE REVIEW INSTRUCTIONS",
+  );
+  const read = (await s.api.readTask(s.seeded.taskId)).data.sandboxEscalations;
+  // Times are asserted present or absent, then compared without their values.
+  assert.deepEqual(
+    read?.map((e) => [
+      e.requestedAt > 0,
+      e.decidedAt !== null,
+      e.completedAt !== null,
+    ]),
+    // Approved and completed; declined with no completion; pending.
+    [
+      [true, true, true],
+      [true, true, false],
+      [true, false, false],
+    ],
+  );
+  assert.deepEqual(
+    read?.map((e) => ({ ...e, requestedAt: 0, decidedAt: 0, completedAt: 0 })),
+    [
+      {
+        interactionId: approved.approval.interactionId,
+        command: "node chromium.mjs escalated",
+        truncated: false,
+        cwd: s.shownCwd,
+        workspace: {
+          head: worktreeGit(s.worktree, "rev-parse", "HEAD"),
+          branch: null,
+          dirty: true,
+        },
+        decider: "operator",
+        decision: "accept",
+        outcome: "approved",
+        exitCode: 3,
+        durationMs: 1234,
+        durationSource: "runtime",
+        requestedAt: 0,
+        decidedAt: 0,
+        completedAt: 0,
+      },
+      {
+        interactionId: declined.approval.interactionId,
+        command: "node chromium.mjs escalated",
+        truncated: false,
+        cwd: s.shownCwd,
+        workspace: {
+          head: worktreeGit(s.worktree, "rev-parse", "HEAD"),
+          branch: null,
+          dirty: true,
+        },
+        decider: "operator",
+        decision: "decline",
+        outcome: "declined",
+        exitCode: null,
+        durationMs: null,
+        durationSource: null,
+        requestedAt: 0,
+        decidedAt: 0,
+        completedAt: 0,
+      },
+      {
+        interactionId: withheld.approval.interactionId,
+        command: null,
+        truncated: false,
+        cwd: null,
+        workspace: null,
+        decider: null,
+        decision: null,
+        outcome: "pending",
+        exitCode: null,
+        durationMs: null,
+        durationSource: null,
+        requestedAt: 0,
+        decidedAt: 0,
+        completedAt: 0,
+      },
+    ],
+  );
+  assert.doesNotMatch(JSON.stringify(read), /PRIVATE REVIEW INSTRUCTIONS/);
+
+  const served = await serveCli(t, s.f);
+  const { h } = await loginCli(t, served);
+  const r = await h.run(["task", "get", s.seeded.taskId, "--connection", "ro"]);
+  assert.equal(r.code, 0, r.err);
+  assert.ok(
+    r.out.includes(
+      `Escalation ${approved.approval.interactionId}: node chromium.mjs escalated in ${s.shownCwd} · HEAD ${worktreeGit(s.worktree, "rev-parse", "HEAD").slice(0, 12)} · detached · uncommitted changes · Approved by the operator · exit code 3 · 1.2 s`,
+    ),
+    r.out,
+  );
+  assert.ok(
+    r.out.includes(
+      `Escalation ${declined.approval.interactionId}: node chromium.mjs escalated in ${s.shownCwd} · HEAD ${worktreeGit(s.worktree, "rev-parse", "HEAD").slice(0, 12)} · detached · uncommitted changes · Declined by the operator`,
+    ),
+  );
+  assert.ok(
+    r.out.includes(
+      `Escalation ${withheld.approval.interactionId}: Command unavailable in an unavailable directory · Workspace state unknown · Waiting for an operator answer`,
+    ),
+  );
+  assert.doesNotMatch(r.out, /PRIVATE REVIEW INSTRUCTIONS/);
 });

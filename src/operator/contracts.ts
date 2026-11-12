@@ -1,5 +1,6 @@
 import { inboxLifecycleSchema } from "../core/inbox-lifecycle.js";
 import { sandboxLevelSchema } from "../core/sandbox-level.js";
+import { sandboxEscalationOutcomes } from "./sandbox-escalation-copy.js";
 import { delegateWithdrawalRefusalCodes } from "../core/delegate-withdrawal.js";
 import {
   maxToolPathChars,
@@ -1462,6 +1463,35 @@ const result = z
       .max(20),
   })
   .strict();
+const sandboxEscalationSchema = z
+  .object({
+    interactionId: uuid,
+    command: safeText,
+    /** The command, cwd or reason was cut to fit the approval limit. */
+    truncated: z.boolean(),
+    cwd: safeText,
+    workspace: z
+      .object({
+        head: z
+          .string()
+          .regex(/^[0-9a-f]{40,64}$/)
+          .nullable(),
+        branch: safeText,
+        dirty: z.boolean().nullable(),
+      })
+      .strict()
+      .nullable(),
+    decider: z.enum(["operator", "expiry", "obsolete"]).nullable(),
+    decision: z.enum(["accept", "decline"]).nullable(),
+    outcome: z.enum(sandboxEscalationOutcomes),
+    exitCode: z.number().int().safe().nullable(),
+    durationMs: time.nullable(),
+    durationSource: z.enum(["runtime", "service"]).nullable(),
+    requestedAt: time,
+    decidedAt: time.nullable(),
+    completedAt: time.nullable(),
+  })
+  .strict();
 export const interactionSchema = z
   .object({
     lifecycle: inboxLifecycleSchema.optional(),
@@ -2160,6 +2190,12 @@ export const taskSchema = envelope(
       unresolvedResults: z.array(unresolvedResultSchema),
       questions: z.array(interactionSchema),
       approvals: z.array(interactionSchema),
+      /**
+       * Each sandbox escalation of the task, oldest first, with how it ended. Command, cwd and
+       * workspace are null when the privacy exclusions withhold the approval's material. No
+       * output is ever recorded. Absent from older services: unavailable, never empty.
+       */
+      sandboxEscalations: z.array(sandboxEscalationSchema).optional(),
       /** Result review requests, oldest first. Absent from older services: unavailable, never empty. */
       resultReviews: z.array(resultReviewSchema).optional(),
       completionRequests: z.array(completion),

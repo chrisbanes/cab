@@ -4034,6 +4034,7 @@ function escalationFakeRuntime() {
     "      if (prompt === 'escalate-end') finish(turnId);",
     "      if (prompt === 'escalate-twice') { const again = { id: 'esc-' + turns, method: 'item/commandExecution/requestApproval', params: { ...base, itemId: 'item-' + turns, command: 'node chromium.mjs', cwd: message.params.cwd, reason: 'needs host Chromium' } }; write(again); resend.set(again.id, again); }",
     "      if (prompt === 'escalate-withdrawn') { write({ method: 'serverRequest/resolved', params: { threadId: 'thread-1', requestId: 'esc-' + turns } }); write({ method: 'item/completed', params: { ...base, item: { id: 'item-' + turns, type: 'commandExecution', status: 'declined', exitCode: null } } }); finish(turnId); }",
+    "      if (prompt === 'escalate-crash') setTimeout(() => process.exit(1), 50);",
     "      if (prompt === 'escalate-settled') { write({ method: 'item/completed', params: { ...base, item: { id: 'item-' + turns, type: 'commandExecution', status: 'declined', exitCode: null } } }); finish(turnId); }",
     "    } else if (prompt === 'stray-resolution') {",
     "      write({ method: 'serverRequest/resolved', params: { threadId: 'thread-1', requestId: 'stray' } });",
@@ -4513,6 +4514,48 @@ test("Codex resolving an escalation itself, or after an interrupt, ends it once 
       { method: "unmatched-native-resolution", threadId: "thread-1" },
     ]);
     assert.equal(events.length, 4);
+  } finally {
+    await cleanup();
+  }
+});
+
+test("a lost runtime ends its unanswered escalation, which can no longer be answered", async () => {
+  const { root, runtime, replies, cleanup } = escalationFakeRuntime();
+  const events: SandboxEscalationEvent[] = [];
+  runtime.onUnexpectedRequest(() => {});
+  runtime.onSandboxEscalation((event) => {
+    events.push(event);
+    return true;
+  });
+  try {
+    await bounded(runtime.start(), 3000);
+    await bounded(runtime.startThread(root), 3000);
+    await bounded(
+      runtime.startTurn(
+        "thread-1",
+        root,
+        "escalate-crash",
+        undefined,
+        escalationPolicy,
+      ),
+      3000,
+    );
+    await eventually(() => events.length === 2);
+    assert.deepEqual(
+      events.map((event) => [
+        event.kind,
+        "reason" in event ? event.reason : undefined,
+      ]),
+      [
+        ["requested", "needs host Chromium"],
+        ["ended", "Runtime lost"],
+      ],
+    );
+    assert.equal(
+      await runtime.replySandboxEscalation(events[1]!.identity, "accept"),
+      false,
+    );
+    assert.deepEqual(replies("esc-1"), []);
   } finally {
     await cleanup();
   }

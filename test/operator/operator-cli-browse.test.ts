@@ -1,6 +1,8 @@
 import {
   claudeUnsandboxedLine,
+  codexEscalateApprovalLine,
   codexUnsandboxedLine,
+  escalateApprovalLines,
   unsandboxedSupersededLine,
 } from "../../src/operator/sandbox-level-copy.js";
 import assert from "node:assert/strict";
@@ -777,6 +779,19 @@ test("assignment get states the admitted sandbox level for both harnesses", asyn
   assert.ok(strict.includes("Admitted at the strict sandbox level."), strict);
   assert.ok(!strict.includes(codexUnsandboxedLine), strict);
   assert.ok(!strict.includes(unsandboxedSupersededLine), strict);
+  // An escalate-approval admission states the Codex escalation grant and supersedes nothing.
+  s.f.seedPersistedState((db) => {
+    db.prepare(
+      "UPDATE execution_intent_sandbox_level SET level = 'escalate-approval' WHERE intentId = ?",
+    ).run(intentId);
+  });
+  const escalate = (await h.run(["assignment", "get", codexId])).out;
+  assert.ok(
+    escalate.includes("Admitted at the escalate-approval sandbox level."),
+    escalate,
+  );
+  assert.ok(escalate.includes(codexEscalateApprovalLine), escalate);
+  assert.ok(!escalate.includes(unsandboxedSupersededLine), escalate);
 });
 
 test("project get shows the sandbox level and marks network access and local listening superseded when unsandboxed", async (t) => {
@@ -803,6 +818,20 @@ test("project get shows the sandbox level and marks network access and local lis
   assert.match(out, /full filesystem, process, network and credential access/);
   assert.ok(out.includes(codexUnsandboxedLine));
   assert.ok(out.includes(claudeUnsandboxedLine));
+  // Escalate with approval states its lines, Claude staying strict, and supersedes nothing.
+  d.execute({
+    type: "project.configure",
+    actor: "operator",
+    key: randomUUID(),
+    projectId: seed.alphaId,
+    expectedVersion: Number(d.project(seed.alphaId).version),
+    sandbox: "escalate-approval",
+  });
+  out = await get();
+  assert.match(row(out, "Sandbox level"), /:\s+Escalate with approval$/);
+  assert.doesNotMatch(out, /superseded/i);
+  for (const line of escalateApprovalLines) assert.ok(out.includes(line), line);
+  assert.ok(!out.includes(codexUnsandboxedLine));
 });
 
 test("task get names the lead assignment, execution and who acts next", async (t) => {

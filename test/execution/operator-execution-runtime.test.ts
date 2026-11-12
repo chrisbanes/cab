@@ -16,8 +16,11 @@ import {
   localListeningLimit,
 } from "../../src/operator/local-listening-copy.js";
 import {
+  claudeEscalateApprovalLine,
   claudeUnsandboxedLine,
+  codexEscalateApprovalLine,
   codexUnsandboxedLine,
+  escalateApprovalRiskLines,
   unsandboxedRiskLines,
 } from "../../src/operator/sandbox-level-copy.js";
 import {
@@ -435,6 +438,20 @@ test("both harnesses' disclosures state the unsandboxed grant and risks within t
   assert.match(claudeUnsandboxedLine, /sandbox disabled/);
   assert.ok(claude.lines.includes(claudeUnsandboxedLine));
   assert.ok(codex.lines.includes(codexUnsandboxedLine));
+  // The escalate-approval level: Codex states its grant and risks, Claude that it stays strict.
+  assert.match(codexEscalateApprovalLine, /allows only sandbox escalation/);
+  assert.match(claudeEscalateApprovalLine, /run at the strict level/);
+  assert.ok(codex.lines.includes(codexEscalateApprovalLine));
+  for (const risk of escalateApprovalRiskLines)
+    assert.ok(codex.lines.includes(risk), risk);
+  assert.ok(claude.lines.includes(claudeEscalateApprovalLine));
+  assert.ok(
+    [
+      codexEscalateApprovalLine,
+      claudeEscalateApprovalLine,
+      ...escalateApprovalRiskLines,
+    ].every((line) => line.length <= 300),
+  );
   for (const disclosure of [claude, codex]) {
     for (const risk of unsandboxedRiskLines)
       assert.ok(disclosure.lines.includes(risk));

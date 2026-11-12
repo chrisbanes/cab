@@ -335,6 +335,11 @@ unsandboxed turn has the service user's full filesystem, process, network and cr
 and started processes can outlive the turn; cab does not clean them up. The Claude subprocess
 environment scrub and per-task temporary directory confinement no longer hold, the Claude
 sandbox self-test does not gate an unsandboxed turn, and only macOS is qualified.
+At `escalate-approval` a Codex task turn keeps its `workspaceWrite` sandbox and sends a granular
+approval policy that allows only sandbox escalation, with reviewer `user`; each command it asks to
+run outside the sandbox becomes an Inbox approval the operator answers `accept` or `decline`,
+declined after 15 minutes unanswered and withdrawn when its turn ends. A Claude Code task turn at
+this level is admitted `strict`. An approved command has the same access as an unsandboxed one.
 The three values are recorded at admission (`execution_intent_network_access`,
 `execution_intent_local_listening` and `execution_intent_sandbox_level`), so a later change reaches only later admissions and a
 running turn keeps its policy. Claude Code turns, drafting runs and requests without a task

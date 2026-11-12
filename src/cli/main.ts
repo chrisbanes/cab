@@ -43,7 +43,7 @@ import {
   serviceHelp,
   snapshotCommand,
 } from "./service.js";
-import { jsonLine, terminalSafe, unavailable } from "./render.js";
+import { jsonLine, oneLine, terminalSafe, unavailable } from "./render.js";
 import {
   DEFAULT_FIX,
   fixLine,
@@ -61,6 +61,11 @@ import { connectionOrigin, ServiceClient } from "./transport.js";
 import type { CliDeps, Result, Values } from "./types.js";
 import { rejectUnusedFlags } from "./write.js";
 import { stackSummary } from "../operator/stacking-copy.js";
+import {
+  sandboxEscalationCommandUnavailable,
+  sandboxEscalationPlace,
+  sandboxEscalationResultLine,
+} from "../operator/sandbox-escalation-copy.js";
 
 export type { CliDeps } from "./types.js";
 
@@ -947,6 +952,11 @@ async function run(
         ...(read.data.stackDelivery?.failedBlocker
           ? ["Stacked blocker failed: Unstack or Cancel this task"]
           : []),
+        ...(read.data.sandboxEscalations ?? []).map(
+          (e) =>
+            // Model-written, so flattened: a multi-line command cannot fake another line.
+            `Escalation ${e.interactionId}: ${oneLine(e.command ?? sandboxEscalationCommandUnavailable, 200)} ${oneLine(sandboxEscalationPlace(e), 1200)} · ${sandboxEscalationResultLine(e)}`,
+        ),
         ...read.data.unresolvedResults.map((r) =>
           r.availability === "available"
             ? `Undelivered result ${r.resultId}: cab result deliver ${task.id} ${r.resultId}`
