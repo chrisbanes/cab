@@ -931,6 +931,31 @@ Server, not live, because the probe's model had no permission-request tool. A Co
 sends several approval callbacks for one command (`approvalId`) is not qualified; the second is
 declined and the work held. The live run saw one callback per command and no `approvalId`.
 
+## Sandbox reviewer
+
+At the `escalate-auto-review` sandbox level ([ADR-1034](adr/1034-harness-native-sandbox-escalation.md))
+Codex's reviewer `auto_review` decides each escalation of a Codex task turn, cab records the
+decision, and a denial offers the operator an advisory overrule. The service, the Codex runtime
+and the operator surfaces are covered by deterministic suites; the
+[probe](evidence/2026-11-12-auto-review-overrule-probe.md) proved live that a review names the command item it decides.
+
+| Criteria | Evidence |
+| --- | --- |
+| The operator can choose `escalate-auto-review`, versioned and operator-only through the API and `project prepare --sandbox`; the startup migration widens the stored levels in place and adds the review table | `operator-command-network.test.ts`, `startup-snapshot.test.ts` |
+| Only a Codex task turn is admitted at the level and sends the granular policy with reviewer `auto_review`; Claude Code task turns, draft turns, drafting runs and unbound turns record `strict` | `command-network-admission.test.ts`, `codex-runtime.test.ts` |
+| A review of the exact admitted turn, generation and process is recorded with decider `reviewer`, decision, risk, rationale and, when approved, the target item's exit code and duration, even when the turn completed before the write; timed-out and aborted reviews decline; no output is stored | `sandbox-escalation-service.test.ts`, `codex-runtime.test.ts` |
+| Reviews on another turn or generation, of another action, without a target, with a relative working directory or of another shape are not recorded and are held or noted as an anomaly; a review after its turn ended is dropped | `codex-runtime.test.ts`, `sandbox-escalation-service.test.ts` |
+| A denial of a command in the task workspace opens one `sandbox.overrule` Inbox approval while its turn runs; approve sends one overrule to the denial's runtime and generation, a replay sends nothing, an answer after the turn ended is not delivered, and the retry is recorded as a new review | `sandbox-escalation-service.test.ts`, `codex-runtime.test.ts` |
+| Turn end, Stop, interrupt, a new turn, runtime loss, service stop and restart withdraw an undecided overrule, and a later decision is refused; agents cannot request `sandbox.overrule` | `sandbox-escalation-service.test.ts`, `codex-runtime.test.ts` |
+| An escalation that still reaches cab at this level follows the `escalate-approval` path, including the 15-minute expiry | `sandbox-escalation-service.test.ts` |
+| Settings saves the level without a confirmation and states the reviewer's cost, that it does not contain agent-written code, the advisory and unproven overrule, and that Claude Code turns stay `strict`, as do both policy disclosures | `operator-project-config-general-browser.test.ts`, `operator-execution-runtime.test.ts`, `neutral-runtime-copy.test.ts` |
+| Project deletion removes the review evidence | `project-deletion.test.ts` |
+
+Limits: the overrule is not proven against a live denial. The probe used no denial stimulus, so
+`thread/approveGuardianDeniedAction`, its event mapping and the re-review are qualified only
+against a fake App Server. No live run through cab is recorded yet, and the task's Execution tab
+and `cab task get` do not yet show reviewer decisions.
+
 ## Draft turns
 
 A draft turn is a read-only turn of the project lead on a task that is not Ready. The

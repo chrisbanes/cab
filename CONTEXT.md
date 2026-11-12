@@ -315,8 +315,9 @@ _Avoid_: Assignment identity when referring only to an execution session
 **Sandbox level**:
 A per-project setting, `sandbox`, that the operator chooses for a project's task turns
 (ADR-1034). `strict`, the default, keeps the harness sandbox. `escalate-approval` keeps it but
-lets a Codex task turn ask to run one command outside it, a **Sandbox escalation**; Claude Code
-task turns stay `strict` at this level for now. `unsandboxed` runs task turns without the
+lets a Codex task turn ask to run one command outside it, a **Sandbox escalation**;
+`escalate-auto-review` has Codex's reviewer decide each such request instead, a **Reviewer
+decision**. Claude Code task turns stay `strict` at both levels for now. `unsandboxed` runs task turns without the
 sandbox, so they can launch host tools such as browsers and Android emulators; agents then act
 with the service user's full filesystem, process, network and credential access, and command
 network access and local listening are superseded. The level is recorded when a turn is
@@ -332,6 +333,14 @@ decline refuses it. One left unanswered for 15 minutes is declined, and one whos
 first is withdrawn as obsolete. Its evidence records who decided, the decision, the exit code
 and the duration, never the command's output.
 _Avoid_: Sandbox bypass, permission grant, when referring to one approved command
+
+**Reviewer decision**:
+Codex's reviewer approving or denying one command that a task turn admitted at
+`escalate-auto-review` asks to run outside the sandbox. cab records it with its risk level and
+rationale, and an approved command's exit code and duration. A denial offers the operator an
+advisory overrule in the Inbox while its turn runs: Codex then tells the agent the exact action
+is approved, and the agent's retry is reviewed again.
+_Avoid_: Operator approval, when the reviewer decided
 
 **Task workspace**:
 The working files allocated to a task, retained independently of its conversations.

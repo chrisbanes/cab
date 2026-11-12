@@ -666,10 +666,10 @@ name, version and preview digest. The service rechecks every confirmation atomic
    local listening the same way. It applies to Claude Code task turns admitted
    afterwards; running turns keep their policy.
 
-   `project prepare PROJECT_ID --sandbox strict|escalate-approval|unsandboxed` changes
-   the project's sandbox level the same way. It applies to task turns admitted
-   afterwards (`escalate-approval` to Codex task turns only; Claude Code turns stay
-   `strict`); running turns keep their policy. The flag is explicit and asks no
+   `project prepare PROJECT_ID --sandbox strict|escalate-approval|escalate-auto-review|unsandboxed`
+   changes the project's sandbox level the same way. It applies to task turns admitted
+   afterwards (`escalate-approval` and `escalate-auto-review` to Codex task turns only;
+   Claude Code turns stay `strict`); running turns keep their policy. The flag is explicit and asks no
    confirmation; Settings confirms a change to `unsandboxed`.
 
    Retention: items older than `CAB_DIAGNOSTIC_RETENTION_DAYS` (1–365,

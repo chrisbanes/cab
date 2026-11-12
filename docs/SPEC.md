@@ -1134,7 +1134,7 @@ never changes a Codex turn. Draft turns, drafting runs and turns without a task 
 never listen. Every place the effective policy is shown states what local listening does
 in that harness and that other processes on the host can reach a listening port.
 A project's sandbox level ([ADR-1034](adr/1034-harness-native-sandbox-escalation.md)) is
-`strict`, the default, `escalate-approval` or `unsandboxed`. At `unsandboxed` a project's task turns run host
+`strict`, the default, `escalate-approval`, `escalate-auto-review` or `unsandboxed`. At `unsandboxed` a project's task turns run host
 tools that a harness sandbox blocks, such as browsers and Android emulators
 ([ADR-1029](adr/1029-skip-sandbox-for-host-tools.md)).
 A Codex task turn at `unsandboxed` sends `sandboxPolicy: { type: "dangerFullAccess" }` with approval policy
@@ -1177,6 +1177,33 @@ measured by the service) is shown on the task's Execution tab and by `cab task g
 is stored. Claude Code task turns in such a project are admitted `strict` until their harness
 has an escalation seam. An approved command runs with the service user's full access, and
 processes it starts can outlive the turn.
+At `escalate-auto-review` a Codex task turn sends the same sandbox and granular approval policy
+with `approvalsReviewer: "auto_review"`: Codex's reviewer decides each escalation instead of the
+operator, as an extra model call on the operator's account whose availability depends on the
+account and model. The reviewer judges the command; it does not contain agent-written code, and
+an approved command runs with the service user's full access. cab records each reviewer
+decision of the exact admitted turn, runtime generation and process as evidence: decider
+`reviewer`, the decision (`accept` when approved; `decline` when denied, timed out or aborted),
+the risk level and rationale, the command, the working directory relative to the task
+workspace and the workspace state, cut to fixed limits with the cut marked, and for an approved
+command the exit code and duration of the command item whose id equals the review's target. No
+output is stored. Codex marks the review notifications unstable, so cab checks their shape: a
+review on a turn not started with this reviewer, of an action other than a command, without a
+target item, with a relative working directory or of another shape gets the unexpected-request
+hold, and one that arrives after its turn ended is dropped. A denial of a command in the task
+workspace offers the operator an advisory overrule in the Inbox, an approval with action
+`sandbox.overrule`, while the denied turn runs. Approve calls
+`thread/approveGuardianDeniedAction` once, on the denial's runtime, generation and process and
+never after the turn ends; Codex tells the agent the exact action is approved, and its retry is
+reviewed again as a new review. Decline keeps the denial. The overrule has no expiry and holds
+neither slot nor writer; it is withdrawn as obsolete when its turn ends, is stopped,
+interrupted or replaced, when the runtime is lost, or when the service stops or restarts, and
+agents cannot request the action. The overrule is not proven against a live denial: the
+[probe](evidence/2026-11-12-auto-review-overrule-probe.md) proved only that a review names its
+command item. An escalation that still reaches cab at this level follows the
+`escalate-approval` path. Claude Code task turns in such a project are admitted `strict`. The
+reviewer decisions are recorded but not yet shown on the task's Execution tab or by
+`cab task get`.
 cab enforces only what it sends the runtime; none of the three settings is an allow-list,
 a proxy or a host filter, and MCP and app tools, web tools and model transport are
 separate surfaces.
