@@ -1145,11 +1145,20 @@ was admitted at. `cab project get PROJECT_ID` shows the project's current sandbo
 ## Approving commands at the escalate-approval level
 
 When a project only occasionally needs a host tool, the **Escalate with approval** sandbox
-level keeps Codex task turns sandboxed and lets a turn ask to run one command outside the
-sandbox. Choose it in the project's Settings, General tab, or run
+level keeps Codex and Claude Code task turns sandboxed and lets a turn ask to run one command
+outside the sandbox. Choose it in the project's Settings, General tab, or run
 `cab project prepare PROJECT_ID --sandbox escalate-approval` and apply the prepared file. It
-needs no confirmation and applies to task turns admitted afterwards. Claude Code task turns in
-the project stay strict for now.
+needs no confirmation and applies to task turns admitted afterwards.
+
+Claude Code task turns at this level run in Claude Code's auto permission mode:
+
+- Auto mode must be available for the account and the turn's model. If it isn't, the task
+  waits with the reason `auto mode is not available for model …`. Change the model, or the
+  level, to continue.
+- Claude's own classifier can still refuse a command you approved. The command then does not
+  run, and its escalation shows no exit code.
+- A Bash command can ask for up to 60 minutes. One that times out keeps running in the
+  background.
 
 - Each request appears in the Inbox as **Run a command outside the sandbox**, with the command,
   its working directory relative to the task workspace, the agent's reason and the workspace's

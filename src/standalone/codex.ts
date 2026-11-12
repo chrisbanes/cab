@@ -770,8 +770,9 @@ export interface RuntimeTurnPolicy {
    */
   skipSandbox?: boolean;
   /**
-   * Set when the turn was admitted at the escalate-approval level, which only a Codex task turn
-   * can be: the turn keeps its sandbox and may ask to run one command outside it.
+   * Set when a task turn was admitted at an escalate level: the turn keeps its sandbox and may
+   * ask to run one command outside it. Codex takes both levels; Claude Code takes `approval`,
+   * where its PreToolUse hook holds the call for the operator (ADR-1034).
    */
   sandboxEscalation?: "approval" | "auto-review";
 }
@@ -862,6 +863,14 @@ export interface Runtime {
   ): Promise<boolean>;
   onSandboxReview?(listener: (event: SandboxReviewEvent) => void): void;
   /**
+   * The recorded process of one running turn, for a runtime with a process per turn; native
+   * callbacks bind against it instead of `processIdentity()`.
+   */
+  turnProcessIdentity?(
+    threadId: string,
+    turnId: string,
+  ): RuntimeProcessIdentity | null;
+  /**
    * Overrules a reviewer denial once, while its turn runs in this process; false when it was not
    * sent, was rejected, or its turn ended before the answer.
    */
@@ -889,6 +898,7 @@ export interface Runtime {
     workspace: string;
     settings?: RuntimeTurnSettings;
     skipSandbox?: boolean;
+    sandboxEscalation?: "approval" | "auto-review";
   }): Promise<string | undefined>;
   /** Called when a preflight reason may have cleared, so waiting work is retried. */
   onAdmissionChange?(listener: () => void): void;

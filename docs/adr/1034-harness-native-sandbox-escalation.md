@@ -43,12 +43,27 @@ A store migration maps `dangerouslySkipSandbox: true` to `unsandboxed`, everythi
   is `user` at `escalate-approval` and `auto_review` at `escalate-auto-review`. cab answers an
   escalation only with `accept` or `decline`, never `acceptForSession` or an execpolicy amendment,
   so no approval outlives its request or reaches other threads.
-- **Claude Code.** At the escalate levels a task turn sets `allowUnsandboxedCommands: true`. At
-  `escalate-approval` it keeps `dontAsk`, and the PreToolUse hook sends escalated Bash to the
-  Inbox. At `escalate-auto-review` it runs in `auto` permission mode; the hook still denies every
-  call outside today's allowlist before the classifier sees it, so the classifier decides only
-  escalated Bash. Undecided calls reach the Inbox through `canUseTool`. At the escalate levels and
-  `unsandboxed` the Bash timeout ceiling is 60 minutes.
+- **Claude Code.** At the escalate levels a task turn runs in `auto` permission mode with
+  `allowUnsandboxedCommands: true`. `dontAsk` is not used for escalated calls, because it refuses
+  them even after the hook allows them. Bash leaves `allowedTools`, because an allow rule would
+  decide an escalated call before the hook and the classifier. Sandboxed Bash still runs through
+  `autoAllowBashIfSandboxed`. A turn whose model lacks auto mode waits with a named reason and is
+  never downgraded. An escalate turn whose start reports another permission mode fails, and its
+  hook refuses escalated Bash until the start confirms `auto`.
+  - **At `escalate-approval`:** the PreToolUse hook holds each Bash call with
+    `dangerouslyDisableSandbox` for the Inbox. Its matcher has a 960-second timeout and
+    `onFailure: "block"`, so the service's 15-minute expiry answers first, and a hook timeout or
+    failure refuses the call rather than passing it to the classifier.
+  - **The classifier after an approval:** the hook's `allow` is not shown to stop the classifier
+    from deciding the call, so Claude's classifier can still refuse a call the operator approved.
+    If the classifier asks `canUseTool` about an accepted call, cab allows that one call once, so
+    no second Inbox item opens.
+  - **At `escalate-auto-review`:** the hook still denies every call outside today's allowlist
+    before the classifier sees it, so the classifier decides only escalated Bash. Undecided calls
+    reach the Inbox through `canUseTool`.
+  - **Bash timeouts:** at the escalate levels and `unsandboxed`, a Bash call can request up to
+    60 minutes. A timed-out command moves to the background and keeps running, so the request
+    ceiling does not bound execution.
 - **Operator approval.** The Inbox item shows the command, working directory, the agent's reason
   and the workspace identity (HEAD, branch, uncommitted-changes flag). The operator approves or
   declines that one request; there are no remembered rules. A request unanswered after 15 minutes
@@ -71,6 +86,17 @@ approval, decline, expiry, reviewer approval and denial and the Codex overrule b
 Claude's PreToolUse hook runs before its classifier; an approved command runs outside the sandbox;
 and the reviewer decisions cab records are observable. A behaviour that fails or cannot be observed
 is recorded as a limit before the level ships.
+
+The Claude probes ([2026-11-11](../evidence/sandbox-escalation-probe-2026-11-11.md),
+[2026-11-12](../evidence/2026-11-12-claude-auto-hook-allow-probe.md)) found:
+
+- `dontAsk` refuses an escalated call that the hook allowed.
+- Under `auto`, unflagged Bash runs sandboxed, and a call the hook held for 75 seconds and then
+  allowed ran outside the sandbox.
+- The installed Claude Code honours `onFailure` and reports `supportsAutoMode` for each model.
+- No per-call classifier signal was observable, so whether the classifier also decides a
+  hook-allowed call is a recorded limit.
+- The 15-minute hold and the 60-minute ceiling are inferred from bounded runs.
 
 ## Threat model
 

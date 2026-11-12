@@ -2295,7 +2295,7 @@ test("the sandbox level asks for confirmation when made unsandboxed and saves st
   await savedOutcome(page);
   assert.equal(d.sandboxLevel(ids.atlas), "strict");
 
-  // Escalate with approval saves at once and states that Claude Code turns stay strict.
+  // Escalate with approval saves at once and states that it applies in both harnesses.
   await page
     .getByText(
       /Claude Code task turns in a project at the escalate-approval level/,
@@ -2311,7 +2311,7 @@ test("the sandbox level asks for confirmation when made unsandboxed and saves st
   assert.equal(d.sandboxLevel(ids.atlas), "escalate-approval");
   await page
     .getByText(
-      "The sandbox level is escalate-approval for this project's Codex task turns; its Claude Code task turns stay strict.",
+      "The sandbox level is escalate-approval for this project's task turns in both harnesses.",
     )
     .waitFor();
   // Leaving it for unsandboxed still asks.

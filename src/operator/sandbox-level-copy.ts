@@ -17,9 +17,13 @@ export const sandboxLevelLabels: Record<SandboxLevel, string> = {
 export const codexEscalateApprovalLine =
   "A project at the escalate-approval level keeps its Codex task turns sandboxed, with an approval policy that allows only sandbox escalation: a turn can ask to run one command outside the sandbox. Draft, read-only and unbound turns stay strict.";
 
-/** Claude Code has no escalation seam yet, so its task turns stay strict. */
+/** What the escalate-approval level sends Claude Code for a task turn (#1682 T1, branch B). */
 export const claudeEscalateApprovalLine =
-  "Claude Code task turns in a project at the escalate-approval level run at the strict level for now; they cannot ask to run a command outside the sandbox.";
+  "A project at the escalate-approval level runs its Claude Code task turns sandboxed in auto permission mode: cab's hook holds each Bash call that asks to leave the sandbox for the operator. Claude's classifier can still refuse an approved call. Draft, read-only and unbound turns stay strict.";
+
+/** The Bash timeout ceiling of Claude Code task turns that can leave the sandbox (#1678). */
+export const claudeBashTimeoutLine =
+  "At the escalate-approval and unsandboxed levels, a Claude Code Bash command can ask for up to 60 minutes. A command that times out is moved to the background and keeps running, so the timeout does not bound it.";
 
 /** How an escalation is decided and what an approved one can do. */
 export const escalateApprovalRiskLines = [
@@ -31,6 +35,7 @@ export const escalateApprovalRiskLines = [
 export const escalateApprovalLines = [
   codexEscalateApprovalLine,
   claudeEscalateApprovalLine,
+  claudeBashTimeoutLine,
   ...escalateApprovalRiskLines,
 ];
 
@@ -91,7 +96,7 @@ export const projectSandboxLevelLine = (level: SandboxLevel) =>
   level === "unsandboxed"
     ? "The sandbox level is unsandboxed for this project's task turns in both harnesses."
     : level === "escalate-approval"
-      ? "The sandbox level is escalate-approval for this project's Codex task turns; its Claude Code task turns stay strict."
+      ? "The sandbox level is escalate-approval for this project's task turns in both harnesses."
       : level === "escalate-auto-review"
         ? "The sandbox level is escalate-auto-review for this project's Codex task turns; its Claude Code task turns stay strict."
         : "The sandbox level is strict for this project.";

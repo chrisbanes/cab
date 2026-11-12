@@ -713,7 +713,7 @@ const hiddenLimits = [
   ...codexPolicyDisclosure().limits,
   ...codexPolicyDisclosure().lines.slice(2),
 ];
-const evidenceReferences = ["F6.3", "F6.4", "F5.5", "#827"];
+const evidenceReferences = ["F6.4", "F5.5", "#827"];
 
 for (const [name, viewport] of [
   ["1366", desktop],
@@ -763,7 +763,7 @@ for (const [name, viewport] of [
         .waitFor();
     for (const line of [
       "Commands run in Claude Code's sandbox",
-      "Command network access is denied. There are no interactive approvals.",
+      "Command network access is denied. Only an escalation at the escalate-approval level asks for an interactive approval.",
     ])
       await runtimeRow(page, "Claude").getByText(line).first().waitFor();
 

@@ -2138,9 +2138,9 @@ export class ExecutionState {
         ...(this.hasTurnRequests ? [work.workId] : []),
       ) as { level: SandboxLevel; harness: string } | undefined;
     if (row?.level === "unsandboxed") return "unsandboxed";
-    return (row?.level === "escalate-approval" ||
-      row?.level === "escalate-auto-review") &&
-      row.harness === "codex"
+    // Claude Code has an escalate-approval seam (auto mode with a hook hold); auto-review is Codex only.
+    return row?.level === "escalate-approval" ||
+      (row?.level === "escalate-auto-review" && row.harness === "codex")
       ? row.level
       : "strict";
   }

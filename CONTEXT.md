@@ -315,9 +315,10 @@ _Avoid_: Assignment identity when referring only to an execution session
 **Sandbox level**:
 A per-project setting, `sandbox`, that the operator chooses for a project's task turns
 (ADR-1034). `strict`, the default, keeps the harness sandbox. `escalate-approval` keeps it but
-lets a Codex task turn ask to run one command outside it, a **Sandbox escalation**;
+lets a Codex or Claude Code task turn ask to run one command outside it, a **Sandbox
+escalation**. For Claude Code, its auto-mode classifier can still refuse an approved call.
 `escalate-auto-review` has Codex's reviewer decide each such request instead, a **Reviewer
-decision**. Claude Code task turns stay `strict` at both levels for now. `unsandboxed` runs task turns without the
+decision**; Claude Code task turns stay `strict` at that level for now. `unsandboxed` runs task turns without the
 sandbox, so they can launch host tools such as browsers and Android emulators; agents then act
 with the service user's full filesystem, process, network and credential access, and command
 network access and local listening are superseded. The level is recorded when a turn is

@@ -16,6 +16,7 @@ import {
   localListeningLimit,
 } from "../../src/operator/local-listening-copy.js";
 import {
+  claudeBashTimeoutLine,
   claudeEscalateApprovalLine,
   claudeEscalateAutoReviewLine,
   claudeUnsandboxedLine,
@@ -441,17 +442,30 @@ test("both harnesses' disclosures state the unsandboxed grant and risks within t
   assert.match(claudeUnsandboxedLine, /sandbox disabled/);
   assert.ok(claude.lines.includes(claudeUnsandboxedLine));
   assert.ok(codex.lines.includes(codexUnsandboxedLine));
-  // The escalate-approval level: Codex states its grant and risks, Claude that it stays strict.
+  // The escalate-approval level: each harness states its grant and the shared risks; Claude also
+  // states that its classifier can still refuse an approved call and that timeouts background.
   assert.match(codexEscalateApprovalLine, /allows only sandbox escalation/);
-  assert.match(claudeEscalateApprovalLine, /run at the strict level/);
+  assert.doesNotMatch(claudeEscalateApprovalLine, /strict level/);
+  assert.match(claudeEscalateApprovalLine, /auto permission mode/);
+  assert.match(
+    claudeEscalateApprovalLine,
+    /classifier can still refuse an approved call/,
+  );
+  assert.match(claudeBashTimeoutLine, /60 minutes.*keeps running/);
   assert.ok(codex.lines.includes(codexEscalateApprovalLine));
+  for (const line of [
+    claudeEscalateApprovalLine,
+    claudeBashTimeoutLine,
+    ...escalateApprovalRiskLines,
+  ])
+    assert.ok(claude.lines.includes(line), line);
   for (const risk of escalateApprovalRiskLines)
     assert.ok(codex.lines.includes(risk), risk);
-  assert.ok(claude.lines.includes(claudeEscalateApprovalLine));
   assert.ok(
     [
       codexEscalateApprovalLine,
       claudeEscalateApprovalLine,
+      claudeBashTimeoutLine,
       ...escalateApprovalRiskLines,
     ].every((line) => line.length <= 300),
   );

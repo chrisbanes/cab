@@ -31,6 +31,7 @@ import {
   RuntimeNotEnabledError,
   type RuntimeToolCall,
   type RuntimeTurnSettings,
+  type SandboxEscalationEvent,
   type UnexpectedRequest,
 } from "../../src/standalone/codex.js";
 import type { ClaudeTurnEnvironment } from "../../src/standalone/service.js";
@@ -184,10 +185,15 @@ function fixture(
     gitWritableRoots?: string[],
     localListening?: boolean,
     skipSandbox?: boolean,
+    sandboxEscalation?: "approval",
   ) => {
     const turnSettings = skills ? { ...settings, skills } : settings;
     assert.equal(
-      await settledPreflight(runtime, { workspace, settings: turnSettings }),
+      await settledPreflight(runtime, {
+        workspace,
+        settings: turnSettings,
+        ...(sandboxEscalation ? { sandboxEscalation } : {}),
+      }),
       undefined,
     );
     const turnId = await runtime.startTurn(
@@ -195,13 +201,18 @@ function fixture(
       workspace,
       "Do the work",
       turnSettings,
-      access || gitWritableRoots || localListening || skipSandbox
+      access ||
+        gitWritableRoots ||
+        localListening ||
+        skipSandbox ||
+        sandboxEscalation
         ? {
             networkAccess: false,
             ...(access ? { access } : {}),
             ...(gitWritableRoots ? { gitWritableRoots } : {}),
             ...(localListening ? { localListening } : {}),
             ...(skipSandbox ? { skipSandbox } : {}),
+            ...(sandboxEscalation ? { sandboxEscalation } : {}),
           }
         : undefined,
     );
@@ -1308,8 +1319,8 @@ test("the effective policy discloses hook confinement, the redirected temporary 
     /PreToolUse hook/,
     /exit 126/,
     /F5\.5/,
-    /F6\.3/,
     /F6\.4/,
+    /classifier also decides a call the operator approved/,
     /scrub/,
     /version the pinned SDK declares/,
     /TodoWrite/,
@@ -2185,5 +2196,490 @@ test("native subscription metadata may omit the optional API-key source and refu
     } finally {
       await f.cleanup();
     }
+  }
+});
+
+type Decision = {
+  hookSpecificOutput?: {
+    permissionDecision?: string;
+    permissionDecisionReason?: string;
+  };
+};
+const decisionOf = (value: unknown) =>
+  (value as Decision).hookSpecificOutput?.permissionDecision ?? "pass";
+const reasonOf = (value: unknown) =>
+  (value as Decision).hookSpecificOutput?.permissionDecisionReason;
+const flagged = (command: string, description?: string) => ({
+  command,
+  dangerouslyDisableSandbox: true,
+  ...(description ? { description } : {}),
+});
+/** Waits for a condition the runtime reaches asynchronously. */
+async function until(condition: () => boolean): Promise<void> {
+  for (let attempt = 0; attempt < 400 && !condition(); attempt++)
+    await new Promise((resolve) => setTimeout(resolve, 5));
+  assert.ok(condition(), "condition not reached");
+}
+
+test("an escalate-approval task turn runs in auto mode with Bash held by the hook; other turns keep their options", {
+  skip: slashTmpDenied(),
+}, async () => {
+  const script: Script = async function* (session) {
+    yield init(sessionOf(session), "auto");
+    yield result(sessionOf(session));
+  };
+  const f = fixture({ scripts: [script, script, script, script] });
+  try {
+    await f.runtime.start();
+    const threadId = await f.runtime.startThread(f.workspace, []);
+    const run = async (
+      access?: "read-only",
+      skip?: boolean,
+      escalate?: "approval",
+    ) => {
+      const turnId = await f.turn(
+        threadId,
+        access,
+        undefined,
+        undefined,
+        undefined,
+        skip,
+        escalate,
+      );
+      assert.equal(await f.runtime.waitForTurn(threadId, turnId), "completed");
+    };
+    await run();
+    await run(undefined, undefined, "approval");
+    await run("read-only", undefined, "approval");
+    await run(undefined, true);
+    const [strict, escalated, readOnly, unsandboxed] = f.sessions.map(
+      (s) => s.options,
+    );
+    assert.ok(strict && escalated && readOnly && unsandboxed);
+    assert.equal(escalated.permissionMode, "auto");
+    assert.deepEqual(
+      escalated.allowedTools,
+      strict.allowedTools?.filter((name) => name !== "Bash"),
+    );
+    assert.ok(strict.allowedTools?.includes("Bash"));
+    assert.deepEqual(escalated.tools, strict.tools);
+    assert.equal(escalated.sandbox?.allowUnsandboxedCommands, true);
+    assert.equal(escalated.sandbox?.autoAllowBashIfSandboxed, true);
+    const { hooks: _hooks, ...matcher } =
+      escalated.hooks?.PreToolUse?.[0] ?? {};
+    assert.deepEqual(matcher, { timeout: 960, onFailure: "block" });
+    assert.equal(escalated.env?.BASH_MAX_TIMEOUT_MS, "3600000");
+    // A read-only turn ignores the escalation and keeps today's exact options.
+    for (const options of [strict, readOnly]) {
+      assert.equal(options.permissionMode, "dontAsk");
+      assert.equal(options.sandbox?.allowUnsandboxedCommands, false);
+      assert.deepEqual(Object.keys(options.hooks?.PreToolUse?.[0] ?? {}), [
+        "hooks",
+      ]);
+      assert.equal(options.env?.BASH_MAX_TIMEOUT_MS, undefined);
+    }
+    assert.deepEqual(readOnly.allowedTools, strict.allowedTools);
+    // An unsandboxed turn gains only the request ceiling.
+    assert.equal(unsandboxed.permissionMode, "dontAsk");
+    assert.deepEqual(unsandboxed.allowedTools, strict.allowedTools);
+    assert.equal(unsandboxed.env?.BASH_MAX_TIMEOUT_MS, "3600000");
+  } finally {
+    await f.cleanup();
+  }
+});
+
+test("a held escalation is answered once: accept allows the call and records its exit code, decline refuses it", {
+  skip: slashTmpDenied(),
+}, async () => {
+  const events: SandboxEscalationEvent[] = [];
+  const decisions: unknown[] = [];
+  let f!: ReturnType<typeof fixture>;
+  const requested = (n: number) =>
+    events.filter((e) => e.kind === "requested").length >= n;
+  const script: Script = async function* (session) {
+    yield init(sessionOf(session), "auto");
+    const accepted = session.hook(
+      "Bash",
+      flagged("node chromium.mjs", "needs host Chromium"),
+      "toolu_accept",
+    );
+    await until(() => requested(1));
+    const [first] = events;
+    assert.ok(first?.kind === "requested");
+    assert.equal(
+      await f.runtime.replySandboxEscalation(first.identity, "accept"),
+      true,
+    );
+    // A second answer, or one for another generation, is never written.
+    assert.equal(
+      await f.runtime.replySandboxEscalation(first.identity, "decline"),
+      false,
+    );
+    decisions.push(await accepted);
+    await session.postHook(
+      "Bash",
+      flagged("node chromium.mjs"),
+      "toolu_accept",
+      {
+        response: { stdout: "ok", stderr: "", interrupted: false },
+      },
+    );
+    const declined = session.hook("Bash", flagged("echo hi"), "toolu_decline");
+    await until(() => requested(2));
+    const second = events.findLast((e) => e.kind === "requested");
+    assert.ok(second?.kind === "requested");
+    assert.equal(
+      await f.runtime.replySandboxEscalation(
+        { ...second.identity, runtimeGeneration: "another" },
+        "accept",
+      ),
+      false,
+    );
+    assert.equal(
+      await f.runtime.replySandboxEscalation(second.identity, "decline"),
+      true,
+    );
+    decisions.push(await declined);
+    yield result(sessionOf(session));
+  };
+  f = fixture({ scripts: [script] });
+  f.runtime.onSandboxEscalation((event) => {
+    events.push(event);
+    return true;
+  });
+  try {
+    await f.runtime.start();
+    const threadId = await f.runtime.startThread(f.workspace, []);
+    const turnId = await f.turn(
+      threadId,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      "approval",
+    );
+    assert.equal(await f.runtime.waitForTurn(threadId, turnId), "completed");
+    const generation = f.runtime.currentUserInputGeneration();
+    const identity = (id: string) => ({
+      requestId: id,
+      runtimeGeneration: generation,
+      threadId,
+      turnId,
+      itemId: id,
+    });
+    assert.deepEqual(events, [
+      {
+        kind: "requested",
+        identity: identity("toolu_accept"),
+        command: "node chromium.mjs",
+        cwd: f.workspace,
+        reason: "needs host Chromium",
+      },
+      {
+        kind: "completed",
+        identity: identity("toolu_accept"),
+        exitCode: 0,
+        durationMs: null,
+      },
+      {
+        kind: "requested",
+        identity: identity("toolu_decline"),
+        command: "echo hi",
+        cwd: f.workspace,
+        reason: null,
+      },
+      {
+        kind: "completed",
+        identity: identity("toolu_decline"),
+        exitCode: null,
+        durationMs: null,
+      },
+    ]);
+    assert.deepEqual(decisions.map(decisionOf), ["allow", "deny"]);
+    assert.match(String(reasonOf(decisions[1])), /declined/);
+    assert.deepEqual(f.unexpected, []);
+  } finally {
+    await f.cleanup();
+  }
+});
+
+test("a flagged call is refused without an owner, before auto mode is confirmed, on a strict turn and when its turn stops", {
+  skip: slashTmpDenied(),
+}, async () => {
+  const events: SandboxEscalationEvent[] = [];
+  let owned = false;
+  const decisions: unknown[] = [];
+  let held: Promise<unknown> | undefined;
+  const refusing: Script = async function* (session) {
+    // Before init confirms auto, nothing is sent to the operator.
+    decisions.push(
+      await session.hook("Bash", flagged("echo early"), "toolu_early"),
+    );
+    yield init(sessionOf(session), "auto");
+    // A listener that does not take the request leaves it refused.
+    decisions.push(
+      await session.hook("Bash", flagged("echo unowned"), "toolu_unowned"),
+    );
+    yield result(sessionOf(session));
+  };
+  const strict: Script = async function* (session) {
+    yield init(sessionOf(session), "auto");
+    decisions.push(
+      await session.hook("Bash", flagged("echo strict"), "toolu_strict"),
+    );
+    yield result(sessionOf(session));
+  };
+  const stopped: Script = async function* (session) {
+    yield init(sessionOf(session), "auto");
+    held = session.hook("Bash", flagged("echo held"), "toolu_held");
+    await new Promise(() => {});
+  };
+  const f = fixture({ scripts: [refusing, strict, stopped] });
+  f.runtime.onSandboxEscalation((event) => {
+    events.push(event);
+    return owned;
+  });
+  try {
+    await f.runtime.start();
+    const threadId = await f.runtime.startThread(f.workspace, []);
+    const escalate = (id: string) =>
+      f.turn(
+        id,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        "approval",
+      );
+    const first = await escalate(threadId);
+    assert.equal(await f.runtime.waitForTurn(threadId, first), "completed");
+    const second = await f.turn(threadId);
+    assert.equal(await f.runtime.waitForTurn(threadId, second), "completed");
+    assert.deepEqual(decisions.map(decisionOf), ["deny", "deny", "deny"]);
+    assert.match(String(reasonOf(decisions[0])), /not confirmed auto/);
+    assert.equal(
+      reasonOf(decisions[2]),
+      "Commands never run outside the sandbox",
+    );
+    // Only the unowned request reached the listener.
+    assert.deepEqual(
+      events.map((e) => e.kind === "requested" && e.command),
+      ["echo unowned"],
+    );
+    owned = true;
+    const third = await escalate(threadId);
+    await until(() => held !== undefined && events.length === 2);
+    await f.runtime.interruptTurn(threadId, third);
+    assert.equal(decisionOf(await held), "deny");
+    assert.equal(await f.runtime.waitForTurn(threadId, third), "failed");
+    const ended = events.at(-1);
+    // Nothing held can be answered after its turn stopped.
+    assert.ok(ended?.kind === "ended");
+    assert.equal(ended.reason, "Turn stopped");
+    assert.equal(
+      await f.runtime.replySandboxEscalation(ended.identity, "accept"),
+      false,
+    );
+  } finally {
+    await f.cleanup();
+  }
+});
+
+test("an escalate turn whose start reports another permission mode fails with a named reason", {
+  skip: slashTmpDenied(),
+}, async () => {
+  const script: Script = async function* (session) {
+    yield init(sessionOf(session), "default");
+    yield result(sessionOf(session));
+  };
+  const f = fixture({ scripts: [script] });
+  try {
+    await f.runtime.start();
+    const threadId = await f.runtime.startThread(f.workspace, []);
+    const turnId = await f.turn(
+      threadId,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      "approval",
+    );
+    await assert.rejects(f.runtime.waitForTurn(threadId, turnId));
+    assert.deepEqual(
+      f.anomalies.map((a) => a.reason),
+      ["Claude Code reported permission mode default, not auto"],
+    );
+  } finally {
+    await f.cleanup();
+  }
+});
+
+test("a hook cancelled while held refuses the call and ends the escalation; a failed command reports its exit code", {
+  skip: slashTmpDenied(),
+}, async () => {
+  const events: SandboxEscalationEvent[] = [];
+  const decisions: unknown[] = [];
+  let f!: ReturnType<typeof fixture>;
+  const script: Script = async function* (session) {
+    yield init(sessionOf(session), "auto");
+    const cancel = new AbortController();
+    const held = session.hook(
+      "Bash",
+      flagged("echo cancelled"),
+      "toolu_cancel",
+      undefined,
+      cancel.signal,
+    );
+    await until(() => events.length === 1);
+    cancel.abort();
+    decisions.push(await held);
+    const failing = session.hook("Bash", flagged("exit 3"), "toolu_fail");
+    await until(() => events.length === 3);
+    const request = events[2];
+    assert.ok(request?.kind === "requested");
+    await f.runtime.replySandboxEscalation(request.identity, "accept");
+    decisions.push(await failing);
+    await session.postHook("Bash", flagged("exit 3"), "toolu_fail", {
+      error: "Exit code 3\nboom",
+    });
+    yield result(sessionOf(session));
+  };
+  f = fixture({ scripts: [script] });
+  f.runtime.onSandboxEscalation((event) => {
+    events.push(event);
+    return true;
+  });
+  try {
+    await f.runtime.start();
+    const threadId = await f.runtime.startThread(f.workspace, []);
+    const turnId = await f.turn(
+      threadId,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      "approval",
+    );
+    assert.equal(await f.runtime.waitForTurn(threadId, turnId), "completed");
+    assert.deepEqual(decisions.map(decisionOf), ["deny", "allow"]);
+    assert.deepEqual(
+      events.map((e) => e.kind),
+      ["requested", "ended", "requested", "completed"],
+    );
+    const completed = events[3];
+    assert.ok(completed?.kind === "completed");
+    assert.equal(completed.exitCode, 3);
+    assert.equal(completed.durationMs, null);
+  } finally {
+    await f.cleanup();
+  }
+});
+
+test("preflight and start refuse an escalate-approval turn whose model has no auto mode, by the model's value", {
+  skip: slashTmpDenied(),
+}, async () => {
+  const f = fixture();
+  try {
+    await f.runtime.start();
+    const preflight = (model: string) =>
+      settledPreflight(f.runtime, {
+        workspace: f.workspace,
+        settings: { model, reasoningEffort: null },
+        sandboxEscalation: "approval",
+      });
+    assert.equal(
+      await preflight("default"),
+      "Claude runtime unavailable: auto mode is not available for model default",
+    );
+    assert.equal(await preflight("haiku"), undefined);
+    // Without the hint, or at auto-review (Codex only), auto mode is not needed.
+    assert.equal(
+      await settledPreflight(f.runtime, {
+        workspace: f.workspace,
+        settings: { model: "default", reasoningEffort: null },
+      }),
+      undefined,
+    );
+    const threadId = await f.runtime.startThread(f.workspace, []);
+    await assert.rejects(
+      f.runtime.startTurn(
+        threadId,
+        f.workspace,
+        "x",
+        { model: "default", reasoningEffort: null },
+        {
+          networkAccess: false,
+          sandboxEscalation: "approval",
+        },
+      ),
+      /auto mode is not available for model default/,
+    );
+  } finally {
+    await f.cleanup();
+  }
+});
+
+test("canUseTool allows only an accepted escalation's own call, once; the turn's process identity binds only while it runs", {
+  skip: slashTmpDenied(),
+}, async () => {
+  const events: SandboxEscalationEvent[] = [];
+  const asked: unknown[] = [];
+  let identityDuring: unknown;
+  let f!: ReturnType<typeof fixture>;
+  let threadId = "";
+  const script: Script = async function* (session) {
+    yield init(sessionOf(session), "auto");
+    const held = session.hook("Bash", flagged("node chromium.mjs"), "toolu_ok");
+    await until(() => events.length === 1);
+    const request = events[0];
+    assert.ok(request?.kind === "requested");
+    identityDuring = f.runtime.turnProcessIdentity(
+      threadId,
+      request.identity.turnId,
+    );
+    await f.runtime.replySandboxEscalation(request.identity, "accept");
+    await held;
+    const input = flagged("node chromium.mjs");
+    asked.push(await session.canUseTool("Bash", input, "toolu_ok"));
+    asked.push(await session.canUseTool("Bash", input, "toolu_ok"));
+    asked.push(await session.canUseTool("Bash", input, "toolu_other"));
+    yield result(sessionOf(session));
+  };
+  f = fixture({ scripts: [script] });
+  f.runtime.onSandboxEscalation((event) => {
+    events.push(event);
+    return true;
+  });
+  try {
+    await f.runtime.start();
+    threadId = await f.runtime.startThread(f.workspace, []);
+    const turnId = await f.turn(
+      threadId,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      "approval",
+    );
+    assert.equal(await f.runtime.waitForTurn(threadId, turnId), "completed");
+    assert.deepEqual(asked, [
+      { behavior: "allow", updatedInput: flagged("node chromium.mjs") },
+      { behavior: "deny", message: "cab grants no permissions" },
+      { behavior: "deny", message: "cab grants no permissions" },
+    ]);
+    assert.equal(f.unexpected.length, 2);
+    assert.deepEqual(
+      identityDuring,
+      (f.recorded[0] as { processIdentity: unknown }).processIdentity,
+    );
+    assert.equal(f.runtime.turnProcessIdentity(threadId, turnId), null);
+    assert.equal(f.runtime.turnProcessIdentity("other", turnId), null);
+  } finally {
+    await f.cleanup();
   }
 });

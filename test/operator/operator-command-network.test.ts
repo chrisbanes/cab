@@ -359,7 +359,7 @@ test("the sandbox level is strict by default, operator-only and versioned throug
   for (const line of [...unsandboxedGrantLines, unsandboxedSupersededLine])
     assert.ok(notes.includes(line), line);
 
-  // Choosing escalate-approval states its Codex grant, that Claude Code stays strict, and its risks.
+  // Choosing escalate-approval states each harness's grant, the Claude timeout limit and its risks.
   const escalate = prepare("escalate-approval");
   r = await escalate.run();
   assert.equal(r.code, 0, r.err + r.out);

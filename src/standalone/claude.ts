@@ -33,8 +33,14 @@ import {
   type RuntimeToolResult,
   type RuntimeTurnPolicy,
   type RuntimeTurnSettings,
+  type SandboxEscalationEvent,
   type UnexpectedRequest,
 } from "./codex.js";
+import {
+  type NativeInputEndpointIdentity,
+  nativeEndpointKey,
+  nativeInputEndpointIdentitySchema,
+} from "../core/structured-questions.js";
 import type {
   ExactExecutionIdentity,
   ExecutionInspection,
@@ -113,9 +119,18 @@ const supportedModelsSchema = z
       value: z.string().min(1).max(128),
       supportsEffort: z.boolean().optional(),
       supportedEffortLevels: z.array(effortSchema).optional(),
+      supportsAutoMode: z.boolean().optional(),
     }),
   )
   .max(64);
+/**
+ * An escalate-approval turn's PreToolUse hold, in seconds: the service's 15-minute expiry plus
+ * margin, so the service always answers first. With `onFailure: "block"` a hook timeout or throw
+ * refuses the call instead of handing it to the classifier.
+ */
+const escalationHookTimeoutSeconds = 960;
+/** The Bash timeout request ceiling for unsandboxed and escalate-level task turns (#1678). */
+const longBashTimeoutMs = "3600000";
 const settingsReadTimeoutMs = 30_000;
 /** A passed self-test admits a turn only this soon after it ran. */
 const probeFreshMs = 30_000;
@@ -158,6 +173,7 @@ const initSchema = z.object({
   subtype: z.literal("init"),
   session_id: z.string().min(1),
   claude_code_version: z.string().optional(),
+  permissionMode: z.string().optional(),
 });
 const assistantSchema = z.object({
   type: z.literal("assistant"),
@@ -193,6 +209,7 @@ const hookInputSchema = z.object({
   tool_name: z.string().min(1),
   tool_input: z.unknown(),
   tool_use_id: z.string().min(1),
+  cwd: z.string().min(1).optional(),
   mcp_server: z.object({ name: z.string(), source: z.string() }).optional(),
   ...subagentFields,
 });
@@ -497,7 +514,7 @@ export const claudePolicyLimits: readonly string[] = [
   "File-editing tools are confined by cab's PreToolUse hook, not by the OS sandbox.",
   "A sandbox that stops working mid-turn shows only as failed commands (exit 126), not a failed turn.",
   "The sandbox self-test proves Seatbelt can start, not the exact profile Claude Code applies.",
-  "Untested: inertness of model-written Claude configuration (C0 F5.5), whether Claude Code honours dangerouslyDisableSandbox (F6.3; cab's hook denies it), and a missing sandbox-exec binary (F6.4).",
+  "Untested: inertness of model-written Claude configuration (C0 F5.5), a missing sandbox-exec binary (F6.4), and whether Claude's auto-mode classifier also decides a call the operator approved; it can still refuse one, which then records no exit code.",
   "The subprocess environment scrub is qualified for sandboxed Bash only (#827): Bash saw neither the token variable nor its value, and could not read its parent's environment with ps. Other ways to read a parent process's environment are untested.",
   "After a service crash, a running Claude CLI process can outlive the service (#827); verify it has exited before recovering the turn.",
   "Only the Claude Code version the pinned SDK declares was qualified. The installed claude is not version-checked, and another version may enforce the sandbox, tool and permission controls differently.",
@@ -622,10 +639,27 @@ interface TurnOutcome {
   failure?: RuntimeTerminalFailureEvidence;
 }
 
+/** One flagged Bash call of an escalate-approval turn, keyed by its tool_use_id. */
+interface ClaudeEscalation {
+  identity: NativeInputEndpointIdentity;
+  /** Answers the held hook; cleared once it has been answered or ended. */
+  settle: ((decision: "accept" | "decline" | "ended") => void) | undefined;
+  /** Accepted by the operator; `canUseTool` may allow this one call once. */
+  accepted: boolean;
+  permitted: boolean;
+}
+
 interface ClaudeTurn {
   threadId: string;
   turnId: string;
   abort: AbortController;
+  /** Set on a task turn admitted at escalate-approval. */
+  escalation?: "approval";
+  /** Claude Code's init reported `auto`; until then flagged Bash is refused. */
+  autoConfirmed: boolean;
+  escalations: Map<string, ClaudeEscalation>;
+  /** Why the turn's stream was rejected, when a named reason applies. */
+  malformedReason?: string;
   child?: ChildProcess;
   exited?: Promise<void>;
   identity?: RuntimeProcessIdentity;
@@ -663,6 +697,8 @@ export class ClaudeRuntime implements Runtime {
   private readonly turns = new Map<string, ClaudeTurn>();
   /** Model to supported efforts, read model-free from the installed CLI. */
   private supported: Map<string, readonly string[]> | undefined;
+  /** Models whose `supportsAutoMode` the same read reported true. */
+  private autoModels = new Set<string>();
   private settingsReading = false;
   private settingsRun: Promise<void> | undefined;
   private settingsAbort: AbortController | undefined;
@@ -688,6 +724,7 @@ export class ClaudeRuntime implements Runtime {
     threadId: string;
     turnId: string;
   }) => void;
+  private sandboxEscalation?: (event: SandboxEscalationEvent) => boolean;
 
   constructor(private readonly options: ClaudeRuntimeOptions) {}
 
@@ -720,6 +757,44 @@ export class ClaudeRuntime implements Runtime {
     listener: (activity: { threadId: string; turnId: string }) => void,
   ): void {
     this.turnActivity = listener;
+  }
+  onSandboxEscalation(
+    listener: (event: SandboxEscalationEvent) => boolean,
+  ): void {
+    this.sandboxEscalation = listener;
+  }
+
+  /** Answers a held escalation once; false when it is not held by this generation. */
+  async replySandboxEscalation(
+    identity: NativeInputEndpointIdentity,
+    decision: "accept" | "decline",
+  ): Promise<boolean> {
+    const turn = this.turns.get(identity.turnId);
+    const entry =
+      turn?.threadId === identity.threadId
+        ? turn.escalations.get(identity.itemId)
+        : undefined;
+    if (
+      !entry?.settle ||
+      identity.runtimeGeneration !== this.generation ||
+      nativeEndpointKey(entry.identity) !== nativeEndpointKey(identity)
+    )
+      return false;
+    const settle = entry.settle;
+    entry.settle = undefined;
+    settle(decision);
+    return true;
+  }
+
+  /** The recorded CLI process of a running turn; each turn has its own. */
+  turnProcessIdentity(
+    threadId: string,
+    turnId: string,
+  ): RuntimeProcessIdentity | null {
+    const turn = this.turns.get(turnId);
+    return turn?.threadId === threadId && !turn.done
+      ? (turn.identity ?? null)
+      : null;
   }
 
   /** Terminal evidence is bound to this per-start generation. */
@@ -768,6 +843,7 @@ export class ClaudeRuntime implements Runtime {
     workspace: string;
     settings?: RuntimeTurnSettings;
     skipSandbox?: boolean;
+    sandboxEscalation?: "approval" | "auto-review";
   }): Promise<string | undefined> {
     const unavailable = (reason: string) =>
       `Claude runtime unavailable: ${reason}`;
@@ -785,7 +861,9 @@ export class ClaudeRuntime implements Runtime {
     if (sandbox) return unavailable(sandbox);
     const settings = this.settingsStatus(input.workspace, env);
     if (settings) return unavailable(settings);
-    const problem = this.settingsProblem(input.settings);
+    const problem =
+      this.settingsProblem(input.settings) ??
+      this.autoModeProblem(input.settings, input.sandboxEscalation);
     if (problem) return unavailable(problem);
     // A passed self-test admits exactly one turn; an unsandboxed turn leaves it for the next.
     if (!input.skipSandbox) this.sandboxProbes.delete(input.workspace);
@@ -843,10 +921,18 @@ export class ClaudeRuntime implements Runtime {
     this.settingsReading = true;
     this.settingsFailedAt = undefined;
     this.settingsRun = this.readSettings(env, workspace).then(
-      (supported) => {
+      (models) => {
         this.settingsReading = false;
         if (this.generation !== generation) return;
-        this.supported = supported;
+        this.supported = new Map(
+          models.map((model) => [
+            model.value,
+            model.supportsEffort ? (model.supportedEffortLevels ?? []) : [],
+          ]),
+        );
+        this.autoModels = new Set(
+          models.filter((m) => m.supportsAutoMode).map((m) => m.value),
+        );
         this.notifyAdmission(0);
       },
       () => {
@@ -880,11 +966,26 @@ export class ClaudeRuntime implements Runtime {
     return undefined;
   }
 
+  /**
+   * An escalate-approval turn needs auto mode, looked up by the model's `value` as the settings
+   * read lists it; it is never downgraded to another mode.
+   */
+  private autoModeProblem(
+    settings: RuntimeTurnSettings | undefined,
+    escalation: "approval" | "auto-review" | undefined,
+  ): string | undefined {
+    if (escalation !== "approval") return undefined;
+    const model = settings?.model ?? "default";
+    return this.autoModels.has(model)
+      ? undefined
+      : `auto mode is not available for model ${model}`;
+  }
+
   /** A model-free query whose prompt never releases (#825 T1 F9.0). */
   private async readSettings(
     env: Record<string, string>,
     workspace: string,
-  ): Promise<Map<string, readonly string[]>> {
+  ): Promise<z.infer<typeof supportedModelsSchema>> {
     const { sdk, executable } = this;
     if (!sdk || !executable) throw new Error("Runtime stopped");
     const abort = new AbortController();
@@ -945,14 +1046,7 @@ export class ClaudeRuntime implements Runtime {
           );
         }),
       ]).finally(() => clearTimeout(timer));
-      return new Map(
-        supportedModelsSchema
-          .parse(models)
-          .map((model) => [
-            model.value,
-            model.supportsEffort ? (model.supportedEffortLevels ?? []) : [],
-          ]),
-      );
+      return supportedModelsSchema.parse(models);
     } finally {
       abort.abort();
       await drained;
@@ -997,6 +1091,7 @@ export class ClaudeRuntime implements Runtime {
     this.turns.clear();
     this.sandboxProbes.clear();
     this.supported = undefined;
+    this.autoModels = new Set();
     this.settingsFailedAt = undefined;
     this.freshThreads.clear();
     this.threadTools.clear();
@@ -1047,7 +1142,13 @@ export class ClaudeRuntime implements Runtime {
     if (!sdk || !executable || !generation) throw new Error("Runtime stopped");
     const environment = this.options.claude.turnEnvironment();
     if ("unavailable" in environment) throw new Error(environment.unavailable);
-    const problem = this.settingsProblem(settings);
+    const sandboxed = policy?.access === "read-only" || !policy?.skipSandbox;
+    // Only a writable task turn escalates; draft and read-only turns stay strict.
+    const escalate =
+      policy?.sandboxEscalation === "approval" && policy.access !== "read-only";
+    const problem =
+      this.settingsProblem(settings) ??
+      this.autoModeProblem(settings, escalate ? "approval" : undefined);
     if (problem) throw new Error(`Claude runtime unavailable: ${problem}`);
     const model = settings?.model ?? undefined;
     const effort =
@@ -1080,6 +1181,9 @@ export class ClaudeRuntime implements Runtime {
       threadId,
       turnId: randomUUID(),
       abort: new AbortController(),
+      ...(escalate ? { escalation: "approval" as const } : {}),
+      autoConfirmed: false,
+      escalations: new Map(),
       released: false,
       interrupted: false,
       malformed: false,
@@ -1104,10 +1208,22 @@ export class ClaudeRuntime implements Runtime {
         parent_tool_use_id: null,
       };
     }
-    const hook: HookCallback = async (input) => this.preToolUse(turn, input);
+    const hook: HookCallback = async (input, _toolUseId, { signal }) =>
+      this.preToolUse(turn, input, signal);
     const postHook: HookCallback = async (input) =>
       this.postToolUse(turn, input);
-    const canUseTool: CanUseTool = async (toolName) => {
+    const canUseTool: CanUseTool = async (
+      toolName,
+      toolInput,
+      { toolUseID },
+    ) => {
+      // Auto mode's classifier may still ask about a call the operator accepted (#1682 T1,
+      // branch B); that one call is allowed once, so it opens no second Inbox item.
+      const accepted = turn.escalations.get(toolUseID);
+      if (toolName === "Bash" && accepted?.accepted && !accepted.permitted) {
+        accepted.permitted = true;
+        return { behavior: "allow", updatedInput: toolInput };
+      }
       this.unexpected?.({
         method: `claude/canUseTool:${toolName}`,
         threadId,
@@ -1118,31 +1234,41 @@ export class ClaudeRuntime implements Runtime {
     const options: Options = {
       cwd: workspace,
       pathToClaudeCodeExecutable: executable,
-      env: claudeTurnEnvironment(environment.env, base),
+      env: {
+        ...claudeTurnEnvironment(environment.env, base),
+        // A request ceiling only: a timed-out command keeps running in the background (#1678).
+        ...(escalate || !sandboxed
+          ? { BASH_MAX_TIMEOUT_MS: longBashTimeoutMs }
+          : {}),
+      },
       ...(fresh ? { sessionId: threadId } : { resume: threadId }),
       ...(model !== undefined ? { model } : {}),
       ...(effort !== undefined ? { effort } : {}),
-      permissionMode: "dontAsk",
+      // An allow rule would decide escalated Bash before the hook and classifier, so Bash
+      // leaves allowedTools; sandboxed Bash still runs through autoAllowBashIfSandboxed.
+      permissionMode: escalate ? "auto" : "dontAsk",
       tools: [...turnTools],
-      allowedTools: [...turnTools, "mcp__cab__*"],
+      allowedTools: [
+        ...turnTools.filter((name) => !escalate || name !== "Bash"),
+        "mcp__cab__*",
+      ],
       disallowedTools: [...disallowedTools],
-      sandbox:
-        policy?.skipSandbox && policy.access !== "read-only"
-          ? { enabled: false }
-          : {
-              enabled: true,
-              failIfUnavailable: true,
-              allowUnsandboxedCommands: false,
-              autoAllowBashIfSandboxed: true,
-              network: {
-                allowedDomains: [],
-                // macOS only: lets sandboxed commands bind local ports; outbound stays denied.
-                ...(policy?.localListening && policy.access !== "read-only"
-                  ? { allowLocalBinding: true }
-                  : {}),
-              },
-              filesystem: { allowWrite: sandboxWritable },
+      sandbox: !sandboxed
+        ? { enabled: false }
+        : {
+            enabled: true,
+            failIfUnavailable: true,
+            allowUnsandboxedCommands: escalate,
+            autoAllowBashIfSandboxed: true,
+            network: {
+              allowedDomains: [],
+              // macOS only: lets sandboxed commands bind local ports; outbound stays denied.
+              ...(policy?.localListening && policy.access !== "read-only"
+                ? { allowLocalBinding: true }
+                : {}),
             },
+            filesystem: { allowWrite: sandboxWritable },
+          },
       mcpServers: {
         [mcpServerName]: sdk.createSdkMcpServer({
           name: mcpServerName,
@@ -1157,7 +1283,15 @@ export class ClaudeRuntime implements Runtime {
         }),
       },
       hooks: {
-        PreToolUse: [{ hooks: [hook] }],
+        PreToolUse: [
+          escalate
+            ? {
+                hooks: [hook],
+                timeout: escalationHookTimeoutSeconds,
+                onFailure: "block",
+              }
+            : { hooks: [hook] },
+        ],
         PostToolUse: [{ hooks: [postHook] }],
         PostToolUseFailure: [{ hooks: [postHook] }],
       },
@@ -1431,6 +1565,7 @@ export class ClaudeRuntime implements Runtime {
     } catch {
       // An error result throws after it is yielded; outcome is decided below.
     }
+    this.endEscalations(turn, "Turn ended");
     const exitVerified = await this.verifyExit(turn);
     turn.done = true;
     if (!turn.released) {
@@ -1444,7 +1579,10 @@ export class ClaudeRuntime implements Runtime {
       this.anomaly?.({ threadId: turn.threadId, turnId: turn.turnId, reason });
       turn.settled.reject(new Error("Runtime terminal evidence unavailable"));
     };
-    if (turn.malformed) return fail("Claude SDK message failed validation");
+    if (turn.malformed)
+      return fail(
+        turn.malformedReason ?? "Claude SDK message failed validation",
+      );
     if (!exitVerified) return fail("Claude process exit was not verified");
     let outcome: TurnOutcome;
     if (turn.result) {
@@ -1486,7 +1624,16 @@ export class ClaudeRuntime implements Runtime {
     if (!head.success) return false;
     if (head.data.type === "system" && head.data.subtype === "init") {
       const init = initSchema.safeParse(message);
-      return init.success && init.data.session_id === turn.threadId;
+      if (!init.success || init.data.session_id !== turn.threadId) return false;
+      if (turn.escalation) {
+        // Never downgraded: an escalate turn that is not in auto mode fails.
+        if (init.data.permissionMode !== "auto") {
+          turn.malformedReason = `Claude Code reported permission mode ${init.data.permissionMode ?? "none"}, not auto`;
+          return false;
+        }
+        turn.autoConfirmed = true;
+      }
+      return true;
     }
     if (head.data.type === "assistant") {
       const assistant = assistantSchema.safeParse(message);
@@ -1533,8 +1680,12 @@ export class ClaudeRuntime implements Runtime {
     }
   }
 
-  /** Denies calls outside cab's policy. */
-  private async preToolUse(turn: ClaudeTurn, raw: unknown) {
+  /** Denies calls outside cab's policy; holds an escalate-approval turn's flagged Bash. */
+  private async preToolUse(
+    turn: ClaudeTurn,
+    raw: unknown,
+    signal?: AbortSignal,
+  ) {
     const input = hookInputSchema.safeParse(raw);
     const deny = (reason: string) => ({
       hookSpecificOutput: {
@@ -1583,8 +1734,24 @@ export class ClaudeRuntime implements Runtime {
     if (
       name === "Bash" &&
       (!fields.success || fields.data.dangerouslyDisableSandbox === true)
-    )
-      return refuse("Commands never run outside the sandbox");
+    ) {
+      if (!fields.success || !turn.escalation)
+        return refuse("Commands never run outside the sandbox");
+      const refusal = await this.holdEscalation(
+        turn,
+        input.data,
+        fields.data,
+        signal,
+      );
+      return refusal === undefined
+        ? {
+            hookSpecificOutput: {
+              hookEventName: "PreToolUse" as const,
+              permissionDecision: "allow" as const,
+            },
+          }
+        : refuse(refusal);
+    }
     if (name.startsWith(mcpToolPrefix)) {
       if (
         input.data.mcp_server?.source !== "sdk" ||
@@ -1610,6 +1777,124 @@ export class ClaudeRuntime implements Runtime {
     return {};
   }
 
+  /**
+   * Sends a flagged Bash call to the operator and waits for the answer, the turn's end or the
+   * hook's own abort. Undefined allows the call; otherwise the refusal reason.
+   */
+  private async holdEscalation(
+    turn: ClaudeTurn,
+    call: z.infer<typeof hookInputSchema>,
+    fields: Record<string, unknown>,
+    signal: AbortSignal | undefined,
+  ): Promise<string | undefined> {
+    const refused = "Commands never run outside the sandbox";
+    if (!turn.autoConfirmed)
+      return "Claude Code has not confirmed auto permission mode";
+    const identity = nativeInputEndpointIdentitySchema.safeParse({
+      requestId: call.tool_use_id,
+      runtimeGeneration: this.generation,
+      threadId: turn.threadId,
+      turnId: turn.turnId,
+      itemId: call.tool_use_id,
+    });
+    if (
+      typeof fields.command !== "string" ||
+      !identity.success ||
+      turn.escalations.has(call.tool_use_id) ||
+      turn.abort.signal.aborted ||
+      signal?.aborted
+    )
+      return refused;
+    let settle!: (decision: "accept" | "decline" | "ended") => void;
+    const decided = new Promise<"accept" | "decline" | "ended">((done) => {
+      settle = done;
+    });
+    const entry: ClaudeEscalation = {
+      identity: identity.data,
+      settle,
+      accepted: false,
+      permitted: false,
+    };
+    turn.escalations.set(call.tool_use_id, entry);
+    if (
+      !this.emitEscalation({
+        kind: "requested",
+        identity: identity.data,
+        command: fields.command,
+        cwd: call.cwd ?? turn.workspace[0] ?? "",
+        reason:
+          typeof fields.description === "string" ? fields.description : null,
+      })
+    ) {
+      turn.escalations.delete(call.tool_use_id);
+      return refused;
+    }
+    // The hook's own abort is its timeout or the CLI cancelling it.
+    const hookEnded = () =>
+      this.endEscalation(entry, "Claude Code cancelled the held call");
+    const turnEnded = () => this.endEscalation(entry, "Turn stopped");
+    signal?.addEventListener("abort", hookEnded, { once: true });
+    turn.abort.signal.addEventListener("abort", turnEnded, { once: true });
+    const decision = await decided;
+    signal?.removeEventListener("abort", hookEnded);
+    turn.abort.signal.removeEventListener("abort", turnEnded);
+    if (decision === "accept") {
+      entry.accepted = true;
+      return undefined;
+    }
+    turn.escalations.delete(call.tool_use_id);
+    if (decision === "decline")
+      this.emitEscalation({
+        kind: "completed",
+        identity: entry.identity,
+        exitCode: null,
+        durationMs: null,
+      });
+    return decision === "decline"
+      ? "The operator declined running this command outside the sandbox"
+      : "The escalation ended before an answer";
+  }
+
+  /** Ends an unanswered escalation once; nobody can answer it after. */
+  private endEscalation(entry: ClaudeEscalation, reason: string): void {
+    const settle = entry.settle;
+    if (!settle) return;
+    entry.settle = undefined;
+    settle("ended");
+    this.emitEscalation({ kind: "ended", identity: entry.identity, reason });
+  }
+
+  private endEscalations(turn: ClaudeTurn, reason: string): void {
+    for (const entry of turn.escalations.values())
+      this.endEscalation(entry, reason);
+    turn.escalations.clear();
+  }
+
+  private emitEscalation(event: SandboxEscalationEvent): boolean {
+    try {
+      return this.sandboxEscalation?.(event) === true;
+    } catch {
+      return false;
+    }
+  }
+
+  /** An accepted escalation's completion, with Claude's exit code; Claude reports no duration. */
+  private completeEscalation(
+    turn: ClaudeTurn,
+    toolUseId: string,
+    exitCode: number | null,
+  ): void {
+    const entry = turn.escalations.get(toolUseId);
+    if (!entry?.accepted) return;
+    turn.escalations.delete(toolUseId);
+    this.emitEscalation({
+      kind: "completed",
+      identity: entry.identity,
+      exitCode,
+      durationMs: null,
+    });
+  }
+
   /** Records the tool outcome; the result is always `{}` so capture never steers the turn. */
   private async postToolUse(turn: ClaudeTurn, raw: unknown) {
     const input = postToolUseSchema.safeParse(raw);
@@ -1617,11 +1902,13 @@ export class ClaudeRuntime implements Runtime {
     const call = input.data;
     if (call.hook_event_name === "PostToolUseFailure") {
       const code = /^Exit code (\d+)(?:\n|$)/.exec(call.error);
+      const exitCode = call.is_interrupt || !code ? null : Number(code[1]);
       this.emitTool(turn, "completed", call, {
         status: "failed",
-        exitCode: call.is_interrupt || !code ? null : Number(code[1]),
+        exitCode,
         output: code ? call.error.slice(code[0].length) : call.error,
       });
+      this.completeEscalation(turn, call.tool_use_id, exitCode);
       return {};
     }
     if (call.tool_name === todoTool) {
@@ -1629,16 +1916,18 @@ export class ClaudeRuntime implements Runtime {
       return {};
     }
     const bash = bashResponseSchema.safeParse(call.tool_response);
+    const exitCode =
+      bash.success &&
+      !bash.data.interrupted &&
+      bash.data.returnCodeInterpretation === undefined &&
+      bash.data.backgroundTaskId === undefined &&
+      bash.data.timedOutAfterMs === undefined
+        ? 0
+        : null;
+    this.completeEscalation(turn, call.tool_use_id, exitCode);
     this.emitTool(turn, "completed", call, {
       status: "completed",
-      exitCode:
-        bash.success &&
-        !bash.data.interrupted &&
-        bash.data.returnCodeInterpretation === undefined &&
-        bash.data.backgroundTaskId === undefined &&
-        bash.data.timedOutAfterMs === undefined
-          ? 0
-          : null,
+      exitCode,
       ...(bash.success
         ? {
             output:
