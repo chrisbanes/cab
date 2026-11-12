@@ -1273,8 +1273,6 @@ test("codex-overrule links a review to its command item and overrules a denial o
   const overruleId = (denied.events as Event[]).find(
     (e) => e.kind === "overrule",
   )?.requestId;
-  const turnEndT = (denied.events as Event[]).find((e) => e.kind === "turn")
-    ?.t as number;
   const isRetry = (e: Event) => e.kind === "review" && e.reviewId === "r2";
   const deniedCells = (trace: Event) => {
     const o = classify("codex-overrule", trace);
@@ -1308,7 +1306,13 @@ test("codex-overrule links a review to its command item and overrules a denial o
     ],
     [
       "sent after turn/completed",
-      edit(denied, (e) => e.kind === "overrule", { t: turnEndT + 1 }),
+      {
+        ...denied,
+        events: [
+          ...without(denied, (e) => e.kind === "overrule").events,
+          ...(denied.events as Event[]).filter((e) => e.kind === "overrule"),
+        ],
+      },
       ["untested", "untested"],
     ],
     [

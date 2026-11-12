@@ -320,6 +320,8 @@ function codexTiming(trace) {
   return out;
 }
 
+// Events are recorded in arrival order; millisecond times can tie, so order is by position.
+const before = (events, a, b) => events.indexOf(a) < events.indexOf(b);
 const noDenial =
   "denial not elicited: no denial stimulus used (controller decision D32)";
 const terminalReview = ["approved", "denied", "timedOut", "aborted"];
@@ -332,7 +334,7 @@ const startOf = (events, completed) =>
       e.phase === "started" &&
       e.reviewId === completed.reviewId &&
       e.turnId === completed.turnId &&
-      e.t <= completed.t,
+      before(events, e, completed),
   );
 /** Why a completed review's own events do not show a terminal command review in a turn a
  * client turn/start returned; null when they do. */
@@ -361,7 +363,7 @@ const targetItem = (events, review) =>
           e.type === "commandExecution" &&
           e.id === review.targetItemId &&
           e.turnId === review.turnId &&
-          e.t >= review.t,
+          before(events, review, e),
       )
     : undefined;
 const cite = (r) => ({
@@ -500,8 +502,8 @@ function overruleCells(trace) {
       e.kind === "overrule" &&
       e.reviewId === denial.reviewId &&
       e.turnId === denial.turnId &&
-      e.t >= denial.t &&
-      (!turnEnd || e.t < turnEnd.t),
+      before(events, denial, e) &&
+      (!turnEnd || before(events, e, turnEnd)),
   );
   const responseTo = (o) =>
     events.find((e) => e.kind === "response" && e.id === o.requestId);
@@ -537,7 +539,7 @@ function overruleCells(trace) {
     });
     return out;
   }
-  const after = responseTo(accepted).t;
+  const response = responseTo(accepted);
   // A fresh, sound review pair for the same command in the same turn, started after the
   // overrule's own response.
   const retry = events
@@ -550,14 +552,14 @@ function overruleCells(trace) {
         e.command === denial.command,
     )
     .map((e) => reviewPair(trace, e))
-    .find((p) => p && p.started.t >= after);
+    .find((p) => p && before(events, response, p.started));
   const unreviewed = events.find(
     (e) =>
       e.kind === "item" &&
       e.type === "commandExecution" &&
       e.turnId === denial.turnId &&
       e.command === denial.command &&
-      e.t >= after &&
+      before(events, response, e) &&
       e.id !== denial.targetItemId,
   );
   if (retry) {
