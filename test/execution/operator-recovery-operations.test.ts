@@ -227,10 +227,7 @@ test("bound receipt readback is scoped to its command type, assignment and store
     return { status: response.status, body: await response.json() };
   };
   assert.deepEqual((await read()).body.data, { state: "not-recorded" });
-  const result = await reconcileAsBefore(
-    w.s.f.service,
-    w.recovery(command.key),
-  );
+  const result = await w.reconcile(w.recovery(command.key));
   const receipt = (await read()).body.data;
   assert.equal(receipt.state, "recorded");
   assert.equal(receipt.receipt.receiptId, result.id);

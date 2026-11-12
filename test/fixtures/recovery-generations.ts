@@ -708,6 +708,8 @@ export async function reconcileAsBefore(
     receipt.kind === "no-turn-submission"
   )
     assert.equal(witness?.id, receipt.witnessId, "the exact persisted witness");
+  // The retired supervisor recorded the verified exit before the receipt.
+  state.recordRecoveryObservation(workId, "termination-verified");
   const raw = db(service);
   const result = { id: randomUUID(), workId, state: "reconciled" as const };
   const now = Date.now();

@@ -23,9 +23,11 @@ import type {
 import {
   acquiredOf,
   activeWorkIdsOf,
+  databaseOf,
   startedOf,
 } from "../fixtures/service-internals.js";
 import { until } from "../fixtures/until.js";
+import { reconcileAsBefore } from "../fixtures/recovery-generations.js";
 
 function required<T>(value: T | null | undefined): T {
   assert.ok(value !== undefined && value !== null);
@@ -205,7 +207,6 @@ async function fixture(
     claude?: boolean;
     questionText?: string;
     terminationVerifier?: StandaloneServiceOptions["terminationVerifier"];
-    heldTurnRelease?: false;
   } = {},
 ) {
   const root = mkdtempSync(join(tmpdir(), "cab-native-service-"));
@@ -224,7 +225,6 @@ async function fixture(
       power: { enabled: false },
       supervisor: { observationMs: 5 },
       terminationVerifier: options.terminationVerifier ?? liveProcess,
-      ...(options.heldTurnRelease === false ? { heldTurnRelease: false } : {}),
       ...(options.claude ? { runtimeHarnesses: ["codex", "claude"] } : {}),
     },
   );
@@ -572,20 +572,7 @@ test("failed durable native receipt commit releases the callback, then the ended
 });
 for (const mode of ["unavailable", "uncertain"] as const)
   test(`native ${mode} outcome releases its waiter so a reconciled assignment offers continuation without restart`, async () => {
-    const f = await fixture({
-      // An earlier build: the receipt below reconciles the held turn.
-      heldTurnRelease: false,
-      terminationVerifier: {
-        async verify(identity) {
-          return {
-            kind: "verified",
-            processIdentity: identity,
-            verifiedAt: "2026-10-03T10:05:00.000Z",
-            method: "mac-pid-absent-same-boot",
-          };
-        },
-      },
-    });
+    const f = await fixture();
     try {
       const q = runtimeQuestion(f.service, f.taskId);
       if (mode === "uncertain") {
@@ -610,6 +597,13 @@ for (const mode of ["unavailable", "uncertain"] as const)
       const nativeReason = "Native input delivery unavailable or uncertain";
       assert.equal(f.service.list()[0]?.state, "held");
       assert.equal(f.service.list()[0]?.reason, nativeReason);
+      // A task hold keeps held-turn release off the ended turn until its
+      // earlier-build receipt is recorded.
+      databaseOf(f.service)
+        .prepare(
+          "INSERT INTO task_writer_holds (taskId, reason) VALUES (?, 'Fixture hold')",
+        )
+        .run(f.taskId);
       f.runtime.terminal.resolve("completed");
       await until(() => activeWorkIdsOf(f.service).length === 0);
       // The released waiter cannot complete the held execution.
@@ -619,17 +613,22 @@ for (const mode of ["unavailable", "uncertain"] as const)
       const recovery = required(
         f.service.recoveryView().find((r) => r.workId === request.workId),
       );
-      await f.service.resolveHeldExecution({
-        workId: request.workId,
-        workRevision: recovery.generation.workRevision,
-        requestSequence: recovery.generation.requestSequence,
-        threadId: recovery.intent.threadId,
-        turnId: recovery.intent.turnId,
-        processIdentity: required(recovery.processIdentity),
-        termination: { kind: "process-exit" },
-        effects: "settled",
-        workspace: "preserved",
-      } as RecoveryReceipt);
+      await reconcileAsBefore(f.service, {
+        receipt: {
+          workId: request.workId,
+          workRevision: recovery.generation.workRevision,
+          requestSequence: recovery.generation.requestSequence,
+          threadId: recovery.intent.threadId,
+          turnId: recovery.intent.turnId,
+          processIdentity: required(recovery.processIdentity),
+          termination: { kind: "process-exit" },
+          effects: "settled",
+          workspace: "preserved",
+        } as RecoveryReceipt,
+      });
+      databaseOf(f.service)
+        .prepare("DELETE FROM task_writer_holds WHERE taskId = ?")
+        .run(f.taskId);
       assert.equal(
         f.service
           .coordinationView()

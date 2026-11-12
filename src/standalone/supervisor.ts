@@ -2,8 +2,6 @@ import type {
   BoundTurnRecoveryBlocker,
   ReleaseBlocker,
 } from "../core/recovery-contracts.js";
-import { recoveryReceiptSchema } from "./pre-turn-recovery.js";
-import { RecoveryRejectedError } from "./recovery-types.js";
 import { EventEmitter } from "node:events";
 import { performance } from "node:perf_hooks";
 import { setTimeout as delay } from "node:timers/promises";
@@ -17,7 +15,6 @@ import type {
 import type {
   ExactExecutionIdentity,
   ExecutionInspection,
-  RecoveryReceipt,
   RuntimeProcessIdentity,
   TerminationVerification,
   TerminationVerifier,
@@ -345,7 +342,7 @@ export class ExecutionSupervisor {
   }
 
   /**
-   * In-process holds release and bound-turn recovery both respect: an unfinished callback,
+   * In-process holds release respects: an unfinished callback,
    * or a known survivor even when no durable evidence of it could be written.
    */
   releaseBlockers(
@@ -359,74 +356,12 @@ export class ExecutionSupervisor {
     ];
   }
 
-  private boundTurnBlockers(
-    workId: string,
-    assignmentId: string,
-  ): BoundTurnRecoveryBlocker[] {
-    return [
-      ...new Set([
-        ...this.state.boundTurnRecoveryBlockers(workId, assignmentId),
-        ...this.releaseBlockers(workId),
-      ]),
-    ];
-  }
-
   recordObservation(
     workId: string,
     kind: string,
     terminalStatus?: "completed" | "failed",
   ): void {
     this.state.recordRecoveryObservation(workId, kind, terminalStatus);
-  }
-
-  async resolveHeldExecution(
-    receipt: RecoveryReceipt,
-    command?: { key: string; receipt: RecoveryReceipt; assignmentId?: string },
-  ) {
-    const value = recoveryReceiptSchema.parse(receipt);
-    if (!this.state.projectWorkWritable(value.workId))
-      throw new RecoveryRejectedError("Archived projects are read-only");
-    const stored = this.state.recoveryIdentity(value.workId);
-    if (
-      !stored?.processIdentity ||
-      stored.workRevision !== value.workRevision ||
-      stored.requestSequence !== value.requestSequence ||
-      stored.threadId !== value.threadId ||
-      stored.turnId !== value.turnId ||
-      !exactProcessIdentity(stored.processIdentity, value.processIdentity)
-    )
-      throw new RecoveryRejectedError(
-        "Recovery receipt generation or execution identity does not match",
-      );
-
-    if (command && value.kind === "bound-turn") {
-      const blocked = this.boundTurnBlockers(
-        value.workId,
-        command.assignmentId ?? "",
-      );
-      if (blocked.length)
-        throw new RecoveryRejectedError(
-          `Bound-turn recovery blocked: ${blocked.join(", ")}`,
-        );
-    }
-    const confirmed = await this.confirmTermination(
-      value.workId,
-      stored.processIdentity,
-    );
-    if ("refusal" in confirmed)
-      throw new RecoveryRejectedError(confirmed.refusal);
-    const { verification } = confirmed;
-    if (command && value.kind === "bound-turn") {
-      const blocked = this.boundTurnBlockers(
-        value.workId,
-        command.assignmentId ?? "",
-      );
-      if (blocked.length)
-        throw new RecoveryRejectedError(
-          `Bound-turn recovery blocked: ${blocked.join(", ")}`,
-        );
-    }
-    return this.state.resolveHeldExecution(value, verification, command);
   }
 
   observeStop(

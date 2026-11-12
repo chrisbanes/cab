@@ -6,10 +6,7 @@ import {
   taskAcceptsWrites,
   workAcceptsWrites,
 } from "../core/project-lifecycle.js";
-import type {
-  BoundTurnRecoveryBlocker,
-  ReleaseBlocker,
-} from "../core/recovery-contracts.js";
+import type { ReleaseBlocker } from "../core/recovery-contracts.js";
 import { TaskReviewStore } from "../core/task-review.js";
 import { canonicalMaterial, materialDigest } from "../core/delivery.js";
 import {
@@ -24,14 +21,11 @@ import {
   historicalPreTurnAdoptionSchema,
   historicalNoTurnAdoptionSchema,
   rejectedRequestHoldReason,
-  replaceConversationCommandSchema,
   type ArchivedResumeRejection,
   type HistoricalPreTurnAdoption,
-  type ReplaceConversationCommand,
 } from "./pre-turn-recovery.js";
 import { createDraftingTable } from "./drafting.js";
 import {
-  recoveryReceiptSchema,
   releaseCommandSchema,
   releaseResultSchema,
 } from "./pre-turn-recovery.js";
@@ -48,9 +42,7 @@ import type { SandboxLevel } from "../core/sandbox-level.js";
 import type { ReconciledAssignmentProof } from "../core/coordination.js";
 import type {
   RecoveryRecord,
-  RecoveryReceipt,
   RuntimeProcessIdentity,
-  VerifiedTermination,
 } from "./recovery-types.js";
 import type { ConversationHistoryBinding } from "./conversation-history.js";
 import type {
@@ -495,15 +487,6 @@ const processIdentitySchema = z.object({
   processStartedAt: z.string().min(1).max(128),
   bootId: z.string().min(1).max(128),
 });
-
-const verifiedTerminationSchema = z
-  .object({
-    kind: z.literal("verified"),
-    processIdentity: processIdentitySchema,
-    verifiedAt: z.string().datetime({ offset: true }),
-    method: z.literal("mac-pid-absent-same-boot"),
-  })
-  .strict();
 
 // Binds the task id three times: ambiguity hold, writer hold, execution bindings.
 const archiveUnblockedClause = `NOT EXISTS (
@@ -3963,49 +3946,6 @@ export class ExecutionState {
       return true;
     });
   }
-  replaceConversationCommand(command: ReplaceConversationCommand): {
-    revision: number;
-  } {
-    const value = replaceConversationCommandSchema.parse(command);
-    const replay = this.preTurnCommandReplay("replace-conversation", value);
-    if (replay)
-      return z
-        .object({ revision: z.number().int().positive() })
-        .strict()
-        .parse(replay);
-    return transaction(this.db, () => {
-      const assignment = this.db
-        .prepare("SELECT version,taskId FROM domain_assignments WHERE id=?")
-        .get(value.assignmentId) as
-        | { version: number; taskId: string }
-        | undefined;
-      const conversation = this.db
-        .prepare(
-          "SELECT revision FROM assignment_conversations WHERE assignmentId=?",
-        )
-        .get(value.assignmentId) as { revision: number } | undefined;
-      if (
-        !assignment ||
-        assignment.version !== value.expectedAssignmentVersion ||
-        (conversation?.revision ?? 1) !== value.expectedConversationRevision
-      )
-        throw new RecoveryRejectedError(
-          "Conversation replacement material is stale",
-        );
-      if (
-        this.db
-          .prepare(
-            `SELECT 1 FROM task_writer_holds WHERE taskId=? UNION SELECT 1 FROM task_writer_ambiguity_holds WHERE taskId=? UNION SELECT 1 FROM task_archival_holds WHERE taskId=?`,
-          )
-          .get(assignment.taskId, assignment.taskId, assignment.taskId)
-      )
-        throw new RecoveryRejectedError("Task remains held for recovery");
-      const result = { revision: this.replaceConversation(value.assignmentId) };
-      this.recordPreTurnCommand("replace-conversation", value, result);
-      return result;
-    });
-  }
-
   /** Recheck the distinct bound-turn or pre-turn proof on every use. */
   reconciledAssignmentProof(
     workId: string,
@@ -5554,65 +5494,10 @@ export class ExecutionState {
     return this.refusedBeforeStart(workId) || this.heldTurnReleased(workId);
   }
 
-  /** Read-only ownership/effect checks shared by bound recovery eligibility and its transaction. */
-  boundTurnRecoveryBlockers(
-    workId: string,
-    assignmentId: string,
-  ): BoundTurnRecoveryBlocker[] {
-    if (!this.hasTurnRequests) return ["context-unavailable"];
-    const binding = this.taskBinding(workId);
-    if (!binding || binding.assignmentId !== assignmentId)
-      return ["context-unavailable"];
-    const record = this.recoveryFor(
-      assignmentId,
-      binding.assignmentVersion,
-      workId,
-    )[0];
-    if (!record) return ["context-unavailable"];
-    const blocked: BoundTurnRecoveryBlocker[] = [];
-    const current = this.db
-      .prepare(`SELECT identity.threadId, identity.turnId,
-      revision.workRevision AS actualRevision, revision.assignmentId,
-      request.sequence AS actualSequence, request.assignmentId AS requestAssignmentId,
-      intent.threadId AS actualThreadId, intent.turnId AS actualTurnId
-      FROM execution_recovery_identities identity
-      JOIN execution_intents intent ON intent.workId=identity.workId
-      LEFT JOIN task_work_revisions revision ON revision.workId=identity.workId
-      LEFT JOIN turn_requests request ON request.workId=identity.workId WHERE identity.workId=?`)
-      .get(workId) as Record<string, unknown> | undefined;
-    if (!current?.threadId || !current.turnId)
-      blocked.push("bound-identity-missing");
-    if (
-      current?.actualRevision !== record.generation.workRevision ||
-      current?.actualSequence !== record.generation.requestSequence ||
-      current?.assignmentId !== assignmentId ||
-      current?.requestAssignmentId !== assignmentId ||
-      current?.threadId !== current?.actualThreadId ||
-      current?.turnId !== current?.actualTurnId
-    )
-      blocked.push("identity-changed");
-    const held = this.heldGenerationFacts(record);
-    if (held.reconciled) blocked.push("already-reconciled");
-    else if (held.notHeld) blocked.push("not-held");
-    if (!record.holds.writer || !record.holds.capacity)
-      blocked.push("ownership-released");
-    if (
-      !record.intent.threadId ||
-      !record.intent.turnId ||
-      !record.processIdentity ||
-      record.generation.workRevision === null
-    )
-      blocked.push("bound-identity-missing");
-    if (held.witness) blocked.push("other-witness");
-    if (held.pendingEffects) blocked.push("pending-effects");
-    if (held.knownSurvivor) blocked.push("known-survivor");
-    return [...new Set(blocked)];
-  }
-
   /**
-   * The held-generation facts release and bound-turn recovery both check, so a new hold
-   * or effect kind changes both: settled, still held, witnessed, pending effects other
-   * than its result, and a known survivor.
+   * The held-generation facts both release paths check, so a new hold or effect kind
+   * changes both: settled, still held, pending effects other than its result, and a
+   * known survivor.
    */
   private heldGenerationFacts(record: RecoveryRecord) {
     const effects = this.db
@@ -5625,262 +5510,11 @@ export class ExecutionState {
         Boolean(record.receipt) || record.intent.state === "reconciled",
       notHeld:
         record.intent.state !== "held" || record.request?.state !== "held",
-      witness: Boolean(record.preTurnRejection || record.noTurnSubmission),
       pendingEffects: effects.some((e) => e.effectKey !== knownSurvivorEffect),
       knownSurvivor:
         effects.some((e) => e.effectKey === knownSurvivorEffect) ||
         record.observations.some((o) => o.kind === "known-survivor"),
     };
-  }
-
-  resolveHeldExecution(
-    receipt: RecoveryReceipt,
-    verification: VerifiedTermination,
-    command?: { key: string; receipt: RecoveryReceipt; assignmentId?: string },
-  ): { id: string; workId: string; state: "reconciled" } {
-    const value = recoveryReceiptSchema.parse(receipt);
-    const proof = verifiedTerminationSchema.parse(verification);
-    return transaction(this.db, () => {
-      if (command) {
-        const replay = this.preTurnCommandReplay(
-          value.kind === "bound-turn"
-            ? "recover-bound-turn"
-            : value.kind === "no-turn-submission"
-              ? "recover-no-turn"
-              : "recover",
-          command,
-        );
-        if (replay) {
-          const result = z
-            .object({
-              id: z.string().uuid(),
-              workId: z.string().min(1),
-              state: z.literal("reconciled"),
-            })
-            .strict()
-            .parse(replay);
-          return result;
-        }
-      }
-
-      assertOwnedWorkWritable(this.db, value.workId);
-      if (command && value.kind === "bound-turn") {
-        const blocked = this.boundTurnRecoveryBlockers(
-          value.workId,
-          command.assignmentId ?? "",
-        );
-        if (blocked.length)
-          throw new RecoveryRejectedError(
-            `Bound-turn recovery blocked: ${blocked.join(", ")}`,
-          );
-      }
-      const intent = this.db
-        .prepare(`SELECT id, state, threadId, turnId
-        FROM execution_intents WHERE workId = ?`)
-        .get(value.workId) as
-        | {
-            id: string;
-            state: string;
-            threadId: string | null;
-            turnId: string | null;
-          }
-        | undefined;
-      const identity = this.recoveryIdentity(value.workId);
-      if (intent?.state !== "held" || !identity)
-        throw new RecoveryRejectedError(
-          "Execution generation is not held for recovery",
-        );
-      const requestSequence = this.hasTurnRequests
-        ? (
-            this.db
-              .prepare("SELECT sequence FROM turn_requests WHERE workId = ?")
-              .get(value.workId) as { sequence: number } | undefined
-          )?.sequence
-        : undefined;
-      const actualWorkRevision =
-        (
-          this.db
-            .prepare(
-              "SELECT workRevision FROM task_work_revisions WHERE workId = ?",
-            )
-            .get(value.workId) as { workRevision: number } | undefined
-        )?.workRevision ?? null;
-      if (
-        identity.workRevision !== value.workRevision ||
-        actualWorkRevision !== value.workRevision ||
-        identity.requestSequence !== value.requestSequence ||
-        requestSequence !== value.requestSequence ||
-        identity.threadId !== value.threadId ||
-        intent.threadId !== value.threadId ||
-        identity.turnId !== value.turnId ||
-        intent.turnId !== value.turnId ||
-        !identity.processIdentity ||
-        identity.processIdentity.processId !==
-          value.processIdentity.processId ||
-        identity.processIdentity.processStartedAt !==
-          value.processIdentity.processStartedAt ||
-        identity.processIdentity.bootId !== value.processIdentity.bootId ||
-        proof.processIdentity.processId !==
-          identity.processIdentity.processId ||
-        proof.processIdentity.processStartedAt !==
-          identity.processIdentity.processStartedAt ||
-        proof.processIdentity.bootId !== identity.processIdentity.bootId
-      )
-        throw new RecoveryRejectedError(
-          "Recovery receipt generation or execution identity does not match",
-        );
-      if (
-        this.db
-          .prepare("SELECT 1 FROM task_writer_admissions WHERE workId = ?")
-          .get(value.workId) === undefined ||
-        this.db
-          .prepare(
-            "SELECT 1 FROM execution_capacity_reservations WHERE workId = ?",
-          )
-          .get(value.workId) === undefined
-      )
-        throw new RecoveryRejectedError(
-          "Exact generation no longer owns its writer and capacity holds",
-        );
-
-      const preTurnWitness =
-        value.kind === "pre-turn-rejection"
-          ? this.witnessForWork(value.workId)
-          : undefined;
-      if (
-        value.kind === "pre-turn-rejection" &&
-        (!command || !preTurnWitness || preTurnWitness.id !== value.witnessId)
-      )
-        throw new RecoveryRejectedError(
-          "Pre-turn recovery requires its exact persisted witness and keyed command",
-        );
-      const noTurnWitness =
-        value.kind === "no-turn-submission"
-          ? this.noTurnWitnessForWork(value.workId)
-          : undefined;
-      if (
-        value.kind === "no-turn-submission" &&
-        (!command || !noTurnWitness || noTurnWitness.id !== value.witnessId)
-      )
-        throw new RecoveryRejectedError(
-          "No-turn recovery requires its exact persisted witness and keyed command",
-        );
-      if (
-        value.kind !== "no-turn-submission" &&
-        this.db
-          .prepare("SELECT 1 FROM execution_no_turn_submissions WHERE workId=?")
-          .get(value.workId)
-      )
-        throw new RecoveryRejectedError(
-          "Other receipt kinds cannot adopt a no-turn witness",
-        );
-      if (
-        value.kind !== "pre-turn-rejection" &&
-        this.db
-          .prepare("SELECT 1 FROM execution_pre_turn_rejections WHERE workId=?")
-          .get(value.workId)
-      )
-        throw new RecoveryRejectedError(
-          "Bound-turn receipt cannot adopt a pre-turn witness",
-        );
-      const receiptId = randomUUID();
-      const changed = this.db
-        .prepare(`UPDATE execution_intents
-        SET state = 'reconciled', reason = 'Execution reconciled from validated recovery receipt'
-        WHERE workId = ? AND state = 'held' AND threadId IS ? AND turnId IS ?
-        RETURNING id`)
-        .get(value.workId, value.threadId, value.turnId) as
-        | { id: string }
-        | undefined;
-      if (!changed)
-        throw new RecoveryRejectedError(
-          "Recovery generation changed during receipt validation",
-        );
-      // The verified receipt independently resolves a stopped generation; its
-      // target must not gate or answer later Stops of the task.
-      this.db
-        .prepare("DELETE FROM execution_stop_targets WHERE workId = ?")
-        .run(value.workId);
-      this.db
-        .prepare(`INSERT INTO execution_recovery_receipts
-        (id, workId, workRevision, requestSequence, threadId, turnId, processId,
-          processStartedAt, bootId, terminationMethod, terminationVerifiedAt,
-          effectsState, workspaceDisposition, createdAt)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'settled', ?, ?)`)
-        .run(
-          receiptId,
-          value.workId,
-          value.workRevision,
-          value.requestSequence,
-          value.threadId,
-          value.turnId,
-          value.processIdentity.processId,
-          value.processIdentity.processStartedAt,
-          value.processIdentity.bootId,
-          proof.method,
-          proof.verifiedAt,
-          value.workspace,
-          Date.now(),
-        );
-      if (preTurnWitness)
-        this.db
-          .prepare(
-            "INSERT INTO execution_pre_turn_receipts (receiptId,workId,witnessId,witnessMaterial) VALUES (?,?,?,?)",
-          )
-          .run(
-            receiptId,
-            value.workId,
-            preTurnWitness.id,
-            canonicalMaterial(preTurnWitness),
-          );
-      if (noTurnWitness)
-        this.db
-          .prepare(
-            "INSERT INTO execution_no_turn_receipts (receiptId,workId,witnessId,witnessMaterial) VALUES (?,?,?,?)",
-          )
-          .run(
-            receiptId,
-            value.workId,
-            noTurnWitness.id,
-            canonicalMaterial(noTurnWitness),
-          );
-      this.db
-        .prepare(`UPDATE execution_pending_effects SET state = 'settled', reason = NULL
-        WHERE workId = ? AND state = 'pending'`)
-        .run(value.workId);
-      this.db
-        .prepare("DELETE FROM execution_capacity_reservations WHERE workId = ?")
-        .run(value.workId);
-      if (this.hasTurnRequests)
-        this.db
-          .prepare(`UPDATE turn_requests SET state = 'held',
-          reason = 'Execution reconciled; no automatic successor' WHERE workId = ?`)
-          .run(value.workId);
-      this.db
-        .prepare(`INSERT INTO execution_recovery_observations
-        (id, workId, kind, reason, recordedAt) VALUES (?, ?, 'receipt-accepted', ?, ?)`)
-        .run(
-          randomUUID(),
-          value.workId,
-          recoveryReason("receipt-accepted"),
-          Date.now(),
-        );
-      if (command)
-        this.recordPreTurnCommand(
-          value.kind === "bound-turn"
-            ? "recover-bound-turn"
-            : value.kind === "no-turn-submission"
-              ? "recover-no-turn"
-              : "recover",
-          command,
-          {
-            id: receiptId,
-            workId: value.workId,
-            state: "reconciled",
-          },
-        );
-      return { id: receiptId, workId: value.workId, state: "reconciled" };
-    });
   }
 
   writerAndSuccessors(workId: string): ExecutionIntent[] {

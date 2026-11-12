@@ -285,8 +285,6 @@ export async function lifecycle(path, harnesses = ["claude", "codex"]) {
         runtimeHarnesses: [harness],
         power: { enabled: false },
         routingClient: null,
-        // The approved crash proof reconciles through a receipt, as the build it qualified.
-        heldTurnRelease: false,
       });
     const command = (body) =>
       service
@@ -474,11 +472,13 @@ export async function lifecycle(path, harnesses = ["claude", "codex"]) {
       await service.stop();
       service = make();
       await service.start();
-      const held = records(taskId).find((r) => r.workId === interrupted.workId);
-      assert.equal(held?.intent.state, "held");
+      // Start-up releases the crashed turn once its process is verified gone.
       assert.ok(
-        held.holds.writer && held.holds.capacity && held.holds.uncertainty,
+        service.heldTurnReleased(interrupted.workId),
+        "Restart releases the crashed turn",
       );
+      const held = records(taskId).find((r) => r.workId === interrupted.workId);
+      assert.ok(!held.holds.writer && !held.holds.capacity);
       await delay(1000);
       assert.equal(
         evidence.turns.length,
@@ -490,33 +490,17 @@ export async function lifecycle(path, harnesses = ["claude", "codex"]) {
         Date.now() + 5000,
         "ended crash callbacks",
       );
-      // The retired recover command's receipt path, which this approved proof qualified.
-      const recover = {
-        key: randomUUID(),
-        assignmentId: held.binding.assignmentId,
-        receipt: {
-          kind: "bound-turn",
-          workId: held.workId,
-          workRevision: held.generation.workRevision,
-          requestSequence: held.generation.requestSequence,
-          threadId: held.intent.threadId,
-          turnId: held.intent.turnId,
-          processIdentity: held.processIdentity,
-          termination: { kind: "process-exit" },
-          effects: "settled",
-          workspace: "preserved",
-        },
-      };
-      await service["started"]().supervisor.resolveHeldExecution(
-        recover.receipt,
-        recover,
-      );
       assert.equal(
         evidence.turns.length,
         stopTurns + 2,
-        "Recovery alone must not submit a model turn",
+        "Release alone must not submit a model turn",
       );
-      await followUp(taskId, held, complete);
+      await service.startAgain({
+        key: randomUUID(),
+        taskId,
+        expectedVersion: Number(service.domain().task(taskId).version),
+        workId: interrupted.workId,
+      });
       const resumed = await until(
         () =>
           records(taskId).find(

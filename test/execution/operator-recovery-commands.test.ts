@@ -317,7 +317,7 @@ test("bound reconciliation preserves approval material and an independent delive
       )
       .run(operationId, w.g.taskId, JSON.stringify(action)),
   );
-  await reconcileAsBefore(w.s.f.service, w.recovery());
+  await w.reconcile();
   await w.s.restart();
   assert.deepEqual(
     startedOf(w.s.f.service).coordination.interactions(w.g.taskId),

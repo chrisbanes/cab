@@ -23,25 +23,17 @@ import type {
   ExactExecutionIdentity,
   ExecutionInspection,
   RecoveryRecord,
-  RecoveryReceipt,
   RuntimeProcessIdentity,
   TerminationVerifier,
-  TerminationVerification,
 } from "../../src/standalone/recovery-types.js";
 import {
   acquiredOf,
   publishedOf,
-  startedOf,
   unpublish,
 } from "../fixtures/service-internals.js";
 
 interface RecoveryApi {
   recoveryView(): RecoveryRecord[];
-  resolveHeldExecution(receipt: RecoveryReceipt): Promise<{
-    id: string;
-    workId: string;
-    state: "reconciled";
-  }>;
 }
 
 interface ServiceOptions {
@@ -100,14 +92,6 @@ function deferred<T>() {
   let resolve!: (value: T) => void;
   const promise = new Promise<T>((done) => (resolve = done));
   return { promise, resolve };
-}
-
-async function waitUntil(predicate: () => boolean): Promise<boolean> {
-  for (let attempt = 0; attempt < 200; attempt++) {
-    if (predicate()) return true;
-    await new Promise<void>((resolve) => setTimeout(resolve, 0));
-  }
-  return predicate();
 }
 
 class RecoveryRuntime implements Runtime {
@@ -193,38 +177,6 @@ class RecoveryRuntime implements Runtime {
   onUnexpectedRequest(_listener: (request: UnexpectedRequest) => void) {}
   onToolCall(listener: (call: RuntimeToolCall) => Promise<RuntimeToolResult>) {
     this.toolCall = listener;
-  }
-}
-
-class ManualClock {
-  now = 0;
-  readonly sleepEntered = deferred<void>();
-  private advanceSleep: (() => void) | undefined;
-
-  monotonicNow() {
-    return this.now;
-  }
-
-  sleep(ms: number, signal: AbortSignal): Promise<void> {
-    return new Promise((resolve) => {
-      this.sleepEntered.resolve();
-      let settled = false;
-      const finish = () => {
-        if (settled) return;
-        settled = true;
-        this.now += ms;
-        signal.removeEventListener("abort", finish);
-        resolve();
-      };
-      this.advanceSleep = finish;
-      if (signal.aborted) finish();
-      else signal.addEventListener("abort", finish, { once: true });
-    });
-  }
-
-  advance(ms: number) {
-    this.advanceSleep?.();
-    this.now = Math.max(this.now, ms);
   }
 }
 
@@ -377,18 +329,6 @@ function exactIdentity(view: RecoveryRecord): ExactExecutionIdentity {
   };
 }
 
-function validReceipt(view: RecoveryRecord): RecoveryReceipt {
-  const identity = exactIdentity(view);
-  assert.ok(identity.processIdentity);
-  return {
-    ...identity,
-    processIdentity: identity.processIdentity,
-    termination: { kind: "process-exit" },
-    effects: "settled",
-    workspace: "preserved",
-  };
-}
-
 test("startup inspects only a bound original generation and never blindly resubmits it", async () => {
   const old = await activeFixture();
   let recovered: StandaloneService | undefined;
@@ -528,184 +468,6 @@ test("historical, conflicting and terminal startup reports retain every unresolv
       await finishOld(old.service, old.runtime);
       rmSync(old.root, { recursive: true, force: true });
     }
-  }
-});
-
-test("validated recovery receipt releases only the exact generation and preserves Stop until Resume", async () => {
-  const clock = new ManualClock();
-  const old = await activeFixture({
-    supervisor: { clock, observationMs: 3000 },
-  });
-  const stopping = old.service.stopTask(old.taskId);
-  assert.equal(
-    await waitUntil(() => old.runtime.interrupts.length === 1),
-    true,
-  );
-  await clock.sleepEntered.promise;
-  clock.advance(3000);
-  await stopping;
-  let recovered: StandaloneService | undefined;
-  const runtime = new RecoveryRuntime();
-  let terminationOutcome: "verified" | "conflict" | "unknown" = "unknown";
-  const terminationVerifier: TerminationVerifier = {
-    async verify(identity) {
-      if (terminationOutcome === "verified")
-        return {
-          kind: "verified",
-          processIdentity: identity,
-          verifiedAt: "2026-09-29T09:05:00.000Z",
-          method: "mac-pid-absent-same-boot",
-        };
-      return {
-        kind: terminationOutcome,
-        reason: terminationOutcome === "conflict" ? "wrong PID" : "unavailable",
-      } as TerminationVerification;
-    },
-  };
-  try {
-    crash(old.service);
-    runtime.inspection = (identity) => ({
-      kind: "exact-terminal",
-      identity,
-      status: "completed",
-    });
-    recovered = new StandaloneService(old.dataDir, () => runtime, undefined, {
-      terminationVerifier,
-    });
-    await recovered.start();
-    const api = recoveryApi(recovered);
-    const view = api.recoveryView().find((item) => item.workId === old.workId);
-    assert.ok(view);
-    assert.equal(view.pendingEffects.length, 1);
-    assert.equal(view.holds.stop, true);
-    const receipt = validReceipt(view);
-
-    await assert.rejects(
-      () =>
-        api.resolveHeldExecution({
-          ...receipt,
-          workRevision: (receipt.workRevision ?? 0) + 1,
-        }),
-      /generation|identity/i,
-    );
-    await assert.rejects(
-      () =>
-        api.resolveHeldExecution({
-          ...receipt,
-          processIdentity: {
-            ...receipt.processIdentity,
-            processId: "other-pid",
-          },
-        }),
-      /process|identity/i,
-    );
-    await assert.rejects(
-      () =>
-        api.resolveHeldExecution({
-          ...receipt,
-          effects: "unsettled",
-        } as unknown as RecoveryReceipt),
-      /effect|settled/i,
-    );
-    await assert.rejects(
-      () =>
-        api.resolveHeldExecution({
-          ...receipt,
-          workspace: "deleted",
-        } as unknown as RecoveryReceipt),
-      /workspace|disposition/i,
-    );
-    await assert.rejects(
-      () => api.resolveHeldExecution(receipt),
-      /could not be verified/i,
-    );
-    terminationOutcome = "conflict";
-    await assert.rejects(
-      () => api.resolveHeldExecution(receipt),
-      /conflicts with the stored identity/i,
-    );
-    assert.equal(recovered.capacityLimits().currentUsage.global, 1);
-    assert.equal(
-      recovered.list().find((item) => item.workId === old.workId)?.state,
-      "held",
-    );
-
-    terminationOutcome = "verified";
-    const resolved = await api.resolveHeldExecution(receipt);
-    assert.equal(resolved.state, "reconciled");
-    assert.equal(
-      recovered.list().find((item) => item.workId === old.workId)?.state,
-      "reconciled",
-    );
-    assert.equal(recovered.capacityLimits().currentUsage.global, 0);
-    assert.equal(
-      recovered.isCurrentResult(old.workId),
-      false,
-      "reconciled is not successful completion",
-    );
-    assert.equal(recovered.taskHold(old.taskId), "Task stopped");
-    assert.equal(runtime.threads, 0);
-    assert.equal(runtime.turns, 0);
-
-    await recovered.registerExecutionCallback(old.workId, Promise.resolve());
-    assert.equal(
-      recovered.list().find((item) => item.workId === old.workId)?.state,
-      "reconciled",
-    );
-
-    await recovered.stop();
-    const reopenedRuntime = new RecoveryRuntime();
-    recovered = new StandaloneService(
-      old.dataDir,
-      () => reopenedRuntime,
-      undefined,
-      {
-        terminationVerifier,
-      },
-    );
-    await recovered.start();
-    const reopenedApi = recoveryApi(recovered);
-    const persisted = reopenedApi
-      .recoveryView()
-      .find((item) => item.workId === old.workId);
-    assert.equal(persisted?.intent.state, "reconciled");
-    assert.ok(persisted?.receipt?.id);
-    assert.equal(persisted?.holds.stop, true);
-    assert.equal(persisted?.holds.writer, false);
-    assert.equal(persisted?.holds.capacity, false);
-    assert.equal(reopenedRuntime.inspections.length, 0);
-
-    const internals = startedOf(recovered);
-    assert.equal(
-      internals.state.beginArchive(old.taskId),
-      false,
-      "Stop remains an independent archive hold",
-    );
-    await recovered.resumeTask(old.taskId);
-    assert.equal(
-      internals.state.beginArchive(old.taskId),
-      true,
-      "reconciled is terminal for archive admission after Resume",
-    );
-    internals.state.endArchive(old.taskId);
-    void recovered
-      .submitTask("fresh-generation", old.assignmentId, "new captured work")
-      .catch(() => {});
-    assert.equal(await waitUntil(() => reopenedRuntime.turns === 1), true);
-    assert.equal(
-      recovered.list().find((item) => item.workId === "fresh-generation")
-        ?.state,
-      "running",
-    );
-    const afterResume = reopenedApi
-      .recoveryView()
-      .find((item) => item.workId === old.workId);
-    assert.equal(afterResume?.receipt?.workspaceDisposition, "preserved");
-  } finally {
-    runtime.turnGate.resolve();
-    await recovered?.stop();
-    await finishOld(old.service, old.runtime);
-    rmSync(old.root, { recursive: true, force: true });
   }
 });
 

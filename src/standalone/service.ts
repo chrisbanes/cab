@@ -304,11 +304,7 @@ import {
   preTurnRefusalReason,
 } from "./pre-turn-failure.js";
 import { RecoveryRejectedError } from "./recovery-types.js";
-import type {
-  RecoveryReceipt,
-  RecoveryRecord,
-  TerminationVerifier,
-} from "./recovery-types.js";
+import type { RecoveryRecord, TerminationVerifier } from "./recovery-types.js";
 import {
   captureRetainedReviewAnchor,
   type RetainedReviewAnchorStageRequest,
@@ -641,11 +637,8 @@ export interface StandaloneServiceOptions {
   conversationHistoryExclusions?: () => readonly string[];
   supervisor?: ExecutionSupervisorOptions;
   terminationVerifier?: TerminationVerifier;
-  /**
-   * Test-only: the held-turn release quiet period, poll interval and clocks; `false` runs
-   * as an earlier build did, so a test can record the receipts that build accepted.
-   */
-  heldTurnRelease?: HeldTurnReleaseOptions | false;
+  /** Test-only: the held-turn release quiet period, poll interval and clocks. */
+  heldTurnRelease?: HeldTurnReleaseOptions;
   workspaceManager?: WorkspaceManagerOptions;
   /** Test-only; production uses the fixed 10 minute cap. */
   draftingTimeLimitMs?: number;
@@ -1913,14 +1906,11 @@ export class StandaloneService {
         );
       await supervisor.reconcileOnStart();
       this.releaseUnboundHoldsOnStart(state, supervisor);
-      const heldTurns =
-        this.options.heldTurnRelease === false
-          ? undefined
-          : this.heldTurnRelease(
-              state,
-              supervisor,
-              this.options.heldTurnRelease,
-            );
+      const heldTurns = this.heldTurnRelease(
+        state,
+        supervisor,
+        this.options.heldTurnRelease,
+      );
       this.heldTurns = heldTurns;
       // Before admission, so a turn proven ended frees capacity before queued work is admitted.
       await heldTurns?.sweep();
@@ -3590,13 +3580,6 @@ export class StandaloneService {
     }
   }
 
-  resolveHeldExecution(receipt: RecoveryReceipt) {
-    return this.withProjectWrite(
-      workProjectId(this.cache!, receipt.workId),
-      "callback",
-      () => this.started().supervisor.resolveHeldExecution(receipt),
-    );
-  }
   /** Every check a release runs, read without changing anything. */
   releaseBlockers(workId: string): ReleaseBlocker[] {
     const { state, supervisor } = this.started();
