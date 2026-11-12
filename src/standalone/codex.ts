@@ -2780,8 +2780,10 @@ export class CodexRuntime implements Runtime {
     for (const [key, entry] of this.escalations)
       if (entry.identity.threadId === threadId) this.escalations.delete(key);
     this.endReviews("New turn requested", { threadId, drop: true });
-    // The thread's earlier review turn is over: its late reviews are dropped, never bound here.
-    const priorReviewTurn = this.reviewTurns.get(threadId)?.turnId;
+    // The thread's earlier turn, review turn or not, is over: its late reviews are dropped, and its
+    // late completion never ends this turn's pending start.
+    const priorReviewTurn =
+      this.reviewTurns.get(threadId)?.turnId ?? previousTurn;
     if (priorReviewTurn) this.endedReviewTurns.set(threadId, priorReviewTurn);
     if (escalate) this.escalationTurns.set(threadId, null);
     else this.escalationTurns.delete(threadId);
