@@ -2678,8 +2678,9 @@ exact references and anchors.
 
 - The composer starts with the lead as a visible, removable `@lead` recipient. Other
   assignments are added from a task-scoped picker; two assignments of one agent are
-  told apart by their short assignment ID. Removing every recipient is a deliberate
-  record-only comment that wakes nobody, and a refresh never restores a removed
+  told apart by the brief's first sentence, and by short assignment ID only when that
+  also matches. Removing every recipient is a deliberate record-only comment that
+  wakes nobody, and a refresh never restores a removed
   recipient. An assignment's Reply action selects exactly that assignment.
 - Recipients are chosen by assignment identity and expected version. A name, `@name` or
   agent in the text, whoever wrote it, resolves nothing and wakes nothing; agents

@@ -1,3 +1,4 @@
+import { assignmentDistinction } from "./assignment-labels.js";
 import { sha256Hex } from "./browser-crypto.js";
 /**
  * Recipient selection and effect wording for a shared task comment. The service decides what a
@@ -20,6 +21,8 @@ export type CommentRecipientFact = {
     | "unresolved-destination"
     | "recipient-withdrawn"
     | null;
+  /** Joined from the task read's assignment, so same-named recipients are told apart by their brief. */
+  brief?: string | null | undefined;
 };
 
 /** `null` is an untouched composer, which addresses the lead; an array is the operator's explicit set. */
@@ -68,20 +71,21 @@ export function pickableRecipients(
 }
 
 /**
- * The name to show: the agent's name, with the short assignment ID when another assignment in
- * the task shares it, so two same-named delegates are never confused. Names never address anyone.
+ * The name to show: the agent's name, with the brief's first sentence when another assignment in
+ * the task shares it (and the short assignment ID when that matches too), so two same-named
+ * delegates are never confused. Names never address anyone.
  */
 export function recipientLabel(
-  fact: Pick<CommentRecipientFact, "assignmentId" | "name">,
-  facts: readonly Pick<CommentRecipientFact, "assignmentId" | "name">[],
+  fact: Pick<CommentRecipientFact, "assignmentId" | "name" | "brief">,
+  facts: readonly Pick<
+    CommentRecipientFact,
+    "assignmentId" | "name" | "brief"
+  >[],
 ): string {
-  const name = fact.name ?? "Assignment";
-  const shared = facts.some(
-    (other) =>
-      other.assignmentId !== fact.assignmentId &&
-      (other.name ?? "Assignment") === name,
-  );
-  return shared ? `${name} · ${shortAssignmentId(fact.assignmentId)}` : name;
+  return [
+    fact.name ?? "Assignment",
+    ...assignmentDistinction(fact, facts),
+  ].join(" · ");
 }
 
 /** A recipient chip's text: the lead is shown as `@lead` beside its name. */
