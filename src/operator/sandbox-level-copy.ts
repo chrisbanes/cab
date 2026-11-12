@@ -33,9 +33,6 @@ export const escalateApprovalLines = [
   ...escalateApprovalRiskLines,
 ];
 
-/** The Inbox headline of an escalation approval. */
-export const sandboxEscalationHeadline = "Run a command outside the sandbox";
-
 /** What the unsandboxed level sends Codex for a task turn. */
 export const codexUnsandboxedLine =
   "A project at the unsandboxed level runs its Codex task turns with sandbox policy dangerFullAccess; the approval policy stays never. Draft, read-only and unbound turns stay strict.";

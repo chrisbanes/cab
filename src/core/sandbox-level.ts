@@ -16,3 +16,5 @@ export type SandboxLevel = z.infer<typeof sandboxLevelSchema>;
 
 /** The approval action of a sandbox escalation; never a delivery `ActionKind`. */
 export const sandboxEscalationAction = "sandbox.escalate";
+/** The prompt and Inbox headline of a sandbox escalation approval. */
+export const sandboxEscalationHeadline = "Run a command outside the sandbox";

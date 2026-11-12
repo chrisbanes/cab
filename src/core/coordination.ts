@@ -51,7 +51,10 @@ import {
   type RuntimeDeliveryCaller,
 } from "./delivery.js";
 import { transaction, type Database, widenCheck } from "./store.js";
-import { sandboxEscalationAction } from "./sandbox-level.js";
+import {
+  sandboxEscalationAction,
+  sandboxEscalationHeadline,
+} from "./sandbox-level.js";
 import {
   DelegateWithdrawalRefusedError,
   DelegatesUnfinishedError,
@@ -307,7 +310,6 @@ const withdrawnRecipientRefusal =
 const deliverable = (alias: string) =>
   `NOT EXISTS (SELECT 1 FROM coordination_undeliverable_inbox_events undeliverable
     WHERE undeliverable.eventId = ${alias}.eventId)`;
-const sandboxEscalationPrompt = "Run a command outside the sandbox";
 export type SandboxEscalationRecord = {
   interactionId: string;
   taskId: string;
@@ -317,7 +319,7 @@ export type SandboxEscalationRecord = {
   decider: "operator" | "expiry" | "obsolete" | null;
   decision: "accept" | "decline" | null;
   decidedAt: number | null;
-  /** Null until a reply is claimed; 0 when it was claimed but not written. */
+  /** Null until a reply is claimed; false when it was claimed but not confirmed written. */
   delivered: boolean | null;
   exitCode: number | null;
   durationMs: number | null;
@@ -2445,30 +2447,35 @@ export class CoordinationStore {
     };
   }): string {
     const identity = nativeInputEndpointIdentitySchema.parse(input.identity);
-    let material: Record<string, unknown> = {
-      command: input.command,
-      cwd: input.cwd.slice(0, 1024),
-      reason: input.reason?.slice(0, 1024) ?? null,
+    // Model-written fields are cut to fit the 8 KiB approval limit, and any cut is shown.
+    const cwd = input.cwd.slice(0, 512),
+      reason = input.reason?.slice(0, 512) ?? null;
+    let command = input.command;
+    const materialOf = (truncated: boolean) => ({
+      command,
+      cwd,
+      reason,
       workspace: input.workspace,
-    };
-    // A long command is cut to fit the 8 KiB approval limit, and the cut is shown.
-    while (
-      new TextEncoder().encode(canonicalMaterial(material)).byteLength > 8192
-    )
-      material = {
-        ...material,
-        command: String(material.command).slice(
-          0,
-          Math.floor(String(material.command).length * 0.9),
-        ),
-        commandTruncated: true,
-      };
+      ...(truncated ? { truncated: true } : {}),
+    });
+    const fits = (value: unknown) =>
+      new TextEncoder().encode(canonicalMaterial(value)).byteLength <= 8192;
+    let material = materialOf(
+      cwd !== input.cwd || reason !== (input.reason ?? null),
+    );
+    while (!fits(material) && command.length > 0) {
+      command = command.slice(0, Math.floor(command.length * 0.9));
+      material = materialOf(true);
+    }
+    // Only an oversized cwd, reason or branch is left; refused, it is declined.
+    if (!fits(material))
+      throw new Error("Sandbox escalation material exceeds the 8 KiB limit");
     return transaction(this.db, () => {
       const binding = this.currentBinding(identity.threadId, identity.turnId);
       if (!binding || Number(binding.draftTurn) === 1)
         throw new Error("Sandbox escalation is not bound to current work");
       const interactionId = this.openInteraction(binding, "approval", {
-        prompt: sandboxEscalationPrompt,
+        prompt: sandboxEscalationHeadline,
         action: sandboxEscalationAction,
         target: null,
         materialHash: materialDigest(material),

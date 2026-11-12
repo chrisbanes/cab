@@ -66,8 +66,10 @@ import {
 } from "../core/status-mapping-contracts.js";
 import { statusMappingRefusalSentence } from "../operator/status-mapping-copy.js";
 import { approvalHeadlines } from "../operator/delivery-action-copy.js";
-import { sandboxEscalationHeadline } from "../operator/sandbox-level-copy.js";
-import { sandboxEscalationAction } from "../core/sandbox-level.js";
+import {
+  sandboxEscalationAction,
+  sandboxEscalationHeadline,
+} from "../core/sandbox-level.js";
 import {
   type DomainCommand,
   DomainCommands,
@@ -10821,8 +10823,9 @@ export class OperatorApi {
                     typeof view.reconcileResultRecipient
                   >[0],
                 );
-      // A replayed decision finds the reply already claimed and sends nothing.
-      if (c.type === "approval.decide" && c.action === sandboxEscalationAction)
+      // Answers a held sandbox escalation; any other approval has no escalation record, and a
+      // replayed decision finds the reply already claimed and sends nothing.
+      if (c.type === "approval.decide")
         await this.service.settleSandboxEscalation(c.interactionId);
       return commandReceiptSchema.parse({
         kind: "coordination",

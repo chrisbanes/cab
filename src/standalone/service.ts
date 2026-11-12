@@ -980,6 +980,7 @@ export class StandaloneService {
     string,
     {
       runtime: Runtime;
+      identity: NativeInputEndpointIdentity;
       release: () => void;
       interactionId?: string;
       timer?: NodeJS.Timeout;
@@ -3098,6 +3099,8 @@ export class StandaloneService {
               waiter.interactionId,
               "obsolete",
             );
+        } catch {
+          // A restart withdraws what could not be withdrawn now.
         } finally {
           this.finishSandboxEscalation(key);
         }
@@ -6547,7 +6550,11 @@ export class StandaloneService {
     });
     // First, so a refused callback lease leaves no waiter behind.
     this.registerExecutionCallback(binding.workId, pending);
-    this.escalationWaiters.set(key, { runtime, release });
+    this.escalationWaiters.set(key, {
+      runtime,
+      identity: event.identity,
+      release,
+    });
     void this.openSandboxEscalation(event, binding.taskId, intent);
     return true;
   }
@@ -6562,6 +6569,8 @@ export class StandaloneService {
     if (!waiter) return;
     try {
       const workspace = await this.escalationWorkspace(taskId, event.cwd);
+      // A stop during the Git read has already withdrawn it.
+      if (this.escalationWaiters.get(key) !== waiter) return;
       const { coordination } = this.started();
       const interactionId = coordination.recordSandboxEscalation({
         identity: event.identity,
@@ -6584,9 +6593,12 @@ export class StandaloneService {
     } catch {
       // Unrecorded, so nobody can answer it: decline at once and hold the work for review.
       try {
-        const { state, supervisor } = this.started();
-        state.hold(intent.id, "Sandbox escalation could not be recorded");
-        supervisor.noteAnomaly(intent.workId);
+        // A turn that already ended explains the failure; anything else is an anomaly.
+        if (!waiter.ended) {
+          const { state, supervisor } = this.started();
+          state.hold(intent.id, "Sandbox escalation could not be recorded");
+          supervisor.noteAnomaly(intent.workId);
+        }
       } catch {
         // A service stopping meanwhile ends the turn itself.
       }
@@ -6629,7 +6641,8 @@ export class StandaloneService {
           path !== undefined && (cwd === path || cwd.startsWith(path + sep))
         );
       });
-      const repository = holding ?? observed[0];
+      const repository =
+        holding ?? (observed.length === 1 ? observed[0] : undefined);
       if (repository)
         return {
           head: repository.headCommit,
@@ -6671,7 +6684,14 @@ export class StandaloneService {
         "expired",
       );
     } catch {
-      // Unrecorded: the turn's end or a restart withdraws it instead.
+      // The expiry could not be recorded; the turn still must not wait on it, so decline it.
+      for (const [key, waiter] of this.escalationWaiters)
+        if (waiter.interactionId === interactionId) {
+          await waiter.runtime
+            .replySandboxEscalation?.(waiter.identity, "decline")
+            .catch(() => false);
+          this.finishSandboxEscalation(key);
+        }
       return;
     }
     await this.settleSandboxEscalation(interactionId);

@@ -4031,6 +4031,10 @@ function escalationFakeRuntime() {
     "      asked.set('esc-' + turns, turnId);",
     "      write({ id: 'esc-' + turns, method: 'item/commandExecution/requestApproval', params: { ...base, itemId: 'item-' + turns, command: 'node chromium.mjs', cwd: message.params.cwd, reason: 'needs host Chromium', proposedExecpolicyAmendment: ['node'] } });",
     "      if (prompt === 'escalate-end') finish(turnId);",
+    "      if (prompt === 'escalate-twice') write({ id: 'esc-' + turns, method: 'item/commandExecution/requestApproval', params: { ...base, itemId: 'item-' + turns, command: 'node chromium.mjs', cwd: message.params.cwd, reason: 'needs host Chromium' } });",
+    "      if (prompt === 'escalate-settled') { write({ method: 'item/completed', params: { ...base, item: { id: 'item-' + turns, type: 'commandExecution', status: 'declined', exitCode: null } } }); finish(turnId); }",
+    "    } else if (prompt === 'network') {",
+    "      write({ id: 'net', method: 'item/commandExecution/requestApproval', params: { ...base, itemId: 'n', command: 'curl x', cwd: message.params.cwd, networkApprovalContext: { host: 'example.invalid' } } });",
     "    } else if (prompt === 'others') {",
     "      write({ id: 'file', method: 'item/fileChange/requestApproval', params: { ...base, itemId: 'f' } });",
     "      write({ id: 'perm', method: 'item/permissions/requestApproval', params: { ...base, itemId: 'p' } });",
@@ -4331,6 +4335,86 @@ test("an escalation the listener refuses is denied, and one left unanswered ends
       false,
     );
     assert.deepEqual(replies("esc-2"), []);
+  } finally {
+    await cleanup();
+  }
+});
+
+test("a retransmitted escalation stays one request with one decision; one Codex settles itself ends unanswered", async () => {
+  const { root, runtime, replies, cleanup } = escalationFakeRuntime();
+  const events: SandboxEscalationEvent[] = [];
+  const unexpected: Array<{ method: string }> = [];
+  runtime.onUnexpectedRequest((request) => unexpected.push(request));
+  runtime.onSandboxEscalation((event) => {
+    events.push(event);
+    return true;
+  });
+  try {
+    await bounded(runtime.start(), 3000);
+    await bounded(runtime.startThread(root), 3000);
+    await bounded(
+      runtime.startTurn(
+        "thread-1",
+        root,
+        "escalate-twice",
+        undefined,
+        escalationPolicy,
+      ),
+      3000,
+    );
+    await eventually(() => events.length === 1);
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    assert.equal(events.length, 1);
+    assert.deepEqual(replies("esc-1"), []);
+    const requested = events[0]!;
+    assert.equal(
+      await runtime.replySandboxEscalation(requested.identity, "decline"),
+      true,
+    );
+    await eventually(() => events.length === 2);
+    assert.deepEqual(replies("esc-1"), [
+      { id: "esc-1", result: { decision: "decline" } },
+    ]);
+    // Codex settles an unanswered request itself: it ends, and cannot be answered after.
+    await bounded(
+      runtime.startTurn(
+        "thread-1",
+        root,
+        "escalate-settled",
+        undefined,
+        escalationPolicy,
+      ),
+      3000,
+    );
+    await eventually(() => events.length === 4);
+    assert.deepEqual(
+      events.slice(2).map((event) => event.kind),
+      ["requested", "ended"],
+    );
+    assert.equal(
+      await runtime.replySandboxEscalation(events[3]!.identity, "accept"),
+      false,
+    );
+    // A command approval that also asks for network access is another kind and is denied.
+    await bounded(
+      runtime.startTurn(
+        "thread-1",
+        root,
+        "network",
+        undefined,
+        escalationPolicy,
+      ),
+      3000,
+    );
+    await eventually(() => unexpected.length === 1);
+    assert.equal(
+      unexpected[0]?.method,
+      "item/commandExecution/requestApproval",
+    );
+    assert.deepEqual(replies("net"), [
+      { id: "net", result: { decision: "cancel" } },
+    ]);
+    assert.equal(events.length, 4);
   } finally {
     await cleanup();
   }

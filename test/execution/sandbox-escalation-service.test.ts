@@ -65,14 +65,19 @@ class EscalationRuntime extends OperatorFixtureRuntime {
       if (identity.threadId === thread && identity.turnId === turn)
         this.end(identity);
   }
-  request(identity: NativeInputEndpointIdentity, cwd: string) {
+  request(
+    identity: NativeInputEndpointIdentity,
+    cwd: string,
+    command = "node chromium.mjs escalated",
+    reason = "needs host Chromium",
+  ) {
     this.pending.set(nativeEndpointKey(identity), identity);
     const taken = this.emit({
       kind: "requested",
       identity,
-      command: "node chromium.mjs escalated",
+      command,
       cwd,
-      reason: "needs host Chromium",
+      reason,
     });
     if (!taken) this.pending.delete(nativeEndpointKey(identity));
     return taken;
@@ -167,9 +172,13 @@ async function escalationTask(t: TestContext, expiryMs?: number) {
   const approvals = async () =>
     (await api.readTask(seeded.taskId)).data.approvals as Approval[];
   /** Raises an escalation and waits for its Inbox approval. */
-  const escalate = async (at = identity()) => {
+  const escalate = async (
+    at = identity(),
+    command?: string,
+    reason?: string,
+  ) => {
     const known = new Set((await approvals()).map((a) => a.interactionId));
-    assert.equal(runtime.request(at, worktree), true);
+    assert.equal(runtime.request(at, worktree, command, reason), true);
     // Approvals of the same second sort by id, so the new one is found by id, not position.
     const fresh = () =>
       f.service
@@ -236,14 +245,19 @@ test("an escalation becomes an Inbox approval; approve answers accept once and r
     (i: { id: string }) => i.id === approval.interactionId,
   ) as { headline?: string } | undefined;
   assert.equal(inbox?.headline, "Run a command outside the sandbox");
-  // While it waits, the turn keeps running and holds its slot and writer; nothing is held.
+  // While it waits, the turn keeps running, and its pending callback keeps its slot and writer.
   const waiting = s.f.service.list().find((w) => w.workId === s.work.workId);
   assert.equal(waiting?.state, "running");
+  const callbacks = (
+    s.f.service as unknown as { callbacks: Map<string, Set<unknown>> }
+  ).callbacks;
+  assert.equal(callbacks.get(s.work.workId)?.size, 1);
   assert.deepEqual(s.runtime.replies, []);
 
   const key = randomUUID();
   await s.decide(approval, "approved", key);
   assert.deepEqual(s.runtime.replies, [{ identity, decision: "accept" }]);
+  await waitFor(() => !callbacks.has(s.work.workId));
   // A replayed decision sends nothing more.
   await s.decide(approval, "approved", key);
   assert.equal(s.runtime.replies.length, 1);
@@ -482,6 +496,12 @@ test("a stop withdraws a held escalation, and a start withdraws one a crash left
       "UPDATE sandbox_escalations SET decider = NULL, decision = NULL, decidedAt = NULL WHERE interactionId = ?",
     ).run(pending.approval.interactionId);
     db.prepare(
+      "UPDATE inbox_lifecycle SET status = 'actionable', obsolete = 0, resolution = NULL, resolvedAt = NULL WHERE id = ?",
+    ).run(pending.approval.interactionId);
+    db.prepare(
+      "UPDATE coordination_operator_attention SET status = 'open', resolvedAt = NULL WHERE interactionId = ?",
+    ).run(pending.approval.interactionId);
+    db.prepare(
       "UPDATE sandbox_escalations SET delivered = NULL WHERE interactionId = ?",
     ).run(approved.approval.interactionId);
   } finally {
@@ -512,4 +532,27 @@ test("a stop withdraws a held escalation, and a start withdraws one a crash left
   } finally {
     await restarted.stop();
   }
+});
+
+test("a long command is cut to fit the approval limit and the cut is shown, whatever the reason holds", async (t) => {
+  const s = await escalationTask(t);
+  // Control characters escape to six bytes each, so the reason alone could exceed the limit.
+  const { approval } = await s.escalate(
+    undefined,
+    `node ${"x".repeat(20_000)}`,
+    "\u0001".repeat(5_000),
+  );
+  const material = approval.material as {
+    command: string;
+    reason: string;
+    truncated?: boolean;
+  };
+  assert.equal(material.truncated, true);
+  assert.ok(material.command.startsWith("node x"));
+  assert.ok(material.command.length < 20_000);
+  assert.equal(material.reason.length, 512);
+  assert.ok(
+    new TextEncoder().encode(JSON.stringify(material)).byteLength <= 8192,
+  );
+  assert.equal(approval.approvable, true);
 });
