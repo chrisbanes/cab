@@ -2206,6 +2206,12 @@ export function TaskWorkspace({
       />
     );
   const comment = commentAvailability(data.commentPolicy);
+  // Without a comment grant the option is hidden, unless it is selected: then it stays, disabled
+  // with its reason and the draft kept, so a tracker-bound draft is never re-routed silently.
+  const githubOffered =
+    !!data.source &&
+    (data.commentPolicy?.reasonCode !== "no-comment-grant" ||
+      destination === "github");
   // Exactly one sentence sits above the box: what this destination does now.
   const replyNote =
     destination === "comment"
@@ -2278,7 +2284,7 @@ export function TaskWorkspace({
             </span>
           </label>
         )}
-        {data.source && (
+        {githubOffered && (
           <label className="reply-destination-option">
             <input
               type="radio"
@@ -2299,7 +2305,7 @@ export function TaskWorkspace({
             <span>Post {trackerName(data.source)} comment</span>
           </label>
         )}
-        {data.source && comment.sentence && (
+        {githubOffered && comment.sentence && (
           <span id={githubReasonId} className="sr-only">
             {comment.sentence}
           </span>

@@ -228,7 +228,11 @@ Rules:
   mono subtitle, at most one outline action).
 - The Reply destination (Comment on task, Message task lead, Post GitHub comment) is
   a segmented radio group named Send to; Send is the only primary button in Reply.
-  An unavailable destination stays focusable with `aria-disabled` and its reason.
+  An unavailable destination stays focusable with `aria-disabled` and its reason;
+  Post GitHub comment is hidden when the project doesn't permit issue comments, unless
+  it is the selected destination. A shared comment has one line above the box, and
+  the fuller sending rules sit in a closed "How sending works" disclosure below the
+  recipient preview.
 - Use a navigation row for anything that only opens another view. Keep buttons for
   actions, with one primary action per view. Desktop buttons hug their label.
 - Stop uses the destructive treatment and confirms first; reversible states show

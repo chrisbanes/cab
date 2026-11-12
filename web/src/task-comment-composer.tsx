@@ -3,6 +3,7 @@ import { Button } from "./components.js";
 import {
   addRecipient,
   admissionText,
+  commentRulesText,
   noLeadText,
   chipLabel,
   pickableRecipients,
@@ -147,10 +148,12 @@ export function CommentRecipients({
             ))}
           </ul>
         )}
-        {lines.some((line) => !line.blocked) && (
-          <p className="metadata muted">{admissionText}</p>
-        )}
       </output>
+      <details className="reply-help">
+        <summary>How sending works</summary>
+        <p className="metadata muted">{commentRulesText}</p>
+        <p className="metadata muted">{admissionText}</p>
+      </details>
     </div>
   );
 }

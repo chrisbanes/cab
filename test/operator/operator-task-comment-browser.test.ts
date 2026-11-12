@@ -10,7 +10,9 @@ import {
 import { createOperatorFixture } from "../fixtures/operator-web.js";
 import { markTaskReady, seedReviewTask } from "../fixtures/task-review.js";
 import {
+  admissionText,
   commentNote,
+  commentRulesText,
   recordOnlyText,
 } from "../../web/src/task-comment-model.js";
 
@@ -200,9 +202,12 @@ for (const engine of ["chromium", "webkit"] as const)
         .getByText(/receives this as input/)
         .first()
         .waitFor();
-      await page
-        .getByText(/Pause, Stop, capacity, readiness and permissions/)
-        .waitFor();
+      // The fuller rules sit behind a closed help disclosure that opens by keyboard.
+      assert.equal(await page.getByText(admissionText).isVisible(), false);
+      await page.locator(".reply-help > summary").focus();
+      await page.keyboard.press("Enter");
+      await page.getByText(commentRulesText).waitFor();
+      await page.getByText(admissionText).waitFor();
       await captureBrowserEvidence(
         page,
         `${engine}-1366-mixed-recipient-preview`,

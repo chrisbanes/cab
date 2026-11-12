@@ -955,17 +955,21 @@ a.task-source-chip:hover {
   gap: var(--space-4);
 }
 
-/* The per-message menu: an icon trigger at the end of the header and a small popover. */
-.conv-menu {
+/* The per-message menu: an icon trigger at the end of the header and a small popover, not a
+   framed workspace disclosure. */
+.task-workspace details.conv-menu {
   position: relative;
-  margin-left: auto;
+  margin: 0 0 0 auto;
+  padding: 0;
+  border: 0;
 }
 
-.conv-menu > summary {
+.task-workspace .conv-menu > summary {
   display: flex;
   align-items: center;
   justify-content: center;
   width: 28px;
+  min-height: 0;
   height: 28px;
   border-radius: var(--radius-md);
   color: var(--fg-2);
@@ -1247,7 +1251,7 @@ a.task-source-chip:hover {
     min-height: 44px;
   }
 
-  .conv-menu > summary {
+  .task-workspace .conv-menu > summary {
     width: 44px;
     height: 44px;
   }
@@ -1375,6 +1379,21 @@ a.task-source-chip:hover {
 }
 .comment-preview p {
   margin: 0;
+}
+/* The fuller sending rules, closed by default below the preview. */
+.task-workspace details.reply-help {
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+.task-workspace .reply-help > summary {
+  width: fit-content;
+  color: var(--fg-2);
+  font-size: var(--type-xs);
+  font-weight: var(--weight-medium);
+}
+.reply-help p {
+  margin: var(--space-4) 0 0;
 }
 
 /* Keep Reply inside its conversation column; overflow keeps short screens usable. */

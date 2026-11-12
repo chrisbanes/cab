@@ -156,7 +156,11 @@ export const hasBlockedRecipient = (
 
 /** The one sentence above the box for a shared comment. */
 export const commentNote =
-  "Shared in the task conversation. Only the assignments listed below receive it; a name in the text addresses no one, and a sent comment can't be edited.";
+  "Shared in the task conversation; only the recipients below receive it.";
+
+/** The rest of the rules, behind the composer's "How sending works" disclosure. */
+export const commentRulesText =
+  "A name in the text addresses no one, and a sent comment can't be edited.";
 
 export const commentUnavailableNote =
   "Shared comments are unavailable, so nothing can be sent from here.";
@@ -168,7 +172,7 @@ export const noLeadText =
 export const recordOnlyText =
   "No recipients: this comment is recorded in the conversation and wakes no assignment.";
 
-/** The admission caveat shown with any wake: recording is not starting. */
+/** The admission caveat, in "How sending works": recording is not starting. */
 export const admissionText =
   "Sending queues this input. Pause, Stop, capacity, readiness and permissions still decide when work runs.";
 
