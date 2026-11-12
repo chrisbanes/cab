@@ -2,11 +2,13 @@
 
 Recorded 2026-11-12 for [#1681](https://github.com/chrisbanes/cab/issues/1681), slice T5 of its approved plan. The run is at candidate `339ba2d39da10f0ace75c9df78325f7abe2bf8ba` (on `main` at `0419e5cb`), built into `dist` from that clean tree. No credential, token or account data is recorded. The sanitised output is in [2026-11-12-escalate-auto-review-live.json](2026-11-12-escalate-auto-review-live.json). The harness replaced the fixture root with `<fixture>`, the per-user temporary directory with `<tmpdir>` and the home directory with `~`.
 
+After the run, review tightened the harness and classifier. The harness reserves its one turn before the start is awaited. The classifier leaves the cell untested without cab's own turn id or without the captured policy, anomaly record and result files, and refutes it on a second, conflicting completion, turn end or record. Reclassifying the stored trace with the final classifier gives the same verdict, and the offline harness test checks this.
+
 ## Run
 
 - **Command:** `npm run escalate-auto-review:live`, which takes exactly `--live --one-attempt`. It ran once, from 13:48:34 to 13:49:03 UTC, and exited 0. No rerun was made, so the allowance of one fresh attempt for a diagnosed harness defect is unused.
 - **Offline gate:** the run's offline contract passed at the same candidate before the run (`sandbox-escalation-qualification-harness.test.ts`: the grammar refusal and the classifier).
-- **Runtime:** Codex launcher `codex-cli 0.167.0-alpha.3.2` (SHA-256 `50ab38ba21d0d9f8346f32f41848382f15b556190f3c7a07e885a4fb73e379c8`) on the service user's own login. The operator's `CODEX_HOME` holds 2 files in `rules`, counted but not read.
+- **Runtime:** Codex launcher `codex-cli 0.167.0-alpha.3.2` (SHA-256 `50ab38ba21d0d9f8346f32f41848382f15b556190f3c7a07e885a4fb73e379c8`) on the service user's own login. Before the run, a separate read-only check counted 2 files in the `rules` directory of the operator's `CODEX_HOME` without reading them; the harness itself does not count them.
 - **Host:** Node v26.13.0 on macOS.
 
 The harness starts the real `StandaloneService` and Codex App Server on a disposable data directory under `~/.cache`. It sets up one project at sandbox level `escalate-auto-review` and one task, whose workspace holds the fixed `chromium.mjs` script. That script launches headless Chromium through Playwright and writes `{chromium}` to `<label>-result.json`.

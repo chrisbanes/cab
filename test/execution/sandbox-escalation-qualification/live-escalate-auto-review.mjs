@@ -78,6 +78,7 @@ if (!evidence.candidateClean) {
   process.exit(2);
 }
 
+let turnsStarted = 0;
 const turnIds = [],
   wire = [],
   reviews = [],
@@ -139,13 +140,14 @@ function makeService(dataDir) {
       const startTurn = runtime.startTurn.bind(runtime);
       // One turn, found by its marker; repair and other turns are refused.
       runtime.startTurn = async (...call) => {
-        if (!String(call[2]).includes(marker) || turnIds.length > 0) {
+        // Reserved before the start is awaited, so a failed or overlapping start cannot add one.
+        if (!String(call[2]).includes(marker) || turnsStarted > 0) {
           evidence.refusedTurns += 1;
           throw new Error("turn outside the budget");
         }
-        const turnId = await startTurn(...call);
-        turnIds.push(turnId);
-        return turnId;
+        turnsStarted += 1;
+        turnIds.push(await startTurn(...call));
+        return turnIds.at(-1);
       };
       const request = runtime.request.bind(runtime);
       runtime.request = (method, params, ...rest) => {

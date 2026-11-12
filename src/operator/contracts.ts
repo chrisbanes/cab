@@ -1,5 +1,8 @@
 import { inboxLifecycleSchema } from "../core/inbox-lifecycle.js";
-import { sandboxLevelSchema } from "../core/sandbox-level.js";
+import {
+  sandboxLevelSchema,
+  sandboxReviewRiskSchema,
+} from "../core/sandbox-level.js";
 import {
   sandboxEscalationOutcomes,
   sandboxOverruleOutcomes,
@@ -1517,7 +1520,7 @@ const sandboxReviewSchema = z
     decider: z.literal("reviewer"),
     decision: z.enum(["accept", "decline"]).nullable(),
     outcome: z.enum(sandboxReviewOutcomes),
-    riskLevel: z.enum(["low", "medium", "high", "critical"]).nullable(),
+    riskLevel: sandboxReviewRiskSchema.nullable(),
     rationale: safeText,
     /** The advisory overrule a denial offered; null when none was offered. */
     overrule: z

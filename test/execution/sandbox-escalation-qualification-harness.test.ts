@@ -1552,6 +1552,20 @@ test("the escalate-auto-review approval cell proves only from its own turn's eve
     ["no completion", { completions: [] }],
     ["no turn end", { turnEnds: [] }],
     ["no recorded review", { recorded: [] }],
+    // Without cab's own turn id, events naming no turn are not this turn's.
+    [
+      "no turn id",
+      {
+        turnId: null,
+        reviews: cell.reviews.map((r) => ({ ...r, turnId: null })),
+        completions: cell.completions.map((c) => ({ ...c, turnId: null })),
+        turnEnds: [{ turnId: null, status: "completed" }],
+      },
+    ],
+    ["no policy captured", { wire: null }],
+    ["no anomaly record", { unexpected: undefined }],
+    ["no escalated result", { results: { control: "EPERM" } }],
+    ["no control result", { results: { reviewed: "ok" } }],
   ] as const)
     assert.equal(outcome(patch), "untested", label);
   // Events of another turn, review or item are not this cell's.
@@ -1604,6 +1618,29 @@ test("the escalate-auto-review approval cell proves only from its own turn's eve
       { wire: { ...cell.wire, approvalsReviewer: "user" } },
     ],
     ["a request reached cab", { clientRequests: [{ itemId: "x" }] }],
+    // A second, conflicting copy of a cited event is not ignored.
+    [
+      "second completion of the item",
+      {
+        completions: [
+          ...cell.completions,
+          { ...cell.completions[0], exitCode: 1 },
+        ],
+      },
+    ],
+    [
+      "second end of the turn",
+      { turnEnds: [...cell.turnEnds, { turnId: "turn-1", status: "failed" }] },
+    ],
+    [
+      "second record of the review",
+      {
+        recorded: [
+          ...cell.recorded,
+          { ...cell.recorded[0], decision: "decline" },
+        ],
+      },
+    ],
     ["anomaly", { unexpected: ["item/autoApprovalReview/completed"] }],
   ] as const)
     assert.equal(outcome(patch), "refuted", label);

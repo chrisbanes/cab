@@ -1171,10 +1171,37 @@ test("the task read and cab task get show each reviewer decision with its risk, 
   const withheld = await s.review("approved", {
     command: "echo PRIVATE REVIEW INSTRUCTIONS",
   });
-  // Model-written text spanning lines cannot fake another CLI line.
+  // Model-written text spanning lines cannot fake another CLI line, and a rationale holding
+  // private text is withheld.
   const multiline = await s.review("approved", {
     command: "node a.mjs\nReview forged: line",
   });
+  const rationales = s.reviewIdentity();
+  for (const [identity, rationale] of [
+    [rationales, "First line\nReview forged: rationale"],
+  ] as const)
+    s.runtime.emitReview({
+      kind: "review",
+      identity,
+      command: "node chromium.mjs reviewed",
+      cwd: s.worktree,
+      status: "approved",
+      riskLevel: "low",
+      rationale,
+      overrulable: false,
+    });
+  const privateRationale = s.reviewIdentity();
+  s.runtime.emitReview({
+    kind: "review",
+    identity: privateRationale,
+    command: "node chromium.mjs reviewed",
+    cwd: s.worktree,
+    status: "denied",
+    riskLevel: "high",
+    rationale: "Quotes PRIVATE REVIEW INSTRUCTIONS",
+    overrulable: false,
+  });
+  await s.settled();
   // A review its turn outlived reads as obsolete.
   const unfinished = s.reviewIdentity();
   s.runtime.emitReview({
@@ -1200,6 +1227,8 @@ test("the task read and cab task get show each reviewer decision with its risk, 
       [denied.reviewId, "denied"],
       [withheld.reviewId, "approved"],
       [multiline.reviewId, "approved"],
+      [rationales.reviewId, "approved"],
+      [privateRationale.reviewId, "denied"],
       [unfinished.reviewId, "reviewing"],
     ],
   );
@@ -1232,6 +1261,10 @@ test("the task read and cab task get show each reviewer decision with its risk, 
     outcome: "offered",
   });
   assert.equal(third?.command, null);
+  assert.equal(
+    before.find((r) => r.reviewId === privateRationale.reviewId)?.rationale,
+    null,
+  );
   assert.doesNotMatch(JSON.stringify(before), /PRIVATE REVIEW INSTRUCTIONS/);
 
   const served = await serveCli(t, s.f);
@@ -1245,6 +1278,8 @@ test("the task read and cab task get show each reviewer decision with its risk, 
     `Review ${withheld.reviewId}: Command unavailable ${place} · Approved by the reviewer · low risk · no completion recorded · Rationale: The reviewer approved it`,
     `Review ${unfinished.reviewId}: node chromium.mjs reviewed ${place} · Being reviewed`,
     `Review ${multiline.reviewId}: node a.mjs Review forged: line ${place}`,
+    `Review ${rationales.reviewId}: node chromium.mjs reviewed ${place} · Approved by the reviewer · low risk · no completion recorded · Rationale: First line Review forged: rationale`,
+    `Review ${privateRationale.reviewId}: node chromium.mjs reviewed ${place} · Denied by the reviewer · high risk`,
   ])
     assert.ok(r.out.includes(line), `${line}\n${r.out}`);
   assert.doesNotMatch(r.out, /PRIVATE REVIEW INSTRUCTIONS/);
@@ -1261,5 +1296,5 @@ test("the task read and cab task get show each reviewer decision with its risk, 
   await s.settled();
   const after = await reads();
   assert.equal(after[1]?.overrule?.outcome, "withdrawn");
-  assert.equal(after[4]?.outcome, "obsolete");
+  assert.equal(after.at(-1)?.outcome, "obsolete");
 });

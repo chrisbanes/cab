@@ -44,15 +44,18 @@ export const sandboxEscalationCommandUnavailable = "Command unavailable";
  * Where the command was asked to run: its working directory and workspace state, and whether
  * the command, cwd or reason was cut to fit the approval limit.
  */
-export function sandboxEscalationPlace(e: {
-  cwd: string | null;
-  workspace: Parameters<typeof sandboxEscalationWorkspaceLine>[0];
-  truncated: boolean;
-}): string {
+export function sandboxEscalationPlace(
+  e: {
+    cwd: string | null;
+    workspace: Parameters<typeof sandboxEscalationWorkspaceLine>[0];
+    truncated: boolean;
+  },
+  cut = "request cut to fit the approval limit",
+): string {
   return [
     `in ${e.cwd ?? "an unavailable directory"}`,
     sandboxEscalationWorkspaceLine(e.workspace),
-    ...(e.truncated ? ["request cut to fit the approval limit"] : []),
+    ...(e.truncated ? [cut] : []),
   ].join(" · ");
 }
 
@@ -168,7 +171,7 @@ export function sandboxOverruleOutcome(overrule: {
 const overruleLines: Record<SandboxOverruleOutcome, string> = {
   offered: "overrule offered in the Inbox",
   approved: "overrule approved",
-  sent: "overruled by the operator; the retry is reviewed again",
+  sent: "overruled by the operator; any retry is reviewed again",
   "not-delivered": "overrule approved but not delivered",
   declined: "overrule declined",
   withdrawn: "overrule withdrawn: the turn ended",
@@ -219,14 +222,6 @@ export function sandboxReviewResultLine(r: {
 }
 
 /** Where a reviewed command was asked to run, and whether its recorded text was cut. */
-export function sandboxReviewPlace(r: {
-  cwd: string | null;
-  workspace: Parameters<typeof sandboxEscalationWorkspaceLine>[0];
-  truncated: boolean;
-}): string {
-  return [
-    `in ${r.cwd ?? "an unavailable directory"}`,
-    sandboxEscalationWorkspaceLine(r.workspace),
-    ...(r.truncated ? ["review cut to its recorded limit"] : []),
-  ].join(" · ");
-}
+export const sandboxReviewPlace = (
+  r: Parameters<typeof sandboxEscalationPlace>[0],
+) => sandboxEscalationPlace(r, "review cut to its recorded limit");

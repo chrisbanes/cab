@@ -894,7 +894,7 @@ test(
 );
 
 test(
-  "the Execution tab lists reviewer decisions oldest first, with risk, rationale, result and overrule",
+  "the Execution tab lists reviewer decisions with the escalations in time order, with risk, rationale, result and overrule",
   { browserEngine: "chromium" },
   async (_t, j) => {
     const f = await j.start("fixture.create", () =>
@@ -907,9 +907,36 @@ test(
       () => f.lifecycle.steps,
     );
     const a = await seedReviewTask(f, "Review project", "Review task");
-    const overrule = randomUUID();
+    const overrule = randomUUID(),
+      escalation = randomUUID();
     f.seedPersistedState((db) => {
       db.exec("PRAGMA foreign_keys = OFF");
+      // An operator-decided escalation between the two reviews, by time.
+      db.prepare(
+        `INSERT INTO coordination_interactions (interactionId, taskId, requestingAssignmentId,
+          requestingWorkId, requestingWorkRevision, requestingAssignmentVersion,
+          conversationRevision, kind, status, prompt, action, target, materialHash,
+          materialJson, response, revision)
+        VALUES (?, ?, ?, 'review-work', 1, 1, 1, 'approval', 'denied',
+          'Run a command outside the sandbox', 'sandbox.escalate', NULL, ?, ?, 'denied', 2)`,
+      ).run(
+        escalation,
+        a.taskId,
+        a.assignmentId,
+        "0".repeat(64),
+        JSON.stringify({
+          command: "node chromium.mjs escalated",
+          cwd: ".",
+          reason: "needs host Chromium",
+          workspace: { head: null, branch: null, dirty: null },
+        }),
+      );
+      db.prepare(
+        `INSERT INTO sandbox_escalations (interactionId, taskId, workId, runtimeGeneration,
+          requestId, threadId, turnId, itemId, requestedAt, decider, decision, decidedAt)
+        VALUES (?, ?, 'review-work', 'generation', '1', 'thread', 'turn', 'item', 15,
+          'operator', 'decline', 16)`,
+      ).run(escalation, a.taskId);
       const review = db.prepare(
         `INSERT INTO sandbox_reviews (runtimeGeneration, threadId, turnId, reviewId,
           targetItemId, taskId, workId, command, cwd, head, branch, dirty, truncated, status,
@@ -918,7 +945,7 @@ test(
         VALUES ('generation', 'thread', 'turn', ?, ?, ?, 'review-work', ?, '.',
           '0123456789abcdef0123456789abcdef01234567', 'main', 0, 0, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       );
-      // The denial started last but is listed by time after the approval.
+      // Inserted first, the denial is still listed by its start time, after the approval.
       review.run(
         "review-denied",
         "item-2",
@@ -986,13 +1013,18 @@ test(
     await denied
       .getByText("Rationale: Sends a file to an unknown host")
       .waitFor();
+    // Reviews and escalations share one list, in time order.
     assert.deepEqual(
       await execution
-        .locator("[data-review]")
+        .locator("[data-review], [data-escalation]")
         .evaluateAll((items) =>
-          items.map((i) => i.getAttribute("data-review")),
+          items.map(
+            (i) =>
+              i.getAttribute("data-review") ??
+              `escalation-${i.getAttribute("data-escalation")}`,
+          ),
         ),
-      ["approved", "denied"],
+      ["approved", "escalation-declined", "denied"],
     );
   },
 );

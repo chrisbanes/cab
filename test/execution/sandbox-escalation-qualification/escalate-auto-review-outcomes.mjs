@@ -29,7 +29,9 @@ export const labelOf = (command) =>
  * command in that turn, the completion of the review's target item, and the turn's end.
  */
 function ownEvents(cell) {
-  const turnId = cell.turnId ?? null;
+  // Without the turn id cab's turn/start returned, no event can be shown to be this turn's.
+  const turnId =
+    typeof cell.turnId === "string" && cell.turnId !== "" ? cell.turnId : null;
   const reviews = (cell.reviews ?? []).filter(
     (r) => r.turnId === turnId && labelOf(r.command) === "reviewed",
   );
@@ -43,16 +45,31 @@ function ownEvents(cell) {
         r.reviewId === review.reviewId &&
         r.targetItemId === review.targetItemId,
     );
-  const completion =
+  // Every match is kept: an item completes once, a turn ends once and cab records a review once,
+  // so a second, conflicting one refutes rather than being ignored.
+  const completions =
     review && typeof review.targetItemId === "string"
-      ? (cell.completions ?? []).find(
+      ? (cell.completions ?? []).filter(
           (c) => c.turnId === turnId && c.itemId === review.targetItemId,
         )
-      : undefined;
-  const end = (cell.turnEnds ?? []).find((t) => t.turnId === turnId);
-  const recorded =
-    review && (cell.recorded ?? []).find((r) => r.reviewId === review.reviewId);
-  return { completed, review, started, completion, end, recorded };
+      : [];
+  const ends =
+    turnId === null
+      ? []
+      : (cell.turnEnds ?? []).filter((t) => t.turnId === turnId);
+  const records = review
+    ? (cell.recorded ?? []).filter((r) => r.reviewId === review.reviewId)
+    : [];
+  return {
+    turnId,
+    completed,
+    review,
+    started,
+    completion: completions[0],
+    end: ends[0],
+    recorded: records[0],
+    duplicates: completions.length > 1 || ends.length > 1 || records.length > 1,
+  };
 }
 
 const cite = ({ review, completion, end }) => ({
@@ -71,7 +88,16 @@ const cite = ({ review, completion, end }) => ({
  */
 export function approvalCell(cell) {
   const events = ownEvents(cell);
-  const { completed, review, started, completion, end, recorded } = events;
+  const {
+    turnId,
+    completed,
+    review,
+    started,
+    completion,
+    end,
+    recorded,
+    duplicates,
+  } = events;
   const checks = {
     policySent:
       same(cell.wire?.approvalPolicy, ESCALATION_POLICY) &&
@@ -98,22 +124,29 @@ export function approvalCell(cell) {
   };
   // Missing evidence leaves the cell untested; only present, contradicting evidence refutes it.
   const untested =
-    completed.length !== 1
-      ? "no single completed review of the escalated command in this turn"
-      : started === undefined
-        ? "no started review with the completed reviewId"
-        : review.status !== "approved"
-          ? `the reviewer ${review.status} the benign command`
-          : completion === undefined
-            ? "no completion of the review's target item"
-            : end === undefined
-              ? "the turn's end was not observed"
-              : recorded === undefined
-                ? "no recorded review with this reviewId"
-                : null;
+    turnId === null
+      ? "no turn id from cab's turn/start"
+      : !cell.wire ||
+          !Array.isArray(cell.unexpected) ||
+          typeof cell.results?.control !== "string" ||
+          typeof cell.results?.reviewed !== "string"
+        ? "the turn's policy, anomaly record or result files were not captured"
+        : completed.length !== 1
+          ? "no single completed review of the escalated command in this turn"
+          : started === undefined
+            ? "no started review with the completed reviewId"
+            : review.status !== "approved"
+              ? `the reviewer ${review.status} the benign command`
+              : completion === undefined
+                ? "no completion of the review's target item"
+                : end === undefined
+                  ? "the turn's end was not observed"
+                  : recorded === undefined
+                    ? "no recorded review with this reviewId"
+                    : null;
   const outcome = untested
     ? "untested"
-    : Object.values(checks).every(Boolean)
+    : !duplicates && Object.values(checks).every(Boolean)
       ? "proved"
       : "refuted";
   return {

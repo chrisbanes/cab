@@ -169,7 +169,7 @@ test("each reviewer decision reads as one line, with risk, an approved command's
   );
   for (const [outcome, text] of [
     ["approved", "overrule approved"],
-    ["sent", "overruled by the operator; the retry is reviewed again"],
+    ["sent", "overruled by the operator; any retry is reviewed again"],
     ["not-delivered", "overrule approved but not delivered"],
     ["declined", "overrule declined"],
     ["withdrawn", "overrule withdrawn: the turn ended"],
