@@ -35,6 +35,7 @@ import {
   type ResultWorkspaceObservation,
 } from "../core/coordination.js";
 import { maxErrorMessageBytes } from "./service-log.js";
+import { capBytesOutsideRedaction } from "./conversation-history.js";
 
 const maxGitOutputBytes = 1024 * 1024;
 const maxTimerMs = 2_147_483_647;
@@ -366,7 +367,15 @@ class WorktreeIdentityReadError extends Error {
   constructor(repository: TaskWorkspaceRepository, cause: unknown) {
     const exit = cause instanceof WorkspaceGitError ? cause.exit : undefined;
     const detail = exit
-      ? `git ${exit.args.join(" ")} exited ${exit.exitCode ?? "without a code"}: ${capBytes(exit.stderr, maxErrorMessageBytes / 2)}`
+      ? `git ${exit.args.join(" ")} exited ${exit.exitCode ?? "without a code"}: ${capBytesOutsideRedaction(
+          exit.stderr,
+          maxErrorMessageBytes / 2,
+          [
+            // A managed workspace path's parent is its binding's path.
+            dirname(repository.workspacePath),
+            ...repositoryBindingPaths(repository),
+          ],
+        )}`
       : messageOf(cause);
     super(
       `Git could not read the worktree identity for ${repository.repositoryId} at ${repository.workspacePath}: ${detail}`,
@@ -1550,9 +1559,13 @@ export class WorkspaceManager implements TaskWorkspaceLifecycle {
       if (error instanceof WorktreeIdentityReadError)
         return this.store.holdForIdentityRead(
           binding.taskId,
-          capBytes(
+          capBytesOutsideRedaction(
             `Task workspace unavailable: ${error.message}. Run 'cab task workspace-recheck ${binding.taskId}' after fixing the cause.`,
             maxErrorMessageBytes,
+            [
+              binding.path,
+              ...binding.repositories.flatMap(repositoryBindingPaths),
+            ],
           ),
         );
       return this.store.update(
@@ -2223,14 +2236,6 @@ async function lstatIfExists(path: string) {
     if ((error as NodeJS.ErrnoException).code === "ENOENT") return undefined;
     throw error;
   }
-}
-
-/** `text` cut to at most `maxBytes` UTF-8 bytes, at a word boundary. */
-function capBytes(text: string, maxBytes: number): string {
-  const bytes = Buffer.from(text, "utf8");
-  if (bytes.length <= maxBytes) return text;
-  // Drop the cut word too: a partial path would no longer match its redaction.
-  return bytes.subarray(0, maxBytes).toString("utf8").replace(/\S*$/, "");
 }
 
 function messageOf(error: unknown): string {

@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import { join } from "node:path";
 import { test } from "node:test";
+import { sanitizeConversationText } from "../../src/standalone/conversation-history.js";
 import {
   OperatorApi,
   OperatorApiError,
@@ -16,7 +17,13 @@ import { checkout } from "../fixtures/setup-home.js";
 const stderr = "fatal: transient identity failure";
 
 /** A task whose follow-up turn waits in admission because its worktree's identity read fails. */
-async function heldTask(t: test.TestContext) {
+async function heldTask(
+  t: test.TestContext,
+  {
+    sourceName = "source",
+    stderrOf = (_source: string): string => stderr,
+  } = {},
+) {
   const controlled = controlledGit();
   const f = await createOperatorFixture(
     null,
@@ -53,7 +60,7 @@ async function heldTask(t: test.TestContext) {
     name: "Recheck",
     leadProfileId: profileId,
   });
-  const source = join(f.directory, "source");
+  const source = join(f.directory, sourceName);
   await checkout(source, "https://github.com/acme/atlas.git");
   await f.service.domain().configureRepositories({
     type: "repositories.configure",
@@ -101,7 +108,7 @@ async function heldTask(t: test.TestContext) {
     commandPrefix: "rev-parse --show-toplevel",
     cwd: repo.workspacePath,
     behavior: "fail",
-    stderr,
+    stderr: stderrOf(source),
   });
   run({
     type: "task.configure",
@@ -222,4 +229,40 @@ test("the recheck command refuses a still-failing check and a hold that needs a 
   assert.equal(stored()?.state, "held");
   assert.equal(receipts(), before);
   assert.equal(f.runtime.turns, 0);
+});
+
+test("a held workspace reason never keeps part of a redacted path cut by the stderr cap", {
+  skip: processIdentityDenied(),
+}, async (t) => {
+  const failure = "fatal: not a git repository: ";
+  const { f, taskId, recheck, stored } = await heldTask(t, {
+    sourceName: "source checkout with spaces",
+    stderrOf: (source) => {
+      // Size the filler so Git's 1 KB stderr cap falls inside "with", after a space.
+      const cut =
+        Buffer.byteLength(failure) +
+        Buffer.byteLength(source.slice(0, source.lastIndexOf("with") + 2));
+      return `${"w ".repeat(1024).slice(0, 1024 - cut)}${failure}${source}/.git`;
+    },
+  });
+  const reason = stored()?.reason;
+  assert.ok(reason, "no stored reason");
+  assert.ok(reason.includes("exited"), reason);
+  const redacted = sanitizeConversationText(
+    reason,
+    f.service.taskWorkspaceRedactionPaths(taskId),
+  );
+  // Every path in the reason sits under the fixture directory, so any trace of it leaked.
+  assert.ok(redacted !== undefined);
+  assert.ok(!redacted.includes(f.directory), redacted);
+  await assert.rejects(
+    recheck(),
+    (error: unknown) =>
+      error instanceof OperatorApiError &&
+      error.status === 409 &&
+      /^Task workspace is still unavailable: /.test(
+        error.publicMessage ?? "",
+      ) &&
+      !(error.publicMessage ?? "").includes(f.directory),
+  );
 });

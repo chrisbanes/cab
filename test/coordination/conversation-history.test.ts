@@ -19,6 +19,7 @@ import type {
   UnexpectedRequest,
 } from "../../src/standalone/codex.js";
 import {
+  capBytesOutsideRedaction,
   ConversationHistoryCapture,
   ConversationHistoryStore,
   sanitizeConversationText,
@@ -1198,6 +1199,121 @@ test("a raw @ in a URL password is redacted through the last @ before the path",
     "postgres://[redacted]@db/x and https://[redacted]@example.test/path?q=a@b#f@g",
   );
   assert.equal(redacted.includes("ss@"), false);
+});
+
+/** `capBytesOutsideRedaction`'s result, asserted to be a whole-character prefix within `maxBytes`. */
+function capChecked(text: string, maxBytes: number, values: readonly string[]) {
+  const result = capBytesOutsideRedaction(text, maxBytes, values);
+  const label = JSON.stringify({ text, maxBytes });
+  assert.ok(Buffer.byteLength(result, "utf8") <= maxBytes, label);
+  assert.ok(text.startsWith(result), label);
+  assert.ok(!/[\uD800-\uDBFF]$/.test(result), label);
+  return result;
+}
+
+test("a byte cap never keeps part of a redactable span", () => {
+  const path = "/tmp/a b/source checkout";
+  const text = `${"x ".repeat(20)}${path} tail`;
+  const cut = text.indexOf("checkout") - 1;
+  const capped = capChecked(text, cut, [path]);
+  assert.equal(capped, "x ".repeat(20));
+  assert.equal(
+    sanitizeConversationText(capped, [path])?.includes("/tmp"),
+    false,
+  );
+
+  const secret = 'start password: "a b c" end';
+  // A word-boundary cut here would keep `"a b`, leaving `b` unredacted.
+  assert.equal(capChecked(secret, secret.indexOf("c"), []), "start password: ");
+  // The header and URL cuts also stop before the credential.
+  const header = "see Authorization: Bearer one two three";
+  assert.equal(
+    capChecked(header, header.indexOf("two"), []),
+    "see Authorization: ",
+  );
+  const url = "clone https://user:LEAK@host/r";
+  assert.equal(capChecked(url, url.indexOf("@"), []), "clone ");
+
+  // Overlapping spans with spaces: the cut moves before both.
+  const overlap = "go /a b/c d/e f end";
+  assert.equal(
+    capChecked(overlap, overlap.indexOf("e f") + 1, ["/a b/c d", "c d/e f"]),
+    "go ",
+  );
+  // A span at the start leaves nothing, and the loop ends.
+  assert.equal(capChecked(`${path} tail`, 10, [path]), "");
+});
+
+test("a byte cap cuts plain text at a word boundary and whole UTF-8 characters", () => {
+  const old = (text: string, max: number) =>
+    Buffer.from(text, "utf8")
+      .subarray(0, max)
+      .toString("utf8")
+      .replace(/\S*$/, "");
+  const plain = "alpha beta gamma delta";
+  assert.equal(capBytesOutsideRedaction(plain, 100, []), plain);
+  assert.equal(capBytesOutsideRedaction(plain, plain.length, ["delta"]), plain);
+  for (let max = 0; max < plain.length; max++)
+    assert.equal(capBytesOutsideRedaction(plain, max, [""]), old(plain, max));
+  // Text too large to search for spans keeps nothing rather than block on it.
+  assert.equal(capBytesOutsideRedaction("a ".repeat(40 * 1024), 1024, []), "");
+
+  // Every byte limit, including those inside a multi-byte character or the path: the
+  // word-boundary result, except that a partly kept path is dropped whole.
+  const before = "日本 😀😀 ";
+  const path = "/tmp/é è/x";
+  const wide = `${before}${path} ok`;
+  for (let max = 0; max < Buffer.byteLength(wide); max++) {
+    const capped = capChecked(wide, max, [path]);
+    const words = old(wide, max);
+    assert.equal(capped.includes("\uFFFD"), false);
+    assert.equal(
+      capped,
+      words.includes("/tmp") && !words.includes(path) ? before : words,
+    );
+  }
+});
+
+test("byte caps at every boundary of mixed secrets keep no unredacted fragment", () => {
+  // Every redactable character is upper case and nothing else is, so any kept one leaked.
+  const values = ["/TMP/X LEAK Y/SRC", "SRC/.GIT LEAK", "É LEAK Ö"];
+  const pieces = [
+    ...values,
+    "/TMP/X LEAK Y/SRC/.GIT LEAK",
+    'password: "P LEAK Q"',
+    "token=LEAKX",
+    "authorization: bearer LEAK Z",
+    "bearer LEAKW",
+    "https://U:LEAK@host/p",
+    "postgres://U:P@LEAK@db/x",
+    "é",
+    "😀",
+    "word",
+    "src",
+  ];
+  const separators = [" ", "  ", "\n", ", ", " 😀 "];
+  let seed = 1668;
+  const pick = <T>(list: readonly T[]) => {
+    seed = (seed * 1103515245 + 12345) % 2 ** 31;
+    return list[Math.floor((seed / 2 ** 31) * list.length)] as T;
+  };
+  for (let sample = 0; sample < 300; sample++) {
+    let text = "";
+    for (let count = 1 + pick([0, 1, 2, 3, 4, 5, 6, 7, 8]); count > 0; count--)
+      text += pick(pieces) + pick(separators);
+    assert.doesNotMatch(
+      sanitizeConversationText(text, values) ?? "",
+      /[A-ZÉÖ]/,
+    );
+    for (let max = 0; max <= Buffer.byteLength(text, "utf8"); max++) {
+      const kept = sanitizeConversationText(
+        capChecked(text, max, values),
+        values,
+      );
+      assert.ok(kept !== undefined);
+      assert.doesNotMatch(kept, /[A-ZÉÖ]/, JSON.stringify({ text, max }));
+    }
+  }
 });
 
 function plan(...statuses: ("pending" | "in_progress" | "completed")[]) {
