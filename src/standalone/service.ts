@@ -907,11 +907,11 @@ export const withoutWithdrawn = <T extends Record<string, unknown>>(
   assignments: T[],
 ) => assignments.filter((a) => a.state !== "withdrawn");
 
-/** Owns only standalone.sqlite in a marked data directory. No import or attach path exists. */
 /** One review in one runtime generation's thread. */
 const sandboxReviewKey = (identity: SandboxReviewIdentity) =>
   `${identity.runtimeGeneration}\u0000${identity.threadId}\u0000${identity.reviewId}`;
 
+/** Owns only standalone.sqlite in a marked data directory. No import or attach path exists. */
 export class StandaloneService {
   private owner: StandaloneDataDirectory | undefined;
   private db: DatabaseSync | undefined;
@@ -3131,6 +3131,7 @@ export class StandaloneService {
         } finally {
           this.overruleRuntimes.delete(interactionId);
         }
+      this.endedDenials.clear();
     });
     await attempt("conversation-capture cleanup", () =>
       this.clearConversationCaptures(),

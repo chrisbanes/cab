@@ -4002,7 +4002,8 @@ test("stop during a failed spawn does not wait for an exit event", {
  * denies and waits for an overrule, then retries under a fresh review (`-end` ends the turn at
  * once, `-error` rejects the overrule, `-late` ends the turn before answering it, `-crash` exits);
  * `review-other`, `review-malformed` and `review-relative` send reviews cab does not record, and
- * `review-late` sends one after its turn ended.
+ * `review-late` sends one after its turn ended; `review-overlap` first ends the previous turn,
+ * then answers its start and approves a review.
  */
 function escalationFakeRuntime() {
   const root = mkdtempSync(join(tmpdir(), "codex-escalation-"));
@@ -4032,6 +4033,7 @@ function escalationFakeRuntime() {
     "    const turnId = 'turn-' + ++turns;",
     "    const prompt = message.params.input[0].text;",
     "    policy = prompt === 'corrupt-policy' ? { granular: { sandbox_approval: true, rules: true, mcp_elicitations: false, skill_approval: false, request_permissions: false } } : message.params.approvalPolicy;",
+    "    if (prompt === 'review-overlap') finish('turn-' + (turns - 1));",
     "    write({ id: message.id, result: { turn: { id: turnId } } });",
     "    const base = { threadId: 'thread-1', turnId };",
     "    const review = (reviewId, status, targetItemId, action) => { const p = { ...base, reviewId, targetItemId, action: action ?? { type: 'command', source: 'shell', command: 'node chromium.mjs', cwd: message.params.cwd } }; write({ method: 'item/autoApprovalReview/started', params: { ...p, startedAtMs: 1, review: { status: 'inProgress', riskLevel: null, userAuthorization: null, rationale: null } } }); write({ method: 'item/autoApprovalReview/completed', params: { ...p, startedAtMs: 1, completedAtMs: 2, decisionSource: 'agent', review: { status, riskLevel: status === 'approved' ? 'low' : 'high', userAuthorization: 'unknown', rationale: 'because ' + status } } }); };",
@@ -4040,6 +4042,7 @@ function escalationFakeRuntime() {
     "    if (prompt.startsWith('review-deny')) { review('rv-' + turns, 'denied', 'item-' + turns); denied = { turnId, review, ran, prompt }; if (prompt === 'review-deny-end') finish(turnId); if (prompt === 'review-deny-crash') setTimeout(() => process.exit(1), 50); }",
     "    if (prompt === 'review-other') { review('rv-' + turns, 'approved', null, { type: 'networkAccess', target: 'x', host: 'x', protocol: 'https', port: 443 }); finish(turnId); }",
     "    if (prompt === 'review-relative') { review('rv-' + turns, 'denied', 'item-' + turns, { type: 'command', source: 'shell', command: 'node chromium.mjs', cwd: 'subdir' }); finish(turnId); }",
+    "    if (prompt === 'review-overlap') { review('rv-' + turns, 'approved', 'item-' + turns); ran('item-' + turns); finish(turnId); }",
     "    if (prompt === 'review-late') { finish(turnId); review('rv-' + turns, 'aborted', 'item-' + turns); }",
     "    if (prompt === 'review-malformed') { write({ method: 'item/autoApprovalReview/completed', params: { ...base, reviewId: 'bad', targetItemId: 'i', review: { status: 'weird' }, action: { type: 'command', command: 'x', cwd: '/' } } }); finish(turnId); }",
     "    if (prompt.startsWith('escalate')) {",
@@ -4278,6 +4281,49 @@ test("a review that arrives after its turn ended is neither recorded nor held", 
     await bounded(runtime.startTurn("thread-1", root, "plain"), 3000);
     assert.deepEqual(events, []);
     assert.deepEqual(unexpected, []);
+  } finally {
+    await cleanup();
+  }
+});
+
+test("an earlier turn ending after a new review turn starts leaves the new turn's reviews recorded", async () => {
+  const { root, runtime, cleanup } = escalationFakeRuntime();
+  const events: Array<{ kind: string; identity?: { turnId: string } }> = [];
+  const unexpected: unknown[] = [];
+  runtime.onUnexpectedRequest((request) => unexpected.push(request));
+  runtime.onSandboxReview((event) => events.push(event));
+  try {
+    await bounded(runtime.start(), 3000);
+    await bounded(runtime.startThread(root), 3000);
+    // The first turn stays running on its denial; cab starts the next before seeing it end.
+    await bounded(
+      runtime.startTurn(
+        "thread-1",
+        root,
+        "review-deny",
+        undefined,
+        autoReviewPolicy,
+      ),
+      3000,
+    );
+    await eventually(() => events.length === 2);
+    const next = await bounded(
+      runtime.startTurn(
+        "thread-1",
+        root,
+        "review-overlap",
+        undefined,
+        autoReviewPolicy,
+      ),
+      3000,
+    );
+    await eventually(() => events.some((e) => e.kind === "itemCompleted"));
+    assert.deepEqual(unexpected, []);
+    assert.equal(
+      events.filter((e) => e.kind === "review" && e.identity?.turnId === next)
+        .length,
+      2,
+    );
   } finally {
     await cleanup();
   }

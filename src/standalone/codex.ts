@@ -3142,12 +3142,14 @@ export class CodexRuntime implements Runtime {
           drop: true,
         });
         const reviewTurn = this.reviewTurns.get(terminal.data.threadId);
-        // A pending start (null) is this turn: turns run one at a time, and completion can arrive
-        // before the turn/start answer.
+        // A pending start (null) is this turn, since completion can arrive before the turn/start
+        // answer, unless it names the earlier turn that start replaced and saw no end of.
         if (
           reviewTurn &&
-          (reviewTurn.turnId === null ||
-            reviewTurn.turnId === terminal.data.turn.id)
+          (reviewTurn.turnId === terminal.data.turn.id ||
+            (reviewTurn.turnId === null &&
+              this.endedReviewTurns.get(terminal.data.threadId) !==
+                terminal.data.turn.id))
         ) {
           this.reviewTurns.delete(terminal.data.threadId);
           this.endedReviewTurns.set(
