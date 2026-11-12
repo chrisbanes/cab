@@ -453,7 +453,7 @@ test("an escalation whose turn ends or is stopped resolves obsolete with no repl
   assert.equal(obsolete?.approvable, false);
   assert.equal(
     obsolete?.lifecycle?.resolution,
-    "Obsolete: the turn ended before the escalation was answered",
+    "Obsolete: the request ended before it was answered",
   );
   assert.equal(s.record(ended.approval.interactionId)?.decider, "obsolete");
   // An obsolete escalation is no longer approvable.

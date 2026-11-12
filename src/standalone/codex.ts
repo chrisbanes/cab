@@ -1063,6 +1063,33 @@ export class CodexRuntime implements Runtime {
     this.escalations.delete(key);
     return false;
   }
+  /**
+   * Codex's `serverRequest/resolved` for an escalation request. After cab's answer it confirms
+   * the reply, and the entry waits for its command item; before an answer, Codex resolved the
+   * request itself, so it ends and can no longer be answered. False when it names no escalation.
+   */
+  private resolveEscalation(
+    threadId: string,
+    requestId: string | number,
+  ): boolean {
+    for (const [key, entry] of this.escalations)
+      if (
+        entry.child === this.child &&
+        entry.identity.threadId === threadId &&
+        entry.identity.requestId === requestId
+      ) {
+        if (!entry.answered) {
+          this.escalations.delete(key);
+          this.emitEscalation({
+            kind: "ended",
+            identity: entry.identity,
+            reason: "Resolved by the runtime before an answer",
+          });
+        }
+        return true;
+      }
+    return false;
+  }
   /** Reports the completed command item of an escalation, never its output. */
   private completeEscalation(params: unknown): void {
     const completed = escalatedItemSchema.safeParse(params);
@@ -1683,6 +1710,8 @@ export class CodexRuntime implements Runtime {
     if (method === "serverRequest/resolved") {
       const parsed = serverRequestResolvedSchema.safeParse(params);
       if (!parsed.success) return;
+      if (this.resolveEscalation(parsed.data.threadId, parsed.data.requestId))
+        return;
       const waiting = this.nativeReadbacks.get(parsed.data.threadId);
       const endpoint = this.nativeGeneration
         ? this.nativeEndpointByRpcId({

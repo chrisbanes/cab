@@ -2546,7 +2546,7 @@ export class CoordinationStore {
         interactionId,
         outcome === "expired"
           ? "Expired: declined after 15 minutes without an answer"
-          : "Obsolete: the turn ended before the escalation was answered",
+          : "Obsolete: the request ended before it was answered",
         outcome === "obsolete",
       );
       this.resolveAttention(interactionId);

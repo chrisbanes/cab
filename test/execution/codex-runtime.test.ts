@@ -4033,7 +4033,11 @@ function escalationFakeRuntime() {
     "      write({ id: 'esc-' + turns, method: 'item/commandExecution/requestApproval', params: { ...base, itemId: 'item-' + turns, command: 'node chromium.mjs', cwd: message.params.cwd, reason: 'needs host Chromium', proposedExecpolicyAmendment: ['node'] } });",
     "      if (prompt === 'escalate-end') finish(turnId);",
     "      if (prompt === 'escalate-twice') { const again = { id: 'esc-' + turns, method: 'item/commandExecution/requestApproval', params: { ...base, itemId: 'item-' + turns, command: 'node chromium.mjs', cwd: message.params.cwd, reason: 'needs host Chromium' } }; write(again); resend.set(again.id, again); }",
+    "      if (prompt === 'escalate-withdrawn') { write({ method: 'serverRequest/resolved', params: { threadId: 'thread-1', requestId: 'esc-' + turns } }); write({ method: 'item/completed', params: { ...base, item: { id: 'item-' + turns, type: 'commandExecution', status: 'declined', exitCode: null } } }); finish(turnId); }",
     "      if (prompt === 'escalate-settled') { write({ method: 'item/completed', params: { ...base, item: { id: 'item-' + turns, type: 'commandExecution', status: 'declined', exitCode: null } } }); finish(turnId); }",
+    "    } else if (prompt === 'stray-resolution') {",
+    "      write({ method: 'serverRequest/resolved', params: { threadId: 'thread-1', requestId: 'stray' } });",
+    "      finish(turnId);",
     "    } else if (prompt === 'network') {",
     "      write({ id: 'net', method: 'item/commandExecution/requestApproval', params: { ...base, itemId: 'n', command: 'curl x', cwd: message.params.cwd, networkApprovalContext: { host: 'example.invalid' } } });",
     "    } else if (prompt === 'others') {",
@@ -4047,6 +4051,7 @@ function escalationFakeRuntime() {
     "    const turnId = asked.get(message.id);",
     "    const accepted = message.result?.decision === 'accept';",
     "    if (resend.has(message.id)) { write(resend.get(message.id)); resend.delete(message.id); }",
+    "    write({ method: 'serverRequest/resolved', params: { threadId: 'thread-1', requestId: message.id } });",
     "    write({ method: 'item/completed', params: { threadId: 'thread-1', turnId, item: { id: message.id.replace('esc', 'item'), type: 'commandExecution', status: accepted ? 'completed' : 'declined', exitCode: accepted ? 3 : null, ...(accepted ? { durationMs: 1234 } : {}), aggregatedOutput: 'OUTPUT_SENTINEL' } } });",
     "    finish(turnId);",
     "  }",
@@ -4303,7 +4308,12 @@ test("an escalation the listener refuses is denied, and one left unanswered ends
       ),
       3000,
     );
-    await eventually(() => unexpected.length === 1);
+    // The denied request's own resolution is then reported unmatched too, as for any denial.
+    await eventually(() => unexpected.length >= 1);
+    assert.equal(
+      (unexpected[0] as { method: string }).method,
+      "item/commandExecution/requestApproval",
+    );
     assert.deepEqual(replies("esc-1"), [
       { id: "esc-1", result: { decision: "cancel" } },
     ]);
@@ -4377,6 +4387,8 @@ test("a request retransmitted before and after its answer stays one request with
     assert.deepEqual(replies("esc-1"), [
       { id: "esc-1", result: { decision: "decline" } },
     ]);
+    // Codex's resolution of the declined request is no anomaly.
+    assert.equal(unexpected.length, 0);
     // Codex settles an unanswered request itself: it ends, and cannot be answered after.
     await bounded(
       runtime.startTurn(
@@ -4417,6 +4429,59 @@ test("a request retransmitted before and after its answer stays one request with
       { id: "net", result: { decision: "cancel" } },
     ]);
     assert.equal(events.length, 4);
+  } finally {
+    await cleanup();
+  }
+});
+
+test("Codex resolving an escalation itself withdraws it unanswered; a resolution naming no request stays unexpected", async () => {
+  const { root, runtime, replies, cleanup } = escalationFakeRuntime();
+  const events: SandboxEscalationEvent[] = [];
+  const unexpected: Array<{ method: string; threadId?: string }> = [];
+  runtime.onUnexpectedRequest((request) => unexpected.push(request));
+  runtime.onSandboxEscalation((event) => {
+    events.push(event);
+    return true;
+  });
+  try {
+    await bounded(runtime.start(), 3000);
+    await bounded(runtime.startThread(root), 3000);
+    await bounded(
+      runtime.startTurn(
+        "thread-1",
+        root,
+        "escalate-withdrawn",
+        undefined,
+        escalationPolicy,
+      ),
+      3000,
+    );
+    await eventually(() => events.length === 2);
+    assert.deepEqual(
+      events.map((event) => [
+        event.kind,
+        "reason" in event ? event.reason : undefined,
+      ]),
+      [
+        ["requested", "needs host Chromium"],
+        ["ended", "Resolved by the runtime before an answer"],
+      ],
+    );
+    assert.equal(
+      await runtime.replySandboxEscalation(events[1]!.identity, "accept"),
+      false,
+    );
+    assert.deepEqual(replies("esc-1"), []);
+    assert.deepEqual(unexpected, []);
+    await bounded(
+      runtime.startTurn("thread-1", root, "stray-resolution"),
+      3000,
+    );
+    await eventually(() => unexpected.length === 1);
+    assert.deepEqual(unexpected, [
+      { method: "unmatched-native-resolution", threadId: "thread-1" },
+    ]);
+    assert.equal(events.length, 2);
   } finally {
     await cleanup();
   }
