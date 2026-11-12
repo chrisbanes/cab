@@ -891,21 +891,23 @@ export function TaskWorkspace({
    * Without native scroll anchoring, only a scroll moves `scrollY`, so the scroll since the
    * capture is kept exactly and a shift from content above the entry is undone.
    */
-  const holdAnchor = (a: { y: number; scrollY?: number }, el: HTMLElement) =>
-    nativeScrollAnchoring
-      ? scrollBy(
-          0,
-          el.getBoundingClientRect().top -
-            (beforeCommit.current?.anchor === a
-              ? beforeCommit.current.top
-              : a.y),
-        )
-      : scrollBy(
-          0,
-          el.getBoundingClientRect().top -
-            a.y +
-            (scrollY - (a.scrollY ?? scrollY)),
-        );
+  const holdAnchor = (a: { y: number; scrollY?: number }, el: HTMLElement) => {
+    if (nativeScrollAnchoring)
+      return scrollBy(
+        0,
+        el.getBoundingClientRect().top -
+          (beforeCommit.current?.anchor === a ? beforeCommit.current.top : a.y),
+      );
+    scrollBy(
+      0,
+      el.getBoundingClientRect().top - a.y + (scrollY - (a.scrollY ?? scrollY)),
+    );
+    // A later correction of the same capture, without a new one, starts from here.
+    if (a.scrollY !== undefined) {
+      a.y = el.getBoundingClientRect().top;
+      a.scrollY = scrollY;
+    }
+  };
   const refresh = () => {
     capture();
     resource.refresh();
