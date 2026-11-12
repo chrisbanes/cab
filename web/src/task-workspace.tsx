@@ -1043,7 +1043,7 @@ export function TaskWorkspace({
   // is captured as the read lands, so scrolling while it is in flight is not undone.
   const poll = (supersede = false) =>
     resource.poll({ supersede, beforeApply: () => captureRef.current() });
-  // Manual re-reads also refresh the shell's workspace and Inbox count; the poll below does not.
+  // Manual re-reads also refresh the shell's workspace (in the background) and Inbox count; the poll below does not.
   const refreshAll = () => {
     refresh();
     onRefresh?.();
