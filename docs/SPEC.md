@@ -2046,7 +2046,8 @@ a delivery operation or a runtime question, carries no notice.
 Preserve the task, assignment and conversation hierarchy: the task retains the
 outcome and accountable lead, assignments identify delegated responsibility, and
 each delegated assignment appears where the lead delegated it as a collapsible
-sub-conversation with its assignment, agent and harness. Do not invent narrative
+sub-conversation with its agent, harness, state and the brief's first sentence, with
+the full brief on request. Do not invent narrative
 summaries, recommendations or ownership when the evidence is absent. Unavailable or
 stale evidence remains explicit: omitted items, expired tool activity and activity a
 harness does not capture are inline gaps, and an absent tool row is not evidence
