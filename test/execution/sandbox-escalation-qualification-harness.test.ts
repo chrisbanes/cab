@@ -1248,14 +1248,6 @@ test("claude-auto-hook-allow cells prove only from their own same-run events", a
     "hookHoldBeyondDefault",
     run(
       events.map((e) =>
-        e.kind === "hookReturn" ? { ...e, aborted: true } : e,
-      ),
-    ),
-  );
-  refutedBy(
-    "hookHoldBeyondDefault",
-    run(
-      events.map((e) =>
         e.kind === "hook" && e.event === "PostToolUse" && e.toolUseId === "c2"
           ? { ...e, t: 70_000 }
           : e,
@@ -1307,6 +1299,79 @@ test("claude-auto-hook-allow cells prove only from their own same-run events", a
           : e,
       ),
     ),
+  );
+  // An aborted hold (deadline or query end) says nothing about the CLI: no branch C.
+  const aborted = run(
+    events.map((e) => (e.kind === "hookReturn" ? { ...e, aborted: true } : e)),
+  );
+  for (const key of [
+    "hookHoldBeyondDefault",
+    "hookAllowRunsOutside",
+    "hookAllowBypassesClassifier",
+  ])
+    assert.equal(aborted[key]?.outcome, "untested", key);
+  // A denial-only signal for a comparison call that never ran shows nothing about
+  // approvals, so it cannot prove the bypass (branch A).
+  const deniedComparison = run(
+    [
+      ...events.filter(
+        (e) =>
+          e.subtype !== "permission_check_status" &&
+          !(e.event === "PostToolUse" && e.toolUseId === "c3"),
+      ),
+      signal(82_000, ["c3"], "permission_denied"),
+      {
+        t: 82_100,
+        query: 1,
+        kind: "toolResult",
+        toolUseId: "c3",
+        isError: true,
+        text: "denied",
+      },
+    ],
+    { ...results, classified: undefined },
+  );
+  assert.equal(
+    deniedComparison.hookAllowBypassesClassifier?.outcome,
+    "untested",
+  );
+  // A retry shares the label's result file, so neither call has a result of its own.
+  const retried = run([
+    ...events,
+    hook(85_000, "c4", "node chromium.mjs hook-allowed", true, "allow"),
+    {
+      t: 160_000,
+      query: 1,
+      kind: "hookReturn",
+      toolUseId: "c4",
+      decision: "allow",
+      aborted: false,
+    },
+    post(161_000, "c4"),
+    hook(162_000, "c5", "node chromium.mjs control", false, "pass"),
+    post(163_000, "c5"),
+  ]);
+  for (const key of [
+    "controlRunsSandboxed",
+    "hookAllowRunsOutside",
+    "hookHoldBeyondDefault",
+    "hookAllowBypassesClassifier",
+  ])
+    assert.equal(retried[key]?.outcome, "untested", key);
+  // The hook-allowed call must itself have run: an error result is no run.
+  downgraded(
+    "hookAllowRunsOutside",
+    run([
+      ...events,
+      {
+        t: 80_500,
+        query: 1,
+        kind: "toolResult",
+        toolUseId: "c2",
+        isError: true,
+        text: "denied",
+      },
+    ]),
   );
   // A control that launched Chromium shows no sandbox, so nothing ran "outside".
   const open = run(events, { ...results, control: { chromium: "ok" } });

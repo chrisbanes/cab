@@ -844,7 +844,8 @@ const classifierSignal = (e) =>
   e.kind === "message" &&
   e.type === "system" &&
   ["permission_check_status", "permission_denied"].includes(e.subtype);
-const holdMs = 75_000;
+/** The claude-auto-hook-allow group's hook hold (its spec's `holdMs`). */
+const hookAllowHoldMs = 75_000;
 
 function claudeAutoHookAllow(trace) {
   const { events, results } = trace;
@@ -886,17 +887,31 @@ function claudeAutoHookAllow(trace) {
     );
   const askedFor = (id) =>
     events.some((e) => e.kind === "canUseTool" && e.toolUseId === id);
-  const control = pre.find(
-    (e) =>
-      isCommand(e.command, STIMULI.control) &&
-      !e.dangerouslyDisableSandbox &&
-      e.decision === "pass",
-  );
-  // The control counts only once its own call ran, with no permission callback.
-  const controlRan =
-    control && postFor(control.toolUseId) && !askedFor(control.toolUseId);
-  if (control) {
-    const evidence = {
+  // Its own call ran: a PostToolUse and no error result, with no permission callback.
+  const ranOk = (id) =>
+    postFor(id)?.event === "PostToolUse" &&
+    !resultFor(id)?.isError &&
+    !askedFor(id);
+  // Result files are keyed by label, so a stimulus run twice has no result of its own.
+  const once = (command, flagged, decision) => {
+    const calls = pre.filter(
+      (e) =>
+        isCommand(e.command, command) &&
+        e.dangerouslyDisableSandbox === flagged &&
+        e.decision === decision,
+    );
+    return {
+      call: calls.length === 1 ? calls[0] : undefined,
+      repeated: calls.length > 1,
+    };
+  };
+  const repeated = (label) => untested(`${label} call made more than once`);
+  const controls = once(STIMULI.control, false, "pass");
+  const control = controls.call;
+  const controlRan = control && ranOk(control.toolUseId);
+  if (controls.repeated) out.controlRunsSandboxed = repeated("control");
+  else if (control) {
+    const controlEvidence = {
       toolUseId: control.toolUseId,
       result: results.control ?? null,
       postHook: postFor(control.toolUseId)?.event ?? null,
@@ -904,25 +919,30 @@ function claudeAutoHookAllow(trace) {
     };
     out.controlRunsSandboxed =
       controlRan && blocked(results.control)
-        ? proved(evidence)
+        ? proved(controlEvidence)
         : controlRan && ran(results.control)
           ? untested(
               "control launched Chromium; the sandbox is not shown",
-              evidence,
+              controlEvidence,
             )
           : resultFor(control.toolUseId)?.isError && !results.control
             ? refuted({
-                ...evidence,
+                ...controlEvidence,
                 toolResult: resultFor(control.toolUseId).text,
               })
-            : untested("control wrote no result", evidence);
+            : untested("control wrote no result", controlEvidence);
   }
-  const allowed = pre.find(
-    (e) =>
-      isCommand(e.command, STIMULI.hookAllowed) &&
-      e.dangerouslyDisableSandbox &&
-      e.decision === "allow",
-  );
+  const hookAllowCells = [
+    "hookAllowRunsOutside",
+    "hookHoldBeyondDefault",
+    "hookAllowBypassesClassifier",
+  ];
+  const allowedOnce = once(STIMULI.hookAllowed, true, "allow");
+  if (allowedOnce.repeated) {
+    for (const key of hookAllowCells) out[key] = repeated("hook-allowed");
+    return out;
+  }
+  const allowed = allowedOnce.call;
   const released =
     allowed &&
     events.find(
@@ -939,30 +959,44 @@ function claudeAutoHookAllow(trace) {
     aborted: released.aborted,
     postHook: post ? { event: post.event, atMs: post.t } : null,
   };
+  // An aborted hold (the deadline or the query ending) says nothing about the CLI.
+  if (released.aborted) {
+    for (const key of hookAllowCells)
+      out[key] = untested("the hook hold was aborted", held);
+    return out;
+  }
   // A call that ran before its hook returned was not held by it.
   out.hookHoldBeyondDefault =
-    released.aborted || held.heldMs < holdMs || (post && post.t < released.t)
+    held.heldMs < hookAllowHoldMs || (post && post.t < released.t)
       ? refuted(held)
-      : post && post.t >= released.t
+      : post
         ? proved(held)
         : untested("the held call did not run after its hook returned", held);
+  const signals = events.filter(classifierSignal);
+  const named = (
+    toolUseId,
+    subtypes = ["permission_check_status", "permission_denied"],
+  ) =>
+    signals
+      .filter(
+        (e) =>
+          e.toolUseIds?.includes(toolUseId) && subtypes.includes(e.subtype),
+      )
+      .map((e) => ({ subtype: e.subtype, atMs: e.t, detail: e.detail }));
   const legs = {
     control: results.control ?? null,
     hookAllowed: results["hook-allowed"] ?? null,
     toolUseId: id,
   };
-  const denials = events.filter(
-    (e) => classifierSignal(e) && e.toolUseIds?.includes(id),
-  );
-  if (!results["hook-allowed"])
+  if (!results["hook-allowed"] || !ranOk(id))
     out.hookAllowRunsOutside = resultFor(id)?.isError
       ? refuted({
           ...legs,
           toolResult: resultFor(id).text,
-          signals: denials.map((e) => e.detail),
+          signals: named(id),
           canUseTool: askedFor(id),
         })
-      : untested("hook-allowed call wrote no result", legs);
+      : untested("hook-allowed call did not run with a result", legs);
   else if (!controlRan || !results.control)
     out.hookAllowRunsOutside = untested("no same-run sandboxed control", legs);
   else if (ran(results.control))
@@ -975,19 +1009,11 @@ function claudeAutoHookAllow(trace) {
       blocked(results.control) && ran(results["hook-allowed"])
         ? proved({ ...legs, controlToolUseId: control.toolUseId })
         : refuted(legs);
-  // Bypass needs a comparison: a classifier signal that names the classified call
-  // shows signals are per call, so silence for the allowed call means something.
-  const classified = pre.find(
-    (e) =>
-      isCommand(e.command, STIMULI.classified) &&
-      e.dangerouslyDisableSandbox &&
-      e.decision === "pass",
-  );
-  const signals = events.filter(classifierSignal);
-  const named = (toolUseId) =>
-    signals
-      .filter((e) => e.toolUseIds?.includes(toolUseId))
-      .map((e) => ({ subtype: e.subtype, atMs: e.t, detail: e.detail }));
+  // Bypass needs a comparison: a non-denial classifier signal naming a classified call
+  // that then ran shows approvals are signalled per call, so silence for the
+  // hook-allowed call means something. A denial-only signal shows nothing about approvals.
+  const classifiedOnce = once(STIMULI.classified, true, "pass");
+  const classified = classifiedOnce.call;
   const evidence = {
     hookAllowed: {
       toolUseId: id,
@@ -1007,16 +1033,20 @@ function claudeAutoHookAllow(trace) {
   out.hookAllowBypassesClassifier =
     evidence.hookAllowed.signals.length > 0 || evidence.hookAllowed.canUseTool
       ? refuted(evidence)
-      : !post
+      : !ranOk(id)
         ? untested("hook-allowed call did not run", evidence)
-        : evidence.unattributed.length > 0
-          ? untested("classifier signals not attributable per call", evidence)
-          : !evidence.classified?.signals.length
-            ? untested(
-                "no per-call classifier signal for the comparison call",
-                evidence,
-              )
-            : proved(evidence);
+        : classifiedOnce.repeated
+          ? untested("classified call made more than once", evidence)
+          : evidence.unattributed.length > 0
+            ? untested("classifier signals not attributable per call", evidence)
+            : !ranOk(classified?.toolUseId) ||
+                named(classified.toolUseId, ["permission_check_status"])
+                  .length === 0
+              ? untested(
+                  "no per-call classifier signal for the comparison call",
+                  evidence,
+                )
+              : proved(evidence);
   return out;
 }
 

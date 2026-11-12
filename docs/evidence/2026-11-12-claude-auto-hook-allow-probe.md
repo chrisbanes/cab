@@ -10,7 +10,7 @@ Claude Agent SDK 0.3.319 (declares Claude Code 2.1.319); installed `claude` 2.1.
 
 ## Run
 
-`npm run sandbox-escalation:live -- --group=claude-auto-hook-allow` ran once, from clean candidate `441d9336`, with `CLAUDE_CODE_OAUTH_TOKEN` exported. It started at 15:14:34 UTC and ended at 15:16:09 UTC. It exited 0 with `pass: true`, the fixture root and Claude Code's task-output directory were removed, and the one query ended `success`. This is the only attempt; no rerun was needed. The offline harness test passed at the candidate before the run.
+`npm run sandbox-escalation:live -- --group=claude-auto-hook-allow` ran once, from clean candidate `441d9336`, with `CLAUDE_CODE_OAUTH_TOKEN` exported. It started at 15:14:34 UTC and ended at 15:16:09 UTC. It exited 0 with `pass: true`, the fixture root and Claude Code's task-output directory were removed, and the one query ended `success`. This is the only attempt; no rerun was needed. The offline harness test passed at the candidate before the run. After the run, review tightened the classifier. A proof now needs exactly one call per stimulus and that call's own successful run. An aborted hold counts as untested, not as a refutation. The bypass comparison counts only a non-denial signal for a comparison call that ran. The run's trace reclassifies to the same outcomes under the final rules.
 
 ## Fixture
 
@@ -34,10 +34,10 @@ All times are milliseconds from the start of the query.
 | `hookAllowRunsOutside`: the held, hook-allowed flagged call runs outside the sandbox | proved | `toolu_01GE5BY15MA6ULGHN8BE1mZ1` wrote `chromium: "ok"`, while the same-run control above failed. Its tool result was not an error, and its `PostToolUse` carried `dangerouslyDisableSandbox: true`. |
 | `hookHoldBeyondDefault`: the hook holds past the 60 s default with matcher `timeout: 960` | proved | Same call. Hook input at 5 592, hook returned `allow` at 80 596 (held 75 004 ms, not aborted), and `PostToolUse` followed at 81 685. |
 | `hookAllowBypassesClassifier`: the classifier does not decide a hook-allowed call | untested | No classifier signal of any kind was emitted: no `system` / `permission_check_status` and no `permission_denied`. The comparison call (`toolu_012ryP8DXaJq6QCy4DYVmB39`) has nothing attributable either, so silence for the hook-allowed call shows nothing. `canUseTool` was not called for any call. |
-| `onFailureBlockSupported`: the installed CLI honours `onFailure: "block"` | proved | The initialize reply reported `hook_on_failure_supported: true` and `hooks_applied: true` for the matcher sent with `onFailure: "block"`. |
+| `onFailureBlockSupported`: the installed CLI reports support for `onFailure: "block"` | proved | The initialize reply reported `hook_on_failure_supported: true` and `hooks_applied: true` for the matcher sent with `onFailure: "block"`. |
 | `supportsAutoModeReported`: `supportedModels()` reports `supportsAutoMode` | proved | Each listed model reported `supportsAutoMode: true`: `default`, `sonnet`, `fable`, `opus` and `haiku`. |
 
-The comparison call ran: the classifier let it through without `canUseTool`, and it wrote `chromium: "ok"`.
+The comparison call ran: auto mode let it through without `canUseTool`, and it wrote `chromium: "ok"`.
 
 ## Outcome branch: B
 
