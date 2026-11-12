@@ -831,7 +831,7 @@ test("operations npm commands are strict, secret-safe, and do not start the serv
   }
 });
 
-test("restored public state reconciles exact execution evidence before one eligible admission", async () => {
+test("restored public state keeps exact execution holds until Resume before one eligible admission", async () => {
   const root = mkdtempSync(join(tmpdir(), "cab-restore-journey-"));
   const sourceData = join(root, "source-install", "data");
   const destinationData = join(root, "restored-install", "data");
@@ -1151,6 +1151,8 @@ test("restored public state reconciles exact execution evidence before one eligi
 
     await restoredService.resumeTask(routedTaskId);
     assert.equal(restoredService.taskHold(routedTaskId), undefined);
+    // Resume clears the Stop, so cab releases the ended turn and dispatches nothing.
+    await until(() => restoredService?.heldTurnReleased(routedWorkId) === true);
     assert.equal(
       (await restoredService.taskWorkspace(routedTaskId))?.state,
       "held",

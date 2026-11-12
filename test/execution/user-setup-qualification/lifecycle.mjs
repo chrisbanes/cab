@@ -465,21 +465,23 @@ export async function lifecycle(path, harnesses = ["claude", "codex"]) {
         Date.now() + 10_000,
         "crashed runtime exit",
       );
+      // Held, or already released once cab verifies the crashed process is gone.
       await until(
         () =>
+          service.heldTurnReleased(interrupted.workId) ||
           records(taskId).find(
             (r) => r.workId === interrupted.workId && r.intent.state === "held",
           ),
         Date.now() + 10_000,
-        "uncertainty hold",
+        "crashed turn held or released",
       );
       await service.stop();
       service = make();
       await service.start();
-      // Start-up releases the crashed turn once its process is verified gone.
+      // Released before the restart or by start-up, once its process is verified gone.
       assert.ok(
         service.heldTurnReleased(interrupted.workId),
-        "Restart releases the crashed turn",
+        "The crashed turn is released",
       );
       const held = records(taskId).find((r) => r.workId === interrupted.workId);
       assert.ok(!held.holds.writer && !held.holds.capacity);

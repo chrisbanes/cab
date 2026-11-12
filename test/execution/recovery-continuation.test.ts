@@ -743,7 +743,7 @@ test("the lead recovery candidate query is driven by recovery receipts, not assi
   }
 });
 
-test("wrong or unproved recovery never upgrades a pre-recovery message on replay", async () => {
+test("a message posted before recovery is never upgraded on replay", async () => {
   const f = await heldFixture();
   try {
     const event = await f.service

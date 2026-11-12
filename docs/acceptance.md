@@ -510,8 +510,8 @@ evidence. Per-scenario dispositions for A01–A30 and R01–R10 are in the
 - **Operations, recovery and cutover** (R06) — **Bounded.** A disposable launchd
   service lifecycle with database backup/restore passed, and current-schema backup,
   verify and restore with exact owned-process recovery passed locally. Deterministic
-  tests prove restored-execution receipt reconciliation, independent Stop/Resume and
-  one post-recovery admission; the launchd proof restores populated paused/unready
+  tests prove that a restored Stop keeps an ended turn held until Resume, independent
+  Stop/Resume and one post-restore admission; the launchd proof restores populated paused/unready
   records and confirms start, restart and stop without admission, and injects no live
   recovery receipt. Actual old-work disposition and cutover are unproved. Evidence:
   [operations](evidence/s08a-operations-2026-09-30.md),

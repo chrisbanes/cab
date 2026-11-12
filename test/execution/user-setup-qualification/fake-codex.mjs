@@ -99,7 +99,7 @@ createInterface({ input: process.stdin }).on("line", (line) => {
       });
     } else report(threadId, turnId);
   } else if (m.method === "turn/interrupt") {
-    // Only a turn this process is running ends; another process's turn sends nothing.
+    // Only a sleep this process is running ends; another process's turn sends nothing.
     const running = sleeps.has(p.turnId);
     sleeps.get(p.turnId)?.kill("SIGTERM");
     sleeps.delete(p.turnId);

@@ -2389,7 +2389,7 @@ export class DeliveryStore {
   }
   /**
    * Offline lower-chain proof, refreshed synchronously at the merge effect boundary. With `linkBases`
-   * (GitLab: the base the task's workspace resolved to, else the link's ref), a task whose lower chain
+   * (GitLab: the base the stack's bottom task's workspace resolved to, else the link's ref), a task whose lower chain
    * is all merged is held until its change request's accepted base is one of them, so it never merges
    * into a merged layer's branch.
    */
