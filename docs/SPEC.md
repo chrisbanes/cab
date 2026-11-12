@@ -440,7 +440,7 @@ The service's operator Unstack continuation freezes the selected task, linked re
 PR/head/base and full ordered provider stack into one durable command. GitHub's Unstack
 endpoint removes all removable unmerged members of that provider stack, not just the
 selected PR; merged layers remain unaffected. The local recovery retargets only the
-selected PR to its repository link's base. An HTTP 200 can leave members in the stack.
+selected PR to the task's resolved base, the base a retarget is accepted against (below). An HTTP 200 can leave members in the stack.
 If any captured unmerged member remains, even after the selected PR was removed, the
 original operation stays unfinished and readback-only: no repeat Unstack, replacement
 operation key, queue cancellation, retarget, accepted-base advancement, edge retirement
@@ -451,8 +451,8 @@ continue. This partial outcome is not successful live acceptance.
 GitLab has no stack object: a merge request is stacked because it targets its blocker's
 branch. GitLab Unstack captures the blocker's single unmerged merge request from that branch
 (open, or closed for a failed blocker) and the selected one, with no stack id or number, and
-is one `PUT /projects/:id/merge_requests/:iid {target_branch}` to the repository link's base
-under the same journal. A read that still shows the blocker's branch is membership, the link's
+is one `PUT /projects/:id/merge_requests/:iid {target_branch}` to the task's resolved base
+under the same journal. A read that still shows the blocker's branch is membership, the resolved
 base is removal and its retarget at once, and any other target is an identity change. The
 journal goes from unstack intent through confirmed removal and retarget to confirmation
 without a second edit. The new base SHA is the target branch's tip. Merge requests stacked on
@@ -978,7 +978,8 @@ revalidate the witness, receipt and continuation audit at use time, and late cal
 or known survivors persist a hold and retract successors across restart.
 
 Already-admitted execution and tools may survive coordinator or App Server failure
-and continue effects. A crash releases neither writer ownership nor capacity. No
+and continue effects. A crash by itself releases neither writer ownership nor capacity: a crashed
+turn keeps them until [held-turn release](#execution-and-recovery). No
 queued turn, follow-up, delegation or replacement may gain admission while cab
 is unavailable. Retain unresolved holds rather than relaunching work. Historical
 conversation resume does not prove reattachment to a live execution. A
@@ -1080,10 +1081,12 @@ exclusion or the policy of an unobserved action. See the
 [runtime trust boundary](design/standalone.md#runtime-trust-boundary).
 Crash, Stop, failure/interruption, missing or conflicting terminal identity/status,
 unfinished cab callbacks and known survivors retain holds until independently
-resolved; the one exception is a task turn that a planned restart interrupted and
-recorded as ended (see above).
-A timer, expired lease, quiet interval, empty terminal list, acknowledged Stop or
-operator acknowledgement cannot release them. Conversation replacement and archival
+resolved. The exceptions are a task turn that a planned restart interrupted and
+recorded as ended (see above) and a held turn that
+[held-turn release](#execution-and-recovery) ends on its runtime-reported end, the
+verified exit of its exact process or its 30-minute quiet period, once no independent
+hold remains. Otherwise a timer, expired lease, quiet interval, empty terminal list,
+acknowledged Stop or operator acknowledgement cannot release them. Conversation replacement and archival
 do not automatically delete
 workspaces. Retain until operator archival by default; automatic cleanup requires
 confirmed delivery and preservation checks for uncommitted work, handoffs and
@@ -1710,8 +1713,10 @@ Codex's ([ADR-1008](adr/1008-claude-code-execution-harness.md)):
 Each runtime's effective policy lists its disclosed limits. For Claude, the
 subprocess environment scrub is qualified for sandboxed Bash only; inherited hooks
 and MCP servers may perform external effects beyond cab tools. A Claude CLI process can outlive a crashed service,
-so the operator verifies its exit before recovering the turn through the supported
-CLI or operator recovery controls. Recovery continues
+so cab releases the crashed turn only through
+[held-turn release](#execution-and-recovery), normally once it verifies that CLI process
+exited, and the operator continues it with [Start again](#start-again-and-reset-task).
+Start again continues
 from the assignment's latest completed turn, so a crash during its first turn
 continues in a fresh session. Surfaces the journeys did not test remain limits.
 Native Claude subscription metadata is checked without a model prompt. A missing
@@ -3008,7 +3013,7 @@ The Delivery tab offers every method cab can merge with on the code host (on Git
 
 The merge gate evaluates each repository's settings on the fresh provider read that precedes every merge. The code host's required checks are GitHub's ruleset and classic branch protection status checks, or `pipeline` when the GitLab project's "Pipelines must succeed" setting (`only_allow_merge_if_pipeline_succeeds`) is on. When those plus cab's additional checks are empty, the gate reports `no-required-checks` and holds the merge, so protection removed between saves is caught on the next read. It reports `merge-method-not-configured` when the repository has no merge method or the code host no longer allows it, and a `pr.merge` whose method is not the configured one is held as `provider-preflight-held` before any provider write. A through-merge repository therefore holds merges until the operator sets its method. A base branch that advanced since the PR was last pushed is not itself a blocker; the code host's mergeability (`mergeability-unproved` for a conflict) and its up-to-date rules decide. When GitHub classic protection's strict status checks or a ruleset's `strict_required_status_checks_policy` require an up-to-date branch, the gate reports `strict-head-behind` for a PR that is behind its base, or `strict-head-current-unproved` when GitHub does not report it current. A base branch that is missing or can't be read is `base-ref-missing`. Each PR observation records its required checks with their source (`code-host` or `cab`). `cab delivery get` and the task's delivery view list the bound PR's merge blockers from its last observation. `strict-head-behind` and `base-ref-missing` read in plain words that name the base branch ("Behind main: the branch rules require an up-to-date branch, and this PR is behind main. Update the branch on GitHub, or the lead can request pr.update-branch."); the CLI follows the sentence with the code, and the lead's delivery feedback carries the same sentence.
 
-The bound PR carries an accepted base, the branch its actions are authorised against: the base it was registered on, until a retarget is accepted. A fresh read that finds another base accepts it only when the new base is the repository link's base branch (the link's ref without a leading `refs/heads/`, `refs/remotes/origin/` or `origin/`; a commit id names none) and the change request it used to target is merged: on GitHub a pull request from that branch in the same repository is merged into the new base and none from it is open, and on GitLab the same of its merge requests. That is how a code host moves a PR onto the stack's trunk when the layer below merges. A failed lookup counts as not merged. Accepting moves the accepted base and the base recorded on the PR's unsettled `pr.*` actions, so their read-back confirms against the new base; the action request and its digest never change. Every other base change is held: `pr.edit`, `pr.ready`, `pr.merge` and thread actions on that PR are refused, with a `pr.merge` also refused as `merge-target-not-current-delivery`, and an action must name the accepted base as its `baseRef`. The hold clears when a later read shows the accepted base again or the retarget becomes acceptable, and has no operator override: it is lifted on the code host. A hold, and its lifting, are a new delivery revision that wakes the lead, and `cab delivery get` and the task's delivery view list a held change as the merge blocker `pr-base-change-held`. A PR bound before this was recorded takes its stored base as accepted.
+The bound PR carries an accepted base, the branch its actions are authorised against: the base it was registered on, until a retarget is accepted. A fresh read that finds another base accepts it only when the new base is the task's resolved base (the branch its workspace's remote base resolved to when the workspace was provisioned, which a later move of the code host's default does not change; for a stacked dependent, which starts at its blocker's head, the one its stack's bottom task's workspace resolved to; else, as for an Explicit ref link, the repository link's ref without a leading `refs/heads/`, `refs/remotes/origin/` or `origin/`, where a commit id names none) and the change request it used to target is merged: on GitHub a pull request from that branch in the same repository is merged into the new base and none from it is open, and on GitLab the same of its merge requests. That is how a code host moves a PR onto the stack's trunk when the layer below merges. A failed lookup counts as not merged. Accepting moves the accepted base and the base recorded on the PR's unsettled `pr.*` actions, so their read-back confirms against the new base; the action request and its digest never change. Every other base change is held: `pr.edit`, `pr.ready`, `pr.merge` and thread actions on that PR are refused, with a `pr.merge` also refused as `merge-target-not-current-delivery`, and an action must name the accepted base as its `baseRef`. The hold clears when a later read shows the accepted base again or the retarget becomes acceptable, and has no operator override: it is lifted on the code host. A hold, and its lifting, are a new delivery revision that wakes the lead, and `cab delivery get` and the task's delivery view list a held change as the merge blocker `pr-base-change-held`. A PR bound before this was recorded takes its stored base as accepted.
 
 Before any provider call for `pr.merge`, cab walks the recorded stacked dependency chain in
 the same project and repository. Every lower layer must have an identity-bound PR observed as

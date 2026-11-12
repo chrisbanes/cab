@@ -566,10 +566,10 @@ TASK_ID` is a read of the current filtered full-stack preview and its exact task
 and material hash. `task unstack TASK_ID --expected-version N --material-hash SHA256
 --yes [--request-id UUID]` confirms that material; it never silently refreshes consent.
 GitHub removes all removable unmerged members of the captured provider stack, not just
-the selected PR. Only the selected PR is retargeted to the link's base, and a restack is
+the selected PR. Only the selected PR is retargeted to the task's resolved base (the base its stack's bottom task's workspace resolved to, else the link's ref), and a restack is
 queued only after complete removal and exact retarget are confirmed. Merged layers stay
 unaffected; cab cannot undo merges or automatic adoption. On GitLab, which has no stack object,
-Unstack retargets only the selected merge request to the link's base, merge requests stacked on
+Unstack retargets only the selected merge request to that resolved base, merge requests stacked on
 it stay on its branch, and the preview names no stack number; the CLI and web show the wording
 for the change request's code host.
 
