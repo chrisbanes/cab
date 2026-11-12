@@ -1,0 +1,299 @@
+{
+  "candidate": "f7fa0d5d0240b85b168a7b37fd4cd8155b5ccb2a",
+  "node": "v26.13.0",
+  "runtime": {
+    "launcherSha256": "50ab38ba21d0d9f8346f32f41848382f15b556190f3c7a07e885a4fb73e379c8",
+    "version": "codex-cli 0.167.0-alpha.3.2"
+  },
+  "cells": {
+    "approve": {
+      "results": {
+        "control": "browserType.launch: EPERM: operation not permitted, mkdtemp '<tmpdir>/playwright-artifacts-4TZHnS'",
+        "escalated": "ok"
+      },
+      "escalations": [
+        {
+          "label": "escalated",
+          "decider": "operator",
+          "decision": "accept",
+          "outcome": "approved",
+          "exitCode": 0,
+          "durationMs": 516,
+          "durationSource": "runtime"
+        }
+      ],
+      "wire": {
+        "cell": "approve",
+        "approvalPolicy": {
+          "granular": {
+            "sandbox_approval": true,
+            "rules": false,
+            "mcp_elicitations": false,
+            "skill_approval": false,
+            "request_permissions": false
+          }
+        },
+        "approvalsReviewer": "user",
+        "sandboxType": "workspaceWrite"
+      },
+      "resume": null,
+      "turnState": "completed",
+      "held": false,
+      "unmatchedResolutions": 0,
+      "unexpected": [],
+      "requests": [
+        {
+          "cell": "approve",
+          "id": 0,
+          "itemId": "exec-dcc85f2c-bc96-4a46-86ca-40b43d3fb536",
+          "hasApprovalId": false,
+          "command": "/bin/zsh -lc 'node chromium.mjs escalated'",
+          "keys": [
+            "availableDecisions",
+            "command",
+            "commandActions",
+            "cwd",
+            "environmentId",
+            "itemId",
+            "kind",
+            "proposedExecpolicyAmendment",
+            "reason",
+            "startedAtMs",
+            "threadId",
+            "turnId"
+          ]
+        }
+      ],
+      "completions": [
+        {
+          "cell": "approve",
+          "itemId": "exec-fdb08cd6-2729-43e4-8c70-03e6e66a7803",
+          "status": "completed",
+          "exitCode": 0,
+          "durationMs": 324
+        },
+        {
+          "cell": "approve",
+          "itemId": "exec-dcc85f2c-bc96-4a46-86ca-40b43d3fb536",
+          "status": "completed",
+          "exitCode": 0,
+          "durationMs": 516
+        }
+      ],
+      "resolutions": 1
+    },
+    "decline": {
+      "results": {
+        "control": "browserType.launch: EPERM: operation not permitted, mkdtemp '<tmpdir>/playwright-artifacts-4TZHnS'",
+        "escalated": "ok"
+      },
+      "escalations": [
+        {
+          "label": "escalated",
+          "decider": "operator",
+          "decision": "accept",
+          "outcome": "approved",
+          "exitCode": 0,
+          "durationMs": 516,
+          "durationSource": "runtime"
+        },
+        {
+          "label": "declined",
+          "decider": "operator",
+          "decision": "decline",
+          "outcome": "declined",
+          "exitCode": null,
+          "durationMs": null,
+          "durationSource": null
+        }
+      ],
+      "wire": {
+        "cell": "decline",
+        "approvalPolicy": {
+          "granular": {
+            "sandbox_approval": true,
+            "rules": false,
+            "mcp_elicitations": false,
+            "skill_approval": false,
+            "request_permissions": false
+          }
+        },
+        "approvalsReviewer": "user",
+        "sandboxType": "workspaceWrite"
+      },
+      "resume": {
+        "cell": "decline",
+        "ok": true,
+        "approvalPolicy": "never"
+      },
+      "turnState": "completed",
+      "held": false,
+      "unmatchedResolutions": 0,
+      "unexpected": [],
+      "requests": [
+        {
+          "cell": "decline",
+          "id": 0,
+          "itemId": "exec-76058669-c09d-416c-9c91-d11edb0999b1",
+          "hasApprovalId": false,
+          "command": "/bin/zsh -lc 'node chromium.mjs declined'",
+          "keys": [
+            "availableDecisions",
+            "command",
+            "commandActions",
+            "cwd",
+            "environmentId",
+            "itemId",
+            "kind",
+            "proposedExecpolicyAmendment",
+            "reason",
+            "startedAtMs",
+            "threadId",
+            "turnId"
+          ]
+        }
+      ],
+      "completions": [
+        {
+          "cell": "decline",
+          "itemId": "exec-76058669-c09d-416c-9c91-d11edb0999b1",
+          "status": "declined",
+          "exitCode": null,
+          "durationMs": null
+        }
+      ],
+      "resolutions": 1
+    },
+    "interrupt": {
+      "results": {
+        "control": "browserType.launch: EPERM: operation not permitted, mkdtemp '<tmpdir>/playwright-artifacts-4TZHnS'",
+        "escalated": "ok"
+      },
+      "escalations": [
+        {
+          "label": "escalated",
+          "decider": "operator",
+          "decision": "accept",
+          "outcome": "approved",
+          "exitCode": 0,
+          "durationMs": 516,
+          "durationSource": "runtime"
+        },
+        {
+          "label": "declined",
+          "decider": "operator",
+          "decision": "decline",
+          "outcome": "declined",
+          "exitCode": null,
+          "durationMs": null,
+          "durationSource": null
+        },
+        {
+          "label": "held",
+          "decider": "obsolete",
+          "decision": null,
+          "outcome": "obsolete",
+          "exitCode": null,
+          "durationMs": null,
+          "durationSource": null
+        }
+      ],
+      "wire": {
+        "cell": "interrupt",
+        "approvalPolicy": {
+          "granular": {
+            "sandbox_approval": true,
+            "rules": false,
+            "mcp_elicitations": false,
+            "skill_approval": false,
+            "request_permissions": false
+          }
+        },
+        "approvalsReviewer": "user",
+        "sandboxType": "workspaceWrite"
+      },
+      "resume": {
+        "cell": "interrupt",
+        "ok": true,
+        "approvalPolicy": "never"
+      },
+      "turnState": "interrupted",
+      "held": true,
+      "unmatchedResolutions": 0,
+      "unexpected": [],
+      "requests": [
+        {
+          "cell": "interrupt",
+          "id": 2,
+          "itemId": "exec-26f019d8-6982-4995-97a4-a81f5960fb3e",
+          "hasApprovalId": false,
+          "command": "/bin/zsh -lc 'node chromium.mjs held'",
+          "keys": [
+            "availableDecisions",
+            "command",
+            "commandActions",
+            "cwd",
+            "environmentId",
+            "itemId",
+            "kind",
+            "proposedExecpolicyAmendment",
+            "reason",
+            "startedAtMs",
+            "threadId",
+            "turnId"
+          ]
+        }
+      ],
+      "completions": [],
+      "resolutions": 1,
+      "stopped": true,
+      "resolvedAfterInterrupt": true
+    }
+  },
+  "callbacks": {
+    "requests": 3,
+    "withApprovalId": 0,
+    "itemsWithSeveral": 0
+  },
+  "refusedTurns": 0,
+  "verdict": {
+    "approve": {
+      "checks": {
+        "policySent": true,
+        "controlFailedInSandbox": true,
+        "escalatedRanOutside": true,
+        "recorded": true,
+        "noAnomaly": true
+      },
+      "proved": true
+    },
+    "decline": {
+      "checks": {
+        "resumedWithPolicy": true,
+        "declinedWroteNothing": true,
+        "recorded": true,
+        "turnCompleted": true,
+        "noAnomaly": true
+      },
+      "proved": true
+    },
+    "interrupt": {
+      "escalationObserved": true,
+      "withdrawnObsolete": true,
+      "resolvedAfterInterrupt": true,
+      "unmatchedResolutions": 0
+    }
+  },
+  "pass": true,
+  "failure": null,
+  "cleanup": {
+    "servicesStopped": true,
+    "fixtureRemoved": true
+  },
+  "run": {
+    "command": "npm run escalate-approval:live",
+    "start": "2026-11-12T03:52:57Z",
+    "end": "2026-11-12T03:54:56Z",
+    "exit": 0
+  }
+}

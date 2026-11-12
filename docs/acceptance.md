@@ -922,12 +922,12 @@ one bounded live run, `npm run escalate-approval:live`, in the
 | Each escalation records decider, decision, delivery, exit code and duration, and no output; the task read, Execution tab and `cab task get` show them, withheld under the privacy exclusions | `sandbox-escalation-service.test.ts`, `sandbox-escalation-presentation.test.ts` |
 | Settings saves the level without a confirmation, still asks when leaving it for `unsandboxed`, and with both policy disclosures, `project get` and `assignment get` states its risks and that Claude Code turns stay `strict` | `operator-project-config-general-browser.test.ts`, `operator-execution-runtime.test.ts`, `operator-cli-browse.test.ts`, `neutral-runtime-copy.test.ts` |
 | Project deletion removes the escalation evidence | `project-deletion.test.ts` |
-| A live Codex task turn through cab: an approved escalation runs outside the sandbox and records operator, `accept`, exit code and duration; a declined one runs nothing; a follow-up turn resumes with the persisted policy | [live record](evidence/2026-11-12-escalate-approval-live.md) |
+| A live Codex task turn through cab: an approved escalation runs outside the sandbox and records operator, `accept`, exit code and duration; after a restart a follow-up turn resumes the thread and a declined escalation runs nothing; Codex's resolution of a request pending at a Stop is no anomaly | [live record](evidence/2026-11-12-escalate-approval-live.md) |
 
 Limits: "Other approval kinds are still refused" is proved deterministically against a fake App
 Server, not live, because the probe's model had no permission-request tool. A Codex version that
 sends several approval callbacks for one command (`approvalId`) is not qualified; the second is
-declined and the work held. The live record states what it observed of both.
+declined and the work held. The live run saw one callback per command and no `approvalId`.
 
 ## Draft turns
 
