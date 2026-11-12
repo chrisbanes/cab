@@ -1178,24 +1178,38 @@ find and stop them as described for the unsandboxed level. The task's **Executio
 `cab task get TASK_ID` list each escalation with who decided, the decision, and an approved
 command's exit code and duration.
 
-## Letting Codex's reviewer decide at the escalate-auto-review level
+## Letting the reviewer decide at the escalate-auto-review level
 
-The **Escalate with reviewer** sandbox level keeps Codex task turns sandboxed and has Codex's
-reviewer `auto_review` approve or deny each command a turn asks to run outside the sandbox,
-instead of the operator. Choose it in the project's Settings, General tab, or run
+The **Escalate with reviewer** sandbox level keeps task turns sandboxed and has the harness's
+reviewer approve or deny each command a turn asks to run outside the sandbox, instead of the
+operator: Codex's reviewer `auto_review`, or Claude Code's auto-mode classifier. Choose it in the
+project's Settings, General tab, or run
 `cab project prepare PROJECT_ID --sandbox escalate-auto-review` and apply the prepared file. It
-needs no confirmation and applies to task turns admitted afterwards. Claude Code task turns in
-the project stay strict for now.
+needs no confirmation and applies to task turns admitted afterwards.
+
+For Claude Code task turns at this level:
+
+- Auto mode must be available for the account and the turn's model, as at the
+  escalate-approval level; otherwise the task waits with the reason
+  `auto mode is not available for model …`.
+- cab's hook still refuses every call outside its tool policy, so the classifier decides only
+  Bash calls that ask to leave the sandbox.
+- A call the classifier leaves undecided waits in the Inbox as at the escalate-approval level.
+- cab records a classifier approval when the command runs without asking you, with its exit
+  code. It records a denial when Claude Code reports one. Neither has a risk level or rationale,
+  and a denial has no overrule.
+- A Bash command can ask for up to 60 minutes. One that times out keeps running in the
+  background.
 
 - Each review is an extra model call on the Codex account, and the reviewer is available only
   for some accounts and models. It judges the requested command; it does not contain the
   agent's code, and an approved command has the service user's full filesystem, process,
   network and credential access.
-- cab records each decision with its risk level, its rationale and, for an approved command,
-  its exit code and duration. The task's **Execution** tab and `cab task get TASK_ID` list each
+- cab records each Codex decision with its risk level, its rationale and, for an approved
+  command, its exit code and duration. The task's **Execution** tab and `cab task get TASK_ID` list each
   decision with the escalations, and with the outcome of a denial's overrule.
-- A denial of a command in the task workspace appears in the Inbox as **Overrule a reviewer
-  denial** while its turn runs. Approving it tells the agent the exact action is approved; the
+- A Codex denial of a command in the task workspace appears in the Inbox as **Overrule a
+  reviewer denial** while its turn runs. Approving it tells the agent the exact action is approved; the
   agent may retry it, and the retry is reviewed again, so the overrule is advisory. Declining
   keeps the denial. It is withdrawn when the turn ends or stops. The overrule has not yet been
   proven against a live denial.

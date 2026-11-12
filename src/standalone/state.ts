@@ -2119,8 +2119,7 @@ export class ExecutionState {
 
   /**
    * The level admitting this intent now would record: only a task turn that is not a draft turn
-   * takes its project's level. escalate-approval applies to either harness; escalate-auto-review
-   * only to a Codex task turn (a Claude turn runs `strict` there). Admission uses the same condition.
+   * takes its project's level, in either harness. Admission uses the same condition.
    */
   applicableSandboxLevel(intentId: string, projectId: string): SandboxLevel {
     const work = this.db
@@ -2128,7 +2127,7 @@ export class ExecutionState {
       .get(intentId) as { workId: string } | undefined;
     if (!work) return "strict";
     const row = this.db
-      .prepare(`SELECT p.level, b.harness FROM project_sandbox_level p
+      .prepare(`SELECT p.level FROM project_sandbox_level p
         JOIN task_execution_bindings b ON b.workId = ?
         WHERE p.projectId = ?
         ${this.hasTurnRequests ? "AND NOT EXISTS (SELECT 1 FROM turn_requests r WHERE r.workId = ? AND r.draftTurn = 1)" : ""}`)
@@ -2136,13 +2135,9 @@ export class ExecutionState {
         work.workId,
         projectId,
         ...(this.hasTurnRequests ? [work.workId] : []),
-      ) as { level: SandboxLevel; harness: string } | undefined;
-    if (row?.level === "unsandboxed") return "unsandboxed";
-    // Claude Code has an escalate-approval seam (auto mode with a hook hold); auto-review is Codex only.
-    return row?.level === "escalate-approval" ||
-      (row?.level === "escalate-auto-review" && row.harness === "codex")
-      ? row.level
-      : "strict";
+      ) as { level: SandboxLevel } | undefined;
+    // An unbound turn has no task binding row, so it stays strict.
+    return row?.level ?? "strict";
   }
 
   /** The harness a work item runs on: its task binding, else its drafting run, else the default. */
@@ -5897,8 +5892,7 @@ export class ExecutionState {
             options.projectId,
             ...(this.hasTurnRequests ? [workId] : []),
           );
-        // A task turn takes the project's level (escalate-auto-review only on Codex); draft turns
-        // and drafting runs stay strict.
+        // A task turn takes the project's level; draft turns and drafting runs stay strict.
         this.db
           .prepare(
             "INSERT OR REPLACE INTO execution_intent_sandbox_level (intentId, level) VALUES (?, ?)",

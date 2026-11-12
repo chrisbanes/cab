@@ -32,6 +32,7 @@ import {
   type RuntimeToolCall,
   type RuntimeTurnSettings,
   type SandboxEscalationEvent,
+  type SandboxReviewEvent,
   type UnexpectedRequest,
 } from "../../src/standalone/codex.js";
 import type { ClaudeTurnEnvironment } from "../../src/standalone/service.js";
@@ -185,7 +186,7 @@ function fixture(
     gitWritableRoots?: string[],
     localListening?: boolean,
     skipSandbox?: boolean,
-    sandboxEscalation?: "approval",
+    sandboxEscalation?: "approval" | "auto-review",
   ) => {
     const turnSettings = skills ? { ...settings, skills } : settings;
     assert.equal(
@@ -2613,7 +2614,16 @@ test("preflight and start refuse an escalate-approval turn whose model has no au
       "Claude runtime unavailable: auto mode is not available for model default",
     );
     assert.equal(await preflight("haiku"), undefined);
-    // Without the hint, or at auto-review (Codex only), auto mode is not needed.
+    // Auto-review needs auto mode too, and is never downgraded.
+    assert.equal(
+      await settledPreflight(f.runtime, {
+        workspace: f.workspace,
+        settings: { model: "default", reasoningEffort: null },
+        sandboxEscalation: "auto-review",
+      }),
+      "Claude runtime unavailable: auto mode is not available for model default",
+    );
+    // Without the hint, auto mode is not needed.
     assert.equal(
       await settledPreflight(f.runtime, {
         workspace: f.workspace,
@@ -2696,6 +2706,190 @@ test("canUseTool allows only an accepted escalation's own call, once; the turn's
     );
     assert.equal(f.runtime.turnProcessIdentity(threadId, turnId), null);
     assert.equal(f.runtime.turnProcessIdentity("other", turnId), null);
+  } finally {
+    await f.cleanup();
+  }
+});
+
+test("an escalate-auto-review turn keeps the escalate options and passes only flagged Bash to the classifier", {
+  skip: slashTmpDenied(),
+}, async () => {
+  const decisions: unknown[] = [];
+  const script: Script = async function* (session) {
+    decisions.push(
+      await session.hook("Bash", flagged("echo early"), "toolu_early"),
+    );
+    yield init(sessionOf(session), "auto");
+    decisions.push(
+      await session.hook("Bash", flagged("node chromium.mjs"), "toolu_flag"),
+    );
+    decisions.push(
+      await session.hook("WebFetch", { url: "https://x" }, "toolu_web"),
+    );
+    yield result(sessionOf(session));
+  };
+  const approval: Script = async function* (session) {
+    yield init(sessionOf(session), "auto");
+    yield result(sessionOf(session));
+  };
+  const f = fixture({ scripts: [script, approval] });
+  const reviews: SandboxReviewEvent[] = [];
+  f.runtime.onSandboxReview((event) => reviews.push(event));
+  try {
+    await f.runtime.start();
+    const threadId = await f.runtime.startThread(f.workspace, []);
+    for (const level of ["auto-review", "approval"] as const) {
+      const turnId = await f.turn(
+        threadId,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        level,
+      );
+      assert.equal(await f.runtime.waitForTurn(threadId, turnId), "completed");
+    }
+    const [reviewed, approved] = f.sessions.map((s) => s.options);
+    for (const key of [
+      "permissionMode",
+      "allowedTools",
+      "sandbox",
+      "env",
+    ] as const)
+      assert.deepEqual(reviewed?.[key], approved?.[key], key);
+    assert.deepEqual(
+      Object.keys(reviewed?.hooks?.PreToolUse?.[0] ?? {}),
+      Object.keys(approved?.hooks?.PreToolUse?.[0] ?? {}),
+    );
+    // Refused before auto mode is confirmed; then passed through; a tool outside the
+    // policy is denied by the hook before any classifier, with no canUseTool.
+    assert.deepEqual(decisions.map(decisionOf), ["deny", "pass", "deny"]);
+    assert.match(String(reasonOf(decisions[0])), /not confirmed auto/);
+    assert.deepEqual(f.unexpected, []);
+    // A passed call that never ran records nothing.
+    assert.deepEqual(reviews, []);
+  } finally {
+    await f.cleanup();
+  }
+});
+
+test("classifier decisions on passed flagged calls are recorded as reviews; an undecided call goes to the operator once", {
+  skip: slashTmpDenied(),
+}, async () => {
+  const reviews: SandboxReviewEvent[] = [];
+  const escalations: SandboxEscalationEvent[] = [];
+  const asked: unknown[] = [];
+  let f!: ReturnType<typeof fixture>;
+  const denied = (toolUseId: string, type: string, reason?: string) => ({
+    type: "system",
+    subtype: "permission_denied",
+    tool_name: "Bash",
+    tool_use_id: toolUseId,
+    decision_reason_type: type,
+    ...(reason ? { decision_reason: reason } : {}),
+    message: "denied",
+  });
+  const script: Script = async function* (session) {
+    yield init(sessionOf(session), "auto");
+    // Approved: it runs with no permission ask.
+    await session.hook("Bash", flagged("node chromium.mjs"), "toolu_ran");
+    await session.postHook("Bash", flagged("node chromium.mjs"), "toolu_ran", {
+      error: "Exit code 2\nboom",
+    });
+    // Denied by the classifier, with its reason; other reasons and unknown calls record nothing.
+    await session.hook("Bash", flagged("curl x"), "toolu_denied");
+    yield denied("toolu_denied", "classifier", "Looks like exfiltration");
+    await session.hook("Bash", flagged("echo rule"), "toolu_rule");
+    yield denied("toolu_rule", "rule");
+    yield denied("toolu_unknown", "classifier");
+    // Undecided: the classifier asks, and the operator answers once.
+    await session.hook("Bash", flagged("node chromium.mjs ask"), "toolu_ask");
+    const pending = session.canUseTool(
+      "Bash",
+      flagged("node chromium.mjs ask"),
+      "toolu_ask",
+    );
+    await until(() => escalations.length === 1);
+    const request = escalations[0];
+    assert.ok(request?.kind === "requested");
+    assert.equal(
+      await f.runtime.replySandboxEscalation(request.identity, "accept"),
+      true,
+    );
+    asked.push(await pending);
+    await session.postHook(
+      "Bash",
+      flagged("node chromium.mjs ask"),
+      "toolu_ask",
+      { response: { stdout: "", stderr: "", interrupted: false } },
+    );
+    // Anything else the classifier asks about is still unexpected.
+    asked.push(await session.canUseTool("Bash", flagged("ls"), "toolu_other"));
+    yield result(sessionOf(session));
+  };
+  f = fixture({ scripts: [script] });
+  f.runtime.onSandboxReview((event) => reviews.push(event));
+  f.runtime.onSandboxEscalation((event) => {
+    escalations.push(event);
+    return true;
+  });
+  try {
+    await f.runtime.start();
+    const threadId = await f.runtime.startThread(f.workspace, []);
+    const turnId = await f.turn(
+      threadId,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      "auto-review",
+    );
+    assert.equal(await f.runtime.waitForTurn(threadId, turnId), "completed");
+    const generation = f.runtime.currentUserInputGeneration();
+    const target = (id: string) => ({
+      runtimeGeneration: generation,
+      threadId,
+      turnId,
+      targetItemId: id,
+    });
+    const review = (id: string, command: string) => ({
+      kind: "review",
+      identity: { ...target(id), reviewId: id },
+      command,
+      cwd: f.workspace,
+      riskLevel: null,
+      overrulable: false,
+    });
+    assert.deepEqual(reviews, [
+      {
+        ...review("toolu_ran", "node chromium.mjs"),
+        status: "approved",
+        rationale: null,
+      },
+      {
+        kind: "itemCompleted",
+        target: target("toolu_ran"),
+        exitCode: 2,
+        durationMs: null,
+      },
+      {
+        ...review("toolu_denied", "curl x"),
+        status: "denied",
+        rationale: "Looks like exfiltration",
+      },
+    ]);
+    // The undecided call is an operator escalation, not a review.
+    assert.deepEqual(
+      escalations.map((e) => e.kind),
+      ["requested", "completed"],
+    );
+    assert.deepEqual(asked, [
+      { behavior: "allow", updatedInput: flagged("node chromium.mjs ask") },
+      { behavior: "deny", message: "cab grants no permissions" },
+    ]);
+    assert.equal(f.unexpected.length, 1);
   } finally {
     await f.cleanup();
   }

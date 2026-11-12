@@ -1785,7 +1785,7 @@ test("the sandbox level reads the saved level, what applies and each turn's admi
   );
   assert.match(
     projectSandboxLevelLine("escalate-auto-review"),
-    /Claude Code task turns stay strict/,
+    /escalate-auto-review.*both harnesses/,
   );
   assert.match(sandboxLevelAppliesNote, /admitted after the change/);
   assert.match(

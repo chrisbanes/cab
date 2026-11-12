@@ -1194,7 +1194,7 @@ first, and a hook failure refuses the call.
   ([probe](evidence/2026-11-12-claude-auto-hook-allow-probe.md)). If the classifier asks cab
   about an accepted call, cab allows that one call once.
 
-At `escalate-approval` and at `unsandboxed`, a Claude Code task turn sets
+At both escalate levels and at `unsandboxed`, a Claude Code task turn sets
 `BASH_MAX_TIMEOUT_MS=3600000`. That is a request ceiling, not an execution bound: a command that
 times out moves to the background and keeps running. An approved command runs with the service
 user's full access, and processes it starts can outlive the turn.
@@ -1222,7 +1222,24 @@ interrupted or replaced, when the runtime is lost, or when the service stops or 
 agents cannot request the action. The overrule is not proven against a live denial: the
 [probe](evidence/2026-11-12-auto-review-overrule-probe.md) proved only that a review names its
 command item. An escalation that still reaches cab at this level follows the
-`escalate-approval` path. Claude Code task turns in such a project are admitted `strict`. Each
+`escalate-approval` path.
+A Claude Code task turn at `escalate-auto-review` runs with the same options and auto-mode
+checks as at `escalate-approval`. Its PreToolUse hook still refuses every call outside cab's tool
+policy, so Claude's auto-mode classifier decides only a Bash call that sets
+`dangerouslyDisableSandbox`; the hook passes that call through and remembers it.
+- A call the classifier leaves undecided reaches `canUseTool` and becomes the same
+  `sandbox.escalate` approval, with the 15-minute expiry.
+- A remembered call that runs with no `canUseTool` callback is recorded as a reviewer decision
+  `approved`, with the command's exit code and a service-measured duration.
+- A `system` / `permission_denied` message for it with `decision_reason_type: "classifier"` is
+  recorded as `denied`, with Claude Code's reason as the rationale.
+- Neither has a risk level, and a denial offers no overrule. The review id and target are the
+  call's `tool_use_id`.
+- Claude Code shows no classifier decision directly: an approval is inferred, a denial is
+  recorded only when Claude Code reports it (best-effort, per SDK 0.3.319), and a live denial and
+  an undecided call are untested ([probe](evidence/2026-11-12-claude-auto-hook-allow-probe.md)).
+
+Each
 reviewer decision (decision, risk level, rationale, an approved command's exit code and
 duration, and the outcome of a denial's overrule) is shown with the escalations on the task's
 Execution tab and by `cab task get`; the command, working directory, branch and rationale are

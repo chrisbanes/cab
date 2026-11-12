@@ -1266,11 +1266,12 @@ const permission = (value: unknown) =>
   (value as { hookSpecificOutput?: { permissionDecision?: string } })
     .hookSpecificOutput?.permissionDecision;
 
-/** A Claude task in a project at escalate-approval, and the operator's Inbox controls. */
+/** A Claude task in a project at an escalate level, and the operator's Inbox controls. */
 async function claudeEscalation(
   t: { after: (fn: () => Promise<void> | void) => void },
   scripts: Script[],
   expiryMs?: number,
+  level: "escalate-approval" | "escalate-auto-review" = "escalate-approval",
 ) {
   const run = await claudeServiceRun(t, scripts, {
     selfTest: true,
@@ -1282,7 +1283,7 @@ async function claudeEscalation(
     type: "project.configure",
     projectId,
     expectedVersion: Number(run.service.domain().project(projectId).version),
-    sandbox: "escalate-approval",
+    sandbox: level,
   });
   const { taskId, workId } = await run.claudeTask(projectId, worker);
   const api = new OperatorApi(run.service, [run.root]);
@@ -1316,7 +1317,9 @@ async function claudeEscalation(
   };
   const escalations = async () =>
     (await api.readTask(taskId)).data.sandboxEscalations ?? [];
-  return { ...run, taskId, workId, decide, escalations, approvals };
+  const reviews = async () =>
+    (await api.readTask(taskId)).data.sandboxReviews ?? [];
+  return { ...run, taskId, workId, decide, escalations, reviews, approvals };
 }
 
 test("a Claude escalate-approval turn holds a flagged Bash call for the Inbox: approve allows it once with its exit code, decline refuses it", {
@@ -1448,4 +1451,142 @@ test("a Claude escalation is declined at expiry, and one whose turn process does
     read.map((e) => [e.command, e.decider, e.decision]),
     [["echo expired", "expiry", "decline"]],
   );
+});
+
+test("at escalate-auto-review a Claude classifier approval is recorded with its exit code and no Inbox item, and a denial with no overrule", {
+  skip: slashTmpDenied(),
+}, async (t) => {
+  const passed: unknown[] = [];
+  const run = await claudeEscalation(
+    t,
+    [
+      async function* (session) {
+        yield init(sessionOf(session), "auto");
+        passed.push(
+          await session.hook(
+            "Bash",
+            flaggedBash("node chromium.mjs"),
+            "toolu_ok",
+          ),
+        );
+        await session.postHook(
+          "Bash",
+          flaggedBash("node chromium.mjs"),
+          "toolu_ok",
+          { response: { stdout: "", stderr: "", interrupted: false } },
+        );
+        passed.push(
+          await session.hook("Bash", flaggedBash("curl x"), "toolu_no"),
+        );
+        yield {
+          type: "system",
+          subtype: "permission_denied",
+          tool_name: "Bash",
+          tool_use_id: "toolu_no",
+          decision_reason_type: "classifier",
+          decision_reason: "Not needed for the task",
+          message: "denied",
+        };
+        yield result(sessionOf(session));
+      },
+    ],
+    undefined,
+    "escalate-auto-review",
+  );
+  await waitUntil(
+    () => run.intent(run.workId)?.state === "completed",
+    run.describe,
+  );
+  {
+    const base = run.intent(run.workId)?.workspace;
+    t.after(() => releaseTemporaryBase(base));
+  }
+  // Both calls pass the hook to the classifier.
+  assert.deepEqual(passed.map(permission), [undefined, undefined]);
+  assert.equal(run.service.sandboxLevelFor(run.workId), "escalate-auto-review");
+  // Reviewer events apply one at a time; wait for the queue before reading.
+  await (run.service as unknown as { sandboxReviewQueue: Promise<void> })
+    .sandboxReviewQueue;
+  const read = await run.reviews();
+  assert.deepEqual(
+    read.map((r) => ({
+      command: r.command,
+      decider: r.decider,
+      outcome: r.outcome,
+      riskLevel: r.riskLevel,
+      rationale: r.rationale,
+      overrule: r.overrule,
+      exitCode: r.exitCode,
+      durationSource: r.durationSource,
+    })),
+    [
+      {
+        command: "node chromium.mjs",
+        decider: "reviewer",
+        outcome: "approved",
+        riskLevel: null,
+        rationale: null,
+        overrule: null,
+        exitCode: 0,
+        durationSource: "service",
+      },
+      {
+        command: "curl x",
+        decider: "reviewer",
+        outcome: "denied",
+        riskLevel: null,
+        rationale: "Not needed for the task",
+        overrule: null,
+        exitCode: null,
+        durationSource: null,
+      },
+    ],
+  );
+  assert.deepEqual(await run.approvals(), []);
+  assert.deepEqual(await run.escalations(), []);
+});
+
+test("at escalate-auto-review a Claude call the classifier leaves undecided follows the escalate-approval path, including expiry", {
+  skip: slashTmpDenied(),
+}, async (t) => {
+  const asked: unknown[] = [];
+  const run = await claudeEscalation(
+    t,
+    [
+      async function* (session) {
+        yield init(sessionOf(session), "auto");
+        await session.hook(
+          "Bash",
+          flaggedBash("node chromium.mjs"),
+          "toolu_ask",
+        );
+        asked.push(
+          await session.canUseTool(
+            "Bash",
+            flaggedBash("node chromium.mjs"),
+            "toolu_ask",
+          ),
+        );
+        yield result(sessionOf(session));
+      },
+    ],
+    100,
+    "escalate-auto-review",
+  );
+  await waitUntil(
+    () => run.intent(run.workId)?.state === "completed",
+    run.describe,
+  );
+  {
+    const base = run.intent(run.workId)?.workspace;
+    t.after(() => releaseTemporaryBase(base));
+  }
+  assert.equal((asked[0] as { behavior: string }).behavior, "deny");
+  const read = await run.escalations();
+  assert.deepEqual(
+    read.map((e) => [e.command, e.decider, e.decision]),
+    [["node chromium.mjs", "expiry", "decline"]],
+  );
+  // An operator escalation is not a classifier decision.
+  assert.deepEqual(await run.reviews(), []);
 });

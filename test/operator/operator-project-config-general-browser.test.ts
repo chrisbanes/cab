@@ -2322,7 +2322,7 @@ test("the sandbox level asks for confirmation when made unsandboxed and saves st
   assert.equal(d.sandboxLevel(ids.atlas), "escalate-approval");
 
   // Escalate with reviewer saves at once and states the reviewer's cost, the advisory overrule
-  // and that Claude Code turns stay strict.
+  // and what cab records of Claude's classifier.
   await level.selectOption("escalate-auto-review");
   await changes(page)
     .getByText("Sandbox level: Escalate with approval → Escalate with reviewer")
@@ -2335,14 +2335,15 @@ test("the sandbox level asks for confirmation when made unsandboxed and saves st
   assert.equal(d.sandboxLevel(ids.atlas), "escalate-auto-review");
   await page
     .getByText(
-      "The sandbox level is escalate-auto-review for this project's Codex task turns; its Claude Code task turns stay strict.",
+      "The sandbox level is escalate-auto-review for this project's task turns in both harnesses.",
     )
     .waitFor();
   for (const line of [
     /reviewer auto_review decides each request/,
     /does not contain agent-written code/,
     /advisory overrule/,
-    /Claude Code task turns in a project at the escalate-auto-review level/,
+    /classifier decides each Bash call that asks to leave the sandbox/,
+    /cab records a classifier approval/,
   ])
     await page.getByText(line).first().waitFor();
   // Leaving it for unsandboxed still asks.

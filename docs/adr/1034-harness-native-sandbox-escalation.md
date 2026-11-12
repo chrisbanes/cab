@@ -60,7 +60,10 @@ A store migration maps `dangerouslySkipSandbox: true` to `unsandboxed`, everythi
     no second Inbox item opens.
   - **At `escalate-auto-review`:** the hook still denies every call outside today's allowlist
     before the classifier sees it, so the classifier decides only escalated Bash. Undecided calls
-    reach the Inbox through `canUseTool`.
+    reach the Inbox through `canUseTool`. Claude Code reports no classifier decision as such:
+    cab records an approval when an escalated call runs with no `canUseTool` callback, and a
+    denial from a `permission_denied` message whose reason type is `classifier`. Neither has a
+    risk level, and only Claude Code's reason is kept as a denial's rationale.
   - **Bash timeouts:** at the escalate levels and `unsandboxed`, a Bash call can request up to
     60 minutes. A timed-out command moves to the background and keeps running, so the request
     ceiling does not bound execution.

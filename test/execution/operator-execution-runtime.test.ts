@@ -16,6 +16,8 @@ import {
   localListeningLimit,
 } from "../../src/operator/local-listening-copy.js";
 import {
+  autoReviewCostLine,
+  claudeAutoReviewEvidenceLine,
   claudeBashTimeoutLine,
   claudeEscalateApprovalLine,
   claudeEscalateAutoReviewLine,
@@ -471,11 +473,27 @@ test("both harnesses' disclosures state the unsandboxed grant and risks within t
   );
   // The escalate-auto-review level: the reviewer, its cost and limits, and the advisory overrule.
   assert.match(codexEscalateAutoReviewLine, /reviewer auto_review decides/);
-  assert.match(claudeEscalateAutoReviewLine, /run at the strict level/);
+  assert.doesNotMatch(claudeEscalateAutoReviewLine, /strict level/);
+  assert.match(
+    claudeEscalateAutoReviewLine,
+    /classifier decides each Bash call/,
+  );
+  // Claude's decisions carry no risk level, rationale or overrule, and the gaps are disclosed.
+  assert.match(
+    claudeAutoReviewEvidenceLine,
+    /no risk level, rationale or overrule.*untested/,
+  );
   assert.ok(codex.lines.includes(codexEscalateAutoReviewLine));
   for (const risk of escalateAutoReviewRiskLines)
     assert.ok(codex.lines.includes(risk), risk);
-  assert.ok(claude.lines.includes(claudeEscalateAutoReviewLine));
+  for (const line of [
+    claudeEscalateAutoReviewLine,
+    claudeAutoReviewEvidenceLine,
+    autoReviewCostLine,
+  ])
+    assert.ok(claude.lines.includes(line), line);
+  // The overrule is Codex's only.
+  assert.ok(!claude.lines.some((line) => /overrule in the Inbox/.test(line)));
   const reviewer = escalateAutoReviewRiskLines.join(" ");
   for (const word of [
     /extra model call/,
@@ -490,6 +508,7 @@ test("both harnesses' disclosures state the unsandboxed grant and risks within t
     [
       codexEscalateAutoReviewLine,
       claudeEscalateAutoReviewLine,
+      claudeAutoReviewEvidenceLine,
       ...escalateAutoReviewRiskLines,
     ].every((line) => line.length <= 300),
   );

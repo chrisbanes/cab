@@ -317,8 +317,9 @@ A per-project setting, `sandbox`, that the operator chooses for a project's task
 (ADR-1034). `strict`, the default, keeps the harness sandbox. `escalate-approval` keeps it but
 lets a Codex or Claude Code task turn ask to run one command outside it, a **Sandbox
 escalation**. For Claude Code, its auto-mode classifier can still refuse an approved call.
-`escalate-auto-review` has Codex's reviewer decide each such request instead, a **Reviewer
-decision**; Claude Code task turns stay `strict` at that level for now. `unsandboxed` runs task turns without the
+`escalate-auto-review` has the harness's reviewer decide each such request instead, a **Reviewer
+decision**: Codex's `auto_review`, or Claude Code's auto-mode classifier, whose decisions cab
+records only as far as Claude Code shows them. `unsandboxed` runs task turns without the
 sandbox, so they can launch host tools such as browsers and Android emulators; agents then act
 with the service user's full filesystem, process, network and credential access, and command
 network access and local listening are superseded. The level is recorded when a turn is
