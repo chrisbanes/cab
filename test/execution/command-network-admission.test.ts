@@ -348,11 +348,17 @@ test("a drafting run, a draft turn and an unadmitted turn never record the unsan
     );
     assert.equal(f.state.begin(drafting.id, { projectId }), true);
     assert.equal(f.state.sandboxLevel(drafting.id), "strict");
-    assert.equal(f.state.unsandboxedApplies(drafting.id, projectId), false);
+    assert.equal(
+      f.state.applicableSandboxLevel(drafting.id, projectId),
+      "strict",
+    );
 
     const waiting = ready(taskB, "claude");
     assert.equal(f.state.sandboxLevel(waiting.id), null);
-    assert.equal(f.state.unsandboxedApplies(waiting.id, projectId), true);
+    assert.equal(
+      f.state.applicableSandboxLevel(waiting.id, projectId),
+      "unsandboxed",
+    );
 
     new SchedulerStore(f.db);
     const state = new ExecutionState(f.db);
@@ -362,11 +368,14 @@ test("a drafting run, a draft turn and an unadmitted turn never record the unsan
         "INSERT INTO turn_requests (requestKey, workId, kind, prompt, state, draftTurn) VALUES (?, ?, 'assignment', 'Draft', 'active', 1)",
       )
       .run(randomUUID(), draft.workId);
-    assert.equal(state.unsandboxedApplies(draft.id, projectId), false);
+    assert.equal(state.applicableSandboxLevel(draft.id, projectId), "strict");
     assert.equal(state.begin(draft.id, { projectId }), true);
     assert.equal(state.sandboxLevel(draft.id), "strict");
     setSandbox("strict");
-    assert.equal(f.state.unsandboxedApplies(waiting.id, projectId), false);
+    assert.equal(
+      f.state.applicableSandboxLevel(waiting.id, projectId),
+      "strict",
+    );
     assert.equal(admit(waiting), true);
   } finally {
     f.close();

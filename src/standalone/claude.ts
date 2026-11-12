@@ -1733,7 +1733,10 @@ export class ClaudeRuntime implements Runtime {
     }
     if (
       name === "Bash" &&
-      (!fields.success || fields.data.dangerouslyDisableSandbox === true)
+      // Anything but absent or false is a request to leave the sandbox (the CLI also reads "true").
+      (!fields.success ||
+        (fields.data.dangerouslyDisableSandbox !== undefined &&
+          fields.data.dangerouslyDisableSandbox !== false))
     ) {
       if (!fields.success || !turn.escalation)
         return refuse("Commands never run outside the sandbox");

@@ -2428,6 +2428,14 @@ test("a flagged call is refused without an owner, before auto mode is confirmed,
     decisions.push(
       await session.hook("Bash", flagged("echo strict"), "toolu_strict"),
     );
+    // The CLI reads the string "true" as the flag too, so the hook refuses it.
+    decisions.push(
+      await session.hook(
+        "Bash",
+        { command: "echo string", dangerouslyDisableSandbox: "true" },
+        "toolu_string",
+      ),
+    );
     yield result(sessionOf(session));
   };
   const stopped: Script = async function* (session) {
@@ -2457,7 +2465,16 @@ test("a flagged call is refused without an owner, before auto mode is confirmed,
     assert.equal(await f.runtime.waitForTurn(threadId, first), "completed");
     const second = await f.turn(threadId);
     assert.equal(await f.runtime.waitForTurn(threadId, second), "completed");
-    assert.deepEqual(decisions.map(decisionOf), ["deny", "deny", "deny"]);
+    assert.deepEqual(decisions.map(decisionOf), [
+      "deny",
+      "deny",
+      "deny",
+      "deny",
+    ]);
+    assert.equal(
+      reasonOf(decisions[3]),
+      "Commands never run outside the sandbox",
+    );
     assert.match(String(reasonOf(decisions[0])), /not confirmed auto/);
     assert.equal(
       reasonOf(decisions[2]),

@@ -6547,7 +6547,8 @@ export class StandaloneService {
 
   /**
    * Takes an escalation of an exact running turn admitted at escalate-approval (ADR-1034); false
-   * leaves the request to the runtime's denial and unexpected-request hold. The request then
+   * leaves the request to the runtime's denial: Codex's unexpected-request hold, or Claude's hook
+   * refusing that one call, which records nothing. The request then
    * holds the turn's callback, and with it its slot and writer, until it is answered or withdrawn.
    */
   private handleSandboxEscalation(

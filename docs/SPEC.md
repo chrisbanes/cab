@@ -1194,7 +1194,7 @@ first, and a hook failure refuses the call.
   ([probe](evidence/2026-11-12-claude-auto-hook-allow-probe.md)). If the classifier asks cab
   about an accepted call, cab allows that one call once.
 
-At both escalate levels and at `unsandboxed`, a Claude Code task turn sets
+At `escalate-approval` and at `unsandboxed`, a Claude Code task turn sets
 `BASH_MAX_TIMEOUT_MS=3600000`. That is a request ceiling, not an execution bound: a command that
 times out moves to the background and keeps running. An approved command runs with the service
 user's full access, and processes it starts can outlive the turn.

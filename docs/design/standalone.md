@@ -339,7 +339,11 @@ At `escalate-approval` a Codex task turn keeps its `workspaceWrite` sandbox and 
 approval policy that allows only sandbox escalation, with reviewer `user`; each command it asks to
 run outside the sandbox becomes an Inbox approval the operator answers `accept` or `decline`,
 declined after 15 minutes unanswered and withdrawn when its turn ends. A Claude Code task turn at
-this level is admitted `strict`. An approved command has the same access as an unsandboxed one.
+this level runs in `auto` permission mode with unsandboxed commands allowed and Bash outside its
+allowed tools; cab's PreToolUse hook holds each Bash call that sets `dangerouslyDisableSandbox` as
+the same Inbox approval, and Claude's classifier can still refuse an approved call. A model
+without auto mode keeps the turn waiting with a named reason. An approved command has the same
+access as an unsandboxed one.
 At `escalate-auto-review` a Codex task turn sends the same policy with reviewer `auto_review`, so
 Codex's reviewer decides each escalation; cab records each decision, and a denial of a command in
 the task workspace offers the operator an advisory Inbox overrule while the turn runs. A Claude
