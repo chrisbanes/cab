@@ -95,7 +95,10 @@ import {
   DomainStaleDispositionError,
   DomainStore,
 } from "../core/domain.js";
-import type { SandboxLevel } from "../core/sandbox-level.js";
+import type {
+  SandboxLevel,
+  SandboxReviewIdentity,
+} from "../core/sandbox-level.js";
 import {
   type SupportedRuntimeSettings,
   supportedRuntimeSettingsSchema,
@@ -905,6 +908,10 @@ export const withoutWithdrawn = <T extends Record<string, unknown>>(
 ) => assignments.filter((a) => a.state !== "withdrawn");
 
 /** Owns only standalone.sqlite in a marked data directory. No import or attach path exists. */
+/** One review in one runtime generation's thread. */
+const sandboxReviewKey = (identity: SandboxReviewIdentity) =>
+  `${identity.runtimeGeneration}\u0000${identity.threadId}\u0000${identity.reviewId}`;
+
 export class StandaloneService {
   private owner: StandaloneDataDirectory | undefined;
   private db: DatabaseSync | undefined;
@@ -973,6 +980,8 @@ export class StandaloneService {
   private readonly overruleRuntimes = new Map<string, Runtime>();
   /** Reviewer events, applied one at a time in arrival order. */
   private sandboxReviewQueue: Promise<void> = Promise.resolve();
+  /** Denials whose turn ended before their review was recorded, so no overrule is offered. */
+  private readonly endedDenials = new Set<string>();
   /** Held sandbox escalations by endpoint, until answered or withdrawn. */
   private readonly escalationWaiters = new Map<
     string,
@@ -2737,14 +2746,16 @@ export class StandaloneService {
       );
     });
     runtime.onSandboxReview?.((event) => {
+      // An ended denial is cab's own bookkeeping, not runtime activity, and always withdrawn.
+      if (event.kind === "overruleEnded") {
+        this.endSandboxOverrule(event.identity);
+        return;
+      }
       const { threadId, turnId } =
         event.kind === "itemCompleted" ? event.target : event.identity;
       this.noteTurnActivity(harness, state, threadId, turnId);
       // Evidence of another harness's execution, or of a retired runtime, is not recorded.
-      if (
-        event.kind === "overruleEnded" ||
-        (acceptsNew() && !foreign(threadId, turnId))
-      )
+      if (acceptsNew() && !foreign(threadId, turnId))
         this.handleSandboxReview(event, runtime);
     });
     runtime.onUserInputOutcome?.((outcome) => {
@@ -6742,25 +6753,52 @@ export class StandaloneService {
     }
   }
 
+  /**
+   * Takes a reviewer event of an exact running turn admitted at escalate-auto-review (ADR-1034).
+   * A review is bound when it arrives; one that does not bind records nothing and notes an
+   * anomaly on the work it names. The writes then apply one at a time, in arrival order.
+   */
   private handleSandboxReview(
-    event: SandboxReviewEvent,
+    event: Exclude<SandboxReviewEvent, { kind: "overruleEnded" }>,
     runtime: Runtime,
   ): void {
+    let binding: CoordinationExecutionBinding | undefined;
+    if (event.kind === "review") {
+      const { state, supervisor } = this.started();
+      try {
+        binding = this.bindNativeCallback(event.identity, runtime);
+      } catch {
+        const named = state.runtimeQuestionBinding(
+          event.identity.threadId,
+          event.identity.turnId,
+        );
+        if (named) supervisor.noteAnomaly(named.workId);
+        return;
+      }
+      const intent = state.byWorkId(binding.workId);
+      if (
+        !intent ||
+        binding.draftTurn ||
+        state.sandboxLevel(intent.id) !== "escalate-auto-review"
+      ) {
+        supervisor.noteAnomaly(binding.workId);
+        return;
+      }
+    }
     this.sandboxReviewQueue = this.sandboxReviewQueue
-      .then(() => this.applySandboxReview(event, runtime))
+      .then(() => this.applySandboxReview(event, binding, runtime))
       .catch(() => {
         // Evidence only: a failed write leaves the record as it was.
       });
   }
 
   /**
-   * Records a reviewer decision of an exact running turn admitted at escalate-auto-review
-   * (ADR-1034), and offers the operator an advisory overrule of a denial of a command in the task
-   * workspace while that turn runs. A review that does not bind records nothing and notes an
-   * anomaly on the work it names.
+   * Records a bound reviewer decision, and offers the operator an advisory overrule of a denial
+   * of a command in the task workspace while that turn runs.
    */
   private async applySandboxReview(
-    event: SandboxReviewEvent,
+    event: Exclude<SandboxReviewEvent, { kind: "overruleEnded" }>,
+    binding: CoordinationExecutionBinding | undefined,
     runtime: Runtime,
   ): Promise<void> {
     const coordination = this.acquired?.coordination;
@@ -6773,35 +6811,8 @@ export class StandaloneService {
       );
       return;
     }
-    if (event.kind === "overruleEnded") {
-      const overrule = coordination.sandboxReview(event.identity)?.overrule;
-      if (overrule) {
-        this.overruleRuntimes.delete(overrule.interactionId);
-        coordination.resolveSandboxOverrule(overrule.interactionId);
-      }
-      return;
-    }
-    const { state, supervisor } = this.started();
-    let binding: CoordinationExecutionBinding;
-    try {
-      binding = this.bindNativeCallback(event.identity, runtime);
-    } catch {
-      const named = state.runtimeQuestionBinding(
-        event.identity.threadId,
-        event.identity.turnId,
-      );
-      if (named) supervisor.noteAnomaly(named.workId);
-      return;
-    }
-    const intent = state.byWorkId(binding.workId);
-    if (
-      !intent ||
-      binding.draftTurn ||
-      state.sandboxLevel(intent.id) !== "escalate-auto-review"
-    ) {
-      supervisor.noteAnomaly(binding.workId);
-      return;
-    }
+    if (!binding) return;
+    // The runtime reports only absolute working directories, so a relative one is inside.
     const cwd = this.escalationCwd(binding.taskId, event.cwd);
     const record = coordination.recordSandboxReview({
       identity: event.identity,
@@ -6818,12 +6829,35 @@ export class StandaloneService {
     // Only a denial of a command in the task workspace is offered, once, while its turn runs.
     if (
       event.overrulable &&
+      !this.endedDenials.delete(sandboxReviewKey(event.identity)) &&
       record.status === "denied" &&
       record.overrule === null &&
       !isAbsolute(cwd)
     ) {
       const interactionId = coordination.openSandboxOverrule(event.identity);
       this.overruleRuntimes.set(interactionId, runtime);
+    }
+  }
+
+  /**
+   * A denial's turn ended, was stopped or lost its runtime: its overrule is withdrawn at once, so
+   * an open one never counts as a waiting action of an ended turn, and one not yet offered never is.
+   */
+  private endSandboxOverrule(identity: SandboxReviewIdentity): void {
+    const coordination = this.acquired?.coordination;
+    if (!coordination) return;
+    try {
+      const review = coordination.sandboxReview(identity);
+      // The denial is still queued: remember it, and its application consumes the mark.
+      if (review?.status !== "denied") {
+        this.endedDenials.add(sandboxReviewKey(identity));
+        return;
+      }
+      if (!review.overrule) return;
+      this.overruleRuntimes.delete(review.overrule.interactionId);
+      coordination.resolveSandboxOverrule(review.overrule.interactionId);
+    } catch {
+      // Evidence only: a restart withdraws what could not be withdrawn now.
     }
   }
 

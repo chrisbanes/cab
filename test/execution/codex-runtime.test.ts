@@ -4000,8 +4000,9 @@ test("stop during a failed spawn does not wait for an exit event", {
  * the last turn's approval policy, or `corrupt-policy` makes it report a widened one. `review-*`
  * prompts send reviewer notifications: `review-approve` approves and runs its item; `review-deny`
  * denies and waits for an overrule, then retries under a fresh review (`-end` ends the turn at
- * once, `-error` rejects the overrule, `-crash` exits); `review-other` and `review-malformed` send
- * reviews cab does not record.
+ * once, `-error` rejects the overrule, `-late` ends the turn before answering it, `-crash` exits);
+ * `review-other`, `review-malformed` and `review-relative` send reviews cab does not record, and
+ * `review-late` sends one after its turn ended.
  */
 function escalationFakeRuntime() {
   const root = mkdtempSync(join(tmpdir(), "codex-escalation-"));
@@ -4038,6 +4039,8 @@ function escalationFakeRuntime() {
     "    if (prompt === 'review-approve') { review('rv-' + turns, 'approved', 'item-' + turns); ran('item-' + turns); finish(turnId); }",
     "    if (prompt.startsWith('review-deny')) { review('rv-' + turns, 'denied', 'item-' + turns); denied = { turnId, review, ran, prompt }; if (prompt === 'review-deny-end') finish(turnId); if (prompt === 'review-deny-crash') setTimeout(() => process.exit(1), 50); }",
     "    if (prompt === 'review-other') { review('rv-' + turns, 'approved', null, { type: 'networkAccess', target: 'x', host: 'x', protocol: 'https', port: 443 }); finish(turnId); }",
+    "    if (prompt === 'review-relative') { review('rv-' + turns, 'denied', 'item-' + turns, { type: 'command', source: 'shell', command: 'node chromium.mjs', cwd: 'subdir' }); finish(turnId); }",
+    "    if (prompt === 'review-late') { finish(turnId); review('rv-' + turns, 'aborted', 'item-' + turns); }",
     "    if (prompt === 'review-malformed') { write({ method: 'item/autoApprovalReview/completed', params: { ...base, reviewId: 'bad', targetItemId: 'i', review: { status: 'weird' }, action: { type: 'command', command: 'x', cwd: '/' } } }); finish(turnId); }",
     "    if (prompt.startsWith('escalate')) {",
     "      asked.set('esc-' + turns, turnId);",
@@ -4061,6 +4064,7 @@ function escalationFakeRuntime() {
     "    }",
     "  } else if (message.method === 'thread/approveGuardianDeniedAction') {",
     "    if (denied?.prompt === 'review-deny-error') { write({ id: message.id, error: { code: -32600, message: 'rejected' } }); finish(denied.turnId); denied = undefined; }",
+    "    else if (denied?.prompt === 'review-deny-late') { finish(denied.turnId); write({ id: message.id, result: {} }); denied = undefined; }",
     "    else if (denied) { write({ id: message.id, result: {} }); denied.review('rv-retry', 'approved', 'item-retry'); denied.ran('item-retry'); finish(denied.turnId); denied = undefined; }",
     "    else write({ id: message.id, error: { code: -32600, message: 'no denial' } });",
     "  } else if (message.method === 'turn/interrupt') {",
@@ -4224,24 +4228,56 @@ test("reviews cab did not ask for, of other actions, without a target or of anot
     await bounded(runtime.start(), 3000);
     await bounded(runtime.startThread(root), 3000);
     const turns = [];
-    for (const [prompt, policy] of [
-      ["review-other", autoReviewPolicy],
-      ["review-malformed", autoReviewPolicy],
-      ["review-approve", escalationPolicy],
-      ["review-approve", undefined],
-    ] as const)
+    // Each turn's reviews are read before the next turn starts, which would end them.
+    for (const [prompt, policy, reviews] of [
+      ["review-other", autoReviewPolicy, 2],
+      ["review-malformed", autoReviewPolicy, 1],
+      ["review-relative", autoReviewPolicy, 2],
+      ["review-approve", escalationPolicy, 2],
+      ["review-approve", undefined, 2],
+    ] as const) {
+      const before = unexpected.length;
       turns.push(
         await bounded(
           runtime.startTurn("thread-1", root, prompt, undefined, policy),
           3000,
         ),
       );
-    await eventually(() => unexpected.length >= 7);
+      await eventually(() => unexpected.length === before + reviews);
+    }
     assert.deepEqual(events, []);
     assert.ok(
       unexpected.every((u) => u.method.startsWith("item/autoApprovalReview/")),
     );
     assert.deepEqual([...new Set(unexpected.map((u) => u.turnId))], turns);
+  } finally {
+    await cleanup();
+  }
+});
+
+test("a review that arrives after its turn ended is neither recorded nor held", async () => {
+  const { root, runtime, cleanup } = escalationFakeRuntime();
+  const events: unknown[] = [];
+  const unexpected: unknown[] = [];
+  runtime.onUnexpectedRequest((request) => unexpected.push(request));
+  runtime.onSandboxReview((event) => events.push(event));
+  try {
+    await bounded(runtime.start(), 3000);
+    await bounded(runtime.startThread(root), 3000);
+    await bounded(
+      runtime.startTurn(
+        "thread-1",
+        root,
+        "review-late",
+        undefined,
+        autoReviewPolicy,
+      ),
+      3000,
+    );
+    // The next turn's start proves the late review was read first.
+    await bounded(runtime.startTurn("thread-1", root, "plain"), 3000);
+    assert.deepEqual(events, []);
+    assert.deepEqual(unexpected, []);
   } finally {
     await cleanup();
   }
@@ -4320,8 +4356,11 @@ test("a denial can no longer be overruled once its turn ends, is interrupted or 
   for (const [prompt, reason] of [
     ["review-deny-end", "Turn ended"],
     ["review-deny", "Turn interrupted"],
+    ["review-deny", "New turn requested"],
     ["review-deny-crash", "Runtime lost"],
     ["review-deny-error", null],
+    // Codex accepts it, but its answer arrives after the turn ended.
+    ["review-deny-late", null],
   ] as const) {
     const { root, runtime, messages, cleanup } = escalationFakeRuntime();
     const events: Array<Record<string, unknown>> = [];
@@ -4349,6 +4388,8 @@ test("a denial can no longer be overruled once its turn ends, is interrupted or 
       ).identity;
       if (reason === "Turn interrupted")
         await bounded(runtime.interruptTurn("thread-1", turnId), 3000);
+      if (reason === "New turn requested")
+        await bounded(runtime.startTurn("thread-1", root, "plain"), 3000);
       if (reason !== null) {
         await eventually(() => events.some((e) => e.kind === "overruleEnded"));
         assert.deepEqual(events.at(-1), {

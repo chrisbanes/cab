@@ -451,7 +451,8 @@ const reviewNotificationSchema = z.object({
 const reviewedCommandSchema = z.object({
   type: z.literal("command"),
   command: z.string().min(1),
-  cwd: z.string().min(1),
+  // Overrule eligibility compares it with the task workspace, so only an absolute path is taken.
+  cwd: z.string().min(1).refine(isAbsolute),
 });
 /**
  * `codex_protocol::protocol::GuardianAssessmentEvent`, mapped from a denial's completed
@@ -1074,6 +1075,8 @@ export class CodexRuntime implements Runtime {
     string,
     { turnId: string | null; interrupted?: true }
   >();
+  /** Each thread's last ended review turn, whose late reviews are dropped. */
+  private readonly endedReviewTurns = new Map<string, string>();
   /** Reviews of current review turns by thread and review, until the turn ends. */
   private readonly reviews = new Map<
     string,
@@ -1110,16 +1113,24 @@ export class CodexRuntime implements Runtime {
     )
       return false;
     entry.overruled = true;
+    // Read when the answer arrives, before any later line of the same read ends the turn: an
+    // answer after the turn ended cannot show the overrule reached the running turn.
+    let answeredWhileRunning = false;
     try {
-      await this.request("thread/approveGuardianDeniedAction", {
-        threadId: identity.threadId,
-        event: guardianAssessmentEvent(entry.denial),
-      });
+      await this.request(
+        "thread/approveGuardianDeniedAction",
+        {
+          threadId: identity.threadId,
+          event: guardianAssessmentEvent(entry.denial),
+        },
+        () => {
+          answeredWhileRunning = running();
+        },
+      );
     } catch {
       return false;
     }
-    // An answer after the turn ended cannot show the overrule reached the running turn.
-    return running();
+    return answeredWhileRunning;
   }
   private emitReview(event: SandboxReviewEvent): void {
     try {
@@ -1139,6 +1150,12 @@ export class CodexRuntime implements Runtime {
   ): void {
     if (!this.sandboxReviewListener) return;
     const named = threadTurnIdentitySchema.safeParse(params);
+    // A review that arrives after its turn ended is evidence only: neither recorded nor held.
+    if (
+      named.success &&
+      this.endedReviewTurns.get(named.data.threadId) === named.data.turnId
+    )
+      return;
     const reviewTurn = named.success
       ? this.reviewTurns.get(named.data.threadId)
       : undefined;
@@ -2763,6 +2780,9 @@ export class CodexRuntime implements Runtime {
     for (const [key, entry] of this.escalations)
       if (entry.identity.threadId === threadId) this.escalations.delete(key);
     this.endReviews("New turn requested", { threadId, drop: true });
+    // The thread's earlier review turn is over: its late reviews are dropped, never bound here.
+    const priorReviewTurn = this.reviewTurns.get(threadId)?.turnId;
+    if (priorReviewTurn) this.endedReviewTurns.set(threadId, priorReviewTurn);
     if (escalate) this.escalationTurns.set(threadId, null);
     else this.escalationTurns.delete(threadId);
     // An escalation the reviewer does not decide still reaches cab, as at escalate-approval.
@@ -3121,11 +3141,20 @@ export class CodexRuntime implements Runtime {
           turnId: terminal.data.turn.id,
           drop: true,
         });
+        const reviewTurn = this.reviewTurns.get(terminal.data.threadId);
+        // A pending start (null) is this turn: turns run one at a time, and completion can arrive
+        // before the turn/start answer.
         if (
-          this.reviewTurns.get(terminal.data.threadId)?.turnId ===
-          terminal.data.turn.id
-        )
+          reviewTurn &&
+          (reviewTurn.turnId === null ||
+            reviewTurn.turnId === terminal.data.turn.id)
+        ) {
           this.reviewTurns.delete(terminal.data.threadId);
+          this.endedReviewTurns.set(
+            terminal.data.threadId,
+            terminal.data.turn.id,
+          );
+        }
         this.finishConversationTurn(
           terminal.data.threadId,
           terminal.data.turn.id,
@@ -3592,6 +3621,7 @@ export class CodexRuntime implements Runtime {
     this.escalationTurns.clear();
     this.endReviews("Runtime lost", { drop: true });
     this.reviewTurns.clear();
+    this.endedReviewTurns.clear();
     this.nativeGeneration = undefined;
     this.threadSnapshots.clear();
     this.nativeTurns.clear();

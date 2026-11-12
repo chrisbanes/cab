@@ -45,7 +45,7 @@ class EscalationRuntime extends OperatorFixtureRuntime {
   private readonly pending = new Map<string, NativeInputEndpointIdentity>();
   private reviewListener?: (event: SandboxReviewEvent) => void;
   /** Denials that can still be overruled, as Codex keeps them for the running turn. */
-  private readonly denials = new Map<string, SandboxReviewIdentity>();
+  readonly denials = new Map<string, SandboxReviewIdentity>();
   readonly overrules: SandboxReviewIdentity[] = [];
   overruleAnswer = true;
   onSandboxReview(listener: (event: SandboxReviewEvent) => void) {
@@ -869,7 +869,7 @@ test("a timed-out or aborted review is recorded as a decline, and a request that
   assert.equal(s.record(approval.interactionId)?.decider, "expiry");
 });
 
-test("a review that does not bind to the exact admitted escalate-auto-review turn records nothing and notes an anomaly", async (t) => {
+test("a review that does not bind to the exact admitted escalate-auto-review turn records nothing; one of another generation notes an anomaly", async (t) => {
   const s = await autoReviewTask(t);
   const foreignTurn = await s.review("approved", {
     identity: s.reviewIdentity({ turnId: "foreign-turn" }),
@@ -926,6 +926,11 @@ test("a reviewer denial offers an advisory overrule; approve overrules it once a
   await s.decide(approval, "approved", key);
   assert.deepEqual(s.runtime.overrules, [denied]);
   await s.decide(approval, "approved", key);
+  // Even with the runtime ready to send again, the claimed overrule is never sent twice.
+  s.runtime.denials.set(denied.reviewId, denied);
+  (
+    s.f.service as unknown as { overruleRuntimes: Map<string, unknown> }
+  ).overruleRuntimes.set(approval.interactionId, s.runtime);
   await s.f.service.settleSandboxOverrule(approval.interactionId);
   assert.equal(s.runtime.overrules.length, 1);
   assert.deepEqual(s.reviewRecord(denied)?.overrule, {
@@ -972,6 +977,42 @@ test("a declined overrule keeps the denial; a rejected overrule records it was n
   await s.decide(second!, "approved");
   assert.equal(s.runtime.overrules.length, 1);
   assert.equal(s.reviewRecord(rejected)?.overrule?.delivered, false);
+  // A runtime of another generation is never asked to overrule.
+  s.runtime.overruleAnswer = true;
+  const other = await s.review("denied");
+  const third = (await s.approvals()).find(
+    (a) => a.interactionId === s.reviewRecord(other)?.overrule?.interactionId,
+  );
+  s.runtime.currentUserInputGeneration = () => randomUUID();
+  await s.decide(third!, "approved");
+  assert.equal(s.runtime.overrules.length, 1);
+  assert.equal(s.reviewRecord(other)?.overrule?.delivered, false);
+});
+
+test("a denial whose turn ends before it is recorded offers no overrule, and a long command is cut and marked", async (t) => {
+  const s = await autoReviewTask(t);
+  const at = s.reviewIdentity();
+  const base = {
+    kind: "review" as const,
+    identity: at,
+    command: "node chromium.mjs reviewed",
+    cwd: s.worktree,
+    riskLevel: "high" as const,
+    rationale: "denied",
+  };
+  s.runtime.emitReview({ ...base, status: "inProgress", overrulable: false });
+  s.runtime.emitReview({ ...base, status: "denied", overrulable: true });
+  s.runtime.endDenials(s.work.turnId!);
+  await s.settled();
+  assert.equal(s.reviewRecord(at)?.status, "denied");
+  assert.equal(s.reviewRecord(at)?.overrule, null);
+  assert.deepEqual(await s.approvals(), []);
+  const long = await s.review("denied", { command: "x".repeat(5000) });
+  assert.equal(s.reviewRecord(long)?.command.length, 4096);
+  assert.equal(s.reviewRecord(long)?.truncated, true);
+  const [approval] = await s.approvals();
+  assert.ok(approval);
+  assert.equal((approval.material as { truncated?: boolean }).truncated, true);
 });
 
 test("an overrule is withdrawn when its turn ends or is stopped, and a later decision is refused", async (t) => {
