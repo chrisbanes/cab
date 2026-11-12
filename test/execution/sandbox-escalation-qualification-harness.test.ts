@@ -1085,3 +1085,374 @@ test("the committed escalate-approval live evidence reclassifies with the curren
     unmatchedResolutions: 0,
   });
 });
+
+test("the codex-overrule group is in the live grammar and still refuses extra arguments", () => {
+  const result = spawnSync(
+    process.execPath,
+    [
+      join(directory, "live-escalation.mjs"),
+      "--live",
+      "--one-attempt",
+      "--group=codex-overrule",
+      "extra",
+    ],
+    { encoding: "utf8", timeout: 10_000 },
+  );
+  assert.equal(result.status, 2);
+  assert.match(result.stderr, /\|codex-overrule\|/);
+  assert.equal(result.stdout, "");
+});
+
+test("codex-overrule links a review to its command item and overrules a denial only mid-turn", async (t) => {
+  const { runCodexGroup } = await load("codex-groups.mjs");
+  const { classify } = await load("outcomes.mjs");
+  const ws = workspace(t);
+  const logPath = join(ws, "..", `${ws.split("/").at(-1)}-log.jsonl`);
+  t.after(() => rmSync(logPath, { force: true }));
+  const run = (mode?: string) =>
+    runCodexGroup("codex-overrule", {
+      executable: process.execPath,
+      args: [
+        join(directory, "fake-app-server.mjs"),
+        logPath,
+        ...(mode ? [mode] : []),
+      ],
+      env: process.env,
+      workspace: ws,
+      deadlineMs: 60_000,
+    });
+  const overrulesSent = () =>
+    readFileSync(logPath, "utf8")
+      .trim()
+      .split("\n")
+      .map((line) => JSON.parse(line))
+      .filter((m) => m.method === "thread/approveGuardianDeniedAction");
+
+  const approved = await run();
+  assert.equal(approved.failure, null);
+  assert.equal(approved.turnStart.approvalsReviewer, "auto_review");
+  assert.equal(approved.cleanup.appServerStopped, true);
+  const linked = classify("codex-overrule", approved);
+  for (const key of [
+    "reviewPaired",
+    "targetItemLinked",
+    "linkedItemCompleted",
+    "noUnrequestedTurn",
+  ])
+    assert.equal(linked[key].outcome, "proved", key);
+  assert.deepEqual(linked.targetItemLinked.evidence, {
+    review: {
+      reviewId: "r1",
+      turnId: "turn-1",
+      targetItemId: "item-r1",
+      status: "approved",
+      riskLevel: "low",
+      actionType: "command",
+    },
+    item: { id: "item-r1", status: "completed", exitCode: 0, durationMs: 5 },
+  });
+  for (const key of ["overruleAccepted", "retryReviewedAgain"]) {
+    assert.equal(linked[key].outcome, "untested", key);
+    assert.equal(
+      linked[key].reason,
+      "denial not elicited: no denial stimulus used (controller decision D32)",
+    );
+  }
+  assert.deepEqual(overrulesSent(), []);
+
+  // Stripping any one cited event leaves its cell unproved.
+  const without = (trace: Event, drop: (e: Event) => boolean) => ({
+    ...trace,
+    events: (trace.events as Event[]).filter((e) => !drop(e)),
+  });
+  const strip = {
+    reviewPaired: (e: Event) => e.kind === "review" && e.phase === "started",
+    targetItemLinked: (e: Event) => e.kind === "item",
+    linkedItemCompleted: (e: Event) => e.kind === "item",
+    noUnrequestedTurn: (e: Event) => e.kind === "turnStarted",
+  };
+  for (const [key, drop] of Object.entries(strip))
+    assert.notEqual(
+      classify("codex-overrule", without(approved, drop))[key].outcome,
+      "proved",
+      key,
+    );
+  assert.equal(
+    classify(
+      "codex-overrule",
+      without(approved, (e) => e.kind === "review"),
+    ).reviewPaired.reason,
+    "no completed review of the stimulus",
+  );
+  // A turn no client turn/start returned refutes, and voids the pair.
+  const foreign = classify("codex-overrule", { ...approved, clientTurns: [] });
+  assert.equal(foreign.noUnrequestedTurn.outcome, "refuted");
+  assert.equal(foreign.reviewPaired.outcome, "refuted");
+  const edit = (trace: Event, match: (e: Event) => boolean, patch: Event) => ({
+    ...trace,
+    events: (trace.events as Event[]).map((e) =>
+      match(e) ? { ...e, ...patch } : e,
+    ),
+  });
+  const isCompleted = (e: Event) =>
+    e.kind === "review" && e.phase === "completed";
+  // Sensitivity: the started review under another reviewId, a completion whose id is not
+  // targetItemId, a null target, a failed item and a non-terminal review status.
+  assert.equal(
+    classify(
+      "codex-overrule",
+      edit(approved, (e) => e.kind === "review" && e.phase === "started", {
+        reviewId: "r9",
+      }),
+    ).reviewPaired.outcome,
+    "refuted",
+  );
+  assert.equal(
+    classify(
+      "codex-overrule",
+      edit(approved, (e) => e.kind === "item", { id: "item-other" }),
+    ).targetItemLinked.outcome,
+    "refuted",
+  );
+  assert.equal(
+    classify(
+      "codex-overrule",
+      edit(approved, (e) => e.kind === "review", { targetItemId: null }),
+    ).targetItemLinked.outcome,
+    "refuted",
+  );
+  // A start under the same reviewId for another action is not this review's start.
+  assert.equal(
+    classify(
+      "codex-overrule",
+      edit(approved, (e) => e.kind === "review" && e.phase === "started", {
+        command: "/bin/zsh -lc 'ls'",
+      }),
+    ).reviewPaired.outcome,
+    "untested",
+  );
+  // The target item ran another command.
+  const lsItem = classify(
+    "codex-overrule",
+    edit(approved, (e) => e.kind === "item", { command: "/bin/zsh -lc 'ls'" }),
+  );
+  assert.equal(lsItem.targetItemLinked.outcome, "untested");
+  assert.equal(lsItem.linkedItemCompleted.outcome, "untested");
+  // Missing turn ids never match each other.
+  const unnamed = classify(
+    "codex-overrule",
+    edit(
+      { ...approved, clientTurns: [undefined] },
+      (e) => e.kind === "turnStarted",
+      {
+        turnId: undefined,
+      },
+    ),
+  );
+  assert.equal(unnamed.noUnrequestedTurn.outcome, "refuted");
+  assert.equal(
+    classify(
+      "codex-overrule",
+      edit(approved, (e) => e.kind === "item", {
+        status: "failed",
+        exitCode: 1,
+      }),
+    ).linkedItemCompleted.outcome,
+    "untested",
+  );
+  assert.equal(
+    classify(
+      "codex-overrule",
+      edit(approved, isCompleted, { status: "inProgress" }),
+    ).reviewPaired.outcome,
+    "refuted",
+  );
+  // No turn ended: nothing is decided from a partial trace.
+  assert.deepEqual(
+    Object.values(
+      classify(
+        "codex-overrule",
+        without(approved, (e) => e.kind === "turn"),
+      ) as Record<string, Event>,
+    ).map((o) => o.reason),
+    Array(6).fill("not observed"),
+  );
+
+  rmSync(logPath, { force: true });
+  const denied = await run("deny");
+  assert.equal(denied.failure, null);
+  const sent = overrulesSent();
+  assert.equal(sent.length, 1);
+  assert.equal(sent[0].params.event.id, "r1");
+  assert.equal(sent[0].params.event.turn_id, "turn-1");
+  const overruled = classify("codex-overrule", denied);
+  assert.equal(overruled.overruleAccepted.outcome, "proved");
+  assert.equal(
+    overruled.overruleAccepted.evidence.shape,
+    "GuardianAssessmentEvent",
+  );
+  assert.equal(overruled.overruleAccepted.evidence.denial.reviewId, "r1");
+  assert.deepEqual(overruled.overruleAccepted.evidence.response, {});
+  assert.equal(overruled.retryReviewedAgain.outcome, "proved");
+  assert.equal(overruled.retryReviewedAgain.evidence.retry.reviewId, "r2");
+  assert.equal(overruled.retryReviewedAgain.evidence.item.exitCode, 0);
+  // Linkage comes from the approved retry; the denial's item never ran.
+  assert.equal(overruled.reviewPaired.evidence.completed.reviewId, "r1");
+  assert.equal(overruled.targetItemLinked.outcome, "proved");
+  assert.equal(overruled.targetItemLinked.evidence.item.id, "item-r2");
+  assert.equal(overruled.linkedItemCompleted.outcome, "proved");
+
+  const overruleId = (denied.events as Event[]).find(
+    (e) => e.kind === "overrule",
+  )?.requestId;
+  const isRetry = (e: Event) => e.kind === "review" && e.reviewId === "r2";
+  const rejected = (e: Event) =>
+    e.kind === "response" ? { ...e, result: undefined, error: "rejected" } : e;
+  const firstEvents = (denied.events as Event[]).map(rejected);
+  const sentAt = firstEvents.findIndex((e) => e.kind === "response") + 1;
+  const bothRejected = {
+    ...denied,
+    events: [
+      ...firstEvents.slice(0, sentAt),
+      {
+        t: 0,
+        kind: "overrule",
+        requestId: 99,
+        reviewId: "r1",
+        turnId: "turn-1",
+        shape: "completedNotification",
+      },
+      { t: 0, kind: "response", id: 99, error: "rejected" },
+      ...firstEvents
+        .slice(sentAt)
+        .filter((e) => !isRetry(e) && e.kind !== "item"),
+    ],
+  };
+  const deniedCells = (trace: Event) => {
+    const o = classify("codex-overrule", trace);
+    return [o.overruleAccepted.outcome, o.retryReviewedAgain.outcome];
+  };
+  for (const [label, trace, expected] of [
+    [
+      "no overrule event",
+      without(denied, (e) => e.kind === "overrule"),
+      ["untested", "untested"],
+    ],
+    [
+      "no response",
+      without(denied, (e) => e.kind === "response"),
+      ["untested", "untested"],
+    ],
+    [
+      "response for another request id",
+      edit(denied, (e) => e.kind === "response", {
+        id: Number(overruleId) + 7,
+      }),
+      ["untested", "untested"],
+    ],
+    [
+      "first shape rejected, second never sent",
+      edit(denied, (e) => e.kind === "response", {
+        result: undefined,
+        error: "unknown review",
+      }),
+      ["untested", "untested"],
+    ],
+    [
+      "both shapes rejected while the turn ran",
+      bothRejected,
+      ["refuted", "untested"],
+    ],
+    [
+      "sent after turn/completed",
+      {
+        ...denied,
+        events: [
+          ...without(denied, (e) => e.kind === "overrule").events,
+          ...(denied.events as Event[]).filter((e) => e.kind === "overrule"),
+        ],
+      },
+      ["untested", "untested"],
+    ],
+    [
+      "no retry started review",
+      without(denied, (e) => isRetry(e) && e.phase === "started"),
+      ["proved", "untested"],
+    ],
+    ["no retry review at all", without(denied, isRetry), ["proved", "refuted"]],
+    [
+      "retry reuses the denial's reviewId",
+      edit(denied, isRetry, { reviewId: "r1" }),
+      ["proved", "untested"],
+    ],
+    [
+      "denial without its started review",
+      without(
+        denied,
+        (e) =>
+          e.kind === "review" && e.reviewId === "r1" && e.phase === "started",
+      ),
+      ["untested", "untested"],
+    ],
+  ] as [string, Event, string[]][])
+    assert.deepEqual(deniedCells(trace), expected, label);
+  // A retry that ran with no item and no fresh review: the model did not retry.
+  assert.deepEqual(
+    deniedCells(without(denied, (e) => isRetry(e) || e.kind === "item")),
+    ["proved", "untested"],
+  );
+
+  // The denial's own start missing: untested, not refuted by the retry's start.
+  assert.equal(
+    classify(
+      "codex-overrule",
+      without(
+        denied,
+        (e) =>
+          e.kind === "review" && e.reviewId === "r1" && e.phase === "started",
+      ),
+    ).reviewPaired.outcome,
+    "untested",
+  );
+  // An earlier denial of another command does not hide the probe command's overrule.
+  const ls = (e: Event) => ({
+    ...e,
+    reviewId: "r0",
+    targetItemId: "item-r0",
+    command: "/bin/zsh -lc 'ls'",
+  });
+  const r1Events = (denied.events as Event[]).filter(
+    (e) => e.kind === "review" && e.reviewId === "r1",
+  );
+  assert.equal(
+    classify("codex-overrule", {
+      ...denied,
+      events: [...r1Events.map(ls), ...(denied.events as Event[])],
+    }).overruleAccepted.outcome,
+    "proved",
+  );
+
+  // A denial of anything but the probe's own command is never overruled.
+  rmSync(logPath, { force: true });
+  const other = await run("deny-other");
+  assert.equal(other.failure, null);
+  assert.deepEqual(overrulesSent(), []);
+  assert.equal(
+    classify("codex-overrule", other).overruleAccepted.reason,
+    "denial not elicited: no denial stimulus used (controller decision D32)",
+  );
+});
+
+test("the committed codex-overrule probe evidence reclassifies with the current rules", async () => {
+  const { classify } = await load("outcomes.mjs");
+  const evidence = JSON.parse(
+    readFileSync(
+      resolve("docs/evidence/2026-11-12-auto-review-overrule-probe.json"),
+      "utf8",
+    ),
+  );
+  assert.deepEqual(
+    classify("codex-overrule", evidence.trace),
+    evidence.outcomes,
+  );
+});

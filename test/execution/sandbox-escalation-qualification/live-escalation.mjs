@@ -24,6 +24,7 @@ const deadlines = {
   "codex-user": 15,
   "codex-auto-review": 20,
   "codex-timing": 25,
+  "codex-overrule": 15,
   "claude-sandbox": 12,
   "claude-auto": 12,
   "claude-timing": 25,

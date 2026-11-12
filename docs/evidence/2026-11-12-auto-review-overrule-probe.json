@@ -1,0 +1,237 @@
+{
+  "group": "codex-overrule",
+  "candidate": "b763410a3d69c3b5908003537f79c82ffa530ca0",
+  "candidateClean": true,
+  "host": {
+    "platform": "darwin",
+    "release": "27.0.0",
+    "arch": "arm64",
+    "node": "v26.13.0"
+  },
+  "codex": {
+    "launcherSha256": "50ab38ba21d0d9f8346f32f41848382f15b556190f3c7a07e885a4fb73e379c8",
+    "version": "codex-cli 0.167.0-alpha.3.2"
+  },
+  "claude": null,
+  "confounds": {
+    "codexRulesFiles": 2
+  },
+  "deadlineMs": 900000,
+  "outcomes": {
+    "reviewPaired": {
+      "outcome": "proved",
+      "evidence": {
+        "started": {
+          "t": 16609,
+          "reviewId": "3fed604f-db44-4639-9311-59553afa5d41"
+        },
+        "completed": {
+          "t": 24081,
+          "reviewId": "3fed604f-db44-4639-9311-59553afa5d41",
+          "turnId": "01a1ceff-b90e-76b3-8ac5-eef62ea0484e",
+          "targetItemId": "exec-763965ce-eb5a-4e19-8c0d-eefd394660cf",
+          "status": "approved",
+          "riskLevel": "low",
+          "actionType": "command",
+          "rationale": "Auto-review returned a low-risk allow decision."
+        },
+        "actionTypes": ["command"]
+      }
+    },
+    "targetItemLinked": {
+      "outcome": "proved",
+      "evidence": {
+        "review": {
+          "reviewId": "3fed604f-db44-4639-9311-59553afa5d41",
+          "turnId": "01a1ceff-b90e-76b3-8ac5-eef62ea0484e",
+          "targetItemId": "exec-763965ce-eb5a-4e19-8c0d-eefd394660cf",
+          "status": "approved",
+          "riskLevel": "low",
+          "actionType": "command"
+        },
+        "item": {
+          "id": "exec-763965ce-eb5a-4e19-8c0d-eefd394660cf",
+          "status": "completed",
+          "exitCode": 0,
+          "durationMs": 1059
+        }
+      }
+    },
+    "linkedItemCompleted": {
+      "outcome": "proved",
+      "evidence": {
+        "review": {
+          "reviewId": "3fed604f-db44-4639-9311-59553afa5d41",
+          "turnId": "01a1ceff-b90e-76b3-8ac5-eef62ea0484e",
+          "targetItemId": "exec-763965ce-eb5a-4e19-8c0d-eefd394660cf",
+          "status": "approved",
+          "riskLevel": "low",
+          "actionType": "command"
+        },
+        "item": {
+          "id": "exec-763965ce-eb5a-4e19-8c0d-eefd394660cf",
+          "status": "completed",
+          "exitCode": 0,
+          "durationMs": 1059
+        }
+      }
+    },
+    "overruleAccepted": {
+      "outcome": "untested",
+      "reason": "denial not elicited: no denial stimulus used (controller decision D32)"
+    },
+    "retryReviewedAgain": {
+      "outcome": "untested",
+      "reason": "denial not elicited: no denial stimulus used (controller decision D32)"
+    },
+    "noUnrequestedTurn": {
+      "outcome": "proved",
+      "evidence": {
+        "turnStarted": ["01a1ceff-b90e-76b3-8ac5-eef62ea0484e"],
+        "clientTurns": ["01a1ceff-b90e-76b3-8ac5-eef62ea0484e"]
+      }
+    }
+  },
+  "cleanup": {
+    "fixtureRemoved": true,
+    "appServerStopped": true
+  },
+  "trace": {
+    "workspace": "<fixture>/ws",
+    "holdMs": 900000,
+    "reviewer": "auto_review",
+    "events": [
+      {
+        "t": 3155,
+        "turn": 1,
+        "kind": "turnStarted",
+        "turnId": "01a1ceff-b90e-76b3-8ac5-eef62ea0484e"
+      },
+      {
+        "t": 5326,
+        "turn": 1,
+        "kind": "item",
+        "type": "userMessage"
+      },
+      {
+        "t": 8961,
+        "turn": 1,
+        "kind": "item",
+        "type": "commandExecution",
+        "id": "exec-eaf09b4b-17e6-45ab-953d-ac0100984ba7",
+        "turnId": "01a1ceff-b90e-76b3-8ac5-eef62ea0484e",
+        "command": "/bin/zsh -lc 'cat ~/.agents/AGENTS.md'",
+        "status": "completed",
+        "exitCode": 0,
+        "durationMs": 0
+      },
+      {
+        "t": 15738,
+        "turn": 1,
+        "kind": "item",
+        "type": "reasoning"
+      },
+      {
+        "t": 15757,
+        "turn": 1,
+        "kind": "item",
+        "type": "agentMessage",
+        "text": "I’ll run the probe once with the requested escalation.\n"
+      },
+      {
+        "t": 16609,
+        "turn": 1,
+        "kind": "review",
+        "phase": "started",
+        "reviewId": "3fed604f-db44-4639-9311-59553afa5d41",
+        "turnId": "01a1ceff-b90e-76b3-8ac5-eef62ea0484e",
+        "targetItemId": "exec-763965ce-eb5a-4e19-8c0d-eefd394660cf",
+        "actionType": "command",
+        "status": "inProgress",
+        "riskLevel": null,
+        "rationale": null,
+        "command": "/bin/zsh -lc 'node chromium.mjs linked'",
+        "startedAtMs": 1794474241508,
+        "completedAtMs": null
+      },
+      {
+        "t": 24081,
+        "turn": 1,
+        "kind": "review",
+        "phase": "completed",
+        "reviewId": "3fed604f-db44-4639-9311-59553afa5d41",
+        "turnId": "01a1ceff-b90e-76b3-8ac5-eef62ea0484e",
+        "targetItemId": "exec-763965ce-eb5a-4e19-8c0d-eefd394660cf",
+        "actionType": "command",
+        "status": "approved",
+        "riskLevel": "low",
+        "rationale": "Auto-review returned a low-risk allow decision.",
+        "command": "/bin/zsh -lc 'node chromium.mjs linked'",
+        "startedAtMs": 1794474241508,
+        "completedAtMs": 1794474248977
+      },
+      {
+        "t": 25297,
+        "turn": 1,
+        "kind": "item",
+        "type": "commandExecution",
+        "id": "exec-763965ce-eb5a-4e19-8c0d-eefd394660cf",
+        "turnId": "01a1ceff-b90e-76b3-8ac5-eef62ea0484e",
+        "command": "/bin/zsh -lc 'node chromium.mjs linked'",
+        "status": "completed",
+        "exitCode": 0,
+        "durationMs": 1059
+      },
+      {
+        "t": 29937,
+        "turn": 1,
+        "kind": "item",
+        "type": "agentMessage",
+        "text": "Done.\n\nNo further checks run; no known risk."
+      },
+      {
+        "t": 29988,
+        "turn": 1,
+        "kind": "turn",
+        "turnId": "01a1ceff-b90e-76b3-8ac5-eef62ea0484e",
+        "status": "completed"
+      }
+    ],
+    "results": {
+      "linked": {
+        "chromium": "ok"
+      }
+    },
+    "deadline": false,
+    "failure": null,
+    "prerequisite": null,
+    "clientTurns": ["01a1ceff-b90e-76b3-8ac5-eef62ea0484e"],
+    "accountType": "chatgpt",
+    "thread": {
+      "model": "gpt-6.1-sol",
+      "approvalPolicy": "never",
+      "approvalsReviewer": "auto_review"
+    },
+    "turnStart": {
+      "cwd": "<fixture>/ws",
+      "approvalPolicy": {
+        "granular": {
+          "sandbox_approval": true,
+          "rules": false,
+          "mcp_elicitations": false,
+          "skill_approval": false,
+          "request_permissions": false
+        }
+      },
+      "approvalsReviewer": "auto_review",
+      "sandboxPolicy": {
+        "type": "workspaceWrite",
+        "writableRoots": ["<fixture>/ws"],
+        "networkAccess": false,
+        "excludeSlashTmp": true,
+        "excludeTmpdirEnvVar": true
+      }
+    }
+  },
+  "pass": true
+}

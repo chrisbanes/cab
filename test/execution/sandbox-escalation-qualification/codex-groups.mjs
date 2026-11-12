@@ -66,6 +66,14 @@ export const CODEX_GROUPS = {
     answer: () => "decline",
     hold: true,
   },
+  // One ordinary escalation under the reviewer; no denial stimulus (controller decision D32).
+  // A denial, if one ever arrives, is overruled mid-turn.
+  "codex-overrule": {
+    reviewer: "auto_review",
+    turns: [`${preamble} ${escalate(STIMULI.linked)}. Then reply done.`],
+    answer: () => "decline",
+    overrule: true,
+  },
 };
 export const CODEX_LABELS = [
   "control",
@@ -73,6 +81,7 @@ export const CODEX_LABELS = [
   "declined",
   "reviewed",
   "timing",
+  "linked",
 ];
 
 class Deadline extends Error {}
@@ -94,6 +103,11 @@ const assessmentEvent = (p) => ({
   decision_source: p.decisionSource ?? null,
   action: p.action,
 });
+/** The overrule event shapes, in the order they are tried. */
+const overruleShapes = (denial) => [
+  ["GuardianAssessmentEvent", assessmentEvent(denial)],
+  ["completedNotification", denial],
+];
 
 export async function runCodexGroup(
   group,
@@ -119,6 +133,7 @@ export async function runCodexGroup(
     deadline: false,
     failure: null,
     prerequisite: null,
+    clientTurns: [],
     cleanup: { appServerStopped: false },
   };
   const record = (event) => {
@@ -158,6 +173,10 @@ export async function runCodexGroup(
   const race = (promise) => Promise.race([promise, deadline, childGone]);
   const write = (message) => child.stdin.write(`${JSON.stringify(message)}\n`);
   const pending = new Map();
+  // Ids of overrule requests, whose JSON-RPC responses are recorded as events.
+  const overruleIds = new Set();
+  const overrules = [];
+  const overruled = new Set();
   let nextId = 0;
   const request = (method, params) =>
     race(
@@ -213,6 +232,15 @@ export async function runCodexGroup(
       return;
     }
     if (message.method === undefined) {
+      if (overruleIds.has(message.id))
+        record({
+          turn,
+          kind: "response",
+          id: message.id,
+          ...(message.error
+            ? { error: short(String(message.error.message ?? "rpc error")) }
+            : { result: message.result ?? null }),
+        });
       const waiter = pending.get(message.id);
       pending.delete(message.id);
       if (message.error)
@@ -236,13 +264,31 @@ export async function runCodexGroup(
         kind: "review",
         phase,
         reviewId: p.reviewId,
+        turnId: p.turnId,
+        targetItemId: p.targetItemId ?? null,
+        actionType: p.action?.type,
         status: p.review?.status,
         riskLevel: p.review?.riskLevel ?? null,
         rationale: short(p.review?.rationale ?? null),
         command: short(p.action?.command),
+        cwd: p.action?.cwd,
+        startedAtMs: p.startedAtMs ?? null,
+        completedAtMs: p.completedAtMs ?? null,
       });
-      if (phase === "completed" && p.review?.status === "denied")
+      if (phase === "completed" && p.review?.status === "denied") {
         trace.lastDenial = p;
+        // Only the probe's own command in the fixture, once per review: never an action
+        // the model chose itself.
+        if (
+          spec.overrule &&
+          !overruled.has(p.reviewId) &&
+          isCommand(p.action?.command, STIMULI.linked) &&
+          p.action?.cwd === workspace
+        ) {
+          overruled.add(p.reviewId);
+          overrules.push(overruleRunning(p).catch(() => {}));
+        }
+      }
     } else if (message.method === "item/completed") {
       const item = p.item ?? {};
       record({
@@ -250,7 +296,14 @@ export async function runCodexGroup(
         kind: "item",
         type: item.type,
         ...(item.type === "commandExecution"
-          ? { id: item.id, command: short(item.command), status: item.status }
+          ? {
+              id: item.id,
+              turnId: p.turnId,
+              command: short(item.command),
+              status: item.status,
+              exitCode: item.exitCode ?? null,
+              durationMs: item.durationMs ?? null,
+            }
           : {}),
         ...(item.type === "agentMessage"
           ? { text: short(item.text, 200) }
@@ -259,10 +312,17 @@ export async function runCodexGroup(
           ? { name: item.name, output: short(String(item.output ?? ""), 200) }
           : {}),
       });
-    } else if (message.method === "turn/completed") {
+    } else if (message.method === "turn/started")
+      record({ turn, kind: "turnStarted", turnId: p.turn?.id });
+    else if (message.method === "turn/completed") {
       // Turns run one at a time; completion can arrive before the turn/start response.
       completedTurns.set(p.turn?.id, p.turn?.status);
-      record({ turn, kind: "turn", status: p.turn?.status });
+      record({
+        turn,
+        kind: "turn",
+        turnId: p.turn?.id,
+        status: p.turn?.status,
+      });
       turnDone?.();
     }
   }
@@ -288,6 +348,8 @@ export async function runCodexGroup(
     }
     const response = await request("turn/start", params);
     turnId = response?.turn?.id;
+    // Turn ids a client turn/start returned; any other turn/started is unrequested.
+    trace.clientTurns.push(turnId);
     if (!completedTurns.has(turnId)) await race(done);
     // A failed or interrupted turn did not run its probe as asked: stop and fail the run.
     // In codex-timing the turn's status, during or after the hold, is the measured outcome;
@@ -299,10 +361,7 @@ export async function runCodexGroup(
 
   async function overrule() {
     const attempts = [];
-    for (const [shape, event] of [
-      ["GuardianAssessmentEvent", assessmentEvent(trace.lastDenial)],
-      ["completedNotification", trace.lastDenial],
-    ]) {
+    for (const [shape, event] of overruleShapes(trace.lastDenial)) {
       try {
         const response = await request("thread/approveGuardianDeniedAction", {
           threadId,
@@ -331,6 +390,34 @@ export async function runCodexGroup(
     return false;
   }
 
+  // Sent from the denial's completed notification while its turn runs: each shape once, in
+  // order, stopping at the first result. Never after turn/completed, never a turn/start.
+  async function overruleRunning(denial) {
+    for (const [shape, event] of overruleShapes(denial)) {
+      if (completedTurns.has(denial.turnId)) return;
+      const response = request("thread/approveGuardianDeniedAction", {
+        threadId,
+        event,
+      });
+      // The request executor ran synchronously, so nextId is this request's id.
+      overruleIds.add(nextId);
+      record({
+        turn,
+        kind: "overrule",
+        requestId: nextId,
+        reviewId: denial.reviewId,
+        turnId: denial.turnId,
+        shape,
+      });
+      try {
+        await response;
+        return;
+      } catch (error) {
+        if (error instanceof Deadline) throw error;
+      }
+    }
+  }
+
   try {
     await request("initialize", {
       clientInfo: { name: "cab-sandbox-escalation-probe", version: "0.1.0" },
@@ -357,6 +444,7 @@ export async function runCodexGroup(
       approvalsReviewer: thread?.approvalsReviewer ?? null,
     };
     await runTurn(spec.turns[0]);
+    await race(Promise.all(overrules));
     if (group === "codex-auto-review") {
       await runTurn(spec.turns[1]);
       if (trace.lastDenial && (await overrule())) await runTurn(spec.turns[2]);
