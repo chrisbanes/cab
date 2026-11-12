@@ -353,28 +353,38 @@ test("a stale review draft can be discarded and stays gone on the task page and 
   await discard.waitFor();
   // The task page shows the same draft: the store is shared.
   await navigate(`/tasks/${s.taskId}?request=${s.reviewId}`);
-  await s.page.waitForURL(/\/tasks\//);
-  await panel.getByText(draft, { exact: true }).waitFor();
-  await discard.click();
-  const done = panel.getByText("Draft discarded.");
+  const taskPanel = s.page
+    .locator(".task-workspace")
+    .getByRole("region", { name: "Result review" });
+  await taskPanel.getByText(draft, { exact: true }).waitFor();
+  await taskPanel.getByRole("button", { name: "Discard draft" }).click();
+  const done = taskPanel.getByText("Draft discarded.");
   await done.waitFor();
   assert.ok(
-    await done.evaluate((el) => Boolean(document.activeElement?.contains(el))),
+    await done.evaluate(
+      (el) =>
+        el.closest('[data-slot="action-outcome"]') === document.activeElement,
+    ),
     "the outcome takes focus",
   );
-  assert.equal(await panel.getByText(draft, { exact: true }).count(), 0);
+  assert.equal(await taskPanel.getByText(draft, { exact: true }).count(), 0);
   for (const path of [
     `${inboxPath}${s.taskId}&request=${s.reviewId}`,
     "/inbox",
     `${inboxPath}${s.taskId}&request=${s.reviewId}`,
   ])
     await navigate(path);
-  await panel.getByText("Superseded by a newer result").waitFor();
+  const inboxPanel = s.page
+    .locator(".inbox-detail")
+    .getByRole("region", { name: "Result review" });
+  await inboxPanel.getByText("Superseded by a newer result").waitFor();
   assert.equal(
-    await panel.getByRole("heading", { name: "Your unsent draft" }).count(),
+    await inboxPanel
+      .getByRole("heading", { name: "Your unsent draft" })
+      .count(),
     0,
   );
-  assert.equal(await panel.getByText(draft, { exact: true }).count(), 0);
+  assert.equal(await inboxPanel.getByText(draft, { exact: true }).count(), 0);
   assert.equal(responses(s.posts).length, 0);
 });
 
