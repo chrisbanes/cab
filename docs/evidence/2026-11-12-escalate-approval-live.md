@@ -31,6 +31,12 @@ Every check passed:
 - **Approve:** the policy sent, the control failed in the sandbox, the escalated command ran outside it, the evidence was recorded, and there was no anomaly.
 - **Decline:** the thread resumed with an accepted policy, the declined command wrote nothing, the evidence was recorded, the turn completed, and there was no anomaly.
 
+The JSON's `verdict` block is the run's own classification. After the run, the classifier was made stricter: each proof must now cite Codex's own events for its command. For approve, the escalated command's approval request, and the completion of that request's item (`completed`, exit code 0, matching the recorded exit code). For decline, the declined command's request, and its item's completion with status `declined`. An escalation record and an absent result file alone no longer prove anything.
+
+The stored trace was reclassified under these rules without a new run, and the outcomes are unchanged: approve proved, decline proved, and the interrupt observation as above. `sandbox-escalation-qualification-harness.test.ts` re-checks the committed JSON against the current rules. The trace holds:
+- the approval request for `node chromium.mjs escalated` (item `exec-dcc85f2c…`), completed with exit code 0 in 516 ms;
+- the request for `node chromium.mjs declined` (item `exec-76058669…`), completed `declined`.
+
 "No anomaly" means no unexpected-request report in that step, unmatched resolutions included. After the Stop, the work read as held (`held: true`), as a Stop leaves it. No unexpected-request report was made in this step; in particular the late resolution was not reported as an unmatched native-input resolution.
 
 ## Observations and limits

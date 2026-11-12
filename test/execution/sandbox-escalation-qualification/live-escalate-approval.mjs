@@ -32,6 +32,7 @@ import {
   approveCell,
   declineCell,
   interruptCell,
+  labelOf,
 } from "./escalate-approval-outcomes.mjs";
 
 const args = process.argv.slice(2);
@@ -195,9 +196,6 @@ function makeService(dataDir) {
     },
   );
 }
-
-const labelOf = (command) =>
-  /chromium\.mjs ([a-z-]+)/.exec(command ?? "")?.[1] ?? null;
 
 /**
  * Answers this cell's escalations as the operator would through the API, until the cell's turn
