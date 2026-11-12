@@ -18,7 +18,7 @@ import {
 import type { OperatorClient } from "./api.js";
 import { ActionLink, Button, StatusBadge } from "./components.js";
 import { outsideWorkspace } from "../../src/operator/tool-limits.js";
-import { clockLabel, outcomeLine, shortId } from "./presentation.js";
+import { briefSummary, clockLabel, shortId } from "./presentation.js";
 import { assignmentDistinction } from "./assignment-labels.js";
 import { CopyButton } from "./action-feedback.js";
 import { WorkingStatus } from "./working-status.js";
@@ -971,7 +971,7 @@ function Delegation({
     item.id !== ctx.data.leadAssignmentId &&
     (ctx.data.commentRecipients?.find((r) => r.assignmentId === item.id)
       ?.mode ?? "unavailable") !== "unavailable";
-  const brief = outcomeLine(a?.brief ?? null);
+  const brief = briefSummary(a?.brief);
   const briefKey = `c:brief:${item.id}`;
   const briefOpen = ctx.expanded(briefKey);
   const name = a?.name ?? item.entry?.name ?? "Assignment";
@@ -1033,8 +1033,7 @@ function Delegation({
           {summary.join(" · ")}
         </p>
       )}
-      {/* A brief whose first line is a heading or quote has no summary line, so it opens here too. */}
-      {a?.brief?.trim() && (brief.more || !brief.line) && (
+      {brief.full && a?.brief && (
         <div className="conv-delegation-brief">
           <Button
             variant="secondary"

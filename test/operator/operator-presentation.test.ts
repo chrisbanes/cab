@@ -28,6 +28,7 @@ import {
   fileSizeLabel,
   midSentence,
   outcomeLine,
+  briefSummary,
   repositoryLabel,
   shortId,
   sortFileEntries,
@@ -199,6 +200,26 @@ test("the outcome line shows plain text without inline Markdown markers", () => 
     "Rename snake_case_name and 2 * 3 * 4.",
   );
   assert.equal(plain("**Open** the menu. Then close it."), "Open the menu.");
+});
+
+test("a delegation brief offers its full text whenever the summary line drops something", () => {
+  // A discarded heading still carries instructions.
+  assert.deepEqual(
+    briefSummary("# Restrict changes to tests\nFix keyboard support."),
+    { line: "Fix keyboard support.", full: true },
+  );
+  // The line shows a link's text, not its destination.
+  assert.deepEqual(
+    briefSummary("Follow [the guide](https://example.com/guide) exactly."),
+    { line: "Follow the guide exactly.", full: true },
+  );
+  // A plain one-sentence brief is shown whole by its line.
+  assert.deepEqual(briefSummary("Fix keyboard support."), {
+    line: "Fix keyboard support.",
+    full: false,
+  });
+  assert.deepEqual(briefSummary("# Heading only"), { line: "", full: true });
+  assert.deepEqual(briefSummary(undefined), { line: "", full: false });
 });
 
 test("the outcome line skips context and metadata and uses the first meaningful sentence", () => {
