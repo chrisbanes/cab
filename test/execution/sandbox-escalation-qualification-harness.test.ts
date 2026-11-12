@@ -1314,6 +1314,20 @@ test("claude-auto-hook-allow cells prove only from their own same-run events", a
   assert.equal(open.hookAllowRunsOutside.outcome, "untested");
 });
 
+test("the committed claude-auto-hook-allow probe evidence reclassifies with the current rules", async () => {
+  const { classify } = await load("outcomes.mjs");
+  const evidence = JSON.parse(
+    readFileSync(
+      resolve("docs/evidence/2026-11-12-claude-auto-hook-allow-probe.json"),
+      "utf8",
+    ),
+  );
+  assert.deepEqual(
+    classify("claude-auto-hook-allow", evidence.trace),
+    evidence.outcomes,
+  );
+});
+
 test("the escalate-approval live run refuses anything but --live --one-attempt and creates nothing", () => {
   const roots = () =>
     existsSync(join(homedir(), ".cache"))
