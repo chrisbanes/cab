@@ -15,6 +15,7 @@ import { join, resolve } from "node:path";
 import { tmpdir } from "node:os";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { createServer } from "node:net";
+import { monitorEventLoopDelay } from "node:perf_hooks";
 import { chromium } from "playwright";
 import {
   StandaloneService,
@@ -242,7 +243,14 @@ export async function runQualification(options = {}) {
     callbackEnded: false,
     cleanup: { operations: {}, stages: [], lateResources: [], verified: false },
     screenshots: [],
+    deadlineMs: deadline - start,
+    timeline: [],
   };
+  // Observational only: marks add no awaits to the timed path.
+  const mark = (event, extra) =>
+    evidence.timeline.push({ event, ms: Date.now() - start, ...extra });
+  const loopDelay = monitorEventLoopDelay({ resolution: 10 });
+  loopDelay.enable();
   let service,
     runtime,
     fixtureChild,
@@ -265,6 +273,7 @@ export async function runQualification(options = {}) {
       label,
       lateCleanup
         ? async (value) => {
+            mark("late-owner-entered", { label });
             const createdAt = new Date().toISOString();
             const createdMs = Date.now() - start;
             await cleanupStarted;
@@ -654,11 +663,14 @@ export async function runQualification(options = {}) {
     );
     browser = await step(
       async () => {
+        mark("browser-launch-start");
         const value = await chromium.launch();
+        mark("browser-launch-end");
         if (fixture?.delayBrowserCreation)
           await new Promise((r) =>
             setTimeout(r, Math.max(1, deadline - Date.now()) + 80),
           );
+        mark("browser-created");
         return value;
       },
       "browser-start",
@@ -705,6 +717,7 @@ export async function runQualification(options = {}) {
     });
     evidence.status = "passed";
   } catch (error) {
+    mark("failure-observed");
     evidence.failure = {
       reason: String(error.message).slice(0, 1024),
       callbackPending,
@@ -718,6 +731,8 @@ export async function runQualification(options = {}) {
   } finally {
     evidence.process ??= runtime?.processIdentity();
     cleanupDeadline = Math.min(start + totalMs, Date.now() + cleanupMs);
+    evidence.cleanupDeadlineMs = cleanupDeadline - start;
+    mark("cleanup-start", { cleanupDeadlineMs: evidence.cleanupDeadlineMs });
     beginCleanup();
     async function clean(name, action) {
       const stage = {
@@ -834,6 +849,8 @@ export async function runQualification(options = {}) {
       cleanupDeadline,
     );
     if (!evidence.cleanup.verified) evidence.status = "failed";
+    loopDelay.disable();
+    evidence.eventLoopDelayMaxMs = loopDelay.max / 1e6;
     save();
     if (!fixture) {
       ledger.live = {
