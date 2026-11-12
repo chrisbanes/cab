@@ -6,8 +6,11 @@ import {
   localListeningLimit,
 } from "../operator/local-listening-copy.js";
 import {
+  claudeEscalateApprovalLine,
   claudeUnsandboxedLine,
+  codexEscalateApprovalLine,
   codexUnsandboxedLine,
+  escalateApprovalRiskLines,
   unsandboxedRiskLines,
 } from "../operator/sandbox-level-copy.js";
 
@@ -41,6 +44,8 @@ export function codexPolicyDisclosure(): PolicyDisclosure {
       localListeningLimit,
       codexUnsandboxedLine,
       ...unsandboxedRiskLines,
+      codexEscalateApprovalLine,
+      ...escalateApprovalRiskLines,
       taskGitDisclosure,
       nativeSetupDisclosure,
     ],
@@ -93,6 +98,7 @@ export function claudePolicyDisclosure(
       localListeningLimit,
       claudeUnsandboxedLine,
       ...unsandboxedRiskLines,
+      claudeEscalateApprovalLine,
       nativeSetupDisclosure,
       "File-editing tools are confined to the same roots by cab's hook, not by the operating system.",
       taskGitDisclosure,

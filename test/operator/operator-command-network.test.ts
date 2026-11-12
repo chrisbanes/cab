@@ -1,4 +1,5 @@
 import {
+  escalateApprovalLines,
   unsandboxedGrantLines,
   unsandboxedSupersededLine,
 } from "../../src/operator/sandbox-level-copy.js";
@@ -357,10 +358,30 @@ test("the sandbox level is strict by default, operator-only and versioned throug
   for (const line of [...unsandboxedGrantLines, unsandboxedSupersededLine])
     assert.ok(notes.includes(line), line);
 
+  // Choosing escalate-approval states its Codex grant, that Claude Code stays strict, and its risks.
+  const escalate = prepare("escalate-approval");
+  r = await escalate.run();
+  assert.equal(r.code, 0, r.err + r.out);
+  const escalateDoc = JSON.parse(readFileSync(escalate.out, "utf8")) as Json;
+  assert.deepEqual(escalateDoc.preview.changes, [
+    { field: "sandbox", from: "strict", to: "escalate-approval" },
+  ]);
+  const escalateNotes = JSON.stringify(escalateDoc.preview.notes);
+  for (const line of escalateApprovalLines)
+    assert.ok(escalateNotes.includes(line), line);
+  assert.equal(escalateNotes.includes(unsandboxedSupersededLine), false);
+  r = await cli("rw", ["project", "apply", "--file", escalate.out]);
+  assert.equal(r.code, 0, r.err + r.out);
+  assert.equal(d.sandboxLevel(s.projectId), "escalate-approval");
+  assert.equal((await config(read.token)).sandbox, "escalate-approval");
+
   const bad = prepare("bogus");
   r = await bad.run();
   assert.equal(r.code, 2, r.err + r.out);
-  assert.match(r.err + r.out, /--sandbox must be strict or unsandboxed/);
+  assert.match(
+    r.err + r.out,
+    /--sandbox must be strict, escalate-approval or unsandboxed/,
+  );
 });
 
 test("no coordination tool can read or change a project's sandbox level", () => {

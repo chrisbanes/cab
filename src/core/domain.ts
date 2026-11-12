@@ -94,7 +94,7 @@ import {
   migrateSourceStorage,
   sameItem,
 } from "./source-storage.js";
-import { type Database, transaction } from "./store.js";
+import { type Database, transaction, widenCheck } from "./store.js";
 import {
   dependencyRecordsTable,
   gitLabStackLimit,
@@ -961,7 +961,7 @@ export class DomainStore {
         );
         CREATE TABLE IF NOT EXISTS project_sandbox_level (
           projectId TEXT PRIMARY KEY REFERENCES domain_projects(id),
-          level TEXT NOT NULL CHECK(level IN ('strict', 'unsandboxed'))
+          level TEXT NOT NULL CHECK(level IN ('strict', 'escalate-approval', 'unsandboxed'))
         );
         CREATE TABLE IF NOT EXISTS scheduler_project_capacity_limits (
           projectId TEXT PRIMARY KEY REFERENCES domain_projects(id),
@@ -989,6 +989,13 @@ export class DomainStore {
           SELECT projectId, CASE enabled WHEN 1 THEN 'unsandboxed' ELSE 'strict' END
           FROM project_dangerously_skip_sandbox;
           DROP TABLE project_dangerously_skip_sandbox;`);
+      // Level 33: the level gains escalate-approval.
+      widenCheck(
+        this.db,
+        "project_sandbox_level",
+        "CHECK(level IN ('strict', 'unsandboxed'))",
+        "CHECK(level IN ('strict', 'escalate-approval', 'unsandboxed'))",
+      );
       const version = this.db
         .prepare("SELECT version FROM domain_schema")
         .get() as Row | undefined;

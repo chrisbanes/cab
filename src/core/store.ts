@@ -30,6 +30,31 @@ export function transaction<T>(db: Database, action: () => T): T {
   }
 }
 
+/**
+ * SQLite cannot alter a CHECK, so rebuild `table` with `from` replaced by `to`, keeping its rows
+ * and otherwise its stored SQL verbatim, so an upgraded schema matches a fresh one. Only for a
+ * table with no indexes of its own that no other table references. Runs inside the caller's
+ * transaction; a table already widened is left alone, and an unrecognised one is refused.
+ */
+export function widenCheck(
+  db: Database,
+  table: string,
+  from: string,
+  to: string,
+): void {
+  const stored = db
+    .prepare("SELECT sql FROM sqlite_master WHERE type='table' AND name=?")
+    .get(table) as { sql: string } | undefined;
+  if (!stored || stored.sql.includes(to)) return;
+  if (!stored.sql.includes(from))
+    throw new Error(`Unrecognized ${table} schema; migration refused`);
+  db.exec(`CREATE TEMP TABLE "${table}_rebuild" AS SELECT * FROM "${table}";
+    DROP TABLE "${table}";
+    ${stored.sql.replace(from, to)};
+    INSERT INTO "${table}" SELECT * FROM temp."${table}_rebuild";
+    DROP TABLE temp."${table}_rebuild";`);
+}
+
 const schemaVersion = 6;
 const hostInstallationSchema = z.object({
   hostKind: z.string(),

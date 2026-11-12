@@ -43,7 +43,7 @@ import {
   type ExecutionHarness,
   executionHarnessSchema,
 } from "./execution-harness.js";
-import { transaction, type Database } from "../core/store.js";
+import { transaction, type Database, widenCheck } from "../core/store.js";
 import type { SandboxLevel } from "../core/sandbox-level.js";
 import type { ReconciledAssignmentProof } from "../core/coordination.js";
 import type {
@@ -682,11 +682,11 @@ export class ExecutionState {
     );
     CREATE TABLE IF NOT EXISTS project_sandbox_level (
       projectId TEXT PRIMARY KEY,
-      level TEXT NOT NULL CHECK(level IN ('strict', 'unsandboxed'))
+      level TEXT NOT NULL CHECK(level IN ('strict', 'escalate-approval', 'unsandboxed'))
     );
     CREATE TABLE IF NOT EXISTS execution_intent_sandbox_level (
       intentId TEXT PRIMARY KEY REFERENCES execution_intents(id),
-      level TEXT NOT NULL CHECK(level IN ('strict', 'unsandboxed'))
+      level TEXT NOT NULL CHECK(level IN ('strict', 'escalate-approval', 'unsandboxed'))
     );
     CREATE TABLE IF NOT EXISTS execution_retry_chains (
       chainId TEXT PRIMARY KEY REFERENCES execution_intents(workId),
@@ -852,6 +852,19 @@ export class ExecutionState {
           FROM execution_intent_dangerously_skip_sandbox;
           DROP TABLE execution_intent_dangerously_skip_sandbox;`),
       );
+    // Level 33: the level gains escalate-approval.
+    transaction(this.db, () => {
+      for (const table of [
+        "project_sandbox_level",
+        "execution_intent_sandbox_level",
+      ])
+        widenCheck(
+          this.db,
+          table,
+          "CHECK(level IN ('strict', 'unsandboxed'))",
+          "CHECK(level IN ('strict', 'escalate-approval', 'unsandboxed'))",
+        );
+    });
     const recoveryIdentityColumns = this.db
       .prepare("PRAGMA table_info(execution_recovery_identities)")
       .all() as Array<{ name: string }>;
@@ -2117,31 +2130,34 @@ export class ExecutionState {
   }
 
   /**
-   * Whether admitting this intent now would record `unsandboxed`: the project level is
-   * unsandboxed, the work has a task binding and it is not a draft turn. Admission uses the same
-   * condition.
+   * The level admitting this intent now would record: only a task turn that is not a draft turn
+   * takes its project's level, and `escalate-approval` applies only to a Codex task turn (a Claude
+   * turn runs `strict` until its harness supports it). Admission uses the same condition.
    */
-  unsandboxedApplies(intentId: string, projectId: string): boolean {
+  applicableSandboxLevel(intentId: string, projectId: string): SandboxLevel {
     const work = this.db
       .prepare("SELECT workId FROM execution_intents WHERE id = ?")
       .get(intentId) as { workId: string } | undefined;
-    if (!work) return false;
-    return (
-      (
-        this.db
-          .prepare(`SELECT EXISTS (
-            SELECT 1 FROM project_sandbox_level p
-            JOIN task_execution_bindings b ON b.workId = ?
-            WHERE p.projectId = ? AND p.level = 'unsandboxed'
-            ${this.hasTurnRequests ? "AND NOT EXISTS (SELECT 1 FROM turn_requests r WHERE r.workId = ? AND r.draftTurn = 1)" : ""}
-          ) AS applies`)
-          .get(
-            work.workId,
-            projectId,
-            ...(this.hasTurnRequests ? [work.workId] : []),
-          ) as { applies: number }
-      ).applies === 1
-    );
+    if (!work) return "strict";
+    const row = this.db
+      .prepare(`SELECT p.level, b.harness FROM project_sandbox_level p
+        JOIN task_execution_bindings b ON b.workId = ?
+        WHERE p.projectId = ?
+        ${this.hasTurnRequests ? "AND NOT EXISTS (SELECT 1 FROM turn_requests r WHERE r.workId = ? AND r.draftTurn = 1)" : ""}`)
+      .get(
+        work.workId,
+        projectId,
+        ...(this.hasTurnRequests ? [work.workId] : []),
+      ) as { level: SandboxLevel; harness: string } | undefined;
+    if (row?.level === "unsandboxed") return "unsandboxed";
+    return row?.level === "escalate-approval" && row.harness === "codex"
+      ? "escalate-approval"
+      : "strict";
+  }
+
+  /** Whether admitting this intent now would record `unsandboxed`; see `applicableSandboxLevel`. */
+  unsandboxedApplies(intentId: string, projectId: string): boolean {
+    return this.applicableSandboxLevel(intentId, projectId) === "unsandboxed";
   }
 
   /** The harness a work item runs on: its task binding, else its drafting run, else the default. */
@@ -6245,18 +6261,17 @@ export class ExecutionState {
             options.projectId,
             ...(this.hasTurnRequests ? [workId] : []),
           );
-        // A task turn of either harness takes the project's level; draft turns and drafting
-        // runs stay strict.
+        // A task turn takes the project's level (escalate-approval only on Codex); draft turns
+        // and drafting runs stay strict.
         this.db
           .prepare(
             "INSERT OR REPLACE INTO execution_intent_sandbox_level (intentId, level) VALUES (?, ?)",
           )
           .run(
             id,
-            options.projectId !== null &&
-              this.unsandboxedApplies(id, options.projectId)
-              ? "unsandboxed"
-              : "strict",
+            options.projectId === null
+              ? "strict"
+              : this.applicableSandboxLevel(id, options.projectId),
           );
         const retryGeneration = this.db
           .prepare(`SELECT chainId FROM execution_retry_generations

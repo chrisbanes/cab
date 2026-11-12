@@ -31,9 +31,12 @@ const allowed: Record<string, { reason: string; lines?: string[] }> = {
     ],
   },
   [join("src", "operator", "sandbox-level-copy.ts")]: {
-    reason: "the Codex grant line of the unsandboxed sandbox level",
+    reason:
+      "the Codex grant lines of the unsandboxed and escalate-approval sandbox levels",
     lines: [
       '"A project at the unsandboxed level runs its Codex task turns with sandbox policy dangerFullAccess; the approval policy stays never. Draft, read-only and unbound turns stay strict.";',
+      '"A project at the escalate-approval level keeps its Codex task turns sandboxed, with an approval policy that allows only sandbox escalation: a turn can ask to run one command outside the sandbox. Draft, read-only and unbound turns stay strict.";',
+      `? "The sandbox level is escalate-approval for this project's Codex task turns; its Claude Code task turns stay strict."`,
     ],
   },
   [join("src", "core", "execution-runtime.ts")]: {

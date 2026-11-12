@@ -1334,6 +1334,29 @@ export const projectDeletionInventory = {
     ownership:
       "workId in W OR captured threadId/turnId owned by H (nullable workId)",
   },
+  sandbox_escalations: {
+    columns: [
+      "interactionId",
+      "taskId",
+      "workId",
+      "runtimeGeneration",
+      "requestId",
+      "threadId",
+      "turnId",
+      "itemId",
+      "requestedAt",
+      "decider",
+      "decision",
+      "decidedAt",
+      "delivered",
+      "exitCode",
+      "durationMs",
+      "durationSource",
+      "completedAt",
+    ],
+    ownership: "taskId in T",
+  },
+
   runtime_thread_qualification: {
     columns: [
       "threadId",

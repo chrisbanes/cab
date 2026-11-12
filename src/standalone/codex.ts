@@ -69,9 +69,29 @@ const configuration = z.object({
     })
     .passthrough(),
 });
+/**
+ * The approval policy an escalate-approval turn sends (ADR-1034): only sandbox escalations reach
+ * the client, and every other approval kind stays refused by policy.
+ */
+export const sandboxEscalationApprovalPolicy = {
+  granular: {
+    sandbox_approval: true,
+    rules: false,
+    mcp_elicitations: false,
+    skill_approval: false,
+    request_permissions: false,
+  },
+} as const;
 const thread = z.object({
   thread: z.object({ id: z.string() }),
-  approvalPolicy: z.literal("never"),
+  // A turn's approval policy persists on the thread like its sandbox, so a resume after an
+  // escalate-approval turn may report that exact policy; nothing else is accepted.
+  approvalPolicy: z.union([
+    z.literal("never"),
+    z.custom<typeof sandboxEscalationApprovalPolicy>((value) =>
+      isDeepStrictEqual(value, sandboxEscalationApprovalPolicy),
+    ),
+  ]),
   // A turn's sandbox policy persists on the thread, so a resume reports the last turn's policy.
   sandbox: z.object({
     type: z.enum(["workspaceWrite", "dangerFullAccess", "readOnly"]),
@@ -375,6 +395,37 @@ const threadTurnIdentitySchema = z.object({
   threadId: z.string().min(1),
   turnId: z.string().min(1),
 });
+/**
+ * What cab reads from a command approval request; amendments are ignored. A request that also
+ * asks for network access or extra permissions is another approval kind and is not taken.
+ */
+const commandApprovalSchema = z.object({
+  threadId: z.string().min(1),
+  turnId: z.string().min(1),
+  itemId: z.string().min(1),
+  command: z.string().min(1),
+  cwd: z.string().min(1),
+  reason: z.string().nullable().optional(),
+  networkApprovalContext: z.null().optional(),
+  additionalPermissions: z.null().optional(),
+});
+/** The completed command item an escalation ran as; its output is never read. */
+const escalatedItemSchema = z.object({
+  threadId: z.string().min(1),
+  turnId: z.string().min(1),
+  item: z.object({
+    id: z.string().min(1),
+    type: z.literal("commandExecution"),
+    exitCode: z.number().int().nullable().optional().catch(null),
+    durationMs: z
+      .number()
+      .int()
+      .nonnegative()
+      .nullable()
+      .optional()
+      .catch(null),
+  }),
+});
 const serverRequestResolvedSchema = z.object({
   threadId: z.string(),
   requestId: z.union([z.string(), z.number()]),
@@ -671,7 +722,33 @@ export interface RuntimeTurnPolicy {
    * harness.
    */
   skipSandbox?: boolean;
+  /**
+   * Set when the turn was admitted at the escalate-approval level, which only a Codex task turn
+   * can be: the turn keeps its sandbox and may ask to run one command outside it.
+   */
+  sandboxEscalation?: "approval";
 }
+
+/**
+ * A command an escalate-approval turn asked to run outside the sandbox (ADR-1034), then how it
+ * ended: its command item completed, or the request went unanswered until its turn or runtime
+ * generation ended.
+ */
+export type SandboxEscalationEvent =
+  | {
+      kind: "requested";
+      identity: NativeInputEndpointIdentity;
+      command: string;
+      cwd: string;
+      reason: string | null;
+    }
+  | {
+      kind: "completed";
+      identity: NativeInputEndpointIdentity;
+      exitCode: number | null;
+      durationMs: number | null;
+    }
+  | { kind: "ended"; identity: NativeInputEndpointIdentity; reason: string };
 
 /** Per-turn read-only policy of a draft turn; proven on a workspace-write thread. */
 export const readOnlyPolicy = () => ({
@@ -702,6 +779,15 @@ export interface Runtime {
   ): Promise<void>;
   cancelUserInput?(identity: NativeInputEndpointIdentity, reason: string): void;
   currentUserInputGeneration?(): string | undefined;
+  /** A `requested` listener returns true once it owns the request; otherwise it is denied. */
+  onSandboxEscalation?(
+    listener: (event: SandboxEscalationEvent) => boolean,
+  ): void;
+  /** Answers a held escalation once; false when it was not written. */
+  replySandboxEscalation?(
+    identity: NativeInputEndpointIdentity,
+    decision: "accept" | "decline",
+  ): Promise<boolean>;
   start(): Promise<void>;
   stop(): Promise<void>;
   startThread(
@@ -880,6 +966,162 @@ export class CodexRuntime implements Runtime {
   >();
   private nativeRequest?: (request: RuntimeUserInputRequest) => void;
   private nativeOutcome?: (outcome: RuntimeUserInputOutcome) => void;
+  private sandboxEscalation?: (event: SandboxEscalationEvent) => boolean;
+  /** Threads whose current turn sent the escalation policy; null until `turn/start` answers. */
+  private readonly escalationTurns = new Map<string, string | null>();
+  /**
+   * Escalation requests by endpoint, until Codex resolves them or their command item completes.
+   * One that ended unanswered stays as a tombstone, so its late resolution is no anomaly; the
+   * thread's next turn or a lost runtime clears it.
+   */
+  private readonly escalations = new Map<
+    string,
+    {
+      identity: NativeInputEndpointIdentity;
+      child: ChildProcessWithoutNullStreams;
+      answered?: "accept" | "decline";
+      ended?: true;
+    }
+  >();
+  onSandboxEscalation(
+    listener: (event: SandboxEscalationEvent) => boolean,
+  ): void {
+    this.sandboxEscalation = listener;
+  }
+  async replySandboxEscalation(
+    identity: NativeInputEndpointIdentity,
+    decision: "accept" | "decline",
+  ): Promise<boolean> {
+    const entry = this.escalations.get(nativeEndpointKey(identity));
+    if (!entry || entry.answered || entry.ended || entry.child !== this.child)
+      return false;
+    entry.answered = decision;
+    try {
+      await this.send(
+        `${JSON.stringify({ id: identity.requestId, result: { decision } })}\n`,
+      );
+      return true;
+    } catch {
+      return false;
+    }
+  }
+  private emitEscalation(event: SandboxEscalationEvent): boolean {
+    try {
+      return this.sandboxEscalation?.(event) === true;
+    } catch {
+      return false;
+    }
+  }
+  /** Ends matching unanswered escalations once each; none can be answered after. */
+  private endEscalations(
+    reason: string,
+    threadId?: string,
+    turnId?: string,
+  ): void {
+    for (const entry of this.escalations.values()) {
+      if (
+        entry.answered ||
+        entry.ended ||
+        (threadId !== undefined && entry.identity.threadId !== threadId) ||
+        (turnId !== undefined && entry.identity.turnId !== turnId)
+      )
+        continue;
+      entry.ended = true;
+      this.emitEscalation({ kind: "ended", identity: entry.identity, reason });
+    }
+  }
+  /** Takes a command approval of an escalate-approval turn; false leaves it to the denial path. */
+  private receiveSandboxEscalation(
+    child: ChildProcessWithoutNullStreams,
+    requestId: string | number,
+    params: unknown,
+  ): boolean {
+    const request = commandApprovalSchema.safeParse(params);
+    if (!request.success || !this.sandboxEscalation) return false;
+    const turn = this.escalationTurns.get(request.data.threadId);
+    if (turn === undefined || (turn !== null && turn !== request.data.turnId))
+      return false;
+    const identity = nativeInputEndpointIdentitySchema.safeParse({
+      requestId,
+      runtimeGeneration: this.nativeGeneration,
+      threadId: request.data.threadId,
+      turnId: request.data.turnId,
+      itemId: request.data.itemId,
+    });
+    if (!identity.success) return false;
+    const key = nativeEndpointKey(identity.data);
+    // A retransmission of a held request stays owned and is never answered a second time.
+    if (this.escalations.has(key)) return true;
+    this.escalations.set(key, { identity: identity.data, child });
+    if (
+      this.emitEscalation({
+        kind: "requested",
+        identity: identity.data,
+        command: request.data.command,
+        cwd: request.data.cwd,
+        reason: request.data.reason ?? null,
+      })
+    )
+      return true;
+    this.escalations.delete(key);
+    return false;
+  }
+  /**
+   * Codex's `serverRequest/resolved` for an escalation request. After cab's answer it confirms
+   * the reply, and the entry waits for its command item; before an answer, Codex resolved the
+   * request itself, so it ends and can no longer be answered. False when it names no escalation.
+   */
+  private resolveEscalation(
+    threadId: string,
+    requestId: string | number,
+  ): boolean {
+    for (const [key, entry] of this.escalations)
+      if (
+        entry.child === this.child &&
+        entry.identity.threadId === threadId &&
+        entry.identity.requestId === requestId
+      ) {
+        if (entry.answered) return true;
+        this.escalations.delete(key);
+        if (!entry.ended)
+          this.emitEscalation({
+            kind: "ended",
+            identity: entry.identity,
+            reason: "Resolved by the runtime before an answer",
+          });
+        return true;
+      }
+    return false;
+  }
+  /** Reports the completed command item of an escalation, never its output. */
+  private completeEscalation(params: unknown): void {
+    const completed = escalatedItemSchema.safeParse(params);
+    if (!completed.success) return;
+    for (const [key, entry] of this.escalations)
+      if (
+        entry.identity.threadId === completed.data.threadId &&
+        entry.identity.turnId === completed.data.turnId &&
+        entry.identity.itemId === completed.data.item.id
+      ) {
+        this.escalations.delete(key);
+        if (entry.ended) continue;
+        // Codex settled an unanswered request itself, so nobody can answer it any more.
+        this.emitEscalation(
+          entry.answered
+            ? {
+                kind: "completed",
+                identity: entry.identity,
+                exitCode: completed.data.item.exitCode ?? null,
+                durationMs: completed.data.item.durationMs ?? null,
+              }
+            : {
+                kind: "ended",
+                identity: entry.identity,
+                reason: "Item completed unanswered",
+              },
+        );
+      }
+  }
   onUserInputRequest(
     listener: (request: RuntimeUserInputRequest) => void,
   ): void {
@@ -1472,6 +1714,8 @@ export class CodexRuntime implements Runtime {
     if (method === "serverRequest/resolved") {
       const parsed = serverRequestResolvedSchema.safeParse(params);
       if (!parsed.success) return;
+      if (this.resolveEscalation(parsed.data.threadId, parsed.data.requestId))
+        return;
       const waiting = this.nativeReadbacks.get(parsed.data.threadId);
       const endpoint = this.nativeGeneration
         ? this.nativeEndpointByRpcId({
@@ -2256,30 +2500,48 @@ export class CodexRuntime implements Runtime {
     else {
       this.nativeReadbacks.delete(threadId);
     }
+    const escalate =
+      policy?.sandboxEscalation === "approval" &&
+      policy.access !== "read-only" &&
+      policy.skipSandbox !== true;
+    // Escalations of the thread's earlier turns, tombstones included, are over.
+    for (const [key, entry] of this.escalations)
+      if (entry.identity.threadId === threadId) this.escalations.delete(key);
+    if (escalate) this.escalationTurns.set(threadId, null);
+    else this.escalationTurns.delete(threadId);
+    const started = this.request("turn/start", {
+      threadId,
+      cwd: workspace,
+      input: [{ type: "text", text: prompt }],
+      approvalPolicy: escalate ? sandboxEscalationApprovalPolicy : "never",
+      ...(escalate ? { approvalsReviewer: "user" } : {}),
+      sandboxPolicy:
+        policy?.access === "read-only"
+          ? readOnlyPolicy()
+          : policy?.skipSandbox
+            ? { type: "dangerFullAccess" as const }
+            : executionPolicy(
+                workspace,
+                policy?.networkAccess === true,
+                policy?.gitWritableRoots,
+              ),
+      // Re-asserted every turn so follow-up and resumed turns keep the captured revision.
+      ...(settings?.model ? { model: settings.model } : {}),
+      ...(settings?.reasoningEffort
+        ? { effort: settings.reasoningEffort }
+        : {}),
+    });
     const response = turn.parse(
-      await this.request("turn/start", {
-        threadId,
-        cwd: workspace,
-        input: [{ type: "text", text: prompt }],
-        approvalPolicy: "never",
-        sandboxPolicy:
-          policy?.access === "read-only"
-            ? readOnlyPolicy()
-            : policy?.skipSandbox
-              ? { type: "dangerFullAccess" as const }
-              : executionPolicy(
-                  workspace,
-                  policy?.networkAccess === true,
-                  policy?.gitWritableRoots,
-                ),
-        // Re-asserted every turn so follow-up and resumed turns keep the captured revision.
-        ...(settings?.model ? { model: settings.model } : {}),
-        ...(settings?.reasoningEffort
-          ? { effort: settings.reasoningEffort }
-          : {}),
+      await started.catch((error: unknown) => {
+        // A turn that never started cannot escalate.
+        if (this.escalationTurns.get(threadId) === null)
+          this.escalationTurns.delete(threadId);
+        throw error;
       }),
     );
     this.nativeTurns.set(threadId, response.turn.id);
+    if (escalate && this.escalationTurns.get(threadId) === null)
+      this.escalationTurns.set(threadId, response.turn.id);
     if (this.persistedTerminal(threadId, response.turn.id) !== null)
       this.retireNativeTurn(
         threadId,
@@ -2292,6 +2554,7 @@ export class CodexRuntime implements Runtime {
 
   async interruptTurn(threadId: string, turnId: string): Promise<void> {
     this.cancelNativeTurn(threadId, turnId, "Turn interrupted");
+    this.endEscalations("Turn interrupted", threadId, turnId);
     emptyResponseSchema.parse(
       await this.request("turn/interrupt", { threadId, turnId }),
     );
@@ -2447,6 +2710,11 @@ export class CodexRuntime implements Runtime {
         this.receiveToolCall(child, message.id, message.params);
         return;
       }
+      if (
+        method === "item/commandExecution/requestApproval" &&
+        this.receiveSandboxEscalation(child, message.id, message.params)
+      )
+        return;
       this.denyUnexpected(
         child,
         unexpectedRequest(method, message.params),
@@ -2494,6 +2762,8 @@ export class CodexRuntime implements Runtime {
     }
     if (message.method)
       this.receiveNativeNotification(message.method, message.params);
+    if (message.method === "item/completed" && this.escalations.size > 0)
+      this.completeEscalation(message.params);
     if (message.method === "turn/completed") {
       const terminal = completedTurn.safeParse(message.params);
       if (!terminal.success) {
@@ -2562,6 +2832,16 @@ export class CodexRuntime implements Runtime {
           terminal.data.turn.id,
           "Turn ended before native receipt",
         );
+        this.endEscalations(
+          "Turn ended",
+          terminal.data.threadId,
+          terminal.data.turn.id,
+        );
+        if (
+          this.escalationTurns.get(terminal.data.threadId) ===
+          terminal.data.turn.id
+        )
+          this.escalationTurns.delete(terminal.data.threadId);
         this.finishConversationTurn(
           terminal.data.threadId,
           terminal.data.turn.id,
@@ -3023,6 +3303,9 @@ export class CodexRuntime implements Runtime {
     if (this.failure) return;
     for (const endpoint of [...this.nativeEndpoints.values()])
       this.cancelUserInput(endpoint.call.identity, "Runtime lost");
+    this.endEscalations("Runtime lost");
+    this.escalations.clear();
+    this.escalationTurns.clear();
     this.nativeGeneration = undefined;
     this.threadSnapshots.clear();
     this.nativeTurns.clear();

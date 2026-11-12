@@ -8,7 +8,9 @@ import {
 } from "../operator/local-listening-copy.js";
 import {
   claudeUnsandboxedLine,
+  codexEscalateApprovalLine,
   codexUnsandboxedLine,
+  escalateApprovalRiskLines,
   turnSandboxLevelLine,
   unsandboxedRisk,
   unsandboxedSupersededLine,
@@ -210,7 +212,9 @@ const assignmentGet: BrowseCommand = {
                     unsandboxedSupersededLine,
                     unsandboxedRisk,
                   ]
-                : []),
+                : g?.sandbox === "escalate-approval"
+                  ? [codexEscalateApprovalLine, ...escalateApprovalRiskLines]
+                  : []),
             ]
           : []),
         ...(a.brief ? ["", oneLine(a.brief, 400)] : []),

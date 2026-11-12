@@ -23,6 +23,7 @@ import {
   projectLocalListeningLine,
 } from "../../src/operator/local-listening-copy.js";
 import {
+  escalateApprovalLines,
   projectSandboxLevelLine,
   sandboxLevelAppliesNote,
   sandboxLevelLabels,
@@ -533,7 +534,8 @@ function GeneralTab(p: TabProps) {
   const form = useRef<HTMLFormElement>(null);
   const unsandboxed = data.sandbox === "unsandboxed";
   const becomesUnsandboxed =
-    data.sandbox === "strict" && v.sandbox === "unsandboxed";
+    (data.sandbox === "strict" || data.sandbox === "escalate-approval") &&
+    v.sandbox === "unsandboxed";
   return (
     <div className="settings-split">
       <div className="settings-column">
@@ -623,7 +625,7 @@ function GeneralTab(p: TabProps) {
                 <p className="metadata muted">
                   {projectSandboxLevelLine(data.sandbox)}{" "}
                   {sandboxLevelAppliesNote} {unsandboxedGrantLines.join(" ")}{" "}
-                  {unsandboxedRisk}
+                  {unsandboxedRisk} {escalateApprovalLines.join(" ")}
                 </p>
               </>
             )}

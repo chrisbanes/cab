@@ -14,6 +14,7 @@ import {
 } from "../operator/contracts.js";
 import { commandNetworkDisclosure } from "../operator/command-network-copy.js";
 import {
+  escalateApprovalLines,
   sandboxLevelLabels,
   unsandboxedGrantLines,
   unsandboxedRisk,
@@ -296,7 +297,9 @@ const projectGet: BrowseCommand = {
               unsandboxedSupersededLine,
               unsandboxedRisk,
             ]
-          : []),
+          : d.sandbox === "escalate-approval"
+            ? escalateApprovalLines
+            : []),
         "",
         d.profiles.length
           ? table(
