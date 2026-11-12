@@ -438,6 +438,38 @@ test("v2 changed source pin and expired grants stop effects", async () => {
   );
 });
 
+test("a closed authority reports the first latched fault as its cause", async () => {
+  const f = await fixture(),
+    g = f.guard();
+  await g.open();
+  await writeFile(f.file, "changed");
+  const first = await g
+    .reserve("service.refresh", { projectId: "offline" }, "refresh")
+    .then(
+      () => assert.fail("changed pin admitted"),
+      (error: unknown) => error as Error,
+    );
+  assert.match(first.message, /v2-source-pin/);
+  const closedByFirst = (error: Error) =>
+    error.message === "v2-authority-closed" && error.cause === first;
+  assert.throws(() => g.current(), closedByFirst);
+  await assert.rejects(
+    g.reserve("service.refresh", { projectId: "offline" }, "refresh"),
+    /v2-authority-closed/,
+  );
+  assert.throws(() => g.current(), closedByFirst);
+  await g.close();
+  const h = await fixture(),
+    closed = h.guard();
+  await closed.open();
+  await closed.close();
+  assert.throws(
+    () => closed.current(),
+    (error: Error) =>
+      error.message === "v2-authority-closed" && error.cause === undefined,
+  );
+});
+
 test("v2 refuses direct Git before credential or child effects when material differs", async () => {
   const f = await fixture(),
     g = f.guard();

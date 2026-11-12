@@ -328,8 +328,16 @@ export async function verifyPreparedStackResources(
     fileURLToPath(new URL("../../../../", import.meta.url)),
   );
   const toolchain = host.toolchain;
+  const ownedSource =
+    executionMode === "offline-only"
+      ? // Offline runs pin a run-owned source identity, never the loaded checkout's refs.
+        host.sourceRoot.startsWith(host.runRoot + sep) &&
+        (await realpath(host.sourceRoot).catch(() => null)) ===
+          host.sourceRoot &&
+        (await lstat(host.sourceRoot)).isDirectory()
+      : host.sourceRoot === loadedRoot;
   if (
-    host.sourceRoot !== loadedRoot ||
+    !ownedSource ||
     (await realpath(process.execPath)) !== toolchain.nodeExecutable.path ||
     process.versions.node !== toolchain.nodeVersion ||
     toolchain.nvmrc.path !== join(loadedRoot, ".nvmrc") ||

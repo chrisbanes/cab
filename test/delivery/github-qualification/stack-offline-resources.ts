@@ -506,8 +506,23 @@ export async function offlineStackResources(
     };
   resource.unstackCommandSha256 = materialHash(command);
   const observed = capturePreparedStackDatabase(database);
-  const sourceRoot = await realpath(
+  const loadedRoot = await realpath(
     fileURLToPath(new URL("../../../../", import.meta.url)),
+  );
+  // The run owns its source identity: a detached HEAD at the loaded commit that borrows
+  // objects, so ref storage other worktrees rewrite is outside every offline pin.
+  const sourceRoot = join(f.root, "source-identity");
+  git(f.root, "init", "-q", sourceRoot);
+  await writeFile(
+    join(sourceRoot, ".git/objects/info/alternates"),
+    `${join(git(loadedRoot, "rev-parse", "--path-format=absolute", "--git-common-dir"), "objects")}\n`,
+  );
+  git(
+    sourceRoot,
+    "update-ref",
+    "--no-deref",
+    "HEAD",
+    git(loadedRoot, "rev-parse", "HEAD"),
   );
   const pin = async (path: string) => ({
     path,
@@ -564,7 +579,7 @@ process.exit(r.status ?? 1);
     );
   const source = await Promise.all(
     (
-      await readdir(join(sourceRoot, "src"), {
+      await readdir(join(loadedRoot, "src"), {
         recursive: true,
         withFileTypes: true,
       })
@@ -573,10 +588,10 @@ process.exit(r.status ?? 1);
       .map((file) =>
         pin(
           join(
-            sourceRoot,
+            loadedRoot,
             "dist",
             "src",
-            file.parentPath.slice(join(sourceRoot, "src").length),
+            file.parentPath.slice(join(loadedRoot, "src").length),
             file.name.replace(/\.ts$/, ".js"),
           ),
         ),
@@ -594,7 +609,7 @@ process.exit(r.status ?? 1);
     source.push(
       await pin(
         join(
-          sourceRoot,
+          loadedRoot,
           "dist/test/delivery/github-qualification",
           `${name}.js`,
         ),
@@ -602,7 +617,7 @@ process.exit(r.status ?? 1);
     );
   source.push(
     await pin(
-      join(sourceRoot, "test/delivery/github-qualification/live-stack.mjs"),
+      join(loadedRoot, "test/delivery/github-qualification/live-stack.mjs"),
     ),
     await pin(sourceHeadFile),
     ...(sourceRefFile === sourceHeadFile ? [] : [await pin(sourceRefFile)]),
@@ -779,9 +794,9 @@ process.exit(r.status ?? 1);
       toolchain: {
         nodeExecutable: await pin(await realpath(process.execPath)),
         nodeVersion: process.versions.node,
-        nvmrc: await pin(join(sourceRoot, ".nvmrc")),
-        packageJson: await pin(join(sourceRoot, "package.json")),
-        lockfile: await pin(join(sourceRoot, "package-lock.json")),
+        nvmrc: await pin(join(loadedRoot, ".nvmrc")),
+        packageJson: await pin(join(loadedRoot, "package.json")),
+        lockfile: await pin(join(loadedRoot, "package-lock.json")),
         packageManager: "npm@12.2.2",
       },
       dataDirectory: data,
