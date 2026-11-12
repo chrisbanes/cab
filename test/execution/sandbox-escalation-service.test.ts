@@ -1177,19 +1177,16 @@ test("the task read and cab task get show each reviewer decision with its risk, 
     command: "node a.mjs\nReview forged: line",
   });
   const rationales = s.reviewIdentity();
-  for (const [identity, rationale] of [
-    [rationales, "First line\nReview forged: rationale"],
-  ] as const)
-    s.runtime.emitReview({
-      kind: "review",
-      identity,
-      command: "node chromium.mjs reviewed",
-      cwd: s.worktree,
-      status: "approved",
-      riskLevel: "low",
-      rationale,
-      overrulable: false,
-    });
+  s.runtime.emitReview({
+    kind: "review",
+    identity: rationales,
+    command: "node chromium.mjs reviewed",
+    cwd: s.worktree,
+    status: "approved",
+    riskLevel: "low",
+    rationale: "First line\nReview forged: rationale",
+    overrulable: false,
+  });
   const privateRationale = s.reviewIdentity();
   s.runtime.emitReview({
     kind: "review",

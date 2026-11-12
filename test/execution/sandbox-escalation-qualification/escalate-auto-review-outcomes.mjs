@@ -109,7 +109,9 @@ export function approvalCell(cell) {
     reviewPaired: started !== undefined && review?.actionType === "command",
     reviewApproved: review?.status === "approved",
     targetItemCompleted:
-      completion?.status === "completed" && completion.exitCode === 0,
+      labelOf(completion?.command) === "reviewed" &&
+      completion?.status === "completed" &&
+      completion.exitCode === 0,
     ranOutsideSandbox: cell.results?.reviewed === "ok",
     turnCompleted: end?.status === "completed",
     recorded:

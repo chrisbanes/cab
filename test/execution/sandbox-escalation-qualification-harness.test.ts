@@ -1606,6 +1606,12 @@ test("the escalate-auto-review approval cell proves only from its own turn's eve
     ],
     ["failed turn", { turnEnds: [{ turnId: "turn-1", status: "failed" }] }],
     [
+      "target item ran another command",
+      {
+        completions: [{ ...cell.completions[0], command: "/bin/zsh -lc 'ls'" }],
+      },
+    ],
+    [
       "item exited non-zero",
       { completions: [{ ...cell.completions[0], exitCode: 1 }] },
     ],

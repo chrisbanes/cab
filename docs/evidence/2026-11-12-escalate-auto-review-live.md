@@ -2,7 +2,7 @@
 
 Recorded 2026-11-12 for [#1681](https://github.com/chrisbanes/cab/issues/1681), slice T5 of its approved plan. The run is at candidate `339ba2d39da10f0ace75c9df78325f7abe2bf8ba` (on `main` at `0419e5cb`), built into `dist` from that clean tree. No credential, token or account data is recorded. The sanitised output is in [2026-11-12-escalate-auto-review-live.json](2026-11-12-escalate-auto-review-live.json). The harness replaced the fixture root with `<fixture>`, the per-user temporary directory with `<tmpdir>` and the home directory with `~`.
 
-After the run, review tightened the harness and classifier. The harness reserves its one turn before the start is awaited. The classifier leaves the cell untested without cab's own turn id or without the captured policy, anomaly record and result files, and refutes it on a second, conflicting completion, turn end or record. Reclassifying the stored trace with the final classifier gives the same verdict, and the offline harness test checks this.
+After the run, review tightened the harness and classifier. The harness reserves its one turn before the start is awaited. The classifier leaves the cell untested without cab's own turn id or without the captured policy, anomaly record or either result file, refutes it on a second completion, turn end or record, and requires the target item to have run the reviewed command. Reclassifying the stored trace with the final classifier gives the same verdict, and the offline harness test checks this.
 
 ## Run
 
