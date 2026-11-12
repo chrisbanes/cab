@@ -979,7 +979,7 @@ or known survivors persist a hold and retract successors across restart.
 
 Already-admitted execution and tools may survive coordinator or App Server failure
 and continue effects. A crash by itself releases neither writer ownership nor capacity: a crashed
-turn keeps them until [held-turn release](#execution-and-recovery). No
+task turn keeps them until [held-turn release](#execution-and-recovery). No
 queued turn, follow-up, delegation or replacement may gain admission while cab
 is unavailable. Retain unresolved holds rather than relaunching work. Historical
 conversation resume does not prove reattachment to a live execution. A
@@ -1082,8 +1082,8 @@ exclusion or the policy of an unobserved action. See the
 Crash, Stop, failure/interruption, missing or conflicting terminal identity/status,
 unfinished cab callbacks and known survivors retain holds until independently
 resolved. The exceptions are a task turn that a planned restart interrupted and
-recorded as ended (see above) and a held turn that
-[held-turn release](#execution-and-recovery) ends on its runtime-reported end, the
+recorded as ended (see above) and a held turn whose holds
+[held-turn release](#execution-and-recovery) frees on its runtime-reported end, the
 verified exit of its exact process or its 30-minute quiet period, once no independent
 hold remains. Otherwise a timer, expired lease, quiet interval, empty terminal list,
 acknowledged Stop or operator acknowledgement cannot release them. Conversation replacement and archival
