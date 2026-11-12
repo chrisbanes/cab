@@ -66,6 +66,8 @@ import {
 } from "../core/status-mapping-contracts.js";
 import { statusMappingRefusalSentence } from "../operator/status-mapping-copy.js";
 import { approvalHeadlines } from "../operator/delivery-action-copy.js";
+import { sandboxEscalationHeadline } from "../operator/sandbox-level-copy.js";
+import { sandboxEscalationAction } from "../core/sandbox-level.js";
 import {
   type DomainCommand,
   DomainCommands,
@@ -3791,6 +3793,8 @@ export class OperatorApi {
     if (q.kind === "approval") {
       const approval = this.interaction(q, excluded);
       if (!approval.approvable) return null;
+      if (approval.action === sandboxEscalationAction)
+        return sandboxEscalationHeadline;
       return approval.action !== null &&
         Object.hasOwn(approvalHeadlines, approval.action)
         ? approvalHeadlines[approval.action as keyof typeof approvalHeadlines]
@@ -10817,6 +10821,9 @@ export class OperatorApi {
                     typeof view.reconcileResultRecipient
                   >[0],
                 );
+      // A replayed decision finds the reply already claimed and sends nothing.
+      if (c.type === "approval.decide" && c.action === sandboxEscalationAction)
+        await this.service.settleSandboxEscalation(c.interactionId);
       return commandReceiptSchema.parse({
         kind: "coordination",
         key: c.key,

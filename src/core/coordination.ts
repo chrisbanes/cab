@@ -50,7 +50,8 @@ import {
   materialDigest,
   type RuntimeDeliveryCaller,
 } from "./delivery.js";
-import { transaction, type Database } from "./store.js";
+import { transaction, type Database, widenCheck } from "./store.js";
+import { sandboxEscalationAction } from "./sandbox-level.js";
 import {
   DelegateWithdrawalRefusedError,
   DelegatesUnfinishedError,
@@ -306,6 +307,50 @@ const withdrawnRecipientRefusal =
 const deliverable = (alias: string) =>
   `NOT EXISTS (SELECT 1 FROM coordination_undeliverable_inbox_events undeliverable
     WHERE undeliverable.eventId = ${alias}.eventId)`;
+const sandboxEscalationPrompt = "Run a command outside the sandbox";
+export type SandboxEscalationRecord = {
+  interactionId: string;
+  taskId: string;
+  workId: string;
+  identity: NativeInputEndpointIdentity;
+  requestedAt: number;
+  decider: "operator" | "expiry" | "obsolete" | null;
+  decision: "accept" | "decline" | null;
+  decidedAt: number | null;
+  /** Null until a reply is claimed; 0 when it was claimed but not written. */
+  delivered: boolean | null;
+  exitCode: number | null;
+  durationMs: number | null;
+  durationSource: "runtime" | "service" | null;
+  completedAt: number | null;
+};
+const sandboxEscalationRecord = (row: Row): SandboxEscalationRecord => ({
+  interactionId: String(row.interactionId),
+  taskId: String(row.taskId),
+  workId: String(row.workId),
+  identity: nativeInputEndpointIdentitySchema.parse({
+    requestId: JSON.parse(String(row.requestId)),
+    runtimeGeneration: row.runtimeGeneration,
+    threadId: row.threadId,
+    turnId: row.turnId,
+    itemId: row.itemId,
+  }),
+  requestedAt: Number(row.requestedAt),
+  decider: z
+    .enum(["operator", "expiry", "obsolete"])
+    .nullable()
+    .parse(row.decider),
+  decision: z.enum(["accept", "decline"]).nullable().parse(row.decision),
+  decidedAt: row.decidedAt === null ? null : Number(row.decidedAt),
+  delivered: row.delivered === null ? null : row.delivered === 1,
+  exitCode: row.exitCode === null ? null : Number(row.exitCode),
+  durationMs: row.durationMs === null ? null : Number(row.durationMs),
+  durationSource: z
+    .enum(["runtime", "service"])
+    .nullable()
+    .parse(row.durationSource),
+  completedAt: row.completedAt === null ? null : Number(row.completedAt),
+});
 const operatorCommandKey = z.string().uuid();
 const answerSchema = z
   .object({
@@ -1129,7 +1174,23 @@ export class CoordinationStore {
       CREATE TABLE IF NOT EXISTS coordination_undeliverable_inbox_events (
         eventId TEXT PRIMARY KEY REFERENCES coordination_inbox_events(eventId),
         assignmentId TEXT NOT NULL REFERENCES domain_assignments(id),
-        reason TEXT NOT NULL CHECK(reason IN ('delegate-withdrawn'))
+        reason TEXT NOT NULL CHECK(reason IN ('delegate-withdrawn','sandbox-escalation'))
+      );
+      CREATE TABLE IF NOT EXISTS sandbox_escalations (
+        interactionId TEXT PRIMARY KEY REFERENCES coordination_interactions(interactionId),
+        taskId TEXT NOT NULL REFERENCES domain_tasks(id),
+        workId TEXT NOT NULL REFERENCES execution_intents(workId),
+        runtimeGeneration TEXT NOT NULL, requestId TEXT NOT NULL,
+        threadId TEXT NOT NULL, turnId TEXT NOT NULL, itemId TEXT NOT NULL,
+        requestedAt INTEGER NOT NULL,
+        decider TEXT CHECK(decider IN ('operator','expiry','obsolete')),
+        decision TEXT CHECK(decision IN ('accept','decline')),
+        decidedAt INTEGER,
+        delivered INTEGER CHECK(delivered IN (0,1)),
+        exitCode INTEGER, durationMs INTEGER,
+        durationSource TEXT CHECK(durationSource IN ('runtime','service')),
+        completedAt INTEGER,
+        UNIQUE(runtimeGeneration, threadId, turnId, itemId)
       );
       CREATE TABLE IF NOT EXISTS coordination_result_reviews (
         reviewId TEXT PRIMARY KEY,
@@ -1150,6 +1211,13 @@ export class CoordinationStore {
         updatedAt INTEGER NOT NULL DEFAULT (unixepoch())
       );
       CREATE INDEX IF NOT EXISTS coordination_result_reviews_task ON coordination_result_reviews(taskId,status);`);
+      // Level 33: an escalation's decision event is history, never delivered to the agent.
+      widenCheck(
+        this.db,
+        "coordination_undeliverable_inbox_events",
+        "CHECK(reason IN ('delegate-withdrawn'))",
+        "CHECK(reason IN ('delegate-withdrawn','sandbox-escalation'))",
+      );
       this.db.exec(taskCommentSchemaSql);
       const interactionColumns = this.db
         .prepare("PRAGMA table_info(coordination_interactions)")
@@ -2349,13 +2417,234 @@ export class CoordinationStore {
     return this.requestInteraction(call, "approval", {
       refusal: actionKinds.some((kind) => kind === call.arguments.action)
         ? null
-        : approvalActionRefusal(call.arguments.action),
+        : call.arguments.action === sandboxEscalationAction
+          ? "sandbox.escalate is reserved for the runtime's own sandbox escalation requests; it cannot be requested with this tool."
+          : approvalActionRefusal(call.arguments.action),
       prompt: `Approval requested for ${call.arguments.action}`,
       action: call.arguments.action,
       target: call.arguments.target ?? null,
       materialHash: materialDigest(call.arguments.material),
       materialJson,
     });
+  }
+
+  /**
+   * Records a command an escalate-approval Codex turn asked to run outside the sandbox
+   * (ADR-1034) as an ordinary Inbox approval of the exact bound turn. The command, cwd, reason and
+   * workspace identity are its material; no output is ever recorded.
+   */
+  recordSandboxEscalation(input: {
+    identity: NativeInputEndpointIdentity;
+    command: string;
+    cwd: string;
+    reason: string | null;
+    workspace: {
+      head: string | null;
+      branch: string | null;
+      dirty: boolean | null;
+    };
+  }): string {
+    const identity = nativeInputEndpointIdentitySchema.parse(input.identity);
+    let material: Record<string, unknown> = {
+      command: input.command,
+      cwd: input.cwd.slice(0, 1024),
+      reason: input.reason?.slice(0, 1024) ?? null,
+      workspace: input.workspace,
+    };
+    // A long command is cut to fit the 8 KiB approval limit, and the cut is shown.
+    while (
+      new TextEncoder().encode(canonicalMaterial(material)).byteLength > 8192
+    )
+      material = {
+        ...material,
+        command: String(material.command).slice(
+          0,
+          Math.floor(String(material.command).length * 0.9),
+        ),
+        commandTruncated: true,
+      };
+    return transaction(this.db, () => {
+      const binding = this.currentBinding(identity.threadId, identity.turnId);
+      if (!binding || Number(binding.draftTurn) === 1)
+        throw new Error("Sandbox escalation is not bound to current work");
+      const interactionId = this.openInteraction(binding, "approval", {
+        prompt: sandboxEscalationPrompt,
+        action: sandboxEscalationAction,
+        target: null,
+        materialHash: materialDigest(material),
+        materialJson: canonicalMaterial(material),
+      });
+      this.db
+        .prepare(
+          `INSERT INTO sandbox_escalations
+          (interactionId, taskId, workId, runtimeGeneration, requestId, threadId, turnId,
+            itemId, requestedAt)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        )
+        .run(
+          interactionId,
+          String(binding.taskId),
+          String(binding.workId),
+          identity.runtimeGeneration,
+          JSON.stringify(identity.requestId),
+          identity.threadId,
+          identity.turnId,
+          identity.itemId,
+          Date.now(),
+        );
+      return interactionId;
+    });
+  }
+
+  sandboxEscalation(
+    interactionId: string,
+  ): SandboxEscalationRecord | undefined {
+    const row = this.one(
+      "SELECT * FROM sandbox_escalations WHERE interactionId = ?",
+      interactionId,
+    );
+    return row ? sandboxEscalationRecord(row) : undefined;
+  }
+
+  /**
+   * Declines an escalation left unanswered for 15 minutes, or withdraws one whose turn or runtime
+   * generation ended (`obsolete`, no decision). A decision already recorded, by the operator or an
+   * earlier call, wins: the record is returned unchanged.
+   */
+  resolveSandboxEscalation(
+    interactionId: string,
+    outcome: "expired" | "obsolete",
+  ): SandboxEscalationRecord {
+    return transaction(this.db, () => {
+      const current = this.sandboxEscalation(interactionId);
+      if (!current) throw new Error("Unknown sandbox escalation");
+      if (current.decider !== null) return current;
+      const interaction = this.required(
+        "SELECT status, taskId FROM coordination_interactions WHERE interactionId = ?",
+        interactionId,
+      );
+      // Only an operator decision moves the interaction off open; its settlement is recorded with it.
+      if (interaction.status !== "open") return current;
+      assertOwnedTaskWritable(this.db, String(interaction.taskId));
+      if (outcome === "expired")
+        this.db
+          .prepare(
+            `UPDATE coordination_interactions
+            SET status = 'denied', response = 'denied', revision = revision + 1,
+              updatedAt = unixepoch()
+            WHERE interactionId = ? AND status = 'open'`,
+          )
+          .run(interactionId);
+      this.inboxLifecycle().resolve(
+        interactionId,
+        outcome === "expired"
+          ? "Expired: declined after 15 minutes without an answer"
+          : "Obsolete: the turn ended before the escalation was answered",
+        outcome === "obsolete",
+      );
+      this.resolveAttention(interactionId);
+      this.decideEscalation(
+        interactionId,
+        outcome === "expired" ? "expiry" : "obsolete",
+        outcome === "expired" ? "decline" : null,
+      );
+      return this.sandboxEscalation(interactionId)!;
+    });
+  }
+
+  /** Claims the one reply of a decided escalation; false when it was claimed already. */
+  claimSandboxEscalationReply(interactionId: string): boolean {
+    return (
+      Number(
+        (
+          this.db
+            .prepare(
+              "UPDATE sandbox_escalations SET delivered = 0 WHERE interactionId = ? AND decision IS NOT NULL AND delivered IS NULL",
+            )
+            .run(interactionId) as { changes: number | bigint }
+        ).changes,
+      ) === 1
+    );
+  }
+
+  recordSandboxEscalationDelivered(interactionId: string): void {
+    this.db
+      .prepare(
+        "UPDATE sandbox_escalations SET delivered = 1 WHERE interactionId = ? AND delivered = 0",
+      )
+      .run(interactionId);
+  }
+
+  /**
+   * The escalated command item completed: its exit code, and its duration, from the runtime when
+   * it reports one, else measured from the decision. A declined command records no exit code.
+   */
+  completeSandboxEscalation(
+    identity: NativeInputEndpointIdentity,
+    exitCode: number | null,
+    durationMs: number | null,
+  ): void {
+    const endpoint = nativeInputEndpointIdentitySchema.parse(identity);
+    const row = this.one(
+      `SELECT interactionId, decision, decidedAt FROM sandbox_escalations
+        WHERE runtimeGeneration = ? AND threadId = ? AND turnId = ? AND itemId = ?
+          AND completedAt IS NULL`,
+      endpoint.runtimeGeneration,
+      endpoint.threadId,
+      endpoint.turnId,
+      endpoint.itemId,
+    );
+    if (!row) return;
+    const now = Date.now();
+    const accepted = row.decision === "accept";
+    const measured =
+      accepted && durationMs === null && row.decidedAt !== null
+        ? Math.max(0, now - Number(row.decidedAt))
+        : null;
+    this.db
+      .prepare(
+        `UPDATE sandbox_escalations
+        SET exitCode = ?, durationMs = ?, durationSource = ?, completedAt = ?
+        WHERE interactionId = ?`,
+      )
+      .run(
+        accepted ? exitCode : null,
+        accepted ? (durationMs ?? measured) : null,
+        !accepted ? null : durationMs !== null ? "runtime" : "service",
+        now,
+        String(row.interactionId),
+      );
+  }
+
+  /**
+   * After a restart no runtime generation from before is live: every undecided escalation is
+   * obsolete, and a decision whose reply was never claimed is recorded as not delivered.
+   */
+  invalidateSandboxEscalations(): void {
+    for (const row of this.db
+      .prepare(
+        `SELECT e.interactionId FROM sandbox_escalations e
+          JOIN domain_tasks t ON t.id = e.taskId JOIN domain_projects p ON p.id = t.projectId
+          WHERE e.decider IS NULL AND p.archived = 0`,
+      )
+      .all() as Row[])
+      this.resolveSandboxEscalation(String(row.interactionId), "obsolete");
+    this.db.exec(
+      "UPDATE sandbox_escalations SET delivered = 0 WHERE decision IS NOT NULL AND delivered IS NULL",
+    );
+  }
+
+  private decideEscalation(
+    interactionId: string,
+    decider: "operator" | "expiry" | "obsolete",
+    decision: "accept" | "decline" | null,
+  ): void {
+    this.db
+      .prepare(
+        `UPDATE sandbox_escalations SET decider = ?, decision = ?, decidedAt = ?
+        WHERE interactionId = ? AND decider IS NULL`,
+      )
+      .run(decider, decision, Date.now(), interactionId);
   }
 
   private parseRuntimeQuestion(row: Row): RuntimeQuestionRecord {
@@ -3203,6 +3492,22 @@ export class CoordinationStore {
           command.expectedRevision,
         );
       this.resolveAttention(command.interactionId);
+      // The command's own result tells the agent; the decision event stays history so it
+      // never blocks a report or wakes the agent.
+      if (
+        interaction.action === sandboxEscalationAction &&
+        this.sandboxEscalation(command.interactionId)
+      ) {
+        this.db
+          .prepare(`INSERT OR IGNORE INTO coordination_undeliverable_inbox_events
+            (eventId, assignmentId, reason) VALUES (?, ?, 'sandbox-escalation')`)
+          .run(event.eventId, String(interaction.requestingAssignmentId));
+        this.decideEscalation(
+          command.interactionId,
+          "operator",
+          command.decision === "approved" ? "accept" : "decline",
+        );
+      }
       this.saveOperatorReceipt(
         "decide-approval",
         command.key,
@@ -5644,28 +5949,7 @@ export class CoordinationStore {
       if (!binding) throw new Error("Interaction is not bound to current work");
       // Refusals write nothing, so a corrected retry with the same callId runs.
       if (value.refusal) return { success: false, text: value.refusal };
-      const interactionId = randomUUID();
-      this.db
-        .prepare(`INSERT INTO coordination_interactions
-        (interactionId, taskId, requestingAssignmentId, requestingWorkId,
-          requestingWorkRevision, requestingAssignmentVersion, conversationRevision,
-          kind, status, prompt, action, target, materialHash, materialJson, revision)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'open', ?, ?, ?, ?, ?, 1)`)
-        .run(
-          interactionId,
-          String(binding.taskId),
-          String(binding.assignmentId),
-          String(binding.workId),
-          Number(binding.workRevision),
-          Number(binding.assignmentVersion),
-          Number(binding.conversationRevision),
-          kind,
-          value.prompt,
-          value.action,
-          value.target,
-          value.materialHash,
-          value.materialJson,
-        );
+      const interactionId = this.openInteraction(binding, kind, value);
       if (value.form)
         this.db
           .prepare(
@@ -5696,18 +5980,6 @@ export class CoordinationStore {
           material,
         );
       }
-      this.inboxLifecycle().observe({
-        id: interactionId,
-        taskId: String(binding.taskId),
-        kind,
-        sourceKey: interactionId,
-      });
-      const attentionId = randomUUID();
-      this.db
-        .prepare(`INSERT INTO coordination_operator_attention
-        (attentionId, taskId, interactionId, status, revision)
-        VALUES (?, ?, ?, 'open', 1)`)
-        .run(attentionId, String(binding.taskId), interactionId);
       const response = {
         text:
           kind === "question"
@@ -5718,6 +5990,58 @@ export class CoordinationStore {
       this.insertToolReceipt(call, binding, response);
       return response;
     });
+  }
+
+  /** An open interaction of the bound work, with its Inbox item and operator attention. */
+  private openInteraction(
+    binding: Row,
+    kind: "question" | "approval",
+    value: {
+      prompt: string;
+      action: string | null;
+      target: string | null;
+      materialHash: string | null;
+      materialJson: string | null;
+    },
+  ): string {
+    const interactionId = randomUUID();
+    this.db
+      .prepare(
+        `INSERT INTO coordination_interactions
+      (interactionId, taskId, requestingAssignmentId, requestingWorkId,
+        requestingWorkRevision, requestingAssignmentVersion, conversationRevision,
+        kind, status, prompt, action, target, materialHash, materialJson, revision)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'open', ?, ?, ?, ?, ?, 1)`,
+      )
+      .run(
+        interactionId,
+        String(binding.taskId),
+        String(binding.assignmentId),
+        String(binding.workId),
+        Number(binding.workRevision),
+        Number(binding.assignmentVersion),
+        Number(binding.conversationRevision),
+        kind,
+        value.prompt,
+        value.action,
+        value.target,
+        value.materialHash,
+        value.materialJson,
+      );
+    this.inboxLifecycle().observe({
+      id: interactionId,
+      taskId: String(binding.taskId),
+      kind,
+      sourceKey: interactionId,
+    });
+    this.db
+      .prepare(
+        `INSERT INTO coordination_operator_attention
+      (attentionId, taskId, interactionId, status, revision)
+      VALUES (?, ?, ?, 'open', 1)`,
+      )
+      .run(randomUUID(), String(binding.taskId), interactionId);
+    return interactionId;
   }
 
   private cachedToolResponse(

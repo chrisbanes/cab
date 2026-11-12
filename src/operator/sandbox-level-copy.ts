@@ -8,8 +8,33 @@ import type { SandboxLevel } from "../core/sandbox-level.js";
 
 export const sandboxLevelLabels: Record<SandboxLevel, string> = {
   strict: "Strict",
+  "escalate-approval": "Escalate with approval",
   unsandboxed: "Unsandboxed (dangerous)",
 };
+
+/** What the escalate-approval level sends Codex for a task turn. */
+export const codexEscalateApprovalLine =
+  "A project at the escalate-approval level keeps its Codex task turns sandboxed, with an approval policy that allows only sandbox escalation: a turn can ask to run one command outside the sandbox. Draft, read-only and unbound turns stay strict.";
+
+/** Claude Code has no escalation seam yet, so its task turns stay strict. */
+export const claudeEscalateApprovalLine =
+  "Claude Code task turns in a project at the escalate-approval level run at the strict level for now; they cannot ask to run a command outside the sandbox.";
+
+/** How an escalation is decided and what an approved one can do. */
+export const escalateApprovalRiskLines = [
+  "Each escalation waits in the Inbox with its command, working directory, reason and workspace state. Approve runs that one command; decline refuses it. An escalation left unanswered for 15 minutes is declined, and one whose turn ends is withdrawn.",
+  "An approved command runs with the service user's full filesystem, process, network and credential access, and untrusted text, including issue and pull request bodies, can shape the request. Processes it starts can outlive the turn; cab does not clean them up.",
+];
+
+/** The escalate-approval level for surfaces that show the level rather than one harness. */
+export const escalateApprovalLines = [
+  codexEscalateApprovalLine,
+  claudeEscalateApprovalLine,
+  ...escalateApprovalRiskLines,
+];
+
+/** The Inbox headline of an escalation approval. */
+export const sandboxEscalationHeadline = "Run a command outside the sandbox";
 
 /** What the unsandboxed level sends Codex for a task turn. */
 export const codexUnsandboxedLine =
@@ -45,7 +70,9 @@ export const unsandboxedSupersededLine =
 export const projectSandboxLevelLine = (level: SandboxLevel) =>
   level === "unsandboxed"
     ? "The sandbox level is unsandboxed for this project's task turns in both harnesses."
-    : "The sandbox level is strict for this project.";
+    : level === "escalate-approval"
+      ? "The sandbox level is escalate-approval for this project's Codex task turns; its Claude Code task turns stay strict."
+      : "The sandbox level is strict for this project.";
 
 /** `null` is a turn with no recorded admission: not admitted yet, held before admission, or admitted before the level existed. */
 export const turnSandboxLevelLine = (level: SandboxLevel | null) =>
@@ -53,4 +80,6 @@ export const turnSandboxLevelLine = (level: SandboxLevel | null) =>
     ? "No sandbox level admission recorded; the project's level at admission applies."
     : level === "unsandboxed"
       ? "Admitted at the unsandboxed sandbox level."
-      : "Admitted at the strict sandbox level.";
+      : level === "escalate-approval"
+        ? "Admitted at the escalate-approval sandbox level."
+        : "Admitted at the strict sandbox level.";

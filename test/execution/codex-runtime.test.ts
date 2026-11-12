@@ -18,6 +18,7 @@ import {
   maxAppServerLineBytes,
   type RuntimeConversationEvent,
   type RuntimeDiagnosticEvent,
+  type SandboxEscalationEvent,
 } from "../../src/standalone/codex.js";
 import {
   closeRuntimeSafetyFixtures,
@@ -3989,5 +3990,348 @@ test("stop during a failed spawn does not wait for an exit event", {
   } finally {
     await runtime.stop();
     rmSync(root, { recursive: true, force: true });
+  }
+});
+
+/**
+ * A fake App Server for sandbox escalation: each turn's prompt says what it sends. `escalate`
+ * asks one command approval and, once answered, completes the item and the turn; `escalate-end`
+ * asks and ends the turn unanswered; `others` sends every other approval kind. A resume reports
+ * the last turn's approval policy, or `corrupt-policy` makes it report a widened one.
+ */
+function escalationFakeRuntime() {
+  const root = mkdtempSync(join(tmpdir(), "codex-escalation-"));
+  const executable = join(root, "fake-codex.mjs");
+  const log = join(root, "messages.jsonl");
+  const source = [
+    `#!${process.execPath}`,
+    "import { appendFileSync } from 'node:fs';",
+    "import { createInterface } from 'node:readline';",
+    `const log = ${JSON.stringify(log)};`,
+    "const write = (message) => process.stdout.write(JSON.stringify(message) + '\\n');",
+    "let policy = 'never';",
+    "let turns = 0;",
+    "const asked = new Map();",
+    "const finish = (turnId) => write({ method: 'turn/completed', params: { threadId: 'thread-1', turn: { id: turnId, status: 'completed' } } });",
+    "for await (const line of createInterface({ input: process.stdin })) {",
+    "  const message = JSON.parse(line);",
+    "  appendFileSync(log, JSON.stringify(message) + '\\n');",
+    "  if (message.method === 'initialize') write({ id: message.id, result: {} });",
+    "  else if (message.method === 'account/read') write({ id: message.id, result: { account: { type: 'chatgpt' } } });",
+    "  else if (message.method === 'config/read') write({ id: message.id, result: { config: { approval_policy: 'never', sandbox_mode: 'workspace-write' } } });",
+    "  else if (message.method === 'model/list') write({ id: message.id, result: { data: [{ model: 'm', isDefault: true, supportedReasoningEfforts: [] }], nextCursor: null } });",
+    "  else if (message.method === 'thread/start' || message.method === 'thread/resume') write({ id: message.id, result: { thread: { id: 'thread-1' }, approvalPolicy: policy, sandbox: { type: 'workspaceWrite' }, model: 'm', modelProvider: 'fake', reasoningEffort: null, serviceTier: null } });",
+    "  else if (message.method === 'turn/start') {",
+    "    const turnId = 'turn-' + ++turns;",
+    "    const prompt = message.params.input[0].text;",
+    "    policy = prompt === 'corrupt-policy' ? { granular: { sandbox_approval: true, rules: true, mcp_elicitations: false, skill_approval: false, request_permissions: false } } : message.params.approvalPolicy;",
+    "    write({ id: message.id, result: { turn: { id: turnId } } });",
+    "    const base = { threadId: 'thread-1', turnId };",
+    "    if (prompt.startsWith('escalate')) {",
+    "      asked.set('esc-' + turns, turnId);",
+    "      write({ id: 'esc-' + turns, method: 'item/commandExecution/requestApproval', params: { ...base, itemId: 'item-' + turns, command: 'node chromium.mjs', cwd: message.params.cwd, reason: 'needs host Chromium', proposedExecpolicyAmendment: ['node'] } });",
+    "      if (prompt === 'escalate-end') finish(turnId);",
+    "    } else if (prompt === 'others') {",
+    "      write({ id: 'file', method: 'item/fileChange/requestApproval', params: { ...base, itemId: 'f' } });",
+    "      write({ id: 'perm', method: 'item/permissions/requestApproval', params: { ...base, itemId: 'p' } });",
+    "      write({ id: 'patch', method: 'applyPatchApproval', params: base });",
+    "      write({ id: 'exec', method: 'execCommandApproval', params: base });",
+    "      write({ id: 'cmd', method: 'item/commandExecution/requestApproval', params: { ...base, itemId: 'c', command: 'ls', cwd: message.params.cwd } });",
+    "    }",
+    "  } else if (message.method === undefined && asked.has(message.id)) {",
+    "    const turnId = asked.get(message.id);",
+    "    const accepted = message.result?.decision === 'accept';",
+    "    write({ method: 'item/completed', params: { threadId: 'thread-1', turnId, item: { id: message.id.replace('esc', 'item'), type: 'commandExecution', status: accepted ? 'completed' : 'declined', exitCode: accepted ? 3 : null, ...(accepted ? { durationMs: 1234 } : {}), aggregatedOutput: 'OUTPUT_SENTINEL' } } });",
+    "    finish(turnId);",
+    "  }",
+    "}",
+  ].join("\n");
+  writeFileSync(executable, source);
+  chmodSync(executable, 0o700);
+  const runtime = newTestRuntime(executable, { settingsRetryMs: 5 });
+  const messages = () =>
+    readFileSync(log, "utf8")
+      .split("\n")
+      .filter(Boolean)
+      .map((line) => JSON.parse(line) as Record<string, unknown>);
+  const replies = (id: string) =>
+    messages().filter((m) => m.id === id && m.method === undefined);
+  const cleanup = async () => {
+    await runtime.stop();
+    rmSync(root, { recursive: true, force: true });
+  };
+  return { root, runtime, messages, replies, cleanup };
+}
+
+const escalationPolicy = {
+  networkAccess: false,
+  sandboxEscalation: "approval" as const,
+};
+
+test("an escalate-approval turn sends the sandbox-only granular policy and reviewer user; other turns are unchanged", async () => {
+  const { root, runtime, messages, cleanup } = escalationFakeRuntime();
+  try {
+    await bounded(runtime.start(), 3000);
+    await bounded(runtime.startThread(root), 3000);
+    await bounded(
+      runtime.startTurn("thread-1", root, "plain", undefined, escalationPolicy),
+      3000,
+    );
+    await bounded(runtime.startTurn("thread-1", root, "plain"), 3000);
+    await bounded(
+      runtime.startTurn("thread-1", root, "plain", undefined, {
+        ...escalationPolicy,
+        access: "read-only",
+      }),
+      3000,
+    );
+    await bounded(
+      runtime.startTurn("thread-1", root, "plain", undefined, {
+        ...escalationPolicy,
+        skipSandbox: true,
+      }),
+      3000,
+    );
+    const turns = messages()
+      .filter((m) => m.method === "turn/start")
+      .map((m) => m.params as Record<string, unknown>);
+    assert.deepEqual(turns[0]?.approvalPolicy, {
+      granular: {
+        sandbox_approval: true,
+        rules: false,
+        mcp_elicitations: false,
+        skill_approval: false,
+        request_permissions: false,
+      },
+    });
+    assert.equal(turns[0]?.approvalsReviewer, "user");
+    assert.deepEqual(turns[0]?.sandboxPolicy, executionPolicy(root));
+    // Strict, read-only and unsandboxed turns keep approval never and send no reviewer.
+    for (const turn of turns.slice(1)) {
+      assert.equal(turn.approvalPolicy, "never");
+      assert.equal(Object.hasOwn(turn, "approvalsReviewer"), false);
+    }
+    assert.deepEqual(turns[1]?.sandboxPolicy, executionPolicy(root));
+    assert.deepEqual(turns[2]?.sandboxPolicy, {
+      type: "readOnly",
+      networkAccess: false,
+    });
+    assert.deepEqual(turns[3]?.sandboxPolicy, { type: "dangerFullAccess" });
+  } finally {
+    await cleanup();
+  }
+});
+
+test("a resume accepts the persisted sandbox-only policy and refuses any other", async () => {
+  const { root, runtime, cleanup } = escalationFakeRuntime();
+  try {
+    await bounded(runtime.start(), 3000);
+    await bounded(runtime.startThread(root), 3000);
+    await bounded(
+      runtime.startTurn("thread-1", root, "plain", undefined, escalationPolicy),
+      3000,
+    );
+    await bounded(runtime.resumeThread("thread-1", []), 3000);
+    await bounded(runtime.startTurn("thread-1", root, "corrupt-policy"), 3000);
+    await assert.rejects(bounded(runtime.resumeThread("thread-1", []), 3000));
+  } finally {
+    await cleanup();
+  }
+});
+
+test("an escalate-approval turn hands its command approval to the listener, and the reply is accept or decline once", async () => {
+  const { root, runtime, messages, replies, cleanup } = escalationFakeRuntime();
+  const events: Array<Record<string, unknown>> = [];
+  const unexpected: unknown[] = [];
+  runtime.onUnexpectedRequest((request) => unexpected.push(request));
+  runtime.onSandboxEscalation((event) => {
+    events.push(event as unknown as Record<string, unknown>);
+    return true;
+  });
+  try {
+    await bounded(runtime.start(), 3000);
+    await bounded(runtime.startThread(root), 3000);
+    const turnId = await bounded(
+      runtime.startTurn(
+        "thread-1",
+        root,
+        "escalate",
+        undefined,
+        escalationPolicy,
+      ),
+      3000,
+    );
+    await eventually(() => events.length === 1);
+    const requested = events[0] as {
+      kind: string;
+      identity: Parameters<CodexRuntime["replySandboxEscalation"]>[0];
+      command: string;
+      cwd: string;
+      reason: string;
+    };
+    assert.equal(requested.kind, "requested");
+    assert.equal(requested.command, "node chromium.mjs");
+    assert.equal(requested.cwd, root);
+    assert.equal(requested.reason, "needs host Chromium");
+    assert.deepEqual(requested.identity, {
+      requestId: "esc-1",
+      runtimeGeneration: runtime.currentUserInputGeneration(),
+      threadId: "thread-1",
+      turnId,
+      itemId: "item-1",
+    });
+    assert.deepEqual(replies("esc-1"), []);
+    assert.equal(
+      await runtime.replySandboxEscalation(requested.identity, "accept"),
+      true,
+    );
+    assert.equal(
+      await runtime.replySandboxEscalation(requested.identity, "decline"),
+      false,
+    );
+    await eventually(() => events.length === 2);
+    assert.deepEqual(replies("esc-1"), [
+      { id: "esc-1", result: { decision: "accept" } },
+    ]);
+    // The completion carries the exit code and duration, never the output.
+    assert.deepEqual(events[1], {
+      kind: "completed",
+      identity: requested.identity,
+      exitCode: 3,
+      durationMs: 1234,
+    });
+    assert.deepEqual(unexpected, []);
+    assert.ok(
+      messages().every(
+        (m) =>
+          !JSON.stringify(m.result ?? null).includes("acceptForSession") &&
+          !JSON.stringify(m.result ?? null).includes("mendment"),
+      ),
+    );
+  } finally {
+    await cleanup();
+  }
+});
+
+test("every other approval kind, and a command approval on a turn without the level, is denied as unexpected", async () => {
+  const { root, runtime, replies, cleanup } = escalationFakeRuntime();
+  const escalations: unknown[] = [];
+  const unexpected: Array<{ method: string }> = [];
+  runtime.onUnexpectedRequest((request) => unexpected.push(request));
+  runtime.onSandboxEscalation((event) => {
+    escalations.push(event);
+    return true;
+  });
+  try {
+    await bounded(runtime.start(), 3000);
+    await bounded(runtime.startThread(root), 3000);
+    // On an escalate-approval turn only the command approval is taken.
+    await bounded(
+      runtime.startTurn(
+        "thread-1",
+        root,
+        "others",
+        undefined,
+        escalationPolicy,
+      ),
+      3000,
+    );
+    await eventually(() => unexpected.length === 4);
+    assert.deepEqual(
+      unexpected.map((request) => request.method),
+      [
+        "item/fileChange/requestApproval",
+        "item/permissions/requestApproval",
+        "applyPatchApproval",
+        "execCommandApproval",
+      ],
+    );
+    assert.deepEqual(replies("file"), [
+      { id: "file", result: { decision: "cancel" } },
+    ]);
+    assert.deepEqual(replies("perm")[0]?.error, {
+      code: -32601,
+      message: "cab denies unexpected server request",
+    });
+    assert.deepEqual(replies("patch"), [
+      { id: "patch", result: { decision: "abort" } },
+    ]);
+    await eventually(() => escalations.length === 1);
+    // On a strict turn the command approval is denied too, and never reaches the listener.
+    await bounded(runtime.startTurn("thread-1", root, "others"), 3000);
+    await eventually(() => unexpected.length === 9);
+    assert.equal(
+      unexpected[8]?.method,
+      "item/commandExecution/requestApproval",
+    );
+    assert.deepEqual(replies("cmd").at(-1), {
+      id: "cmd",
+      result: { decision: "cancel" },
+    });
+    assert.equal(escalations.length, 1);
+  } finally {
+    await cleanup();
+  }
+});
+
+test("an escalation the listener refuses is denied, and one left unanswered ends with its turn", async () => {
+  const { root, runtime, replies, cleanup } = escalationFakeRuntime();
+  const events: SandboxEscalationEvent[] = [];
+  const unexpected: unknown[] = [];
+  let accept = false;
+  runtime.onUnexpectedRequest((request) => unexpected.push(request));
+  runtime.onSandboxEscalation((event) => {
+    events.push(event);
+    return accept;
+  });
+  try {
+    await bounded(runtime.start(), 3000);
+    await bounded(runtime.startThread(root), 3000);
+    await bounded(
+      runtime.startTurn(
+        "thread-1",
+        root,
+        "escalate",
+        undefined,
+        escalationPolicy,
+      ),
+      3000,
+    );
+    await eventually(() => unexpected.length === 1);
+    assert.deepEqual(replies("esc-1"), [
+      { id: "esc-1", result: { decision: "cancel" } },
+    ]);
+    accept = true;
+    await bounded(
+      runtime.startTurn(
+        "thread-1",
+        root,
+        "escalate-end",
+        undefined,
+        escalationPolicy,
+      ),
+      3000,
+    );
+    await eventually(() => events.length === 3);
+    assert.deepEqual(
+      events.map((event) => [
+        event.kind,
+        "reason" in event ? event.reason : undefined,
+      ]),
+      [
+        ["requested", "needs host Chromium"],
+        ["requested", "needs host Chromium"],
+        ["ended", "Turn ended"],
+      ],
+    );
+    const ended = events[2];
+    assert.ok(ended);
+    assert.equal(
+      await runtime.replySandboxEscalation(ended.identity, "accept"),
+      false,
+    );
+    assert.deepEqual(replies("esc-2"), []);
+  } finally {
+    await cleanup();
   }
 });

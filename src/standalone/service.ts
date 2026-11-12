@@ -32,7 +32,7 @@ import {
 } from "../core/issue-text-limits.js";
 import { existsSync, lstatSync, realpathSync, writeFileSync } from "node:fs";
 import { realpath } from "node:fs/promises";
-import { isAbsolute, join, resolve } from "node:path";
+import { isAbsolute, join, relative, resolve, sep } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { LeadTextStore } from "../core/lead-text.js";
 import { leadTaskSection, type TaskText } from "./lead-text-prompt.js";
@@ -163,6 +163,7 @@ import {
   type RuntimeToolCall,
   type RuntimeToolResult,
   type RuntimeTurnPolicy,
+  type SandboxEscalationEvent,
   type RuntimeTurnSettings,
 } from "./codex.js";
 import {
@@ -272,6 +273,7 @@ import {
   recordMigrationLevel,
   type StartupSnapshotOptions,
 } from "./startup-snapshot.js";
+import type { NativeInputEndpointIdentity } from "../core/structured-questions.js";
 import {
   encodeNativeInputReply,
   nativeEndpointKey,
@@ -647,6 +649,8 @@ export interface StandaloneServiceOptions {
   workspaceManager?: WorkspaceManagerOptions;
   /** Test-only; production uses the fixed 10 minute cap. */
   draftingTimeLimitMs?: number;
+  /** Test-only; production declines an unanswered sandbox escalation after 15 minutes. */
+  sandboxEscalationExpiryMs?: number;
   /** Test-only; production retries a failed interrupt after 5 seconds. */
   draftingInterruptRetryMs?: number;
   power?: {
@@ -971,6 +975,18 @@ export class StandaloneService {
     string,
     { workId: string; interactionId: string; resolve: () => void }
   >();
+  /** Held sandbox escalations by endpoint, until answered or withdrawn. */
+  private readonly escalationWaiters = new Map<
+    string,
+    {
+      runtime: Runtime;
+      release: () => void;
+      interactionId?: string;
+      timer?: NodeJS.Timeout;
+      /** The turn ended while the escalation was still being recorded. */
+      ended?: boolean;
+    }
+  >();
   private readonly callbacks = new Map<string, Set<Promise<unknown>>>();
   /** Drafting commands in flight, by key. */
   private readonly draftingKeys = new Map<string, Promise<unknown>>();
@@ -1283,6 +1299,7 @@ export class StandaloneService {
       coordination.invalidateRuntimeQuestions(
         "Service restarted; native endpoints cannot be reconstructed",
       );
+      coordination.invalidateSandboxEscalations();
       acquire("coordination", coordination);
       // A runtime never reads or extends another harness's retained evidence.
       const own = <T extends { harness: ExecutionHarness } | null>(
@@ -2709,6 +2726,20 @@ export class StandaloneService {
         );
       else this.handleUserInputRequest(request, runtime);
     });
+    runtime.onSandboxEscalation?.((event) => {
+      if (event.kind !== "requested") {
+        this.endSandboxEscalation(event);
+        return true;
+      }
+      const { threadId, turnId } = event.identity;
+      this.noteTurnActivity(harness, state, threadId, turnId);
+      return (
+        this.current !== undefined &&
+        acceptsNew() &&
+        !foreign(threadId, turnId) &&
+        this.handleSandboxEscalation(event, runtime)
+      );
+    });
     runtime.onUserInputOutcome?.((outcome) => {
       if (!foreign(outcome.threadId, outcome.turnId))
         this.handleUserInputOutcome(outcome);
@@ -3057,6 +3088,19 @@ export class StandaloneService {
         this.acquired?.coordination?.invalidateRuntimeQuestions(
           "Service stopped; native endpoints lost",
         );
+    });
+    // Nobody can answer a held escalation once its runtime stops.
+    await attempt("sandbox-escalation withdrawal", () => {
+      for (const [key, waiter] of [...this.escalationWaiters])
+        try {
+          if (waiter.interactionId && this.db?.isOpen && this.cache?.isOpen)
+            this.acquired?.coordination?.resolveSandboxEscalation(
+              waiter.interactionId,
+              "obsolete",
+            );
+        } finally {
+          this.finishSandboxEscalation(key);
+        }
     });
     await attempt("conversation-capture cleanup", () =>
       this.clearConversationCaptures(),
@@ -6428,50 +6472,258 @@ export class StandaloneService {
       this.holdKnownSurvivor(workId, "late cab callback");
   }
 
+  /**
+   * The exact admitted, running turn a native callback names, in the runtime process and
+   * generation it was admitted in; a turn whose start response has not arrived is prebound.
+   * Throws when there is none.
+   */
+  private bindNativeCallback(
+    identity: NativeInputEndpointIdentity,
+    runtime: Runtime,
+  ) {
+    const { state, supervisor } = this.started();
+    if (runtime.currentUserInputGeneration?.() !== identity.runtimeGeneration)
+      throw new Error("Native process generation mismatch");
+    let binding = state.runtimeQuestionBinding(
+      identity.threadId,
+      identity.turnId,
+    );
+    if (!binding) {
+      const snapshot = state.nativeTurnPrebinding(
+        identity.threadId,
+        identity.turnId,
+        identity.runtimeGeneration,
+      );
+      if (!snapshot || !state.prebindNativeTurn(snapshot))
+        throw new Error("Native callback has no exact admitted binding");
+      supervisor.turnBound(snapshot.workId, identity.threadId, identity.turnId);
+      binding = state.runtimeQuestionBinding(
+        identity.threadId,
+        identity.turnId,
+      );
+    }
+    if (!binding) throw new Error("Native callback binding unavailable");
+    const recovery = state.recoveryIdentity(binding.workId);
+    const currentProcess = runtime.processIdentity?.();
+    if (
+      !recovery?.processIdentity ||
+      !currentProcess ||
+      currentProcess instanceof Promise ||
+      JSON.stringify(currentProcess) !==
+        JSON.stringify(recovery.processIdentity)
+    )
+      throw new Error("Native admitted process identity mismatch");
+    return binding;
+  }
+
+  /**
+   * Takes an escalation of an exact running turn admitted at escalate-approval (ADR-1034); false
+   * leaves the request to the runtime's denial and unexpected-request hold. The request then
+   * holds the turn's callback, and with it its slot and writer, until it is answered or withdrawn.
+   */
+  private handleSandboxEscalation(
+    event: Extract<SandboxEscalationEvent, { kind: "requested" }>,
+    runtime: Runtime,
+  ): boolean {
+    const { state } = this.started();
+    let binding: CoordinationExecutionBinding;
+    try {
+      binding = this.bindNativeCallback(event.identity, runtime);
+    } catch {
+      return false;
+    }
+    const intent = state.byWorkId(binding.workId);
+    if (
+      !intent ||
+      binding.draftTurn ||
+      state.sandboxLevel(intent.id) !== "escalate-approval"
+    )
+      return false;
+    const key = nativeEndpointKey(event.identity);
+    if (this.escalationWaiters.has(key)) return false;
+    let release!: () => void;
+    const pending = new Promise<void>((done) => {
+      release = done;
+    });
+    // First, so a refused callback lease leaves no waiter behind.
+    this.registerExecutionCallback(binding.workId, pending);
+    this.escalationWaiters.set(key, { runtime, release });
+    void this.openSandboxEscalation(event, binding.taskId, intent);
+    return true;
+  }
+
+  private async openSandboxEscalation(
+    event: Extract<SandboxEscalationEvent, { kind: "requested" }>,
+    taskId: string,
+    intent: { id: string; workId: string },
+  ): Promise<void> {
+    const key = nativeEndpointKey(event.identity);
+    const waiter = this.escalationWaiters.get(key);
+    if (!waiter) return;
+    try {
+      const workspace = await this.escalationWorkspace(taskId, event.cwd);
+      const { coordination } = this.started();
+      const interactionId = coordination.recordSandboxEscalation({
+        identity: event.identity,
+        command: event.command,
+        cwd: this.escalationCwd(taskId, event.cwd),
+        reason: event.reason,
+        workspace,
+      });
+      waiter.interactionId = interactionId;
+      if (waiter.ended) {
+        coordination.resolveSandboxEscalation(interactionId, "obsolete");
+        this.finishSandboxEscalation(key);
+        return;
+      }
+      waiter.timer = setTimeout(
+        () => void this.expireSandboxEscalation(interactionId),
+        this.options.sandboxEscalationExpiryMs ?? 15 * 60_000,
+      );
+      waiter.timer.unref();
+    } catch {
+      // Unrecorded, so nobody can answer it: decline at once and hold the work for review.
+      try {
+        const { state, supervisor } = this.started();
+        state.hold(intent.id, "Sandbox escalation could not be recorded");
+        supervisor.noteAnomaly(intent.workId);
+      } catch {
+        // A service stopping meanwhile ends the turn itself.
+      }
+      await waiter.runtime
+        .replySandboxEscalation?.(event.identity, "decline")
+        .catch(() => false);
+      this.finishSandboxEscalation(key);
+    }
+  }
+
+  /**
+   * The working directory relative to the task workspace, which lies in cab's private data
+   * directory and so is never shown; a directory outside it stays absolute.
+   */
+  private escalationCwd(taskId: string, cwd: string): string {
+    const root = this.started().workspaceBindings.get(taskId)?.path;
+    const inside = root === undefined ? undefined : relative(root, cwd);
+    return inside === undefined ||
+      inside === ".." ||
+      inside.startsWith(`..${sep}`) ||
+      isAbsolute(inside)
+      ? cwd
+      : inside || ".";
+  }
+
+  /** HEAD, branch and uncommitted-changes flag of the repository holding `cwd`; null when Git cannot say. */
+  private async escalationWorkspace(taskId: string, cwd: string) {
+    try {
+      const binding = this.started().workspaceBindings.get(taskId);
+      const observed =
+        await this.started().workspaces.observeResultWorkspaces(taskId);
+      const holding = observed.find((o) => {
+        const path =
+          binding?.state === "ready"
+            ? binding.repositories.find(
+                (r) => r.repositoryId === o.repositoryId,
+              )?.workspacePath
+            : undefined;
+        return (
+          path !== undefined && (cwd === path || cwd.startsWith(path + sep))
+        );
+      });
+      const repository = holding ?? observed[0];
+      if (repository)
+        return {
+          head: repository.headCommit,
+          branch: repository.branch,
+          dirty: repository.dirty,
+        };
+    } catch {
+      // An unreadable workspace does not refuse the escalation; its identity reads as unknown.
+    }
+    return { head: null, branch: null, dirty: null };
+  }
+
+  /** Called after an operator decision on a `sandbox.escalate` approval; idempotent. */
+  async settleSandboxEscalation(interactionId: string): Promise<void> {
+    const { coordination } = this.started();
+    const record = coordination.sandboxEscalation(interactionId);
+    if (
+      !record?.decision ||
+      !coordination.claimSandboxEscalationReply(interactionId)
+    )
+      return;
+    const key = nativeEndpointKey(record.identity);
+    try {
+      const written =
+        (await this.escalationWaiters
+          .get(key)
+          ?.runtime.replySandboxEscalation?.(record.identity, record.decision)
+          .catch(() => false)) === true;
+      if (written) coordination.recordSandboxEscalationDelivered(interactionId);
+    } finally {
+      this.finishSandboxEscalation(key);
+    }
+  }
+
+  private async expireSandboxEscalation(interactionId: string): Promise<void> {
+    try {
+      this.started().coordination.resolveSandboxEscalation(
+        interactionId,
+        "expired",
+      );
+    } catch {
+      // Unrecorded: the turn's end or a restart withdraws it instead.
+      return;
+    }
+    await this.settleSandboxEscalation(interactionId);
+  }
+
+  /** An escalated command completed, or a request went unanswered until its turn or runtime ended. */
+  private endSandboxEscalation(
+    event: Exclude<SandboxEscalationEvent, { kind: "requested" }>,
+  ): void {
+    const coordination = this.acquired?.coordination;
+    if (!coordination) return;
+    try {
+      if (event.kind === "completed") {
+        coordination.completeSandboxEscalation(
+          event.identity,
+          event.exitCode,
+          event.durationMs,
+        );
+        return;
+      }
+      const key = nativeEndpointKey(event.identity);
+      const waiter = this.escalationWaiters.get(key);
+      if (!waiter) return;
+      if (waiter.interactionId === undefined) {
+        waiter.ended = true;
+        return;
+      }
+      try {
+        coordination.resolveSandboxEscalation(waiter.interactionId, "obsolete");
+      } finally {
+        this.finishSandboxEscalation(key);
+      }
+    } catch {
+      // Evidence only: a failed write leaves the record as it was, and a restart withdraws it.
+    }
+  }
+
+  private finishSandboxEscalation(key: string): void {
+    const waiter = this.escalationWaiters.get(key);
+    if (!waiter) return;
+    clearTimeout(waiter.timer);
+    this.escalationWaiters.delete(key);
+    waiter.release();
+  }
+
   private handleUserInputRequest(
     call: RuntimeUserInputRequest,
     runtime: Runtime,
   ): void {
     const { state, coordination, supervisor } = this.started();
     try {
-      if (
-        runtime.currentUserInputGeneration?.() !==
-        call.identity.runtimeGeneration
-      )
-        throw new Error("Native process generation mismatch");
-      let binding = state.runtimeQuestionBinding(
-        call.identity.threadId,
-        call.identity.turnId,
-      );
-      if (!binding) {
-        const snapshot = state.nativeTurnPrebinding(
-          call.identity.threadId,
-          call.identity.turnId,
-          call.identity.runtimeGeneration,
-        );
-        if (!snapshot || !state.prebindNativeTurn(snapshot))
-          throw new Error("Native callback has no exact admitted binding");
-        supervisor.turnBound(
-          snapshot.workId,
-          call.identity.threadId,
-          call.identity.turnId,
-        );
-        binding = state.runtimeQuestionBinding(
-          call.identity.threadId,
-          call.identity.turnId,
-        );
-      }
-      if (!binding) throw new Error("Native callback binding unavailable");
-      const recovery = state.recoveryIdentity(binding.workId);
-      const currentProcess = runtime.processIdentity?.();
-      if (
-        !recovery?.processIdentity ||
-        !currentProcess ||
-        currentProcess instanceof Promise ||
-        JSON.stringify(currentProcess) !==
-          JSON.stringify(recovery.processIdentity)
-      )
-        throw new Error("Native admitted process identity mismatch");
+      const binding = this.bindNativeCallback(call.identity, runtime);
       const question = coordination.recordRuntimeQuestion(call);
       const key = nativeEndpointKey(call.identity);
       if (this.nativeWaiters.has(key)) return;
@@ -10023,7 +10275,7 @@ export class StandaloneService {
       // Synchronous and caught: recorded before submission, never delaying it.
       if (diagnostics)
         this.recordDiagnosticInputs(diagnostics, request, promptParts, prompt);
-      // Passed only when network access, local listening, an unsandboxed level or Git roots apply, so
+      // Passed only when network access, local listening, a non-strict level or Git roots apply, so
       // otherwise keeps today's call shapes. A draft turn is always read-only, strict, with network
       // and listening off.
       const binding = request.taskId
@@ -10035,17 +10287,21 @@ export class StandaloneService {
           : [];
       const networkAccess = state.commandNetworkAccess(intent.id) === true;
       const localListening = state.localListening(intent.id) === true;
-      const skipSandbox = state.sandboxLevel(intent.id) === "unsandboxed";
+      const level = state.sandboxLevel(intent.id);
+      const skipSandbox = level === "unsandboxed";
+      const escalate = level === "escalate-approval";
       const policy: RuntimeTurnPolicy | undefined = request.draftTurn
         ? { networkAccess: false, access: "read-only" }
         : networkAccess ||
             localListening ||
             skipSandbox ||
+            escalate ||
             gitWritableRoots.length > 0
           ? {
               networkAccess,
               ...(localListening ? { localListening: true } : {}),
               ...(skipSandbox ? { skipSandbox: true } : {}),
+              ...(escalate ? { sandboxEscalation: "approval" as const } : {}),
               ...(gitWritableRoots.length > 0 ? { gitWritableRoots } : {}),
             }
           : undefined;
