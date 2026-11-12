@@ -122,7 +122,7 @@ for (const [name, viewport] of [
       .waitFor();
     // Additional Claude policy lines sit in the closed limits disclosure.
     await runtimeRow(page, "Claude")
-      .getByText("Limits and untested surfaces · 31")
+      .getByText("Limits and untested surfaces · 34")
       .click();
     await runtimes
       .getByText("confined to the same roots by cab's hook", {
@@ -713,7 +713,7 @@ const hiddenLimits = [
   ...codexPolicyDisclosure().limits,
   ...codexPolicyDisclosure().lines.slice(2),
 ];
-const evidenceReferences = ["F6.3", "F6.4", "F5.5", "#827"];
+const evidenceReferences = ["F6.4", "F5.5", "#827"];
 
 for (const [name, viewport] of [
   ["1366", desktop],
@@ -729,7 +729,7 @@ for (const [name, viewport] of [
     );
     for (const [runtime, count] of [
       ["Codex", 23],
-      ["Claude", 31],
+      ["Claude", 34],
     ] as const) {
       const row = runtimeRow(page, runtime),
         details = runtimeLimits(page, runtime),
@@ -763,7 +763,7 @@ for (const [name, viewport] of [
         .waitFor();
     for (const line of [
       "Commands run in Claude Code's sandbox",
-      "Command network access is denied. There are no interactive approvals.",
+      "Command network access is denied. Only an escalation at the escalate-approval level asks for an interactive approval.",
     ])
       await runtimeRow(page, "Claude").getByText(line).first().waitFor();
 

@@ -6,6 +6,7 @@ import {
   localListeningLimit,
 } from "../operator/local-listening-copy.js";
 import {
+  claudeBashTimeoutLine,
   claudeEscalateApprovalLine,
   claudeEscalateAutoReviewLine,
   claudeUnsandboxedLine,
@@ -98,12 +99,14 @@ export function claudePolicyDisclosure(
             "A shared sandbox temporary directory is also writable; it is shared across tasks, not isolated per task.",
           ]
         : []),
-      "Command network access is denied. There are no interactive approvals.",
+      "Command network access is denied. Only an escalation at the escalate-approval level asks for an interactive approval.",
       claudeLocalListeningLine,
       localListeningLimit,
       claudeUnsandboxedLine,
       ...unsandboxedRiskLines,
       claudeEscalateApprovalLine,
+      claudeBashTimeoutLine,
+      ...escalateApprovalRiskLines,
       claudeEscalateAutoReviewLine,
       nativeSetupDisclosure,
       "File-editing tools are confined to the same roots by cab's hook, not by the operating system.",

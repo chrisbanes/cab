@@ -2119,8 +2119,8 @@ export class ExecutionState {
 
   /**
    * The level admitting this intent now would record: only a task turn that is not a draft turn
-   * takes its project's level, and the escalate levels apply only to a Codex task turn (a Claude
-   * turn runs `strict` until its harness supports them). Admission uses the same condition.
+   * takes its project's level. escalate-approval applies to either harness; escalate-auto-review
+   * only to a Codex task turn (a Claude turn runs `strict` there). Admission uses the same condition.
    */
   applicableSandboxLevel(intentId: string, projectId: string): SandboxLevel {
     const work = this.db
@@ -2138,16 +2138,11 @@ export class ExecutionState {
         ...(this.hasTurnRequests ? [work.workId] : []),
       ) as { level: SandboxLevel; harness: string } | undefined;
     if (row?.level === "unsandboxed") return "unsandboxed";
-    return (row?.level === "escalate-approval" ||
-      row?.level === "escalate-auto-review") &&
-      row.harness === "codex"
+    // Claude Code has an escalate-approval seam (auto mode with a hook hold); auto-review is Codex only.
+    return row?.level === "escalate-approval" ||
+      (row?.level === "escalate-auto-review" && row.harness === "codex")
       ? row.level
       : "strict";
-  }
-
-  /** Whether admitting this intent now would record `unsandboxed`; see `applicableSandboxLevel`. */
-  unsandboxedApplies(intentId: string, projectId: string): boolean {
-    return this.applicableSandboxLevel(intentId, projectId) === "unsandboxed";
   }
 
   /** The harness a work item runs on: its task binding, else its drafting run, else the default. */
@@ -5902,7 +5897,7 @@ export class ExecutionState {
             options.projectId,
             ...(this.hasTurnRequests ? [workId] : []),
           );
-        // A task turn takes the project's level (escalate-approval only on Codex); draft turns
+        // A task turn takes the project's level (escalate-auto-review only on Codex); draft turns
         // and drafting runs stay strict.
         this.db
           .prepare(

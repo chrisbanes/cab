@@ -1174,9 +1174,30 @@ server request, including a command approval that also asks for network access o
 permissions, keeps the unexpected-request denial and hold. Each escalation's evidence (decider,
 decision, delivery, exit code and duration, from Codex when it reports one and otherwise
 measured by the service) is shown on the task's Execution tab and by `cab task get`; no output
-is stored. Claude Code task turns in such a project are admitted `strict` until their harness
-has an escalation seam. An approved command runs with the service user's full access, and
-processes it starts can outlive the turn.
+is stored. A Claude Code task turn at `escalate-approval` keeps its sandbox and runs in `auto`
+permission mode with `allowUnsandboxedCommands: true`, and Bash leaves its allowed tools, so only
+`autoAllowBashIfSandboxed` admits sandboxed Bash. If the settings read does not report
+`supportsAutoMode` for the turn's model (looked up by the model's `value`), the turn waits with
+the named reason `auto mode is not available for model <model>` and is never started in another
+mode. A turn whose start reports another permission mode fails with that reason. Until its start
+confirms `auto`, the hook refuses every Bash call that sets `dangerouslyDisableSandbox`.
+Afterwards, cab's PreToolUse hook holds each such call of the exact admitted turn and process as
+the same `sandbox.escalate` approval. Its identity is the call's `tool_use_id`. Its material is
+the command, the hook's working directory and the call's description as the reason. The hook
+matcher has a 960-second timeout and `onFailure: "block"`, so the 15-minute expiry answers
+first, and a hook failure refuses the call.
+- Approve allows that one call. Decline, expiry or withdrawal refuses it.
+- The exit code comes from Claude Code's post-tool hook. Claude reports no duration, so the
+  service measures it.
+- Claude's auto-mode classifier can still refuse an approved call. cab does not observe that
+  refusal, and the approval then records no exit code
+  ([probe](evidence/2026-11-12-claude-auto-hook-allow-probe.md)). If the classifier asks cab
+  about an accepted call, cab allows that one call once.
+
+At `escalate-approval` and at `unsandboxed`, a Claude Code task turn sets
+`BASH_MAX_TIMEOUT_MS=3600000`. That is a request ceiling, not an execution bound: a command that
+times out moves to the background and keeps running. An approved command runs with the service
+user's full access, and processes it starts can outlive the turn.
 At `escalate-auto-review` a Codex task turn sends the same sandbox and granular approval policy
 with `approvalsReviewer: "auto_review"`: Codex's reviewer decides each escalation instead of the
 operator, as an extra model call on the operator's account whose availability depends on the
@@ -1731,9 +1752,10 @@ another version is a disclosed limit
 Codex's ([ADR-1008](adr/1008-claude-code-execution-harness.md)):
 
 - `dontAsk` permissions with an explicit tool allowlist and a `PreToolUse` hook that
-  denies calls outside policy.
+  denies calls outside policy. A task turn at `escalate-approval` uses `auto` instead.
 - Shell commands run in Claude Code's Seatbelt sandbox with no network and no
-  unsandboxed retry.
+  unsandboxed retry. At `escalate-approval`, a command runs outside it only after the
+  operator approves it.
 - A sandbox self-test runs before each turn; if it fails, the work waits visibly.
 - Each task has its own sandbox temporary directory (`CLAUDE_CODE_TMPDIR`).
 - File-editing tools are confined by the hook, not by the OS sandbox.

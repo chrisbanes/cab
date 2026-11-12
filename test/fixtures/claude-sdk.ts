@@ -19,12 +19,19 @@ export interface Session {
   options: Options;
   child: ChildProcess;
   prompt: SDKUserMessage | undefined;
-  /** `agent` is set when the hook fires from within a subagent. */
+  /** `agent` is set when the hook fires from within a subagent; `signal` replaces the hook's own. */
   hook(
     toolName: string,
     toolInput: unknown,
     toolUseId: string,
     agent?: { id: string; type?: string },
+    signal?: AbortSignal,
+  ): Promise<unknown>;
+  /** Asks the permission callback, as auto mode's classifier does for an undecided call. */
+  canUseTool(
+    toolName: string,
+    toolInput: Record<string, unknown>,
+    toolUseId: string,
   ): Promise<unknown>;
   /** Invokes the PostToolUse or PostToolUseFailure hook the way the CLI does. */
   postHook(
@@ -54,6 +61,7 @@ export const fakeModels = [
     description: "",
     supportsEffort: true,
     supportedEffortLevels: ["low", "medium", "high", "xhigh", "max"],
+    supportsAutoMode: true,
   },
 ];
 
@@ -160,12 +168,13 @@ export function fakeSdk(
             options,
             child,
             prompt: first.value,
-            hook: (toolName, toolInput, toolUseId, agent) => {
+            hook: (toolName, toolInput, toolUseId, agent, signal) => {
               const hook = options.hooks?.PreToolUse?.[0]
                 ?.hooks[0] as HookCallback;
               return hook(
                 {
                   hook_event_name: "PreToolUse",
+                  ...(options.cwd ? { cwd: options.cwd } : {}),
                   tool_name: toolName,
                   ...(toolName.startsWith("mcp__cab__")
                     ? { mcp_server: { name: "cab", source: "sdk" } }
@@ -180,8 +189,16 @@ export function fakeSdk(
                     : {}),
                 } as never,
                 toolUseId,
-                { signal: forwarded.signal },
+                { signal: signal ?? forwarded.signal },
               );
+            },
+            canUseTool: (toolName, toolInput, toolUseId) => {
+              assert.ok(options.canUseTool);
+              return options.canUseTool(toolName, toolInput, {
+                signal: forwarded.signal,
+                toolUseID: toolUseId,
+                requestId: `request-${toolUseId}`,
+              });
             },
             postHook: (toolName, toolInput, toolUseId, outcome, agent) => {
               const failed = "error" in outcome;
@@ -265,11 +282,12 @@ export function fakeSdk(
   return { sdk, sessions, queries, optionsSeen };
 }
 
-export const init = (sessionId: string) => ({
+export const init = (sessionId: string, permissionMode?: string) => ({
   type: "system",
   subtype: "init",
   session_id: sessionId,
   claude_code_version: "2.1.296",
+  ...(permissionMode ? { permissionMode } : {}),
 });
 export const result = (
   sessionId: string,

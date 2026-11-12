@@ -348,11 +348,17 @@ test("a drafting run, a draft turn and an unadmitted turn never record the unsan
     );
     assert.equal(f.state.begin(drafting.id, { projectId }), true);
     assert.equal(f.state.sandboxLevel(drafting.id), "strict");
-    assert.equal(f.state.unsandboxedApplies(drafting.id, projectId), false);
+    assert.equal(
+      f.state.applicableSandboxLevel(drafting.id, projectId),
+      "strict",
+    );
 
     const waiting = ready(taskB, "claude");
     assert.equal(f.state.sandboxLevel(waiting.id), null);
-    assert.equal(f.state.unsandboxedApplies(waiting.id, projectId), true);
+    assert.equal(
+      f.state.applicableSandboxLevel(waiting.id, projectId),
+      "unsandboxed",
+    );
 
     new SchedulerStore(f.db);
     const state = new ExecutionState(f.db);
@@ -362,11 +368,14 @@ test("a drafting run, a draft turn and an unadmitted turn never record the unsan
         "INSERT INTO turn_requests (requestKey, workId, kind, prompt, state, draftTurn) VALUES (?, ?, 'assignment', 'Draft', 'active', 1)",
       )
       .run(randomUUID(), draft.workId);
-    assert.equal(state.unsandboxedApplies(draft.id, projectId), false);
+    assert.equal(state.applicableSandboxLevel(draft.id, projectId), "strict");
     assert.equal(state.begin(draft.id, { projectId }), true);
     assert.equal(state.sandboxLevel(draft.id), "strict");
     setSandbox("strict");
-    assert.equal(f.state.unsandboxedApplies(waiting.id, projectId), false);
+    assert.equal(
+      f.state.applicableSandboxLevel(waiting.id, projectId),
+      "strict",
+    );
     assert.equal(admit(waiting), true);
   } finally {
     f.close();
@@ -374,7 +383,7 @@ test("a drafting run, a draft turn and an unadmitted turn never record the unsan
 });
 
 for (const level of ["escalate-approval", "escalate-auto-review"] as const)
-  test(`only a Codex task turn is admitted at the ${level} level; the rest record strict`, () => {
+  test(`a task turn is admitted at the ${level} level when its harness has the seam; the rest record strict`, () => {
     const { f, setSandbox, ready, admit } = admissionFixture();
     try {
       f.db.exec(
@@ -389,7 +398,11 @@ for (const level of ["escalate-approval", "escalate-auto-review"] as const)
       assert.equal(admit(codex), true);
       assert.equal(admit(claude), true);
       assert.equal(f.state.sandboxLevel(codex.id), level);
-      assert.equal(f.state.sandboxLevel(claude.id), "strict");
+      // Claude Code has the escalate-approval seam; auto-review stays Codex only.
+      assert.equal(
+        f.state.sandboxLevel(claude.id),
+        level === "escalate-approval" ? level : "strict",
+      );
       // A running turn keeps its level; only later admissions see a change.
       assert.equal(f.state.sandboxLevel(earlier.id), "strict");
       const drafting = f.state.create(
@@ -461,7 +474,11 @@ class RecordingRuntime implements Runtime {
     arity: number;
     policy: RuntimeTurnPolicy | undefined;
   }[] = [];
-  preflights: { workspace: string; skipSandbox?: boolean }[] = [];
+  preflights: {
+    workspace: string;
+    skipSandbox?: boolean;
+    sandboxEscalation?: "approval" | "auto-review";
+  }[] = [];
   gate: Promise<void> | undefined;
   entered: (() => void) | undefined;
   private ids = 0;
@@ -473,7 +490,11 @@ class RecordingRuntime implements Runtime {
     return `thread-${++this.ids}`;
   }
   async resumeThread() {}
-  async preflightTurn(input: { workspace: string; skipSandbox?: boolean }) {
+  async preflightTurn(input: {
+    workspace: string;
+    skipSandbox?: boolean;
+    sandboxEscalation?: "approval" | "auto-review";
+  }) {
     this.preflights.push(input);
     return undefined;
   }
@@ -701,7 +722,7 @@ for (const [level, sandboxEscalation] of [
   ["escalate-approval", "approval"],
   ["escalate-auto-review", "auto-review"],
 ] as const)
-  test(`only a Codex task turn runs with the escalation policy when admitted at ${level}`, async (t) => {
+  test(`a task turn runs with the escalation policy when admitted at ${level}, in each harness with the seam`, async (t) => {
     const { service, project, configure, start, turnOf, finished } =
       await recordingService(t);
     for (const harness of ["codex", "claude"] as const) {
@@ -709,16 +730,15 @@ for (const [level, sandboxEscalation] of [
       configure(projectId, { sandbox: level });
       await start(projectId, `${harness} escalate`);
       const intent = await finished();
+      const admitted = harness === "codex" || level === "escalate-approval";
       assert.deepEqual(
         turnOf(intent)?.policy,
-        harness === "codex"
-          ? { networkAccess: false, sandboxEscalation }
-          : undefined,
+        admitted ? { networkAccess: false, sandboxEscalation } : undefined,
         harness,
       );
       assert.equal(
         service.sandboxLevelFor(intent.workId),
-        harness === "codex" ? level : "strict",
+        admitted ? level : "strict",
       );
     }
   });
@@ -774,4 +794,32 @@ test("the service hints skipSandbox to preflight only for a task turn of an unsa
   }
   for (const input of draftPreflights())
     assert.equal("skipSandbox" in input, false);
+});
+
+test("the service hints sandboxEscalation to preflight only for a task turn admitted at an escalate level", async (t) => {
+  const { runtime, project, configure, start, finished } =
+    await recordingService(t);
+  const projectId = project("claude");
+  for (const [level, hint] of [
+    ["strict", "absent"],
+    ["escalate-approval", "approval"],
+    // Claude Code is admitted strict at auto-review, so its preflight asks for nothing.
+    ["escalate-auto-review", "absent"],
+  ] as const) {
+    configure(projectId, { sandbox: level });
+    await start(projectId, `task ${level}`);
+    const intent = await finished();
+    const inputs = runtime.preflights.filter(
+      (input) => input.workspace === intent.workspace,
+    );
+    assert.ok(inputs.length > 0);
+    for (const input of inputs) {
+      assert.equal(
+        "sandboxEscalation" in input ? input.sandboxEscalation : "absent",
+        hint,
+        level,
+      );
+      assert.equal("skipSandbox" in input, false);
+    }
+  }
 });

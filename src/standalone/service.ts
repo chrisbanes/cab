@@ -6531,7 +6531,9 @@ export class StandaloneService {
     }
     if (!binding) throw new Error("Native callback binding unavailable");
     const recovery = state.recoveryIdentity(binding.workId);
-    const currentProcess = runtime.processIdentity?.();
+    const currentProcess = runtime.turnProcessIdentity
+      ? runtime.turnProcessIdentity(identity.threadId, identity.turnId)
+      : runtime.processIdentity?.();
     if (
       !recovery?.processIdentity ||
       !currentProcess ||
@@ -6545,7 +6547,8 @@ export class StandaloneService {
 
   /**
    * Takes an escalation of an exact running turn admitted at escalate-approval (ADR-1034); false
-   * leaves the request to the runtime's denial and unexpected-request hold. The request then
+   * leaves the request to the runtime's denial: Codex's unexpected-request hold, or Claude's hook
+   * refusing that one call, which records nothing. The request then
    * holds the turn's callback, and with it its slot and writer, until it is answered or withdrawn.
    */
   private handleSandboxEscalation(
@@ -10074,13 +10077,19 @@ export class StandaloneService {
             const settings = this.turnSettings(request);
             // A stale hint fails closed: admission records the setting itself, and a
             // sandboxed turn keeps `failIfUnavailable: true`.
-            const skipSandbox =
-              request.projectId !== null &&
-              state.unsandboxedApplies(intent.id, request.projectId);
+            const level =
+              request.projectId === null
+                ? "strict"
+                : state.applicableSandboxLevel(intent.id, request.projectId);
             return preflight({
               workspace: workspaceKey,
               ...(settings ? { settings } : {}),
-              ...(skipSandbox ? { skipSandbox: true } : {}),
+              ...(level === "unsandboxed" ? { skipSandbox: true } : {}),
+              ...(level === "escalate-approval"
+                ? { sandboxEscalation: "approval" as const }
+                : level === "escalate-auto-review"
+                  ? { sandboxEscalation: "auto-review" as const }
+                  : {}),
             });
           })(),
           () => failed,

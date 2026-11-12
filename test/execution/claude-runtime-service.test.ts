@@ -450,6 +450,7 @@ interface ClaudeHarnessControls {
   hangIdentity?: boolean;
   /** The `claude` the runtime finds; `null` is none on the PATH. Defaults to a fixture path. */
   executable?: string | null;
+  sandboxEscalationExpiryMs?: number;
 }
 
 /** The service with the real ClaudeRuntime over a scripted SDK and a fake Codex. */
@@ -517,6 +518,9 @@ function claudeHarness(
       routingClient: null,
       terminationVerifier: verifier,
       supervisor: { observationMs: 3000 },
+      ...(controls.sandboxEscalationExpiryMs === undefined
+        ? {}
+        : { sandboxEscalationExpiryMs: controls.sandboxEscalationExpiryMs }),
     },
   );
   const execute = (command: Record<string, unknown>) =>
@@ -1245,4 +1249,203 @@ test("a started Claude runtime's supported settings and effective policy parse i
   const settings = run.service.harnessSettings("claude");
   assert.ok(settings && settings.models.length > 0);
   assert.deepEqual(run.service.harnessStatuses()[1]?.settings, settings);
+});
+
+type EscalationApproval = {
+  interactionId: string;
+  revision: number;
+  action: string | null;
+  material: { command?: string; reason?: string | null };
+};
+const flaggedBash = (command: string) => ({
+  command,
+  dangerouslyDisableSandbox: true,
+  description: "needs host Chromium",
+});
+const permission = (value: unknown) =>
+  (value as { hookSpecificOutput?: { permissionDecision?: string } })
+    .hookSpecificOutput?.permissionDecision;
+
+/** A Claude task in a project at escalate-approval, and the operator's Inbox controls. */
+async function claudeEscalation(
+  t: { after: (fn: () => Promise<void> | void) => void },
+  scripts: Script[],
+  expiryMs?: number,
+) {
+  const run = await claudeServiceRun(t, scripts, {
+    selfTest: true,
+    verified: true,
+    ...(expiryMs === undefined ? {} : { sandboxEscalationExpiryMs: expiryMs }),
+  });
+  const { projectId, worker } = run.setup();
+  run.execute({
+    type: "project.configure",
+    projectId,
+    expectedVersion: Number(run.service.domain().project(projectId).version),
+    sandbox: "escalate-approval",
+  });
+  const { taskId, workId } = await run.claudeTask(projectId, worker);
+  const api = new OperatorApi(run.service, [run.root]);
+  const approvals = async () =>
+    (await api.readTask(taskId)).data.approvals as EscalationApproval[];
+  const decide = async (decision: "approved" | "denied") => {
+    let pending: EscalationApproval | undefined;
+    await waitUntil(() => {
+      pending = run.service
+        .coordinationView()
+        .readTask(taskId)
+        .approvals.find(
+          (a) => a.action === "sandbox.escalate" && a.status === "open",
+        ) as EscalationApproval | undefined;
+      return pending !== undefined;
+    }, run.describe);
+    const approval = (await approvals()).find(
+      (a) => a.interactionId === pending!.interactionId,
+    )!;
+    await api.execute({
+      type: "approval.decide",
+      key: randomUUID(),
+      taskId,
+      interactionId: approval.interactionId,
+      expectedRevision: approval.revision,
+      decision,
+      action: approval.action!,
+      material: approval.material,
+    } as never);
+    return approval;
+  };
+  const escalations = async () =>
+    (await api.readTask(taskId)).data.sandboxEscalations ?? [];
+  return { ...run, taskId, workId, decide, escalations, approvals };
+}
+
+test("a Claude escalate-approval turn holds a flagged Bash call for the Inbox: approve allows it once with its exit code, decline refuses it", {
+  skip: slashTmpDenied(),
+}, async (t) => {
+  const decisions: unknown[] = [];
+  let decided: Promise<unknown> = Promise.resolve();
+  let run!: Awaited<ReturnType<typeof claudeEscalation>>;
+  run = await claudeEscalation(t, [
+    async function* (session) {
+      yield init(sessionOf(session), "auto");
+      const approved = session.hook(
+        "Bash",
+        flaggedBash("node chromium.mjs"),
+        "toolu_esc_approve",
+      );
+      decided = run.decide("approved");
+      decisions.push(await approved);
+      await session.postHook(
+        "Bash",
+        flaggedBash("node chromium.mjs"),
+        "toolu_esc_approve",
+        { response: { stdout: "", stderr: "", interrupted: false } },
+      );
+      const declined = session.hook(
+        "Bash",
+        flaggedBash("echo declined"),
+        "toolu_esc_decline",
+      );
+      await decided;
+      decided = run.decide("denied");
+      decisions.push(await declined);
+      yield result(sessionOf(session));
+    },
+  ]);
+  await waitUntil(
+    () => run.intent(run.workId)?.state === "completed",
+    run.describe,
+  );
+  {
+    const base = run.intent(run.workId)?.workspace;
+    t.after(() => releaseTemporaryBase(base));
+  }
+  await decided;
+  assert.deepEqual(decisions.map(permission), ["allow", "deny"]);
+  assert.equal(run.sessions[0]?.options.permissionMode, "auto");
+  const read = await run.escalations();
+  assert.deepEqual(
+    read.map((e) => ({
+      command: e.command,
+      decider: e.decider,
+      decision: e.decision,
+      exitCode: e.exitCode,
+      durationSource: e.durationSource,
+    })),
+    [
+      {
+        command: "node chromium.mjs",
+        decider: "operator",
+        decision: "accept",
+        exitCode: 0,
+        // Claude reports no duration, so the service measures it.
+        durationSource: "service",
+      },
+      {
+        command: "echo declined",
+        decider: "operator",
+        decision: "decline",
+        exitCode: null,
+        durationSource: null,
+      },
+    ],
+  );
+  assert.equal(typeof read[0]?.durationMs, "number");
+  const [approval] = await run.approvals();
+  assert.equal(approval?.material.reason, "needs host Chromium");
+});
+
+test("a Claude escalation is declined at expiry, and one whose turn process does not match the admitted one is refused", {
+  skip: slashTmpDenied(),
+}, async (t) => {
+  const decisions: unknown[] = [];
+  let run!: Awaited<ReturnType<typeof claudeEscalation>>;
+  run = await claudeEscalation(
+    t,
+    [
+      async function* (session) {
+        yield init(sessionOf(session), "auto");
+        const runtime = (
+          run.service as unknown as { runtimes: Map<string, ClaudeRuntime> }
+        ).runtimes.get("claude")!;
+        const own = runtime.turnProcessIdentity.bind(runtime);
+        runtime.turnProcessIdentity = (threadId, turnId) => {
+          const identity = own(threadId, turnId);
+          return identity && { ...identity, processId: "999999" };
+        };
+        decisions.push(
+          await session.hook(
+            "Bash",
+            flaggedBash("echo foreign"),
+            "toolu_foreign",
+          ),
+        );
+        runtime.turnProcessIdentity = own;
+        decisions.push(
+          await session.hook(
+            "Bash",
+            flaggedBash("echo expired"),
+            "toolu_expired",
+          ),
+        );
+        yield result(sessionOf(session));
+      },
+    ],
+    100,
+  );
+  await waitUntil(
+    () => run.intent(run.workId)?.state === "completed",
+    run.describe,
+  );
+  {
+    const base = run.intent(run.workId)?.workspace;
+    t.after(() => releaseTemporaryBase(base));
+  }
+  assert.deepEqual(decisions.map(permission), ["deny", "deny"]);
+  const read = await run.escalations();
+  // The mismatched call reached no Inbox; the other expired unanswered.
+  assert.deepEqual(
+    read.map((e) => [e.command, e.decider, e.decision]),
+    [["echo expired", "expiry", "decline"]],
+  );
 });
