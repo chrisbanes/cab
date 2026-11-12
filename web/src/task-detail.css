@@ -1373,7 +1373,8 @@ a.task-source-chip:hover {
   display: flex;
   flex-direction: column;
   gap: var(--space-4);
-  min-width: max-content;
+  width: max-content;
+  max-width: min(32rem, calc(100vw - 32px));
   padding: var(--space-8);
   border: 1px solid var(--line-strong);
   border-radius: var(--radius-xl);
