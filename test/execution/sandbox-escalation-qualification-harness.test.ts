@@ -895,3 +895,117 @@ test("claude auto group sends auto mode with unsandboxed commands allowed and re
   assert.match(text, /claude-1\/<fixture>-ws/);
   assert.ok(!text.includes(homedir().replace(/\//g, "-")));
 });
+
+test("the escalate-approval live run refuses anything but --live --one-attempt and creates nothing", () => {
+  const roots = () =>
+    existsSync(join(homedir(), ".cache"))
+      ? readdirSync(join(homedir(), ".cache")).filter((name) =>
+          name.startsWith("cab-escalate-approval-live-"),
+        )
+      : [];
+  const before = roots();
+  for (const args of [
+    [],
+    ["--live"],
+    ["--one-attempt", "--live"],
+    ["--live", "--one-attempt", "extra"],
+  ]) {
+    const result = spawnSync(
+      process.execPath,
+      [join(directory, "live-escalate-approval.mjs"), ...args],
+      { encoding: "utf8", timeout: 10_000 },
+    );
+    assert.equal(result.status, 2, args.join(" "));
+    assert.match(result.stderr, /Refusing/);
+    assert.equal(result.stdout, "");
+  }
+  assert.deepEqual(roots(), before);
+});
+
+test("the escalate-approval cells prove only from present evidence", async () => {
+  const {
+    approveCell,
+    declineCell,
+    interruptCell,
+    approvalCallbacks,
+    ESCALATION_POLICY,
+  } = await load("escalate-approval-outcomes.mjs");
+  const approve = {
+    wire: {
+      approvalPolicy: ESCALATION_POLICY,
+      approvalsReviewer: "user",
+      sandboxType: "workspaceWrite",
+    },
+    results: { control: "browserType.launch: EPERM", escalated: "ok" },
+    escalations: [
+      {
+        label: "escalated",
+        decider: "operator",
+        decision: "accept",
+        outcome: "approved",
+        exitCode: 0,
+        durationMs: 900,
+      },
+    ],
+    unexpected: [],
+  };
+  assert.equal(approveCell(approve).proved, true);
+  // No result file is never "ran outside", and a passing control is no sandbox evidence.
+  assert.equal(approveCell({ ...approve, results: {} }).proved, false);
+  assert.equal(
+    approveCell({ ...approve, results: { control: "ok", escalated: "ok" } })
+      .proved,
+    false,
+  );
+  assert.equal(
+    approveCell({ ...approve, unexpected: ["unmatched-native-resolution"] })
+      .proved,
+    false,
+  );
+  assert.equal(
+    approveCell({
+      ...approve,
+      wire: { ...approve.wire, approvalPolicy: "never" },
+    }).proved,
+    false,
+  );
+  const decline = {
+    resume: { ok: true, approvalPolicy: ESCALATION_POLICY },
+    results: { control: "EPERM", escalated: "ok" },
+    escalations: [
+      {
+        label: "declined",
+        decider: "operator",
+        decision: "decline",
+        outcome: "declined",
+        exitCode: null,
+      },
+    ],
+    turnState: "completed",
+    unexpected: [],
+  };
+  assert.equal(declineCell(decline).proved, true);
+  assert.equal(declineCell({ ...decline, resume: null }).proved, false);
+  assert.equal(
+    declineCell({ ...decline, resume: { ok: false, error: "schema" } }).proved,
+    false,
+  );
+  assert.equal(
+    declineCell({ ...decline, results: { declined: "ok" } }).proved,
+    false,
+  );
+  assert.deepEqual(interruptCell({}), {
+    escalationObserved: false,
+    withdrawnObsolete: false,
+    resolvedAfterInterrupt: null,
+    unmatchedResolutions: 0,
+  });
+  assert.deepEqual(
+    approvalCallbacks([
+      { itemId: "a", hasApprovalId: false },
+      { itemId: "a", hasApprovalId: true },
+      { itemId: "b", hasApprovalId: false },
+    ]),
+    { requests: 3, withApprovalId: 1, itemsWithSeveral: 1 },
+  );
+});
