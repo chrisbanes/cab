@@ -1,7 +1,10 @@
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import { startCliService, loginCli } from "../fixtures/operator-cli.js";
-import { NoTurnRuntime } from "../fixtures/recovery-generations.js";
+import {
+  NoTurnRuntime,
+  reconcileAsBefore,
+} from "../fixtures/recovery-generations.js";
 import { until } from "../fixtures/until.js";
 import type { TerminationVerification } from "../../src/standalone/recovery-types.js";
 import { PROCESS_STILL_PRESENT } from "../../src/standalone/termination.js";
@@ -14,6 +17,9 @@ export class BoundRuntime extends NoTurnRuntime {
   complete = false;
   approval = false;
   seedConversation = false;
+  beforeObservationLost:
+    | ((threadId: string, turnId: string) => void)
+    | undefined;
   readonly resumed: string[] = [];
   override async resumeThread(threadId?: string) {
     this.resumed.push(threadId ?? "");
@@ -45,7 +51,10 @@ export class BoundRuntime extends NoTurnRuntime {
           material: { digest: "retained-exact-material" },
         },
       });
-    if (!this.complete) throw new Error("Bound runtime observation lost");
+    if (!this.complete) {
+      this.beforeObservationLost?.(threadId, turnId);
+      throw new Error("Bound runtime observation lost");
+    }
     return super.waitForTurn(threadId, turnId);
   }
 }
@@ -75,6 +84,20 @@ export async function boundWorld(
     | "hang" = options.mode ?? "verified";
   let gate: Promise<void> | undefined;
   let checks = 0;
+  // Without release options each lost turn is held as an earlier build left it: an
+  // unfinished callback keeps release off it until `reconcile` records that build's receipt.
+  const callbacks = new Map<string, () => void>();
+  if (!options.heldTurnRelease)
+    runtime.beforeObservationLost = (threadId, turnId) => {
+      const intent = s.f.service
+        .list()
+        .find((i) => i.threadId === threadId && i.turnId === turnId);
+      assert.ok(intent);
+      s.f.service.registerExecutionCallback(
+        intent.workId,
+        new Promise<void>((resolve) => callbacks.set(intent.workId, resolve)),
+      );
+    };
   const verifier = {
     async verify(
       identity: typeof runtime.identity,
@@ -113,9 +136,13 @@ export async function boundWorld(
       power: { enabled: false },
       routingClient: null,
       terminationVerifier: verifier,
-      // Without options it runs as an earlier build, so tests can record legacy receipts.
-      heldTurnRelease: options.heldTurnRelease ?? false,
+      ...(options.heldTurnRelease && {
+        heldTurnRelease: options.heldTurnRelease,
+      }),
     },
+  });
+  t.after(() => {
+    for (const end of callbacks.values()) end();
   });
   const command = (body: Record<string, unknown>) =>
     s.f.service
@@ -246,6 +273,14 @@ export async function boundWorld(
     runtime,
     command,
     recovery,
+    /** Records the earlier build's receipt for a held turn, then ends its callback. */
+    async reconcile(command: BoundTurnRecoveryCommand = recovery()) {
+      const result = await reconcileAsBefore(s.f.service, command);
+      callbacks.get(command.receipt.workId)?.();
+      callbacks.delete(command.receipt.workId);
+      await new Promise((resolve) => setImmediate(resolve));
+      return result;
+    },
     checks: () => checks,
     setMode: (next: typeof mode) => {
       mode = next;

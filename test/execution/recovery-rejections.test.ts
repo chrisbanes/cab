@@ -17,7 +17,6 @@ import {
 import { RecoveryRejectedError } from "../../src/standalone/recovery-types.js";
 import { StandaloneService } from "../../src/standalone/service.js";
 import {
-  replaceConversationAsBefore,
   controllableVerifier,
   type GenerationMode,
   generationRuntime,
@@ -48,19 +47,10 @@ async function world(t: T, mode: GenerationMode) {
     rmSync(directory, { recursive: true, force: true });
   });
   const g = await holdGeneration(service, runtime, mode);
-  const replace = (fields: Record<string, number> = {}, key = randomUUID()) =>
-    replaceConversationAsBefore(service, {
-      key,
-      assignmentId: g.assignmentId,
-      expectedAssignmentVersion: 1,
-      expectedConversationRevision: 1,
-      ...fields,
-    });
   return {
     service,
     g,
     verifier,
-    replace,
     async stop() {
       stopped = true;
       await service.stop();

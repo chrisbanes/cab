@@ -99,7 +99,6 @@ function required<T>(value: T | undefined | null): T {
 async function fixture() {
   const directory = mkdtempSync(join(tmpdir(), "cab-no-turn-"));
   const runtime = new NoTurnRuntime();
-  let verified = true;
   const makeService = () =>
     bindLegacyHold(
       runtime,
@@ -108,17 +107,12 @@ async function fixture() {
         routingClient: null,
         terminationVerifier: {
           async verify(identity) {
-            return verified
-              ? {
-                  kind: "verified",
-                  processIdentity: identity,
-                  verifiedAt: "2026-10-03T10:05:00.000Z",
-                  method: "mac-pid-absent-same-boot",
-                }
-              : {
-                  kind: "unknown",
-                  reason: "Independent termination unavailable",
-                };
+            return {
+              kind: "verified",
+              processIdentity: identity,
+              verifiedAt: "2026-10-03T10:05:00.000Z",
+              method: "mac-pid-absent-same-boot",
+            };
           },
         },
       }),
@@ -276,9 +270,6 @@ async function fixture() {
     adoption,
     message,
     oldMessage,
-    setVerified: (v: boolean) => {
-      verified = v;
-    },
   };
 }
 async function close(
@@ -368,20 +359,8 @@ test("a no-turn witness adopted by an earlier build recovers exact admitted owne
       },
     );
     const input = recovery(f, adopted.witnessId);
-    f.setVerified(false);
-    await assert.rejects(reconcileAsBefore(service, input), /termination/);
-    assert.equal(
-      service.recoveryView().find((r) => r.workId === f.old.workId)?.holds
-        .capacity,
-      true,
-    );
-    f.setVerified(true);
-    const results = await Promise.all([
-      reconcileAsBefore(service, input),
-      reconcileAsBefore(service, input),
-    ]);
-    assert.deepEqual(results[0], results[1]);
-    assert.deepEqual(await reconcileAsBefore(service, input), results[0]);
+    const result = await reconcileAsBefore(service, input);
+    assert.deepEqual(await reconcileAsBefore(service, input), result);
     assert.equal(f.runtime.turnInvocations.length, 0);
     assert.equal(
       service.turnRequests().find((r) => r.workId === f.old.workId)?.state,
@@ -462,7 +441,7 @@ test("a no-turn witness adopted by an earlier build recovers exact admitted owne
     await service.stop();
     service = f.makeService();
     await service.start();
-    assert.deepEqual(await reconcileAsBefore(service, input), results[0]);
+    assert.deepEqual(await reconcileAsBefore(service, input), result);
     assert.deepEqual(replaceConversationAsBefore(service, replacement), {
       revision: 2,
     });
@@ -471,49 +450,6 @@ test("a no-turn witness adopted by an earlier build recovers exact admitted owne
     assert.equal(f.runtime.turnInvocations.length, 1);
   } finally {
     await close(f, service);
-  }
-});
-
-test("an earlier adoption's key keeps its scope and its witness keeps recovery's checks", async () => {
-  const f = await fixture();
-  try {
-    const adopted = { witnessId: adoptAsBefore(f.service, f.adoption) };
-    assert.throws(
-      () =>
-        replaceConversationAsBefore(f.service, {
-          key: f.adoption.key,
-          assignmentId: f.assignmentId,
-          expectedAssignmentVersion: 1,
-          expectedConversationRevision: 1,
-        }),
-      /key.*different material/,
-    );
-    const input = recovery(f, adopted.witnessId);
-    await assert.rejects(
-      f.service.resolveHeldExecution(input.receipt),
-      /keyed command/,
-    );
-    await assert.rejects(
-      reconcileAsBefore(f.service, {
-        ...input,
-        receipt: { ...input.receipt, witnessId: randomUUID() },
-      }),
-      /persisted witness/,
-    );
-    await assert.rejects(
-      reconcileAsBefore(f.service, {
-        ...input,
-        receipt: { ...input.receipt, kind: "pre-turn-rejection" },
-      }),
-      /pre-turn|receipt kinds/i,
-    );
-    assert.equal(
-      f.service.recoveryView().find((r) => r.workId === f.old.workId)?.holds
-        .capacity,
-      true,
-    );
-  } finally {
-    await close(f);
   }
 });
 
@@ -715,16 +651,14 @@ test("JSON no-turn commands retain bounded witnesses in the curated API", async 
         f.adoption.evidence.invocationLedgerSha256,
       ),
     );
-    // The retired recover command is refused; its receipt is recorded only as before.
-    const input = recovery(f, witness.id);
+    // The retired recover command is refused.
     await assert.rejects(
       api.execute({
         type: "recovery.no-turn.recover",
         assignmentId: f.assignmentId,
-        ...input,
+        ...recovery(f, witness.id),
       } as never),
     );
-    await reconcileAsBefore(f.service, input);
   } finally {
     await close(f);
   }

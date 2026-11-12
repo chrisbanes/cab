@@ -248,9 +248,10 @@ installed prototype may be used as a fixture. The
 [dated record](evidence/issue-1416-signal-recovery-2026-11-02.md) qualifies both
 adapters' foreground signal restart for non-imported tasks; its CLI bound-turn recovery
 case used the retired receipt path, so the held-turn release case is not yet
-re-qualified live. The native user-setup lifecycle qualification's crash case still
-drives that retired receipt path through test internals, so it does not qualify
-held-turn release either. It does not qualify the installed LaunchAgent restart, repeated
+re-qualified live. The native user-setup lifecycle qualification's crash case now
+expects held-turn release and an explicit Start again that delivers the crashed batch
+once; only its offline contract test has run, so it is not yet re-qualified live
+either. The dated record does not qualify the installed LaunchAgent restart, repeated
 signals, descendant containment, or the restart of imported tasks, which still hold
 (#1454).
 
@@ -509,8 +510,8 @@ evidence. Per-scenario dispositions for A01–A30 and R01–R10 are in the
 - **Operations, recovery and cutover** (R06) — **Bounded.** A disposable launchd
   service lifecycle with database backup/restore passed, and current-schema backup,
   verify and restore with exact owned-process recovery passed locally. Deterministic
-  tests prove restored-execution receipt reconciliation, independent Stop/Resume and
-  one post-recovery admission; the launchd proof restores populated paused/unready
+  tests prove that a restored Stop keeps an ended turn held until Resume, independent
+  Stop/Resume and one post-restore admission; the launchd proof restores populated paused/unready
   records and confirms start, restart and stop without admission, and injects no live
   recovery receipt. Actual old-work disposition and cutover are unproved. Evidence:
   [operations](evidence/s08a-operations-2026-09-30.md),
@@ -595,7 +596,8 @@ evidence. Per-scenario dispositions for A01–A30 and R01–R10 are in the
   driver (`npm run mixed-runtime:live`) passed each journey on Claude Code `2.1.296` (scrub,
   Stop and crash on their second attempt after harness repairs, Stop on `sonnet`): Claude-only, Codex lead with a Claude worker, Stop, and a service crash
   recovered through the service seam (no operator route) on the same session. The
-  token scrub is qualified for sandboxed Bash only. Untested surfaces, including
+  crash journey now expects held-turn release and Start again instead, which is not
+  yet re-qualified live. The token scrub is qualified for sandboxed Bash only. Untested surfaces, including
   the launchd-installed service, other platforms and token expiry, remain limits.
   Evidence: [Claude journeys](evidence/issue-827-claude-journeys-2026-10-12.md).
 

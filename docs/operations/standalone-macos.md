@@ -1279,8 +1279,8 @@ workspace paths remain evidence. A managed workspace restored under a different
 installation root is rejected by identity before access to the old path and
 remains held for operator recovery; external workspace contents are not copied.
 Held-turn release still checks the persisted execution generation and independent
-Stop, writer and capacity holds after a restore. A deterministic fixture proves exact
-handling of retired receipts an earlier build recorded and one post-restore admission.
+Stop, writer and capacity holds after a restore. A deterministic fixture proves that a
+restored Stop keeps an ended turn held until Resume, and one post-restore admission.
 The disposable launchd proof instead preserves a paused project and unready task
 across restore/restart and admits no work.
 

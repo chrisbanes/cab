@@ -2,35 +2,35 @@ import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import { mkdtempSync, rmSync } from "node:fs";
 import { join } from "node:path";
+import { DatabaseSync } from "node:sqlite";
 import { test } from "node:test";
-import { tmpdir } from "../fixtures/temp.js";
-import {
-  reconcileAsBefore,
-  replaceConversationAsBefore,
-  adoptAsBefore,
-  bindLegacyHold,
-  failing,
-} from "../fixtures/recovery-generations.js";
-import { StandaloneService } from "../../src/standalone/service.js";
-import { OperatorApi } from "../../src/standalone/operator-api.js";
 import type {
   Runtime,
   RuntimeToolCall,
   RuntimeToolResult,
   UnexpectedRequest,
 } from "../../src/standalone/codex.js";
+import { OperatorApi } from "../../src/standalone/operator-api.js";
+import {
+  ArchivedResumeRejectedError,
+  archivedResumeMessage,
+  type HistoricalPreTurnAdoption,
+  type PreTurnRecoveryCommand,
+} from "../../src/standalone/pre-turn-recovery.js";
 import type {
   RecoveryReceipt,
   RuntimeProcessIdentity,
 } from "../../src/standalone/recovery-types.js";
-import { DatabaseSync } from "node:sqlite";
+import { StandaloneService } from "../../src/standalone/service.js";
 import {
-  type HistoricalPreTurnAdoption,
-  type PreTurnRecoveryCommand,
-  ArchivedResumeRejectedError,
-  archivedResumeMessage,
-} from "../../src/standalone/pre-turn-recovery.js";
+  adoptAsBefore,
+  bindLegacyHold,
+  failing,
+  reconcileAsBefore,
+  replaceConversationAsBefore,
+} from "../fixtures/recovery-generations.js";
 import { startedOf } from "../fixtures/service-internals.js";
+import { tmpdir } from "../fixtures/temp.js";
 import { until } from "../fixtures/until.js";
 
 function deferred() {
@@ -42,6 +42,7 @@ function deferred() {
 }
 class RecoveryContinuationRuntime implements Runtime {
   beforeFailure: ((error: Error) => void) | undefined;
+  beforeFailedTurn: (() => void) | undefined;
   turns = 0;
   threads = 0;
   prompts: string[] = [];
@@ -106,7 +107,10 @@ class RecoveryContinuationRuntime implements Runtime {
       assert.equal(r.success, true);
       return "completed" as const;
     }
-    if (turn === this.failedTurn) return "failed" as const;
+    if (turn === this.failedTurn) {
+      this.beforeFailedTurn?.();
+      return "failed" as const;
+    }
     if (this.holdSuccessor) await this.successorGate.promise;
     const r = await this.listener({
       threadId,
@@ -167,28 +171,28 @@ async function heldFixture(
     });
   }
   if (preTurn) runtime.failedTurn = 0;
-  let verified = true;
+  // An unfinished callback keeps held-turn release off the failed bound turn until the
+  // test records the earlier build's receipt for it.
+  const callback = deferred();
+  runtime.beforeFailedTurn = () => {
+    const running = service.list().find((i) => i.state === "running");
+    assert.ok(running);
+    service.registerExecutionCallback(running.workId, callback.promise);
+  };
   const makeService = () =>
     bindLegacyHold(
       runtime,
       new StandaloneService(join(directory, "data"), () => runtime, undefined, {
         power: { enabled: false },
         routingClient: null,
-        // An earlier build: these generations reconcile through recorded receipts.
-        heldTurnRelease: false,
         terminationVerifier: {
           async verify(identity) {
-            return verified
-              ? {
-                  kind: "verified",
-                  processIdentity: identity,
-                  verifiedAt: "2026-10-03T10:05:00.000Z",
-                  method: "mac-pid-absent-same-boot",
-                }
-              : {
-                  kind: "unknown",
-                  reason: "Synthetic process is not proven ended",
-                };
+            return {
+              kind: "verified",
+              processIdentity: identity,
+              verifiedAt: "2026-10-03T10:05:00.000Z",
+              method: "mac-pid-absent-same-boot",
+            };
           },
         },
       }),
@@ -316,15 +320,25 @@ async function heldFixture(
     message,
     answer,
     pause,
-    setVerified(value: boolean) {
-      verified = value;
+    /** Records the earlier build's receipt for the held generation, then ends the callback. */
+    async reconcile(current = service) {
+      const resolved = await reconcileAsBefore(current, { receipt });
+      await settle(callback);
+      return resolved;
     },
+    endCallback: () => settle(callback),
   };
+}
+async function settle(callback: ReturnType<typeof deferred>) {
+  callback.resolve();
+  await callback.promise;
+  await new Promise((resolve) => setImmediate(resolve));
 }
 async function close(
   f: Awaited<ReturnType<typeof heldFixture>>,
   current = f.service,
 ) {
+  await f.endCallback();
   await current.stop();
   rmSync(f.directory, { recursive: true, force: true });
 }
@@ -340,7 +354,7 @@ test("validated recovery requires a new operator message, processes old batch wi
   const f = await heldFixture();
   let service = f.service;
   try {
-    const resolved = await service.resolveHeldExecution(f.receipt);
+    const resolved = await f.reconcile();
     const { coordination, state, db } = internals(service);
     assert.equal(
       state.isNeverAdmittedRefusedAssignmentWork(f.old.workId),
@@ -475,7 +489,7 @@ test("a shared comment's input delivery records the recovery continuation; a rec
   const f = await heldFixture();
   let service = f.service;
   try {
-    await service.resolveHeldExecution(f.receipt);
+    await f.reconcile(service);
     await service.configureCapacity({
       key: randomUUID(),
       minimumLeadSlots: 0,
@@ -548,7 +562,7 @@ test("a shared comment's input delivery records the recovery continuation; a rec
 test("an invalidated recovery continuation keeps the successor waiting without scanning every request", async () => {
   const f = await heldFixture();
   try {
-    await f.service.resolveHeldExecution(f.receipt);
+    await f.reconcile();
     f.pause(true);
     await f.service.coordinationView().postOperatorMessage(f.message);
     const { db, coordination } = internals(f.service);
@@ -637,7 +651,7 @@ test("an invalidated recovery continuation keeps the successor waiting without s
 test("lead recovery candidates prove only receipt-backed reconciled turns, not ordinary held history", async () => {
   const f = await heldFixture();
   try {
-    await f.service.resolveHeldExecution(f.receipt);
+    await f.reconcile();
     const { db, coordination, state } = internals(f.service);
     const assignmentId = String(f.old.assignmentId);
     const copies = (reason: string | null, prefix: string) =>
@@ -698,7 +712,7 @@ test("lead recovery candidates prove only receipt-backed reconciled turns, not o
 test("the lead recovery candidate query is driven by recovery receipts, not assignment history", async () => {
   const f = await heldFixture();
   try {
-    await f.service.resolveHeldExecution(f.receipt);
+    await f.reconcile();
     const { db, coordination } = internals(f.service);
     const assignmentId = String(f.old.assignmentId);
     const prepare = db.prepare.bind(db);
@@ -729,37 +743,14 @@ test("the lead recovery candidate query is driven by recovery receipts, not assi
   }
 });
 
-test("wrong or unproved recovery never upgrades a pre-recovery message on replay", async () => {
+test("a message posted before recovery is never upgraded on replay", async () => {
   const f = await heldFixture();
   try {
-    for (const altered of [
-      { ...f.receipt, requestSequence: f.receipt.requestSequence + 1 },
-      { ...f.receipt, workRevision: (f.receipt.workRevision ?? 0) + 1 },
-      { ...f.receipt, threadId: "wrong-thread" },
-      { ...f.receipt, turnId: "wrong-turn" },
-      {
-        ...f.receipt,
-        processIdentity: {
-          ...f.receipt.processIdentity,
-          processId: "wrong-process",
-        },
-      },
-    ])
-      await assert.rejects(
-        f.service.resolveHeldExecution(altered as RecoveryReceipt),
-        /generation|identity/,
-      );
-    f.setVerified(false);
-    await assert.rejects(
-      f.service.resolveHeldExecution(f.receipt),
-      /could not be verified/,
-    );
     const event = await f.service
       .coordinationView()
       .postOperatorMessage(f.message);
     assert.equal(audit(f.service, f.old.workId), undefined);
-    f.setVerified(true);
-    await f.service.resolveHeldExecution(f.receipt);
+    await f.reconcile();
     internals(f.service).coordination.ensureDeliveryEventWithinTransaction(
       f.taskId,
       "Confirmed PR feedback",
@@ -816,7 +807,7 @@ test("recovery generation proof rejects changed identity, admission/effects and 
       const f = await heldFixture();
       const callback = deferred();
       try {
-        await f.service.resolveHeldExecution(f.receipt);
+        await f.reconcile();
         const { db } = internals(f.service);
         if (witness === "request-sequence")
           db.prepare(
@@ -881,7 +872,7 @@ test("recorded recovery continuation still enforces current profile, dependency 
     await t.test(gate, async () => {
       const f = await heldFixture();
       try {
-        await f.service.resolveHeldExecution(f.receipt);
+        await f.reconcile();
         if (gate === "profile")
           command(f.service, {
             type: "profile.configure",
@@ -934,7 +925,7 @@ test("every admission revalidates the recorded audit and current recovered proof
     await t.test(witness, async () => {
       const f = await heldFixture();
       try {
-        await f.service.resolveHeldExecution(f.receipt);
+        await f.reconcile();
         f.pause(true);
         const message = await f.service
           .coordinationView()
@@ -993,7 +984,7 @@ test("late callback or known survivor after recorded continuation persistently h
       let service = f.service;
       const callback = deferred();
       try {
-        await service.resolveHeldExecution(f.receipt);
+        await f.reconcile(service);
         const oldIntent = service.list().find((i) => i.workId === f.old.workId);
         const oldRequest = service
           .turnRequests()
@@ -1103,7 +1094,7 @@ test("late callback or known survivor after recorded continuation persistently h
 test("completed Stop history survives Resume without becoming a new recovery gate", async () => {
   const f = await heldFixture();
   try {
-    await f.service.resolveHeldExecution(f.receipt);
+    await f.reconcile();
     internals(f.service)
       .db.prepare(
         `INSERT INTO execution_stop_targets
@@ -1145,8 +1136,7 @@ test("a reconciled Stop target does not answer a later Stop of the successor", a
     );
     await f.service.resumeTask(f.taskId);
     assert.equal(state.stopTarget(f.old.workId)?.terminalState, "failed");
-    await f.service.resolveHeldExecution(f.receipt);
-    assert.equal(state.stopTarget(f.old.workId), undefined);
+    await f.reconcile();
     // Settled history beside the live target must not end the observation early.
     db.prepare(
       `INSERT INTO execution_stop_targets
@@ -1194,7 +1184,7 @@ test("reopening removes Stop targets an earlier build kept for reconciled work",
   const f = await heldFixture();
   let service = f.service;
   try {
-    await service.resolveHeldExecution(f.receipt);
+    await f.reconcile(service);
     const { db } = internals(service);
     db.prepare(
       "INSERT INTO execution_intents (id, workId, prompt, workspace, state, reason, threadId, turnId, accountType, sandbox, approval) VALUES (?, 'unreconciled', 'Fixture', '/tmp', 'held', 'Fixture hold', NULL, NULL, 'chatgpt', 'workspaceWrite', 'never')",
@@ -1242,17 +1232,8 @@ test("positively rejected archived resume stays held until keyed recovery, conve
       /unresolved execution/,
     );
     f.pause(true);
-    const recoveryCommand = preTurnRecovery(f);
-    const concurrent = await Promise.all([
-      reconcileAsBefore(f.service, recoveryCommand),
-      reconcileAsBefore(f.service, recoveryCommand),
-    ]);
-    assert.deepEqual(
-      concurrent[0],
-      concurrent[1],
-      "same command concurrent replay is atomic",
-    );
-    assert.equal(f.runtime.turns, 1, "receipt replay must not dispatch");
+    await reconcileAsBefore(f.service, preTurnRecovery(f));
+    assert.equal(f.runtime.turns, 1, "a receipt must not dispatch");
     const beforeReplacement = {
       ...f.message,
       key: randomUUID(),
@@ -1373,40 +1354,6 @@ test("a pre-turn witness adopted by an earlier build recovers with immutable com
     assert.equal(f.runtime.turns, 1);
     f.pause(true);
     const recovery = preTurnRecovery(f, adopted.witnessId);
-    f.setVerified(false);
-    await assert.rejects(
-      reconcileAsBefore(service, recovery),
-      /termination could not be verified/,
-    );
-    assert.equal(
-      service.recoveryView().find((r) => r.workId === f.old.workId)?.holds
-        .capacity,
-      true,
-    );
-    f.setVerified(true);
-    for (const receipt of [
-      { ...recovery.receipt, witnessId: randomUUID() },
-      { ...recovery.receipt, workRevision: recovery.receipt.workRevision + 1 },
-      {
-        ...recovery.receipt,
-        requestSequence: recovery.receipt.requestSequence + 1,
-      },
-      { ...recovery.receipt, threadId: "thread-1" },
-      {
-        ...recovery.receipt,
-        processIdentity: {
-          ...f.runtime.identity,
-          processStartedAt: "other-birth",
-        },
-      },
-      { ...recovery.receipt, effects: "unknown" },
-    ])
-      await assert.rejects(async () =>
-        reconcileAsBefore(service, {
-          key: randomUUID(),
-          receipt,
-        } as PreTurnRecoveryCommand),
-      );
     const resolved = await reconcileAsBefore(service, recovery);
     assert.deepEqual(await reconcileAsBefore(service, recovery), resolved);
     await assert.rejects(
@@ -1436,11 +1383,6 @@ test("a pre-turn witness adopted by an earlier build recovers with immutable com
           expectedConversationRevision: 2,
         }),
       /key was reused/,
-    );
-    assert.throws(
-      () =>
-        replaceConversationAsBefore(service, { ...replace, key: randomUUID() }),
-      /stale/,
     );
     const fresh = await service
       .coordinationView()
@@ -1498,60 +1440,12 @@ test("a pre-turn witness adopted by an earlier build recovers with immutable com
   }
 });
 
-test("ambiguous resume errors and mismatched structured identities retain admitted ownership", async (t) => {
-  for (const mode of [
-    "historical",
-    "timeout",
-    "wrong-process",
-    "wrong-thread",
-  ] as const)
-    await t.test(mode, async () => {
-      const f = await heldFixture(mode);
-      try {
-        const record = required(
-          f.service.recoveryView().find((r) => r.workId === f.old.workId),
-        );
-        assert.equal(record.preTurnRejection, undefined);
-        assert.equal(record.intent.threadId, null);
-        assert.equal(record.intent.turnId, null);
-        assert.equal(record.holds.writer, true);
-        assert.equal(record.holds.capacity, true);
-        assert.equal(f.runtime.turns, 1);
-        await assert.rejects(async () =>
-          reconcileAsBefore(f.service, {
-            key: randomUUID(),
-            receipt: {
-              ...f.receipt,
-              kind: "pre-turn-rejection",
-              workRevision: required(f.receipt.workRevision),
-              threadId: null,
-              turnId: null,
-              witnessId: randomUUID(),
-            },
-          }),
-        );
-        assert.throws(
-          () =>
-            replaceConversationAsBefore(f.service, {
-              key: randomUUID(),
-              assignmentId: required(f.old.assignmentId),
-              expectedAssignmentVersion: 1,
-              expectedConversationRevision: 1,
-            }),
-          /unresolved execution/,
-        );
-      } finally {
-        await close(f);
-      }
-    });
-});
-
 test("nullable receipt migration preserves existing bound-turn receipt and continuation audit material byte for byte", async () => {
   const f = await heldFixture();
   let service = f.service;
   try {
     f.pause(true);
-    await service.resolveHeldExecution(f.receipt);
+    await f.reconcile(service);
     await service.coordinationView().postOperatorMessage(f.message);
     const before = internals(service);
     const receipt = JSON.stringify(
@@ -1641,7 +1535,7 @@ test("nullable receipt migration preserves existing bound-turn receipt and conti
 test("local review records a message without releasing held recovery; ordinary message still does", async () => {
   const f = await heldFixture();
   try {
-    await f.service.resolveHeldExecution(f.receipt);
+    await f.reconcile();
     f.pause(true);
     const coordination = internals(f.service).coordination;
     const before = coordination.deliveryForWork(f.old.workId);
@@ -1974,7 +1868,7 @@ test("receipt migration rejects unknown column order, constraints, indexes and t
       let service = f.service;
       try {
         f.pause(true);
-        await service.resolveHeldExecution(f.receipt);
+        await f.reconcile(service);
         await service.coordinationView().postOperatorMessage(f.message);
         const retained = JSON.stringify(audit(service, f.old.workId));
         await service.stop();
@@ -2090,7 +1984,7 @@ test("R4 witness storage initialization preserves existing R2 and R3 receipt and
         if (preTurn) {
           await reconcileAsBefore(service, preTurnRecovery(f));
           service.replaceConversation(required(f.old.assignmentId));
-        } else await service.resolveHeldExecution(f.receipt);
+        } else await f.reconcile(service);
         await service.coordinationView().postOperatorMessage(f.message);
         const retained = () =>
           JSON.stringify({

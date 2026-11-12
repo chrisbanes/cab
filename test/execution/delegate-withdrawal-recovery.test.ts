@@ -7,10 +7,7 @@ import { startedOf } from "../fixtures/service-internals.js";
 import { until } from "../fixtures/until.js";
 import { ManualRestartClock } from "../fixtures/restart-clock.js";
 import { boundWorld } from "./bound-turn-recovery-fixture.js";
-import {
-  reconcileAsBefore,
-  replaceConversationAsBefore,
-} from "../fixtures/recovery-generations.js";
+import { replaceConversationAsBefore } from "../fixtures/recovery-generations.js";
 
 /** Recovers the held bound turn of `assignmentId` through the receipt an earlier build recorded. */
 async function recoverHeldTurn(
@@ -44,7 +41,7 @@ async function recoverHeldTurn(
       record.processIdentity &&
       record.generation.workRevision,
   );
-  await reconcileAsBefore(service, {
+  await w.reconcile({
     key: randomUUID(),
     assignmentId,
     receipt: {

@@ -2,6 +2,8 @@ import assert from "node:assert/strict";
 import { createHash, randomUUID } from "node:crypto";
 import type { DatabaseSync } from "node:sqlite";
 import { z } from "zod";
+import { canonicalMaterial } from "../../src/core/delivery.js";
+import { transaction } from "../../src/core/store.js";
 import type {
   Runtime,
   RuntimeToolCall,
@@ -13,6 +15,10 @@ import {
   archivedResumeMessage,
   type HistoricalNoTurnAdoption,
   type HistoricalPreTurnAdoption,
+  type RecoveryReceipt,
+  type ReplaceConversationCommand,
+  recoveryReceiptSchema,
+  replaceConversationCommandSchema,
 } from "../../src/standalone/pre-turn-recovery.js";
 import type {
   RuntimeProcessIdentity,
@@ -20,10 +26,9 @@ import type {
   TerminationVerifier,
 } from "../../src/standalone/recovery-types.js";
 import type { StandaloneService } from "../../src/standalone/service.js";
-import { canonicalMaterial } from "../../src/core/delivery.js";
 import { databaseDigest } from "./database-digest.js";
-import { activeWorkIdsOf, startedOf } from "./service-internals.js";
 import { loginCli, startCliService } from "./operator-cli.js";
+import { activeWorkIdsOf, startedOf } from "./service-internals.js";
 import { until } from "./until.js";
 
 /** Runs the runtime's pre-failure hook, then returns the error to throw. */
@@ -662,38 +667,147 @@ export async function cliGeneration(
 }
 
 /**
- * Records a recovery receipt as an earlier build's retired recover command did, replaying a
- * recorded key, so tests can hold the legacy reconciled generations that still read back.
+ * Writes the rows the retired recover command wrote for a held generation, exactly as an
+ * earlier build left them, replaying a recorded key. A keyless call is the retired direct
+ * receipt, which recorded no command.
  */
 export async function reconcileAsBefore(
   service: StandaloneService,
-  command: {
-    key: string;
-    receipt: Parameters<
-      ReturnType<typeof startedOf>["supervisor"]["resolveHeldExecution"]
-    >[0];
-    assignmentId?: string;
-  },
-) {
-  const { state, supervisor } = startedOf(service);
+  command: { key?: string; receipt: RecoveryReceipt; assignmentId?: string },
+): Promise<{ id: string; workId: string; state: "reconciled" }> {
+  const { state } = startedOf(service);
+  const receipt = recoveryReceiptSchema.parse(command.receipt);
   const scope =
-    command.receipt.kind === "bound-turn"
+    receipt.kind === "bound-turn"
       ? "recover-bound-turn"
-      : command.receipt.kind === "no-turn-submission"
+      : receipt.kind === "no-turn-submission"
         ? "recover-no-turn"
         : "recover";
-  return (
-    state.preTurnCommandReplay(scope, command) ??
-    supervisor.resolveHeldExecution(command.receipt, command)
-  );
+  const keyed =
+    command.key === undefined ? undefined : { ...command, key: command.key };
+  const replay = keyed && state.preTurnCommandReplay(scope, keyed);
+  if (replay)
+    return replay as { id: string; workId: string; state: "reconciled" };
+  const { workId } = receipt;
+  const witness =
+    receipt.kind === "pre-turn-rejection" ||
+    receipt.kind === "no-turn-submission"
+      ? (
+          state as unknown as Record<
+            string,
+            (workId: string) => { id: string } | undefined
+          >
+        )[
+          receipt.kind === "no-turn-submission"
+            ? "noTurnWitnessForWork"
+            : "witnessForWork"
+        ]?.call(state, workId)
+      : undefined;
+  if (
+    receipt.kind === "pre-turn-rejection" ||
+    receipt.kind === "no-turn-submission"
+  )
+    assert.equal(witness?.id, receipt.witnessId, "the exact persisted witness");
+  // The retired supervisor recorded the verified exit before the receipt.
+  state.recordRecoveryObservation(workId, "termination-verified");
+  const raw = db(service);
+  const result = { id: randomUUID(), workId, state: "reconciled" as const };
+  const now = Date.now();
+  transaction(raw, () => {
+    assert.equal(
+      raw
+        .prepare(`UPDATE execution_intents
+        SET state = 'reconciled', reason = 'Execution reconciled from validated recovery receipt'
+        WHERE workId = ? AND state = 'held'`)
+        .run(workId).changes,
+      1,
+      "a held generation",
+    );
+    raw
+      .prepare("DELETE FROM execution_stop_targets WHERE workId = ?")
+      .run(workId);
+    raw
+      .prepare(`INSERT INTO execution_recovery_receipts
+      (id, workId, workRevision, requestSequence, threadId, turnId, processId,
+        processStartedAt, bootId, terminationMethod, terminationVerifiedAt,
+        effectsState, workspaceDisposition, createdAt)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'mac-pid-absent-same-boot', ?, 'settled', ?, ?)`)
+      .run(
+        result.id,
+        workId,
+        receipt.workRevision,
+        receipt.requestSequence,
+        receipt.threadId,
+        receipt.turnId,
+        receipt.processIdentity.processId,
+        receipt.processIdentity.processStartedAt,
+        receipt.processIdentity.bootId,
+        new Date(now).toISOString(),
+        receipt.workspace,
+        now,
+      );
+    if (witness)
+      raw
+        .prepare(
+          `INSERT INTO ${receipt.kind === "no-turn-submission" ? "execution_no_turn_receipts" : "execution_pre_turn_receipts"} (receiptId,workId,witnessId,witnessMaterial) VALUES (?,?,?,?)`,
+        )
+        .run(result.id, workId, witness.id, canonicalMaterial(witness));
+    raw
+      .prepare(`UPDATE execution_pending_effects SET state = 'settled', reason = NULL
+      WHERE workId = ? AND state = 'pending'`)
+      .run(workId);
+    raw
+      .prepare("DELETE FROM execution_capacity_reservations WHERE workId = ?")
+      .run(workId);
+    raw
+      .prepare(`UPDATE turn_requests SET state = 'held',
+      reason = 'Execution reconciled; no automatic successor' WHERE workId = ?`)
+      .run(workId);
+    raw
+      .prepare(`INSERT INTO execution_recovery_observations
+      (id, workId, kind, reason, recordedAt) VALUES (?, ?, 'receipt-accepted', ?, ?)`)
+      .run(
+        randomUUID(),
+        workId,
+        "A validated recovery receipt resolved this generation",
+        now,
+      );
+    if (keyed) recordCommandAsBefore(raw, scope, keyed, result);
+  });
+  return result;
 }
 
 /** The retired conversation-replacement command, as an earlier build recorded it. */
 export function replaceConversationAsBefore(
   service: StandaloneService,
-  command: Parameters<
-    ReturnType<typeof startedOf>["state"]["replaceConversationCommand"]
-  >[0],
-) {
-  return startedOf(service).state.replaceConversationCommand(command);
+  command: ReplaceConversationCommand,
+): { revision: number } {
+  const { state } = startedOf(service);
+  const value = replaceConversationCommandSchema.parse(command);
+  const replay = state.preTurnCommandReplay("replace-conversation", value);
+  if (replay) return replay as { revision: number };
+  const raw = db(service);
+  return transaction(raw, () => {
+    const result = { revision: state.replaceConversation(value.assignmentId) };
+    recordCommandAsBefore(raw, "replace-conversation", value, result);
+    return result;
+  });
+}
+
+function recordCommandAsBefore(
+  raw: DatabaseSync,
+  scope: string,
+  command: { key: string },
+  result: unknown,
+): void {
+  raw
+    .prepare(
+      "INSERT INTO execution_pre_turn_commands (commandKey,scope,payloadMaterial,result) VALUES (?,?,?,?)",
+    )
+    .run(
+      command.key,
+      scope,
+      canonicalMaterial(command),
+      JSON.stringify(result),
+    );
 }

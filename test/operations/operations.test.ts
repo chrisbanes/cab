@@ -30,7 +30,6 @@ import type {
 import { StandaloneDataDirectory } from "../../src/standalone/data-directory.js";
 import { StandaloneService } from "../../src/standalone/service.js";
 import type {
-  RecoveryReceipt,
   RuntimeProcessIdentity,
   TerminationVerifier,
 } from "../../src/standalone/recovery-types.js";
@@ -832,7 +831,7 @@ test("operations npm commands are strict, secret-safe, and do not start the serv
   }
 });
 
-test("restored public state reconciles exact execution evidence before one eligible admission", async () => {
+test("restored public state keeps exact execution holds until Resume before one eligible admission", async () => {
   const root = mkdtempSync(join(tmpdir(), "cab-restore-journey-"));
   const sourceData = join(root, "source-install", "data");
   const destinationData = join(root, "restored-install", "data");
@@ -876,8 +875,6 @@ test("restored public state reconciles exact execution evidence before one eligi
       power: { enabled: false },
       routingClient,
       supervisor: { observationMs: 1 },
-      // An earlier build: these generations reconcile through recorded receipts.
-      heldTurnRelease: false,
     },
   );
   let restoredService: StandaloneService | undefined;
@@ -972,6 +969,8 @@ test("restored public state reconciles exact execution evidence before one eligi
       expectedAssignmentVersion: Number(routedAssignment.version),
       message: "Preserve this operator message in the snapshot.",
     });
+    // Stopped before it fails, so the Stop holds the ended turn until Resume.
+    await sourceService.stopTask(routedTaskId);
     sourceRuntime.finish("turn-1", "failed");
     await until(
       () =>
@@ -983,7 +982,6 @@ test("restored public state reconciles exact execution evidence before one eligi
               item.state === "held",
           ) === true,
     );
-    await sourceService.stopTask(routedTaskId);
 
     const direct = sourceService.submit(
       directWorkId,
@@ -1075,8 +1073,6 @@ test("restored public state reconciles exact execution evidence before one eligi
         power: { enabled: false },
         routingClient: null,
         supervisor: { observationMs: 1 },
-        // An earlier build: these generations reconcile through recorded receipts.
-        heldTurnRelease: false,
         terminationVerifier,
         workspaceManager: {
           beforePathAccess: (path) => restoredPathAccesses.push(path),
@@ -1144,31 +1140,6 @@ test("restored public state reconciles exact execution evidence before one eligi
     assert.ok(directView.processIdentity);
     assert.equal(directView.intent.state, "held");
     assert.equal(routedView.intent.state, "held");
-    const receipt: RecoveryReceipt = {
-      workId: directView.workId,
-      workRevision: directView.generation.workRevision,
-      requestSequence: directView.generation.requestSequence,
-      threadId: directView.intent.threadId,
-      turnId: directView.intent.turnId,
-      processIdentity: directView.processIdentity,
-      termination: { kind: "process-exit" },
-      effects: "settled",
-      workspace: "preserved",
-    };
-    await assert.rejects(
-      restoredService.resolveHeldExecution({
-        ...receipt,
-        turnId: "stale-turn",
-      }),
-      /identity/i,
-    );
-    const resolved = await restoredService.resolveHeldExecution(receipt);
-    assert.equal(resolved.state, "reconciled");
-    const afterReceipt = restoredService
-      .recoveryView()
-      .find((item) => item.workId === directWorkId);
-    assert.equal(afterReceipt?.holds.writer, false);
-    assert.equal(afterReceipt?.holds.capacity, false);
     assert.equal(
       restoredService
         .recoveryView()
@@ -1180,6 +1151,8 @@ test("restored public state reconciles exact execution evidence before one eligi
 
     await restoredService.resumeTask(routedTaskId);
     assert.equal(restoredService.taskHold(routedTaskId), undefined);
+    // Resume clears the Stop, so cab releases the ended turn and dispatches nothing.
+    await until(() => restoredService?.heldTurnReleased(routedWorkId) === true);
     assert.equal(
       (await restoredService.taskWorkspace(routedTaskId))?.state,
       "held",
@@ -1224,7 +1197,6 @@ test("restored public state reconciles exact execution evidence before one eligi
         power: { enabled: false },
         routingClient: null,
         supervisor: { observationMs: 1 },
-        heldTurnRelease: false,
       },
     );
     await restoredService.start();

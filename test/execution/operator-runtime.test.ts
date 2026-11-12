@@ -10,6 +10,7 @@ import type { RuntimeProcessIdentity } from "../../src/standalone/recovery-types
 import { StandaloneService } from "../../src/standalone/service.js";
 import { OperatorApi } from "../../src/standalone/operator-api.js";
 import { until } from "../fixtures/until.js";
+import { reconcileAsBefore } from "../fixtures/recovery-generations.js";
 
 const runtime: Runtime = {
   async start() {},
@@ -334,16 +335,19 @@ test("the assignment recovery read retains scoped records and holds", async (t) 
   assert.ok(firstRecord.intent.turnId);
   assert.ok(firstRecord.processIdentity);
   const firstTurnId = firstRecord.intent.turnId;
-  await service.resolveHeldExecution({
-    workId: firstRecord.workId,
-    workRevision: firstRecord.generation.workRevision,
-    requestSequence: firstRecord.generation.requestSequence,
-    threadId: firstRecord.intent.threadId,
-    turnId: firstTurnId,
-    processIdentity: firstRecord.processIdentity,
-    termination: { kind: "process-exit" },
-    effects: "settled",
-    workspace: "reconciled",
+  // The Stop keeps held-turn release off the turn while its earlier-build receipt is recorded.
+  await reconcileAsBefore(service, {
+    receipt: {
+      workId: firstRecord.workId,
+      workRevision: firstRecord.generation.workRevision,
+      requestSequence: firstRecord.generation.requestSequence,
+      threadId: firstRecord.intent.threadId,
+      turnId: firstTurnId,
+      processIdentity: firstRecord.processIdentity,
+      termination: { kind: "process-exit" },
+      effects: "settled",
+      workspace: "reconciled",
+    },
   });
   runtime.finish(firstTurnId, "failed");
   await service.resumeTask(taskId);

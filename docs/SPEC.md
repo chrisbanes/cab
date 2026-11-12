@@ -405,9 +405,10 @@ blocker's target, and the retarget is accepted under the rule for bound change r
 below. Every other merge, including a merge-train merge, sends no removal flag, and cab
 neither requests nor relies on removal by project or merge request defaults. The decision is
 made before preflight, recorded with the attempt and rechecked at the effect boundary. A
-stacked dependent whose lower layers are all merged but whose accepted base is not the
-repository link's base is held before any request as `stacked-pr-retarget-pending`, so it
-never merges into a merged layer's branch; GitLab's retarget or Unstack lifts the hold.
+stacked dependent whose lower layers are all merged but whose accepted base is not the base
+the stack's bottom task's workspace resolved to (the base a retarget is accepted against, else
+the repository link's ref) is held before any request as `stacked-pr-retarget-pending`, so it never merges
+into a merged layer's branch; GitLab's retarget or Unstack lifts the hold.
 Unstack is one target-branch edit (below), and the outside-rebase adoption rule applies to a
 GitLab dependent after an accepted retarget. A GitLab dependent's head does not move when
 GitLab retargets it, so normally nothing is adopted and the dependent merges as it is.

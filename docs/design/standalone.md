@@ -499,10 +499,9 @@ Codex CLI and native host commands. Passwords and shell wrappers are absent
 from the plist. The opt-in LaunchDaemon form adds only `UserName` and `HOME`
 ([ADR-1011](../adr/1011-packaging-and-distribution.md)).
 
-A deterministic restored-service fixture proves wrong/exact handling of the
-retired recovery receipts an earlier build recorded, independent Stop/Resume
-behavior and exactly one admitted turn after reconciliation; it runs without
-held-turn release, so it does not qualify that release. The bounded
+A deterministic restored-service fixture proves that a restored Stop keeps an
+ended turn held until Resume, that held-turn release then dispatches nothing,
+and exactly one admitted turn after the Stop clears. The bounded
 [macOS launchd evidence](../evidence/s08a-operations-2026-09-30.md) proves the
 per-user service lifecycle and backup/restore of populated paused/unready
 public records; that live fixture admits no work and does not inject an exact

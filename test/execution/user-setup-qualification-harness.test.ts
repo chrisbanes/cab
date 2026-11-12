@@ -365,7 +365,7 @@ test("consolidated native allowance preserves history and starts final validatio
   );
 });
 
-test("the lifecycle driver completes four bounded offline native turns, retains crash ownership and resumes only explicitly", {
+test("the lifecycle driver completes four bounded offline native turns, releases the crashed turn and resumes only through Start again", {
   skip: process.platform !== "darwin" || processIdentityDenied(),
   timeout: 60_000,
 }, async (t) => {
@@ -431,6 +431,8 @@ test("the lifecycle driver completes four bounded offline native turns, retains 
   assert.equal(evidence.turns.length, 4);
   assert.ok(evidence.checks.recovery.noBlindResubmission);
   assert.ok(evidence.checks.recovery.sameThread);
+  assert.ok(evidence.checks.recovery.released);
+  assert.ok(evidence.checks.recovery.startAgainDeliveredOnce);
   assert.equal(readGrant(path).turns.length, 4);
   assert.ok(
     evidence.cleanup.every((c: { exited?: boolean }) => c.exited === true),

@@ -15,7 +15,6 @@ import type {
   ExactExecutionIdentity,
   ExecutionInspection,
   RecoveryRecord,
-  RecoveryReceipt,
   RuntimeProcessIdentity,
   TerminationVerifier,
 } from "../../src/standalone/recovery-types.js";
@@ -249,23 +248,6 @@ function recoveryRecord(
   return record;
 }
 
-function receiptFor(record: RecoveryRecord): RecoveryReceipt {
-  assert.ok(record.processIdentity);
-  assert.ok(record.intent.threadId);
-  assert.ok(record.intent.turnId);
-  return {
-    workId: record.workId,
-    workRevision: record.generation.workRevision,
-    requestSequence: record.generation.requestSequence,
-    threadId: record.intent.threadId,
-    turnId: record.intent.turnId,
-    processIdentity: record.processIdentity,
-    termination: { kind: "process-exit" },
-    effects: "settled",
-    workspace: "preserved",
-  };
-}
-
 test("integrates yielding, pause, Stop, restart reconciliation and exact recovery without replay", async () => {
   const root = mkdtempSync(join(tmpdir(), "cab-s03b-integration-"));
   const dataDir = join(root, "data");
@@ -409,9 +391,8 @@ test("integrates yielding, pause, Stop, restart reconciliation and exact recover
     );
     assert.equal(observed.holds.writer, true);
     assert.equal(observed.holds.capacity, true);
-    const resolved = await recovered.resolveHeldExecution(receiptFor(observed));
-    assert.equal(resolved.state, "reconciled");
-    assert.equal(recovered.capacityLimits().currentUsage.global, 0);
+    // The Stop keeps the ended turn, its writer and capacity held until Resume.
+    assert.equal(recovered.capacityLimits().currentUsage.global, 1);
     assert.equal(recovered.taskHold(child.taskId), "Task stopped");
     assert.equal(
       recovered.recordTaskResult(child.workId, "stale child result"),
@@ -419,6 +400,8 @@ test("integrates yielding, pause, Stop, restart reconciliation and exact recover
     );
 
     await recovered.resumeTask(child.taskId);
+    // Resume clears the Stop, so cab releases the ended turn; nothing replays it.
+    await until(() => recovered?.heldTurnReleased(child.workId) === true);
     await restartRuntime.waitForTurnNumber(1);
     restartRuntime.complete(1);
     await until(

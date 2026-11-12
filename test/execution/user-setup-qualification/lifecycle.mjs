@@ -26,6 +26,9 @@ const complete =
   "This is a disposable native harness qualification. Do not change files or use external integrations, skills, subagents or background work. Call cab_report_result exactly once with summary NATIVE_LIFECYCLE_DONE_1569, then end the turn. Do not complete the assignment or task.";
 const sleep =
   "This is a disposable native harness qualification. Use the ordinary sandboxed shell tool to run /bin/sleep 120 synchronously. Do not use background execution, subagents, external integrations or other commands. The operator will interrupt it. Do not call cab_report_result before the command ends.";
+// Bounded and harmless to run again: Start again delivers the crashed turn's batch afresh.
+const crashing =
+  "This is a disposable native harness qualification. Use the ordinary sandboxed shell tool to run /bin/sleep 10 synchronously, then call cab_report_result exactly once with summary NATIVE_LIFECYCLE_DONE_1569 and end the turn. Running it again is harmless. Do not use background execution, subagents, external integrations or other commands. Do not complete the assignment or task.";
 
 /** Reuse only the approved, unchanged Stop proof; never count a failed seed as completed. */
 export function retainedClaudeStop(grant) {
@@ -218,7 +221,7 @@ export async function lifecycle(path, harnesses = ["claude", "codex"]) {
             event.itemType === "commandExecution" &&
             event.phase === "started" &&
             typeof event.command === "string" &&
-            event.command.includes("sleep 120")
+            /\bsleep (?:120|10)\b/.test(event.command)
           )
             commands.add(event.turnId);
           listener(event);
@@ -251,6 +254,7 @@ export async function lifecycle(path, harnesses = ["claude", "codex"]) {
           turnId: null,
           startedAt: Date.now(),
           terminal: null,
+          crashBatch: String(prompt).includes(crashing),
         };
         evidence.turns.push(entry);
         const timer = setTimeout(() => {
@@ -285,8 +289,6 @@ export async function lifecycle(path, harnesses = ["claude", "codex"]) {
         runtimeHarnesses: [harness],
         power: { enabled: false },
         routingClient: null,
-        // The approved crash proof reconciles through a receipt, as the build it qualified.
-        heldTurnRelease: false,
       });
     const command = (body) =>
       service
@@ -450,7 +452,7 @@ export async function lifecycle(path, harnesses = ["claude", "codex"]) {
             c.turnId === seed.intent.turnId,
         ),
       );
-      await followUp(taskId, seed, sleep);
+      await followUp(taskId, seed, crashing);
       const interrupted = await running(taskId);
       retainIdentity(interrupted.processIdentity);
       const children = await descendants(interrupted.processIdentity);
@@ -463,22 +465,26 @@ export async function lifecycle(path, harnesses = ["claude", "codex"]) {
         Date.now() + 10_000,
         "crashed runtime exit",
       );
+      // Held, or already released once cab verifies the crashed process is gone.
       await until(
         () =>
+          service.heldTurnReleased(interrupted.workId) ||
           records(taskId).find(
             (r) => r.workId === interrupted.workId && r.intent.state === "held",
           ),
         Date.now() + 10_000,
-        "uncertainty hold",
+        "crashed turn held or released",
       );
       await service.stop();
       service = make();
       await service.start();
-      const held = records(taskId).find((r) => r.workId === interrupted.workId);
-      assert.equal(held?.intent.state, "held");
+      // Released before the restart or by start-up, once its process is verified gone.
       assert.ok(
-        held.holds.writer && held.holds.capacity && held.holds.uncertainty,
+        service.heldTurnReleased(interrupted.workId),
+        "The crashed turn is released",
       );
+      const held = records(taskId).find((r) => r.workId === interrupted.workId);
+      assert.ok(!held.holds.writer && !held.holds.capacity);
       await delay(1000);
       assert.equal(
         evidence.turns.length,
@@ -490,33 +496,20 @@ export async function lifecycle(path, harnesses = ["claude", "codex"]) {
         Date.now() + 5000,
         "ended crash callbacks",
       );
-      // The retired recover command's receipt path, which this approved proof qualified.
-      const recover = {
-        key: randomUUID(),
-        assignmentId: held.binding.assignmentId,
-        receipt: {
-          kind: "bound-turn",
-          workId: held.workId,
-          workRevision: held.generation.workRevision,
-          requestSequence: held.generation.requestSequence,
-          threadId: held.intent.threadId,
-          turnId: held.intent.turnId,
-          processIdentity: held.processIdentity,
-          termination: { kind: "process-exit" },
-          effects: "settled",
-          workspace: "preserved",
-        },
-      };
-      await service["started"]().supervisor.resolveHeldExecution(
-        recover.receipt,
-        recover,
-      );
+      const crashDeliveries = () =>
+        evidence.turns.filter((t) => t.crashBatch).length;
       assert.equal(
         evidence.turns.length,
         stopTurns + 2,
-        "Recovery alone must not submit a model turn",
+        "Release alone must not submit a model turn",
       );
-      await followUp(taskId, held, complete);
+      assert.equal(crashDeliveries(), 1, "Only the crashed turn had its batch");
+      await service.startAgain({
+        key: randomUUID(),
+        taskId,
+        expectedVersion: Number(service.domain().task(taskId).version),
+        workId: interrupted.workId,
+      });
       const resumed = await until(
         () =>
           records(taskId).find(
@@ -534,6 +527,8 @@ export async function lifecycle(path, harnesses = ["claude", "codex"]) {
         "Recover the last completed native conversation",
       );
       assert.equal(evidence.turns.length, stopTurns + 3);
+      assert.equal(crashDeliveries(), 2, "Start again delivers the batch once");
+      assert.ok(evidence.turns.at(-1).crashBatch);
       assert.equal(pendingCallbacks, 0);
       assert.ok(
         evidence.callbacks.some(
@@ -546,9 +541,11 @@ export async function lifecycle(path, harnesses = ["claude", "codex"]) {
       );
       evidence.checks.recovery = {
         held: held.holds,
+        released: true,
         explicitContinuation: true,
         sameThread: true,
         noBlindResubmission: true,
+        startAgainDeliveredOnce: true,
       };
       assert.ok(evidence.turns.every((t) => !t.expired));
       retainIdentity(resumed.processIdentity);
