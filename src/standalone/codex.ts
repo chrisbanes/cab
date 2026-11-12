@@ -1075,7 +1075,7 @@ export class CodexRuntime implements Runtime {
     string,
     { turnId: string | null; interrupted?: true }
   >();
-  /** Each thread's last ended review turn, whose late reviews are dropped. */
+  /** Each thread's last ended or replaced turn, whose late reviews and completion are ignored. */
   private readonly endedReviewTurns = new Map<string, string>();
   /** Reviews of current review turns by thread and review, until the turn ends. */
   private readonly reviews = new Map<
@@ -2782,9 +2782,8 @@ export class CodexRuntime implements Runtime {
     this.endReviews("New turn requested", { threadId, drop: true });
     // The thread's earlier turn, review turn or not, is over: its late reviews are dropped, and its
     // late completion never ends this turn's pending start.
-    const priorReviewTurn =
-      this.reviewTurns.get(threadId)?.turnId ?? previousTurn;
-    if (priorReviewTurn) this.endedReviewTurns.set(threadId, priorReviewTurn);
+    const priorTurn = this.reviewTurns.get(threadId)?.turnId ?? previousTurn;
+    if (priorTurn) this.endedReviewTurns.set(threadId, priorTurn);
     if (escalate) this.escalationTurns.set(threadId, null);
     else this.escalationTurns.delete(threadId);
     // An escalation the reviewer does not decide still reaches cab, as at escalate-approval.
