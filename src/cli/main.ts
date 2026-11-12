@@ -62,7 +62,7 @@ import type { CliDeps, Result, Values } from "./types.js";
 import { rejectUnusedFlags } from "./write.js";
 import { stackSummary } from "../operator/stacking-copy.js";
 import {
-  sandboxEscalationCommand,
+  sandboxEscalationCommandUnavailable,
   sandboxEscalationPlace,
   sandboxEscalationResultLine,
 } from "../operator/sandbox-escalation-copy.js";
@@ -955,7 +955,7 @@ async function run(
         ...(read.data.sandboxEscalations ?? []).map(
           (e) =>
             // Model-written, so flattened: a multi-line command cannot fake another line.
-            `Escalation ${e.interactionId}: ${oneLine(sandboxEscalationCommand(e), 200)} ${oneLine(sandboxEscalationPlace(e), 1200)} · ${sandboxEscalationResultLine(e)}`,
+            `Escalation ${e.interactionId}: ${oneLine(e.command ?? sandboxEscalationCommandUnavailable, 200)} ${oneLine(sandboxEscalationPlace(e), 1200)} · ${sandboxEscalationResultLine(e)}`,
         ),
         ...read.data.unresolvedResults.map((r) =>
           r.availability === "available"

@@ -37,21 +37,23 @@ export function escalationDuration(ms: number): string {
   return `${Math.floor(seconds / 60)} min ${seconds % 60} s`;
 }
 
-/** The command as recorded, marked when it was cut to fit the approval limit. */
-export function sandboxEscalationCommand(e: {
-  command: string | null;
-  truncated: boolean;
-}): string {
-  if (e.command === null) return "Command unavailable";
-  return e.truncated ? `${e.command} (cut to fit)` : e.command;
-}
+/** Shown in place of a command the privacy exclusions withhold. */
+export const sandboxEscalationCommandUnavailable = "Command unavailable";
 
-/** Where the command was asked to run: its working directory and workspace state. */
+/**
+ * Where the command was asked to run: its working directory and workspace state, and whether
+ * the command, cwd or reason was cut to fit the approval limit.
+ */
 export function sandboxEscalationPlace(e: {
   cwd: string | null;
   workspace: Parameters<typeof sandboxEscalationWorkspaceLine>[0];
+  truncated: boolean;
 }): string {
-  return `in ${e.cwd ?? "an unavailable directory"} · ${sandboxEscalationWorkspaceLine(e.workspace)}`;
+  return [
+    `in ${e.cwd ?? "an unavailable directory"}`,
+    sandboxEscalationWorkspaceLine(e.workspace),
+    ...(e.truncated ? ["request cut to fit the approval limit"] : []),
+  ].join(" · ");
 }
 
 /** What happened to the escalation and, once an approved command ran, its exit code and duration. */

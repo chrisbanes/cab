@@ -2,7 +2,6 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import {
   escalationDuration,
-  sandboxEscalationCommand,
   sandboxEscalationOutcome,
   sandboxEscalationPlace,
   sandboxEscalationResultLine,
@@ -92,25 +91,18 @@ test("the workspace line names HEAD, branch and uncommitted changes, or says it 
   assert.equal(sandboxEscalationWorkspaceLine(null), "Workspace state unknown");
 });
 
-test("the command and where it runs read the same on both surfaces, a cut command marked", () => {
+test("where the command runs reads the same on both surfaces, a cut request marked", () => {
   assert.equal(
-    sandboxEscalationCommand({ command: "node x", truncated: false }),
-    "node x",
-  );
-  assert.equal(
-    sandboxEscalationCommand({ command: "node x", truncated: true }),
-    "node x (cut to fit)",
-  );
-  assert.equal(
-    sandboxEscalationCommand({ command: null, truncated: false }),
-    "Command unavailable",
-  );
-  assert.equal(
-    sandboxEscalationPlace({ cwd: ".", workspace: null }),
+    sandboxEscalationPlace({ cwd: ".", workspace: null, truncated: false }),
     "in . · Workspace state unknown",
   );
   assert.equal(
-    sandboxEscalationPlace({ cwd: null, workspace: null }),
+    sandboxEscalationPlace({ cwd: null, workspace: null, truncated: false }),
     "in an unavailable directory · Workspace state unknown",
+  );
+  // The mark names the request, since the cwd or reason may be what was cut.
+  assert.equal(
+    sandboxEscalationPlace({ cwd: ".", workspace: null, truncated: true }),
+    "in . · Workspace state unknown · request cut to fit the approval limit",
   );
 });
