@@ -26,11 +26,24 @@ browserTest(
     const r = await module.runQualification({
       fixture: { delayBrowserCreation: true },
     });
-    assert.equal(r.status, "failed");
-    assert.match(r.failure.reason, /browser-start-deadline/);
-    assert.deepEqual(r.counts, { threads: 1, turns: 1, reports: 1 });
-    assert.equal(r.cleanup.operations["pending-setup-settlement"], "settled");
-    assert.equal(r.cleanup.verified, true, JSON.stringify(r.cleanup));
+    const evidence = JSON.stringify({
+      failure: r.failure,
+      timeline: r.timeline,
+      deadlineMs: r.deadlineMs,
+      cleanupDeadlineMs: r.cleanupDeadlineMs,
+      eventLoopDelayMaxMs: r.eventLoopDelayMaxMs,
+      cleanup: r.cleanup,
+    });
+    console.log("late-browser-cleanup-evidence", evidence);
+    assert.equal(r.status, "failed", evidence);
+    assert.match(r.failure.reason, /browser-start-deadline/, evidence);
+    assert.deepEqual(r.counts, { threads: 1, turns: 1, reports: 1 }, evidence);
+    assert.equal(
+      r.cleanup.operations["pending-setup-settlement"],
+      "settled",
+      evidence,
+    );
+    assert.equal(r.cleanup.verified, true, evidence);
   },
 );
 
