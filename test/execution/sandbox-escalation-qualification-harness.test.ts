@@ -1631,3 +1631,23 @@ test("the escalate-auto-review approval cell proves only from its own turn's eve
     observed: false,
   });
 });
+
+test("the committed escalate-auto-review live evidence reclassifies with the current rules", async () => {
+  const { approvalCell, cwdEligibility, denialCells } = await load(
+    "escalate-auto-review-outcomes.mjs",
+  );
+  const evidence = JSON.parse(
+    readFileSync(
+      resolve("docs/evidence/2026-11-12-escalate-auto-review-live.json"),
+      "utf8",
+    ),
+  );
+  assert.deepEqual(
+    {
+      approval: approvalCell(evidence.cell),
+      ...denialCells(evidence.cell),
+      cwdEligibility: cwdEligibility(evidence.cell),
+    },
+    evidence.verdict,
+  );
+});
