@@ -4012,6 +4012,7 @@ function escalationFakeRuntime() {
     "let policy = 'never';",
     "let turns = 0;",
     "const asked = new Map();",
+    "const resend = new Map();",
     "const finish = (turnId) => write({ method: 'turn/completed', params: { threadId: 'thread-1', turn: { id: turnId, status: 'completed' } } });",
     "for await (const line of createInterface({ input: process.stdin })) {",
     "  const message = JSON.parse(line);",
@@ -4031,7 +4032,7 @@ function escalationFakeRuntime() {
     "      asked.set('esc-' + turns, turnId);",
     "      write({ id: 'esc-' + turns, method: 'item/commandExecution/requestApproval', params: { ...base, itemId: 'item-' + turns, command: 'node chromium.mjs', cwd: message.params.cwd, reason: 'needs host Chromium', proposedExecpolicyAmendment: ['node'] } });",
     "      if (prompt === 'escalate-end') finish(turnId);",
-    "      if (prompt === 'escalate-twice') write({ id: 'esc-' + turns, method: 'item/commandExecution/requestApproval', params: { ...base, itemId: 'item-' + turns, command: 'node chromium.mjs', cwd: message.params.cwd, reason: 'needs host Chromium' } });",
+    "      if (prompt === 'escalate-twice') { const again = { id: 'esc-' + turns, method: 'item/commandExecution/requestApproval', params: { ...base, itemId: 'item-' + turns, command: 'node chromium.mjs', cwd: message.params.cwd, reason: 'needs host Chromium' } }; write(again); resend.set(again.id, again); }",
     "      if (prompt === 'escalate-settled') { write({ method: 'item/completed', params: { ...base, item: { id: 'item-' + turns, type: 'commandExecution', status: 'declined', exitCode: null } } }); finish(turnId); }",
     "    } else if (prompt === 'network') {",
     "      write({ id: 'net', method: 'item/commandExecution/requestApproval', params: { ...base, itemId: 'n', command: 'curl x', cwd: message.params.cwd, networkApprovalContext: { host: 'example.invalid' } } });",
@@ -4045,6 +4046,7 @@ function escalationFakeRuntime() {
     "  } else if (message.method === undefined && asked.has(message.id)) {",
     "    const turnId = asked.get(message.id);",
     "    const accepted = message.result?.decision === 'accept';",
+    "    if (resend.has(message.id)) { write(resend.get(message.id)); resend.delete(message.id); }",
     "    write({ method: 'item/completed', params: { threadId: 'thread-1', turnId, item: { id: message.id.replace('esc', 'item'), type: 'commandExecution', status: accepted ? 'completed' : 'declined', exitCode: accepted ? 3 : null, ...(accepted ? { durationMs: 1234 } : {}), aggregatedOutput: 'OUTPUT_SENTINEL' } } });",
     "    finish(turnId);",
     "  }",
@@ -4340,7 +4342,7 @@ test("an escalation the listener refuses is denied, and one left unanswered ends
   }
 });
 
-test("a retransmitted escalation stays one request with one decision; one Codex settles itself ends unanswered", async () => {
+test("a request retransmitted before and after its answer stays one request with one reply; one Codex settles itself ends unanswered", async () => {
   const { root, runtime, replies, cleanup } = escalationFakeRuntime();
   const events: SandboxEscalationEvent[] = [];
   const unexpected: Array<{ method: string }> = [];

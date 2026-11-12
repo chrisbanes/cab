@@ -990,12 +990,6 @@ export class CodexRuntime implements Runtime {
     const entry = this.escalations.get(nativeEndpointKey(identity));
     if (!entry || entry.answered || entry.child !== this.child) return false;
     entry.answered = decision;
-    return this.sendEscalationDecision(identity, decision);
-  }
-  private async sendEscalationDecision(
-    identity: NativeInputEndpointIdentity,
-    decision: "accept" | "decline",
-  ): Promise<boolean> {
     try {
       await this.send(
         `${JSON.stringify({ id: identity.requestId, result: { decision } })}\n`,
@@ -1053,14 +1047,8 @@ export class CodexRuntime implements Runtime {
     });
     if (!identity.success) return false;
     const key = nativeEndpointKey(identity.data);
-    // A retransmission of a held request stays owned: unanswered, it waits; answered, it gets the
-    // same decision again, never a second one.
-    const held = this.escalations.get(key);
-    if (held) {
-      if (held.answered)
-        void this.sendEscalationDecision(held.identity, held.answered);
-      return true;
-    }
+    // A retransmission of a held request stays owned and is never answered a second time.
+    if (this.escalations.has(key)) return true;
     this.escalations.set(key, { identity: identity.data, child });
     if (
       this.emitEscalation({
