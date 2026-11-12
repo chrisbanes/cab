@@ -400,9 +400,10 @@ test("review a result: a long criterion is shown in full and keeps its outcome",
 });
 
 test("review a result: an open N more, its scroll and the focus in it survive leaving and Back", async (_t, journey) => {
+  // A short desktop window, so reaching the fourth criterion scrolls the page.
   const s = await start(
     journey,
-    desktop,
+    { ...desktop, height: 600 },
     seedFourCriteria,
     ({ taskId }) => `/tasks/${taskId}`,
   );
