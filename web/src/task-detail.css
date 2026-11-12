@@ -1333,7 +1333,9 @@ a.task-source-chip:hover {
 .comment-recipients ul {
   margin: 0;
 }
+/* The row anchors the picker, so its list is capped to the row's width, not the trigger's offset. */
 .recipient-row {
+  position: relative;
   display: flex;
   flex-wrap: wrap;
   align-items: center;
@@ -1361,9 +1363,6 @@ a.task-source-chip:hover {
   min-width: 0;
   overflow-wrap: anywhere;
 }
-.recipient-picker {
-  position: relative;
-}
 /* The open picker floats over the composer's rest, so choosing never makes the docked card scroll. */
 .recipient-picker ul {
   position: absolute;
@@ -1374,7 +1373,7 @@ a.task-source-chip:hover {
   flex-direction: column;
   gap: var(--space-4);
   width: max-content;
-  max-width: min(32rem, calc(100vw - 32px));
+  max-width: min(32rem, 100%);
   padding: var(--space-8);
   border: 1px solid var(--line-strong);
   border-radius: var(--radius-xl);

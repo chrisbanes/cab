@@ -42,7 +42,9 @@ async function seed(f: Fixture) {
     taskId: a.taskId,
     assignmentId: pendingId,
     profileId: a.profileId,
-    brief: "Independent focus review",
+    // A long first sentence, as briefs with paths have, so labels must wrap on a phone.
+    brief:
+      "Independent focus review of /Users/example/projects/cab/web/src/task-comment-composer.tsx.",
     resultDestination: "lead",
     requesterAssignmentId: a.assignmentId,
   });
@@ -192,6 +194,13 @@ for (const engine of ["chromium", "webkit"] as const)
         texts.join(),
       );
       await add.click();
+      // On a phone the open picker, long labels and all, stays within the screen.
+      await page.setViewportSize({ width: 390, height: 844 });
+      const right = await options.evaluate(
+        (e) => e.getBoundingClientRect().right,
+      );
+      assert.ok(right <= 390, `picker right edge ${right}`);
+      await page.setViewportSize({ width: 1366, height: 900 });
       await options
         .getByRole("button", { name: /Task lead · Independent focus review/ })
         .click();
