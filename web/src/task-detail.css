@@ -1355,6 +1355,12 @@ a.task-source-chip:hover {
   border-radius: 999px;
   background: var(--raised);
 }
+/* A brief line in a label can hold a long path; it wraps rather than widening the dock. */
+.recipient-chip,
+.recipient-picker [data-slot="button"] {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
 .recipient-picker {
   position: relative;
 }

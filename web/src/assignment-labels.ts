@@ -10,7 +10,7 @@ export interface LabelledAssignment {
 /**
  * What tells an assignment apart from others with the same name, in the order to show it:
  * nothing for a unique name, else the brief's first sentence, plus the short ID only when
- * that sentence repeats too (or the brief is absent).
+ * another same-named assignment has that sentence too (two absent briefs count as the same).
  */
 export function assignmentDistinction(
   assignment: LabelledAssignment,

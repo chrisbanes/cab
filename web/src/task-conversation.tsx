@@ -18,7 +18,8 @@ import {
 import type { OperatorClient } from "./api.js";
 import { ActionLink, Button, StatusBadge } from "./components.js";
 import { outsideWorkspace } from "../../src/operator/tool-limits.js";
-import { clockLabel, outcomeLine } from "./presentation.js";
+import { clockLabel, outcomeLine, shortId } from "./presentation.js";
+import { assignmentDistinction } from "./assignment-labels.js";
 import { CopyButton } from "./action-feedback.js";
 import { WorkingStatus } from "./working-status.js";
 import {
@@ -973,10 +974,11 @@ function Delegation({
   const brief = outcomeLine(a?.brief ?? null);
   const briefKey = `c:brief:${item.id}`;
   const briefOpen = ctx.expanded(briefKey);
-  // Same-agent cards are told apart by their brief line, as recipients are.
-  const label = a
-    ? recipientLabel(a, ctx.data.assignments)
-    : (item.entry?.name ?? "Assignment");
+  const name = a?.name ?? item.entry?.name ?? "Assignment";
+  // Same-agent cards are told apart as recipients are: the brief line, then the short ID.
+  const distinction = a ? assignmentDistinction(a, ctx.data.assignments) : [];
+  const label = [name, ...distinction].join(" · ");
+  const collisionId = distinction.find((part) => part === shortId(item.id));
   const result = ctx.data.results
     .filter((r) => r.assignmentId === item.id)
     .at(-1);
@@ -999,11 +1001,12 @@ function Delegation({
           aria-expanded={open}
           onClick={() => ctx.toggle(key)}
         >
-          <strong>{a?.name ?? item.entry?.name ?? "Assignment"}</strong>
-          {(runtime || delegatedEarlier) && (
+          <strong>{name}</strong>
+          {(runtime || collisionId || delegatedEarlier) && (
             <span className="muted">
               {[
                 runtime && executionHarnessLabels[runtime.harness],
+                collisionId,
                 delegatedEarlier && "delegated earlier",
               ]
                 .filter(Boolean)
@@ -1030,7 +1033,8 @@ function Delegation({
           {summary.join(" · ")}
         </p>
       )}
-      {brief.more && a?.brief && (
+      {/* A brief whose first line is a heading or quote has no summary line, so it opens here too. */}
+      {a?.brief?.trim() && (brief.more || !brief.line) && (
         <div className="conv-delegation-brief">
           <Button
             variant="secondary"

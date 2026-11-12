@@ -152,7 +152,9 @@ export function CommentRecipients({
       <details className="reply-help">
         <summary>How sending works</summary>
         <p className="metadata muted">{commentRulesText}</p>
-        <p className="metadata muted">{admissionText}</p>
+        {lines.some((line) => !line.blocked) && (
+          <p className="metadata muted">{admissionText}</p>
+        )}
       </details>
     </div>
   );

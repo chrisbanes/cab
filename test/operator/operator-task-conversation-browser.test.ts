@@ -562,8 +562,12 @@ for (const [label, viewport] of [
     await page.keyboard.press("Enter");
     await delegation.getByText(/at commit 0123abcd/).waitFor();
     assert.equal(await fullBrief.getAttribute("aria-expanded"), "true");
+    // The open brief survives a re-read of the task and its timeline.
+    const reread = page.waitForResponse((r) =>
+      new URL(r.url()).pathname.endsWith("/timeline"),
+    );
     await refresh(page);
-    await page.waitForTimeout(200);
+    await reread;
     assert.equal(await fullBrief.getAttribute("aria-expanded"), "true");
     await delegation.getByText(/at commit 0123abcd/).waitFor();
     // Same-agent cards never share an accessible name.
@@ -1447,6 +1451,57 @@ test("the message menu and a full brief are reachable by touch", async (_t, j) =
   const fullBrief = log.getByRole("button", { name: /^Full brief/ }).first();
   await fullBrief.tap();
   assert.equal(await fullBrief.getAttribute("aria-expanded"), "true");
+  await log.getByText(/at commit 0123abcd/).waitFor();
+});
+
+test("same-agent delegations whose brief lines match show their short IDs", async (_t, j) => {
+  const twin = randomUUID();
+  const { s, log } = await openWith(j, {}, async (f) => {
+    const s = await seed(f, 2);
+    f.service.domain().execute({
+      type: "assignment.create",
+      actor: "operator",
+      key: randomUUID(),
+      projectId: s.projectId,
+      taskId: s.taskId,
+      assignmentId: twin,
+      profileId: s.profileId,
+      brief: "Cover toolbar launch",
+      resultDestination: "requester",
+      requesterAssignmentId: s.assignmentId,
+    });
+    f.seedPersistedState((db) =>
+      db
+        .prepare(
+          "INSERT INTO coordination_delegations(assignmentId, delegatedAt) VALUES (?, ?)",
+        )
+        .run(twin, t0 + 8200),
+    );
+    return s;
+  });
+  await log.getByText("Second: all steps ran.").waitFor();
+  for (const [id, other] of [
+    [s.waiter, twin],
+    [twin, s.waiter],
+  ] as const) {
+    const card = log.locator(`[data-record-id="delegation:${id}"]`);
+    const head = (await card.getByRole("button").first().textContent()) ?? "";
+    assert.match(head, new RegExp(id.slice(0, 8)), "its own short ID is shown");
+    assert.doesNotMatch(head, new RegExp(other.slice(0, 8)));
+    assert.match(
+      (await card.getAttribute("aria-label")) ?? "",
+      new RegExp(`Cover toolbar launch · ${id.slice(0, 8)}$`),
+    );
+  }
+  // A card whose brief line is unique shows no ID.
+  assert.doesNotMatch(
+    (await log
+      .locator(`[data-record-id="delegation:${s.worker}"]`)
+      .getByRole("button")
+      .first()
+      .textContent()) ?? "",
+    new RegExp(s.worker.slice(0, 8)),
+  );
 });
 
 /** One unfinished tool row on the running lead's stream. */
