@@ -3997,7 +3997,11 @@ test("stop during a failed spawn does not wait for an exit event", {
  * A fake App Server for sandbox escalation: each turn's prompt says what it sends. `escalate`
  * asks one command approval and, once answered, completes the item and the turn; `escalate-end`
  * asks and ends the turn unanswered; `others` sends every other approval kind. A resume reports
- * the last turn's approval policy, or `corrupt-policy` makes it report a widened one.
+ * the last turn's approval policy, or `corrupt-policy` makes it report a widened one. `review-*`
+ * prompts send reviewer notifications: `review-approve` approves and runs its item; `review-deny`
+ * denies and waits for an overrule, then retries under a fresh review (`-end` ends the turn at
+ * once, `-error` rejects the overrule, `-crash` exits); `review-other` and `review-malformed` send
+ * reviews cab does not record.
  */
 function escalationFakeRuntime() {
   const root = mkdtempSync(join(tmpdir(), "codex-escalation-"));
@@ -4013,6 +4017,7 @@ function escalationFakeRuntime() {
     "let turns = 0;",
     "const asked = new Map();",
     "const resend = new Map();",
+    "let denied;",
     "const finish = (turnId) => write({ method: 'turn/completed', params: { threadId: 'thread-1', turn: { id: turnId, status: 'completed' } } });",
     "for await (const line of createInterface({ input: process.stdin })) {",
     "  const message = JSON.parse(line);",
@@ -4028,6 +4033,12 @@ function escalationFakeRuntime() {
     "    policy = prompt === 'corrupt-policy' ? { granular: { sandbox_approval: true, rules: true, mcp_elicitations: false, skill_approval: false, request_permissions: false } } : message.params.approvalPolicy;",
     "    write({ id: message.id, result: { turn: { id: turnId } } });",
     "    const base = { threadId: 'thread-1', turnId };",
+    "    const review = (reviewId, status, targetItemId, action) => { const p = { ...base, reviewId, targetItemId, action: action ?? { type: 'command', source: 'shell', command: 'node chromium.mjs', cwd: message.params.cwd } }; write({ method: 'item/autoApprovalReview/started', params: { ...p, startedAtMs: 1, review: { status: 'inProgress', riskLevel: null, userAuthorization: null, rationale: null } } }); write({ method: 'item/autoApprovalReview/completed', params: { ...p, startedAtMs: 1, completedAtMs: 2, decisionSource: 'agent', review: { status, riskLevel: status === 'approved' ? 'low' : 'high', userAuthorization: 'unknown', rationale: 'because ' + status } } }); };",
+    "    const ran = (itemId) => write({ method: 'item/completed', params: { ...base, item: { id: itemId, type: 'commandExecution', status: 'completed', exitCode: 0, durationMs: 50, aggregatedOutput: 'OUTPUT_SENTINEL' } } });",
+    "    if (prompt === 'review-approve') { review('rv-' + turns, 'approved', 'item-' + turns); ran('item-' + turns); finish(turnId); }",
+    "    if (prompt.startsWith('review-deny')) { review('rv-' + turns, 'denied', 'item-' + turns); denied = { turnId, review, ran, prompt }; if (prompt === 'review-deny-end') finish(turnId); if (prompt === 'review-deny-crash') setTimeout(() => process.exit(1), 50); }",
+    "    if (prompt === 'review-other') { review('rv-' + turns, 'approved', null, { type: 'networkAccess', target: 'x', host: 'x', protocol: 'https', port: 443 }); finish(turnId); }",
+    "    if (prompt === 'review-malformed') { write({ method: 'item/autoApprovalReview/completed', params: { ...base, reviewId: 'bad', targetItemId: 'i', review: { status: 'weird' }, action: { type: 'command', command: 'x', cwd: '/' } } }); finish(turnId); }",
     "    if (prompt.startsWith('escalate')) {",
     "      asked.set('esc-' + turns, turnId);",
     "      write({ id: 'esc-' + turns, method: 'item/commandExecution/requestApproval', params: { ...base, itemId: 'item-' + turns, command: 'node chromium.mjs', cwd: message.params.cwd, reason: 'needs host Chromium', proposedExecpolicyAmendment: ['node'] } });",
@@ -4048,6 +4059,10 @@ function escalationFakeRuntime() {
     "      write({ id: 'exec', method: 'execCommandApproval', params: base });",
     "      write({ id: 'cmd', method: 'item/commandExecution/requestApproval', params: { ...base, itemId: 'c', command: 'ls', cwd: message.params.cwd } });",
     "    }",
+    "  } else if (message.method === 'thread/approveGuardianDeniedAction') {",
+    "    if (denied?.prompt === 'review-deny-error') { write({ id: message.id, error: { code: -32600, message: 'rejected' } }); finish(denied.turnId); denied = undefined; }",
+    "    else if (denied) { write({ id: message.id, result: {} }); denied.review('rv-retry', 'approved', 'item-retry'); denied.ran('item-retry'); finish(denied.turnId); denied = undefined; }",
+    "    else write({ id: message.id, error: { code: -32600, message: 'no denial' } });",
     "  } else if (message.method === 'turn/interrupt') {",
     "    write({ id: message.id, result: {} });",
     "    write({ method: 'serverRequest/resolved', params: { threadId: 'thread-1', requestId: 'esc-' + turns } });",
@@ -4083,6 +4098,282 @@ const escalationPolicy = {
   networkAccess: false,
   sandboxEscalation: "approval" as const,
 };
+const autoReviewPolicy = {
+  networkAccess: false,
+  sandboxEscalation: "auto-review" as const,
+};
+
+test("an escalate-auto-review turn sends the sandbox-only granular policy with reviewer auto_review and still routes a client escalation", async () => {
+  const { root, runtime, messages, cleanup } = escalationFakeRuntime();
+  const escalations: Array<{ kind: string }> = [];
+  runtime.onSandboxEscalation((event) => {
+    escalations.push(event);
+    return true;
+  });
+  try {
+    await bounded(runtime.start(), 3000);
+    await bounded(runtime.startThread(root), 3000);
+    await bounded(
+      runtime.startTurn(
+        "thread-1",
+        root,
+        "escalate",
+        undefined,
+        autoReviewPolicy,
+      ),
+      3000,
+    );
+    await eventually(() => escalations.length === 1);
+    assert.equal(escalations[0]?.kind, "requested");
+    const [turn] = messages()
+      .filter((m) => m.method === "turn/start")
+      .map((m) => m.params as Record<string, unknown>);
+    assert.deepEqual(turn?.approvalPolicy, {
+      granular: {
+        sandbox_approval: true,
+        rules: false,
+        mcp_elicitations: false,
+        skill_approval: false,
+        request_permissions: false,
+      },
+    });
+    assert.equal(turn?.approvalsReviewer, "auto_review");
+    assert.deepEqual(turn?.sandboxPolicy, executionPolicy(root));
+    // A resume reports the persisted sandbox-only policy, which is accepted.
+    await bounded(runtime.resumeThread("thread-1", []), 3000);
+  } finally {
+    await cleanup();
+  }
+});
+
+test("reviewer notifications of an escalate-auto-review turn are emitted with their item's exit code and duration, never its output", async () => {
+  const { root, runtime, cleanup } = escalationFakeRuntime();
+  const events: Array<Record<string, unknown>> = [];
+  const unexpected: unknown[] = [];
+  runtime.onUnexpectedRequest((request) => unexpected.push(request));
+  runtime.onSandboxReview((event) =>
+    events.push(event as unknown as Record<string, unknown>),
+  );
+  try {
+    await bounded(runtime.start(), 3000);
+    await bounded(runtime.startThread(root), 3000);
+    const turnId = await bounded(
+      runtime.startTurn(
+        "thread-1",
+        root,
+        "review-approve",
+        undefined,
+        autoReviewPolicy,
+      ),
+      3000,
+    );
+    await eventually(() => events.length === 3);
+    const identity = {
+      runtimeGeneration: runtime.currentUserInputGeneration(),
+      threadId: "thread-1",
+      turnId,
+      reviewId: "rv-1",
+      targetItemId: "item-1",
+    };
+    const review = {
+      kind: "review",
+      identity,
+      command: "node chromium.mjs",
+      cwd: root,
+      overrulable: false,
+    };
+    assert.deepEqual(events, [
+      {
+        ...review,
+        status: "inProgress",
+        riskLevel: null,
+        rationale: null,
+      },
+      {
+        ...review,
+        status: "approved",
+        riskLevel: "low",
+        rationale: "because approved",
+      },
+      {
+        kind: "itemCompleted",
+        target: {
+          runtimeGeneration: identity.runtimeGeneration,
+          threadId: "thread-1",
+          turnId,
+          targetItemId: "item-1",
+        },
+        exitCode: 0,
+        durationMs: 50,
+      },
+    ]);
+    assert.ok(!JSON.stringify(events).includes("OUTPUT_SENTINEL"));
+    assert.deepEqual(unexpected, []);
+  } finally {
+    await cleanup();
+  }
+});
+
+test("reviews cab did not ask for, of other actions, without a target or of another shape are not recorded and are reported as unexpected", async () => {
+  const { root, runtime, cleanup } = escalationFakeRuntime();
+  const events: unknown[] = [];
+  const unexpected: Array<{ method: string; turnId?: string }> = [];
+  runtime.onUnexpectedRequest((request) => unexpected.push(request));
+  runtime.onSandboxReview((event) => events.push(event));
+  try {
+    await bounded(runtime.start(), 3000);
+    await bounded(runtime.startThread(root), 3000);
+    const turns = [];
+    for (const [prompt, policy] of [
+      ["review-other", autoReviewPolicy],
+      ["review-malformed", autoReviewPolicy],
+      ["review-approve", escalationPolicy],
+      ["review-approve", undefined],
+    ] as const)
+      turns.push(
+        await bounded(
+          runtime.startTurn("thread-1", root, prompt, undefined, policy),
+          3000,
+        ),
+      );
+    await eventually(() => unexpected.length >= 7);
+    assert.deepEqual(events, []);
+    assert.ok(
+      unexpected.every((u) => u.method.startsWith("item/autoApprovalReview/")),
+    );
+    assert.deepEqual([...new Set(unexpected.map((u) => u.turnId))], turns);
+  } finally {
+    await cleanup();
+  }
+});
+
+test("a reviewer denial is overruled once while its turn runs, and the retry is reviewed again", async () => {
+  const { root, runtime, messages, cleanup } = escalationFakeRuntime();
+  const events: Array<Record<string, unknown>> = [];
+  runtime.onSandboxReview((event) =>
+    events.push(event as unknown as Record<string, unknown>),
+  );
+  try {
+    await bounded(runtime.start(), 3000);
+    await bounded(runtime.startThread(root), 3000);
+    const turnId = await bounded(
+      runtime.startTurn(
+        "thread-1",
+        root,
+        "review-deny",
+        undefined,
+        autoReviewPolicy,
+      ),
+      3000,
+    );
+    await eventually(() => events.length === 2);
+    const denial = events[1] as {
+      identity: Parameters<CodexRuntime["overruleSandboxDenial"]>[0];
+      status: string;
+      overrulable: boolean;
+    };
+    assert.equal(denial.status, "denied");
+    assert.equal(denial.overrulable, true);
+    assert.equal(await runtime.overruleSandboxDenial(denial.identity), true);
+    assert.equal(await runtime.overruleSandboxDenial(denial.identity), false);
+    const sent = messages().filter(
+      (m) => m.method === "thread/approveGuardianDeniedAction",
+    );
+    assert.equal(sent.length, 1);
+    assert.deepEqual(sent[0]?.params, {
+      threadId: "thread-1",
+      event: {
+        id: "rv-1",
+        target_item_id: "item-1",
+        turn_id: turnId,
+        status: "denied",
+        risk_level: "high",
+        user_authorization: "unknown",
+        rationale: "because denied",
+        decision_source: "agent",
+        action: {
+          type: "command",
+          source: "shell",
+          command: "node chromium.mjs",
+          cwd: root,
+        },
+      },
+    });
+    await eventually(() => events.some((e) => e.kind === "itemCompleted"));
+    const retry = events.filter(
+      (e) =>
+        e.kind === "review" &&
+        (e.identity as { reviewId: string }).reviewId === "rv-retry",
+    );
+    assert.deepEqual(
+      retry.map((e) => e.status),
+      ["inProgress", "approved"],
+    );
+    // The turn ended after a delivered overrule; nothing is left to end.
+    assert.ok(events.every((e) => e.kind !== "overruleEnded"));
+  } finally {
+    await cleanup();
+  }
+});
+
+test("a denial can no longer be overruled once its turn ends, is interrupted or its runtime is lost, and a rejected overrule returns false", async () => {
+  for (const [prompt, reason] of [
+    ["review-deny-end", "Turn ended"],
+    ["review-deny", "Turn interrupted"],
+    ["review-deny-crash", "Runtime lost"],
+    ["review-deny-error", null],
+  ] as const) {
+    const { root, runtime, messages, cleanup } = escalationFakeRuntime();
+    const events: Array<Record<string, unknown>> = [];
+    runtime.onSandboxReview((event) =>
+      events.push(event as unknown as Record<string, unknown>),
+    );
+    try {
+      await bounded(runtime.start(), 3000);
+      await bounded(runtime.startThread(root), 3000);
+      const turnId = await bounded(
+        runtime.startTurn(
+          "thread-1",
+          root,
+          prompt,
+          undefined,
+          autoReviewPolicy,
+        ),
+        3000,
+      );
+      await eventually(() => events.length >= 2);
+      const identity = (
+        events[1] as {
+          identity: Parameters<CodexRuntime["overruleSandboxDenial"]>[0];
+        }
+      ).identity;
+      if (reason === "Turn interrupted")
+        await bounded(runtime.interruptTurn("thread-1", turnId), 3000);
+      if (reason !== null) {
+        await eventually(() => events.some((e) => e.kind === "overruleEnded"));
+        assert.deepEqual(events.at(-1), {
+          kind: "overruleEnded",
+          identity,
+          reason,
+        });
+      }
+      assert.equal(
+        await runtime.overruleSandboxDenial(identity),
+        false,
+        prompt,
+      );
+      assert.equal(
+        messages().filter(
+          (m) => m.method === "thread/approveGuardianDeniedAction",
+        ).length,
+        reason === null ? 1 : 0,
+        prompt,
+      );
+    } finally {
+      await cleanup();
+    }
+  }
+});
 
 test("an escalate-approval turn sends the sandbox-only granular policy and reviewer user; other turns are unchanged", async () => {
   const { root, runtime, messages, cleanup } = escalationFakeRuntime();

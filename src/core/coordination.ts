@@ -54,6 +54,12 @@ import { transaction, type Database, widenCheck } from "./store.js";
 import {
   sandboxEscalationAction,
   sandboxEscalationHeadline,
+  sandboxOverruleAction,
+  sandboxOverruleHeadline,
+  type SandboxReviewIdentity,
+  sandboxReviewIdentitySchema,
+  sandboxReviewRiskSchema,
+  sandboxReviewStatusSchema,
 } from "./sandbox-level.js";
 import {
   DelegateWithdrawalRefusedError,
@@ -353,6 +359,128 @@ const sandboxEscalationRecord = (row: Row): SandboxEscalationRecord => ({
     .parse(row.durationSource),
   completedAt: row.completedAt === null ? null : Number(row.completedAt),
 });
+/**
+ * Cuts `command` until the approval material fits the 8 KiB limit; a cut, or one already made to
+ * the other fields, is shown as `truncated`. Throws when the other fields alone are too large.
+ */
+function fitCommandMaterial(
+  command: string,
+  rest: Record<string, unknown>,
+  truncated: boolean,
+) {
+  const materialOf = (cut: boolean) => ({
+    command,
+    ...rest,
+    ...(cut ? { truncated: true } : {}),
+  });
+  const fits = (value: unknown) =>
+    new TextEncoder().encode(canonicalMaterial(value)).byteLength <= 8192;
+  let material = materialOf(truncated);
+  while (!fits(material) && command.length > 0) {
+    command = command.slice(0, Math.floor(command.length * 0.9));
+    material = materialOf(true);
+  }
+  if (!fits(material))
+    throw new Error("Sandbox approval material exceeds the 8 KiB limit");
+  return material;
+}
+
+/** Reviewer-written and command fields are cut to these lengths; any cut sets `truncated`. */
+const reviewLimits = { command: 4096, cwd: 512, rationale: 2048 };
+/**
+ * A reviewer decision on a command an escalate-auto-review turn asked to run outside the sandbox
+ * (ADR-1034), with its command item's completion and any advisory overrule of a denial.
+ */
+export type SandboxReviewRecord = {
+  identity: SandboxReviewIdentity;
+  taskId: string;
+  workId: string;
+  command: string;
+  cwd: string;
+  workspace: {
+    head: string | null;
+    branch: string | null;
+    dirty: boolean | null;
+  };
+  truncated: boolean;
+  status: z.infer<typeof sandboxReviewStatusSchema>;
+  riskLevel: z.infer<typeof sandboxReviewRiskSchema> | null;
+  rationale: string | null;
+  decider: "reviewer";
+  /** Null while the review runs; a denial, timeout or abort declines. */
+  decision: "accept" | "decline" | null;
+  startedAt: number;
+  reviewedAt: number | null;
+  exitCode: number | null;
+  durationMs: number | null;
+  durationSource: "runtime" | "service" | null;
+  completedAt: number | null;
+  overrule: {
+    interactionId: string;
+    decider: "operator" | "obsolete" | null;
+    decision: "accept" | "decline" | null;
+    decidedAt: number | null;
+    /** Null until a reply is claimed; false when it was claimed but not confirmed written. */
+    delivered: boolean | null;
+  } | null;
+};
+const sandboxReviewRecord = (row: Row): SandboxReviewRecord => {
+  const status = sandboxReviewStatusSchema.parse(row.status);
+  return {
+    identity: sandboxReviewIdentitySchema.parse(row),
+    taskId: String(row.taskId),
+    workId: String(row.workId),
+    command: String(row.command),
+    cwd: String(row.cwd),
+    workspace: {
+      head: row.head === null ? null : String(row.head),
+      branch: row.branch === null ? null : String(row.branch),
+      dirty: row.dirty === null ? null : row.dirty === 1,
+    },
+    truncated: row.truncated === 1,
+    status,
+    riskLevel: sandboxReviewRiskSchema.nullable().parse(row.riskLevel),
+    rationale: row.rationale === null ? null : String(row.rationale),
+    decider: "reviewer",
+    decision:
+      status === "inProgress"
+        ? null
+        : status === "approved"
+          ? "accept"
+          : "decline",
+    startedAt: Number(row.startedAt),
+    reviewedAt: row.reviewedAt === null ? null : Number(row.reviewedAt),
+    exitCode: row.exitCode === null ? null : Number(row.exitCode),
+    durationMs: row.durationMs === null ? null : Number(row.durationMs),
+    durationSource: z
+      .enum(["runtime", "service"])
+      .nullable()
+      .parse(row.durationSource),
+    completedAt: row.completedAt === null ? null : Number(row.completedAt),
+    overrule:
+      row.interactionId === null
+        ? null
+        : {
+            interactionId: String(row.interactionId),
+            decider: z
+              .enum(["operator", "obsolete"])
+              .nullable()
+              .parse(row.overruleDecider),
+            decision: z
+              .enum(["accept", "decline"])
+              .nullable()
+              .parse(row.overruleDecision),
+            decidedAt:
+              row.overruleDecidedAt === null
+                ? null
+                : Number(row.overruleDecidedAt),
+            delivered:
+              row.overruleDelivered === null
+                ? null
+                : row.overruleDelivered === 1,
+          },
+  };
+};
 const operatorCommandKey = z.string().uuid();
 const answerSchema = z
   .object({
@@ -1193,6 +1321,29 @@ export class CoordinationStore {
         durationSource TEXT CHECK(durationSource IN ('runtime','service')),
         completedAt INTEGER,
         UNIQUE(runtimeGeneration, threadId, turnId, itemId)
+      );
+      CREATE TABLE IF NOT EXISTS sandbox_reviews (
+        runtimeGeneration TEXT NOT NULL, threadId TEXT NOT NULL, turnId TEXT NOT NULL,
+        reviewId TEXT NOT NULL, targetItemId TEXT NOT NULL,
+        taskId TEXT NOT NULL REFERENCES domain_tasks(id),
+        workId TEXT NOT NULL REFERENCES execution_intents(workId),
+        command TEXT NOT NULL, cwd TEXT NOT NULL,
+        head TEXT, branch TEXT, dirty INTEGER CHECK(dirty IN (0,1)),
+        truncated INTEGER NOT NULL CHECK(truncated IN (0,1)),
+        status TEXT NOT NULL
+          CHECK(status IN ('inProgress','approved','denied','timedOut','aborted')),
+        riskLevel TEXT CHECK(riskLevel IN ('low','medium','high','critical')),
+        rationale TEXT,
+        startedAt INTEGER NOT NULL, reviewedAt INTEGER,
+        exitCode INTEGER, durationMs INTEGER,
+        durationSource TEXT CHECK(durationSource IN ('runtime','service')),
+        completedAt INTEGER,
+        interactionId TEXT UNIQUE REFERENCES coordination_interactions(interactionId),
+        overruleDecider TEXT CHECK(overruleDecider IN ('operator','obsolete')),
+        overruleDecision TEXT CHECK(overruleDecision IN ('accept','decline')),
+        overruleDecidedAt INTEGER,
+        overruleDelivered INTEGER CHECK(overruleDelivered IN (0,1)),
+        PRIMARY KEY(runtimeGeneration, threadId, reviewId)
       );
       CREATE TABLE IF NOT EXISTS coordination_result_reviews (
         reviewId TEXT PRIMARY KEY,
@@ -2419,8 +2570,9 @@ export class CoordinationStore {
     return this.requestInteraction(call, "approval", {
       refusal: actionKinds.some((kind) => kind === call.arguments.action)
         ? null
-        : call.arguments.action === sandboxEscalationAction
-          ? "sandbox.escalate is reserved for the runtime's own sandbox escalation requests; it cannot be requested with this tool."
+        : call.arguments.action === sandboxEscalationAction ||
+            call.arguments.action === sandboxOverruleAction
+          ? `${call.arguments.action} is reserved for cab's own sandbox escalation approvals; it cannot be requested with this tool.`
           : approvalActionRefusal(call.arguments.action),
       prompt: `Approval requested for ${call.arguments.action}`,
       action: call.arguments.action,
@@ -2450,26 +2602,12 @@ export class CoordinationStore {
     // Model-written fields are cut to fit the 8 KiB approval limit, and any cut is shown.
     const cwd = input.cwd.slice(0, 512),
       reason = input.reason?.slice(0, 512) ?? null;
-    let command = input.command;
-    const materialOf = (truncated: boolean) => ({
-      command,
-      cwd,
-      reason,
-      workspace: input.workspace,
-      ...(truncated ? { truncated: true } : {}),
-    });
-    const fits = (value: unknown) =>
-      new TextEncoder().encode(canonicalMaterial(value)).byteLength <= 8192;
-    let material = materialOf(
+    // Only an oversized cwd, reason or branch can refuse it, and a refused one is declined.
+    const material = fitCommandMaterial(
+      input.command,
+      { cwd, reason, workspace: input.workspace },
       cwd !== input.cwd || reason !== (input.reason ?? null),
     );
-    while (!fits(material) && command.length > 0) {
-      command = command.slice(0, Math.floor(command.length * 0.9));
-      material = materialOf(true);
-    }
-    // Only an oversized cwd, reason or branch is left; refused, it is declined.
-    if (!fits(material))
-      throw new Error("Sandbox escalation material exceeds the 8 KiB limit");
     return transaction(this.db, () => {
       const binding = this.currentBinding(identity.threadId, identity.turnId);
       if (!binding || Number(binding.draftTurn) === 1)
@@ -2635,8 +2773,282 @@ export class CoordinationStore {
   }
 
   /**
-   * After a restart no runtime generation from before is live: every undecided escalation is
-   * obsolete, and a decision whose reply was never claimed is recorded as not delivered.
+   * Records a reviewer decision of an escalate-auto-review Codex turn (ADR-1034), bound to the
+   * exact current work of its thread and turn: a started review, then its completion. A review
+   * already completed keeps its decision. The command, cwd and rationale are cut to fixed limits
+   * and the cut is marked; no output is ever recorded.
+   */
+  recordSandboxReview(input: {
+    identity: SandboxReviewIdentity;
+    command: string;
+    cwd: string;
+    workspace: {
+      head: string | null;
+      branch: string | null;
+      dirty: boolean | null;
+    };
+    status: z.infer<typeof sandboxReviewStatusSchema>;
+    riskLevel: z.infer<typeof sandboxReviewRiskSchema> | null;
+    rationale: string | null;
+  }): SandboxReviewRecord {
+    const identity = sandboxReviewIdentitySchema.parse(input.identity);
+    const status = sandboxReviewStatusSchema.parse(input.status);
+    const command = input.command.slice(0, reviewLimits.command),
+      cwd = input.cwd.slice(0, reviewLimits.cwd),
+      rationale = input.rationale?.slice(0, reviewLimits.rationale) ?? null;
+    const truncated =
+      command !== input.command ||
+      cwd !== input.cwd ||
+      rationale !== (input.rationale ?? null);
+    const now = Date.now();
+    return transaction(this.db, () => {
+      const current = this.sandboxReview(identity);
+      if (current) {
+        if (current.status === "inProgress" && status !== "inProgress")
+          this.db
+            .prepare(
+              `UPDATE sandbox_reviews
+              SET status = ?, riskLevel = ?, rationale = ?, reviewedAt = ?,
+                truncated = MAX(truncated, ?)
+              WHERE runtimeGeneration = ? AND threadId = ? AND reviewId = ?`,
+            )
+            .run(
+              status,
+              input.riskLevel,
+              rationale,
+              now,
+              truncated ? 1 : 0,
+              identity.runtimeGeneration,
+              identity.threadId,
+              identity.reviewId,
+            );
+        return this.sandboxReview(identity)!;
+      }
+      const binding = this.currentBinding(identity.threadId, identity.turnId);
+      if (!binding || Number(binding.draftTurn) === 1)
+        throw new Error("Sandbox review is not bound to current work");
+      this.db
+        .prepare(
+          `INSERT INTO sandbox_reviews
+          (runtimeGeneration, threadId, turnId, reviewId, targetItemId, taskId, workId,
+            command, cwd, head, branch, dirty, truncated, status, riskLevel, rationale,
+            startedAt, reviewedAt)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        )
+        .run(
+          identity.runtimeGeneration,
+          identity.threadId,
+          identity.turnId,
+          identity.reviewId,
+          identity.targetItemId,
+          String(binding.taskId),
+          String(binding.workId),
+          command,
+          cwd,
+          input.workspace.head,
+          input.workspace.branch,
+          input.workspace.dirty === null ? null : input.workspace.dirty ? 1 : 0,
+          truncated ? 1 : 0,
+          status,
+          input.riskLevel,
+          rationale,
+          now,
+          status === "inProgress" ? null : now,
+        );
+      return this.sandboxReview(identity)!;
+    });
+  }
+
+  sandboxReview(
+    identity: Pick<
+      SandboxReviewIdentity,
+      "runtimeGeneration" | "threadId" | "reviewId"
+    >,
+  ): SandboxReviewRecord | undefined {
+    const row = this.one(
+      "SELECT * FROM sandbox_reviews WHERE runtimeGeneration = ? AND threadId = ? AND reviewId = ?",
+      identity.runtimeGeneration,
+      identity.threadId,
+      identity.reviewId,
+    );
+    return row ? sandboxReviewRecord(row) : undefined;
+  }
+
+  sandboxReviewByOverrule(
+    interactionId: string,
+  ): SandboxReviewRecord | undefined {
+    const row = this.one(
+      "SELECT * FROM sandbox_reviews WHERE interactionId = ?",
+      interactionId,
+    );
+    return row ? sandboxReviewRecord(row) : undefined;
+  }
+
+  /** A task's reviewer decisions, oldest first. */
+  sandboxReviews(taskId: string): SandboxReviewRecord[] {
+    return (
+      this.db
+        .prepare(
+          "SELECT * FROM sandbox_reviews WHERE taskId = ? ORDER BY startedAt, reviewId",
+        )
+        .all(uuid.parse(taskId)) as Row[]
+    ).map(sandboxReviewRecord);
+  }
+
+  /**
+   * The reviewed command item completed: its exit code, and its duration, from the runtime when it
+   * reports one, else measured from the reviewer's approval. Only an approved command records them.
+   */
+  completeSandboxReview(
+    target: Omit<SandboxReviewIdentity, "reviewId">,
+    exitCode: number | null,
+    durationMs: number | null,
+  ): void {
+    const now = Date.now();
+    for (const row of this.db
+      .prepare(
+        `SELECT reviewId, status, reviewedAt FROM sandbox_reviews
+        WHERE runtimeGeneration = ? AND threadId = ? AND turnId = ? AND targetItemId = ?
+          AND completedAt IS NULL`,
+      )
+      .all(
+        target.runtimeGeneration,
+        target.threadId,
+        target.turnId,
+        target.targetItemId,
+      ) as Row[]) {
+      const approved = row.status === "approved";
+      const measured =
+        approved && durationMs === null && row.reviewedAt !== null
+          ? Math.max(0, now - Number(row.reviewedAt))
+          : null;
+      this.db
+        .prepare(
+          `UPDATE sandbox_reviews
+          SET exitCode = ?, durationMs = ?, durationSource = ?, completedAt = ?
+          WHERE runtimeGeneration = ? AND threadId = ? AND reviewId = ?`,
+        )
+        .run(
+          approved ? exitCode : null,
+          approved ? (durationMs ?? measured) : null,
+          !approved ? null : durationMs !== null ? "runtime" : "service",
+          now,
+          target.runtimeGeneration,
+          target.threadId,
+          String(row.reviewId),
+        );
+    }
+  }
+
+  /**
+   * Offers the operator an advisory overrule of a reviewer denial as an ordinary Inbox approval
+   * of the exact bound turn. Its material is the denied command, cwd, workspace, risk and
+   * rationale. Once per review; returns its interaction.
+   */
+  openSandboxOverrule(identity: SandboxReviewIdentity): string {
+    return transaction(this.db, () => {
+      const review = this.sandboxReview(identity);
+      if (review?.status !== "denied" || review.overrule)
+        throw new Error("No reviewer denial to overrule");
+      const binding = this.currentBinding(identity.threadId, identity.turnId);
+      if (!binding || String(binding.workId) !== review.workId)
+        throw new Error("Sandbox overrule is not bound to current work");
+      const material = fitCommandMaterial(
+        review.command,
+        {
+          cwd: review.cwd,
+          workspace: review.workspace,
+          riskLevel: review.riskLevel,
+          rationale: review.rationale,
+        },
+        review.truncated,
+      );
+      const interactionId = this.openInteraction(binding, "approval", {
+        prompt: sandboxOverruleHeadline,
+        action: sandboxOverruleAction,
+        target: null,
+        materialHash: materialDigest(material),
+        materialJson: canonicalMaterial(material),
+      });
+      this.db
+        .prepare(
+          `UPDATE sandbox_reviews SET interactionId = ?
+          WHERE runtimeGeneration = ? AND threadId = ? AND reviewId = ?`,
+        )
+        .run(
+          interactionId,
+          identity.runtimeGeneration,
+          identity.threadId,
+          identity.reviewId,
+        );
+      return interactionId;
+    });
+  }
+
+  /**
+   * Withdraws an undecided overrule whose turn, runtime generation or service ended: no approval
+   * outlives the turn it was offered for. A decision already recorded wins.
+   */
+  resolveSandboxOverrule(interactionId: string): void {
+    transaction(this.db, () => {
+      const review = this.sandboxReviewByOverrule(interactionId);
+      if (!review?.overrule || review.overrule.decider !== null) return;
+      const interaction = this.required(
+        "SELECT status, taskId FROM coordination_interactions WHERE interactionId = ?",
+        interactionId,
+      );
+      if (interaction.status !== "open") return;
+      assertOwnedTaskWritable(this.db, String(interaction.taskId));
+      this.inboxLifecycle().resolve(
+        interactionId,
+        "Obsolete: the turn ended before the overrule was decided",
+        true,
+      );
+      this.resolveAttention(interactionId);
+      this.decideOverrule(interactionId, "obsolete", null);
+    });
+  }
+
+  /** Claims the one call of an approved overrule; false when it was claimed already. */
+  claimSandboxOverrule(interactionId: string): boolean {
+    return (
+      Number(
+        (
+          this.db
+            .prepare(
+              "UPDATE sandbox_reviews SET overruleDelivered = 0 WHERE interactionId = ? AND overruleDecision = 'accept' AND overruleDelivered IS NULL",
+            )
+            .run(interactionId) as { changes: number | bigint }
+        ).changes,
+      ) === 1
+    );
+  }
+
+  recordSandboxOverruleDelivered(interactionId: string): void {
+    this.db
+      .prepare(
+        "UPDATE sandbox_reviews SET overruleDelivered = 1 WHERE interactionId = ? AND overruleDelivered = 0",
+      )
+      .run(interactionId);
+  }
+
+  private decideOverrule(
+    interactionId: string,
+    decider: "operator" | "obsolete",
+    decision: "accept" | "decline" | null,
+  ): void {
+    this.db
+      .prepare(
+        `UPDATE sandbox_reviews
+        SET overruleDecider = ?, overruleDecision = ?, overruleDecidedAt = ?
+        WHERE interactionId = ? AND overruleDecider IS NULL`,
+      )
+      .run(decider, decision, Date.now(), interactionId);
+  }
+
+  /**
+   * After a restart no runtime generation from before is live: every undecided escalation and
+   * overrule is obsolete, and a decision whose reply was never claimed is recorded as not delivered.
    */
   invalidateSandboxEscalations(): void {
     for (const row of this.db
@@ -2647,8 +3059,18 @@ export class CoordinationStore {
       )
       .all() as Row[])
       this.resolveSandboxEscalation(String(row.interactionId), "obsolete");
+    for (const row of this.db
+      .prepare(
+        `SELECT r.interactionId FROM sandbox_reviews r
+          JOIN domain_tasks t ON t.id = r.taskId JOIN domain_projects p ON p.id = t.projectId
+          WHERE r.interactionId IS NOT NULL AND r.overruleDecider IS NULL AND p.archived = 0`,
+      )
+      .all() as Row[])
+      this.resolveSandboxOverrule(String(row.interactionId));
     this.db.exec(
-      "UPDATE sandbox_escalations SET delivered = 0 WHERE decision IS NOT NULL AND delivered IS NULL",
+      `UPDATE sandbox_escalations SET delivered = 0 WHERE decision IS NOT NULL AND delivered IS NULL;
+      UPDATE sandbox_reviews SET overruleDelivered = 0
+        WHERE overruleDecision = 'accept' AND overruleDelivered IS NULL;`,
     );
   }
 
@@ -3521,6 +3943,20 @@ export class CoordinationStore {
             (eventId, assignmentId, reason) VALUES (?, ?, 'sandbox-escalation')`)
           .run(event.eventId, String(interaction.requestingAssignmentId));
         this.decideEscalation(
+          command.interactionId,
+          "operator",
+          command.decision === "approved" ? "accept" : "decline",
+        );
+      }
+      if (
+        interaction.action === sandboxOverruleAction &&
+        this.sandboxReviewByOverrule(command.interactionId)
+      ) {
+        this.db
+          .prepare(`INSERT OR IGNORE INTO coordination_undeliverable_inbox_events
+            (eventId, assignmentId, reason) VALUES (?, ?, 'sandbox-escalation')`)
+          .run(event.eventId, String(interaction.requestingAssignmentId));
+        this.decideOverrule(
           command.interactionId,
           "operator",
           command.decision === "approved" ? "accept" : "decline",

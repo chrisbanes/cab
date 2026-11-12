@@ -13,6 +13,7 @@ import {
 } from "../operator/local-listening-copy.js";
 import {
   escalateApprovalLines,
+  escalateAutoReviewLines,
   sandboxLevelAppliesNote,
   unsandboxedGrantLines,
   unsandboxedRisk,
@@ -64,7 +65,7 @@ export const projectWriteCommands = new Map<string, WriteCommand>([
     "project prepare",
     {
       usage:
-        "project prepare PROJECT_ID [--out FILE] [--expected-version N] [--name S] [--paused true|false] [--lead-profile ID|none] [--diagnostic-capture enhanced|baseline] [--reasoning-summaries true|false] [--command-network-access true|false] [--local-listening true|false] [--sandbox strict|escalate-approval|unsandboxed] [--stacking true|false] [--instructions TEXT|- | --instructions-file PATH | --restore-revision N]",
+        "project prepare PROJECT_ID [--out FILE] [--expected-version N] [--name S] [--paused true|false] [--lead-profile ID|none] [--diagnostic-capture enhanced|baseline] [--reasoning-summaries true|false] [--command-network-access true|false] [--local-listening true|false] [--sandbox strict|escalate-approval|escalate-auto-review|unsandboxed] [--stacking true|false] [--instructions TEXT|- | --instructions-file PATH | --restore-revision N]",
       positionals: 1,
       expects:
         "--expected-version: the project's version ('cab project get PROJECT_ID'); omitted, the version this command reads.",
@@ -123,7 +124,7 @@ export const projectWriteCommands = new Map<string, WriteCommand>([
         if (sandboxFlag !== undefined && sandbox === undefined)
           throw new CliError(
             "invalid-input",
-            "--sandbox must be strict, escalate-approval or unsandboxed.",
+            "--sandbox must be strict, escalate-approval, escalate-auto-review or unsandboxed.",
           );
         const stacking = boolFlag(ctx.values.stacking, "stacking");
         // Read once before connecting: standard input cannot be read again on a retried read.
@@ -261,6 +262,8 @@ export const projectWriteCommands = new Map<string, WriteCommand>([
           notes.push(sandboxLevelAppliesNote);
           if (sandbox === "escalate-approval")
             notes.push(...escalateApprovalLines);
+          else if (sandbox === "escalate-auto-review")
+            notes.push(...escalateAutoReviewLines);
           else {
             notes.push(...unsandboxedGrantLines);
             if (sandbox === "unsandboxed")

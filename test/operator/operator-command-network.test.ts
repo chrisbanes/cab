@@ -1,5 +1,6 @@
 import {
   escalateApprovalLines,
+  escalateAutoReviewLines,
   unsandboxedGrantLines,
   unsandboxedSupersededLine,
 } from "../../src/operator/sandbox-level-copy.js";
@@ -375,12 +376,27 @@ test("the sandbox level is strict by default, operator-only and versioned throug
   assert.equal(d.sandboxLevel(s.projectId), "escalate-approval");
   assert.equal((await config(read.token)).sandbox, "escalate-approval");
 
+  // Choosing escalate-auto-review states the reviewer, its cost, the overrule and Claude Code strict.
+  const reviewed = prepare("escalate-auto-review");
+  r = await reviewed.run();
+  assert.equal(r.code, 0, r.err + r.out);
+  const reviewedDoc = JSON.parse(readFileSync(reviewed.out, "utf8")) as Json;
+  assert.deepEqual(reviewedDoc.preview.changes, [
+    { field: "sandbox", from: "escalate-approval", to: "escalate-auto-review" },
+  ]);
+  const reviewedNotes = JSON.stringify(reviewedDoc.preview.notes);
+  for (const line of escalateAutoReviewLines)
+    assert.ok(reviewedNotes.includes(line), line);
+  r = await cli("rw", ["project", "apply", "--file", reviewed.out]);
+  assert.equal(r.code, 0, r.err + r.out);
+  assert.equal(d.sandboxLevel(s.projectId), "escalate-auto-review");
+
   const bad = prepare("bogus");
   r = await bad.run();
   assert.equal(r.code, 2, r.err + r.out);
   assert.match(
     r.err + r.out,
-    /--sandbox must be strict, escalate-approval or unsandboxed/,
+    /--sandbox must be strict, escalate-approval, escalate-auto-review or unsandboxed/,
   );
 });
 

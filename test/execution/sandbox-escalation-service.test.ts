@@ -10,7 +10,11 @@ import {
   type NativeInputEndpointIdentity,
   nativeEndpointKey,
 } from "../../src/core/structured-questions.js";
-import type { SandboxEscalationEvent } from "../../src/standalone/codex.js";
+import type { SandboxReviewIdentity } from "../../src/core/sandbox-level.js";
+import type {
+  SandboxEscalationEvent,
+  SandboxReviewEvent,
+} from "../../src/standalone/codex.js";
 import {
   OperatorApi,
   OperatorApiError,
@@ -39,6 +43,37 @@ class EscalationRuntime extends OperatorFixtureRuntime {
   }> = [];
   private listener?: (event: SandboxEscalationEvent) => boolean;
   private readonly pending = new Map<string, NativeInputEndpointIdentity>();
+  private reviewListener?: (event: SandboxReviewEvent) => void;
+  /** Denials that can still be overruled, as Codex keeps them for the running turn. */
+  private readonly denials = new Map<string, SandboxReviewIdentity>();
+  readonly overrules: SandboxReviewIdentity[] = [];
+  overruleAnswer = true;
+  onSandboxReview(listener: (event: SandboxReviewEvent) => void) {
+    this.reviewListener = listener;
+  }
+  async overruleSandboxDenial(identity: SandboxReviewIdentity) {
+    if (!this.denials.delete(identity.reviewId)) return false;
+    this.overrules.push(identity);
+    return this.overruleAnswer;
+  }
+  emitReview(event: SandboxReviewEvent) {
+    if (!this.reviewListener) throw new Error("No review listener");
+    if (event.kind === "review" && event.overrulable)
+      this.denials.set(event.identity.reviewId, event.identity);
+    this.reviewListener(event);
+  }
+  /** As Codex does at a turn's end, its denials can no longer be overruled. */
+  endDenials(turn: string) {
+    for (const identity of [...this.denials.values()])
+      if (identity.turnId === turn) {
+        this.denials.delete(identity.reviewId);
+        this.emitReview({
+          kind: "overruleEnded",
+          identity,
+          reason: "Turn ended",
+        });
+      }
+  }
   currentUserInputGeneration() {
     return this.generation;
   }
@@ -65,6 +100,7 @@ class EscalationRuntime extends OperatorFixtureRuntime {
     for (const identity of [...this.pending.values()])
       if (identity.threadId === thread && identity.turnId === turn)
         this.end(identity);
+    this.endDenials(turn);
   }
   request(
     identity: NativeInputEndpointIdentity,
@@ -109,7 +145,11 @@ type Approval = {
   lifecycle?: { status: string; resolution: string | null };
 };
 
-async function escalationTask(t: TestContext, expiryMs?: number) {
+async function escalationTask(
+  t: TestContext,
+  expiryMs?: number,
+  level: "escalate-approval" | "escalate-auto-review" = "escalate-approval",
+) {
   const runtime = new EscalationRuntime();
   const f = await createOperatorFixture(
     null,
@@ -136,7 +176,7 @@ async function escalationTask(t: TestContext, expiryMs?: number) {
     projectId: seeded.projectId,
     expectedVersion: Number(domain.project(seeded.projectId).version),
     paused: false,
-    sandbox: "escalate-approval",
+    sandbox: level,
   });
   domain.execute({
     type: "task.configure",
@@ -150,8 +190,11 @@ async function escalationTask(t: TestContext, expiryMs?: number) {
   await waitFor(() => f.service.list().some((w) => w.state === "running"));
   const work = f.service.list().find((w) => w.state === "running");
   assert.ok(work?.threadId && work.turnId);
-  assert.equal(f.service.sandboxLevelFor(work.workId), "escalate-approval");
-  assert.equal(runtime.policies.at(-1)?.sandboxEscalation, "approval");
+  assert.equal(f.service.sandboxLevelFor(work.workId), level);
+  assert.equal(
+    runtime.policies.at(-1)?.sandboxEscalation,
+    level === "escalate-auto-review" ? "auto-review" : "approval",
+  );
   const workspace = await f.service.taskWorkspace(seeded.taskId);
   if (workspace?.state !== "ready") throw new Error("Workspace missing");
   const worktree = workspace.repositories[0]!.workspacePath;
@@ -209,7 +252,59 @@ async function escalationTask(t: TestContext, expiryMs?: number) {
     } as never);
   const record = (interactionId: string) =>
     storeOf(f.service).sandboxEscalation(interactionId);
+  let reviews = 0;
+  const reviewIdentity = (
+    overrides: Partial<SandboxReviewIdentity> = {},
+  ): SandboxReviewIdentity => ({
+    runtimeGeneration: runtime.generation,
+    threadId: work.threadId!,
+    turnId: work.turnId!,
+    reviewId: `review-${++reviews}`,
+    targetItemId: `reviewed-item-${reviews}`,
+    ...overrides,
+  });
+  /** Waits for the service to apply every reviewer event emitted so far. */
+  const settled = () =>
+    (f.service as unknown as { sandboxReviewQueue: Promise<void> })
+      .sandboxReviewQueue;
+  /** A started review, then its completion with `status`; resolves once both are applied. */
+  const review = async (
+    status: "approved" | "denied" | "timedOut" | "aborted",
+    {
+      identity: at = reviewIdentity(),
+      cwd = worktree,
+      command = "node chromium.mjs reviewed",
+    }: {
+      identity?: SandboxReviewIdentity;
+      cwd?: string;
+      command?: string;
+    } = {},
+  ) => {
+    const base = { kind: "review" as const, identity: at, command, cwd };
+    runtime.emitReview({
+      ...base,
+      status: "inProgress",
+      riskLevel: null,
+      rationale: null,
+      overrulable: false,
+    });
+    runtime.emitReview({
+      ...base,
+      status,
+      riskLevel: status === "approved" ? "low" : "high",
+      rationale: `The reviewer ${status} it`,
+      overrulable: status === "denied",
+    });
+    await settled();
+    return at;
+  };
+  const reviewRecord = (at: SandboxReviewIdentity) =>
+    storeOf(f.service).sandboxReview(at);
   return {
+    reviewIdentity,
+    review,
+    settled,
+    reviewRecord,
     f,
     runtime,
     seeded,
@@ -678,4 +773,293 @@ test("the task read and cab task get show each escalation's command, decision, e
     ),
   );
   assert.doesNotMatch(r.out, /PRIVATE REVIEW INSTRUCTIONS/);
+});
+
+const autoReviewTask = (t: TestContext, expiryMs?: number) =>
+  escalationTask(t, expiryMs, "escalate-auto-review");
+const knownRisk = (service: StandaloneService, workId: string) =>
+  (
+    service as unknown as {
+      started(): { supervisor: { hasKnownRisk(workId: string): boolean } };
+    }
+  )
+    .started()
+    .supervisor.hasKnownRisk(workId);
+
+test("a reviewer approval is recorded with its risk, rationale, exit code and duration, and creates no Inbox item", async (t) => {
+  const s = await autoReviewTask(t);
+  const approved = await s.review("approved");
+  const record = s.reviewRecord(approved);
+  assert.deepEqual(
+    {
+      decider: record?.decider,
+      decision: record?.decision,
+      status: record?.status,
+      riskLevel: record?.riskLevel,
+      rationale: record?.rationale,
+      command: record?.command,
+      cwd: record?.cwd,
+      workspace: record?.workspace,
+      overrule: record?.overrule,
+    },
+    {
+      decider: "reviewer",
+      decision: "accept",
+      status: "approved",
+      riskLevel: "low",
+      rationale: "The reviewer approved it",
+      command: "node chromium.mjs reviewed",
+      cwd: s.shownCwd,
+      workspace: {
+        head: worktreeGit(s.worktree, "rev-parse", "HEAD"),
+        branch: null,
+        dirty: true,
+      },
+      overrule: null,
+    },
+  );
+  assert.deepEqual(await s.approvals(), []);
+  const { reviewId: _reviewId, ...target } = approved;
+  s.runtime.emitReview({
+    kind: "itemCompleted",
+    target,
+    exitCode: 0,
+    durationMs: 516,
+    // A leaky event must still store no output.
+    ...({ aggregatedOutput: "OUTPUT_SENTINEL" } as object),
+  } as SandboxReviewEvent);
+  await s.settled();
+  const completed = s.reviewRecord(approved);
+  assert.equal(completed?.exitCode, 0);
+  assert.equal(completed?.durationMs, 516);
+  assert.equal(completed?.durationSource, "runtime");
+  // Without a runtime duration, the service measures it from the approval.
+  const second = await s.review("approved");
+  const { reviewId: _second, ...secondTarget } = second;
+  s.runtime.emitReview({
+    kind: "itemCompleted",
+    target: secondTarget,
+    exitCode: 2,
+    durationMs: null,
+  });
+  await s.settled();
+  assert.equal(s.reviewRecord(second)?.durationSource, "service");
+  assert.equal(s.reviewRecord(second)?.exitCode, 2);
+  s.f.seedPersistedState((db) => {
+    assert.doesNotMatch(
+      JSON.stringify(db.prepare("SELECT * FROM sandbox_reviews").all()),
+      /OUTPUT_SENTINEL/,
+    );
+  });
+});
+
+test("a timed-out or aborted review is recorded as a decline, and a request that still reaches cab follows the escalate-approval path", async (t) => {
+  const s = await autoReviewTask(t, 50);
+  for (const status of ["timedOut", "aborted"] as const) {
+    const at = await s.review(status);
+    assert.equal(s.reviewRecord(at)?.status, status);
+    assert.equal(s.reviewRecord(at)?.decision, "decline");
+    assert.equal(s.reviewRecord(at)?.overrule, null);
+  }
+  assert.deepEqual(await s.approvals(), []);
+  const { identity, approval } = await s.escalate();
+  assert.equal(approval.action, "sandbox.escalate");
+  await waitFor(() => s.runtime.replies.length === 1);
+  assert.deepEqual(s.runtime.replies, [{ identity, decision: "decline" }]);
+  assert.equal(s.record(approval.interactionId)?.decider, "expiry");
+});
+
+test("a review that does not bind to the exact admitted escalate-auto-review turn records nothing and notes an anomaly", async (t) => {
+  const s = await autoReviewTask(t);
+  const foreignTurn = await s.review("approved", {
+    identity: s.reviewIdentity({ turnId: "foreign-turn" }),
+  });
+  assert.equal(s.reviewRecord(foreignTurn), undefined);
+  assert.equal(knownRisk(s.f.service, s.work.workId), false);
+  const otherGeneration = await s.review("denied", {
+    identity: s.reviewIdentity({ runtimeGeneration: randomUUID() }),
+  });
+  assert.equal(s.reviewRecord(otherGeneration), undefined);
+  assert.equal(knownRisk(s.f.service, s.work.workId), true);
+  assert.deepEqual(await s.approvals(), []);
+  assert.deepEqual(s.runtime.overrules, []);
+});
+
+test("a review of a turn admitted at escalate-approval is not recorded", async (t) => {
+  const s = await escalationTask(t);
+  const at = await s.review("approved");
+  assert.equal(s.reviewRecord(at), undefined);
+  assert.equal(knownRisk(s.f.service, s.work.workId), true);
+});
+
+test("a reviewer denial offers an advisory overrule; approve overrules it once and the retry is a separate review", async (t) => {
+  const s = await autoReviewTask(t);
+  const denied = await s.review("denied");
+  const record = s.reviewRecord(denied);
+  assert.equal(record?.decision, "decline");
+  const [approval] = await s.approvals();
+  assert.ok(approval);
+  assert.equal(record?.overrule?.interactionId, approval.interactionId);
+  assert.equal(approval.action, "sandbox.overrule");
+  assert.equal(approval.approvable, true);
+  assert.deepEqual(approval.material, {
+    command: "node chromium.mjs reviewed",
+    cwd: s.shownCwd,
+    workspace: {
+      head: worktreeGit(s.worktree, "rev-parse", "HEAD"),
+      branch: null,
+      dirty: true,
+    },
+    riskLevel: "high",
+    rationale: "The reviewer denied it",
+  });
+  const inbox = (await s.api.readInbox()).data.items.find(
+    (i: { id: string }) => i.id === approval.interactionId,
+  ) as { headline?: string } | undefined;
+  assert.equal(inbox?.headline, "Overrule a reviewer denial");
+  // An open overrule holds nothing: the turn keeps running without a pending callback.
+  const callbacks = (
+    s.f.service as unknown as { callbacks: Map<string, Set<unknown>> }
+  ).callbacks;
+  assert.equal(callbacks.has(s.work.workId), false);
+  const key = randomUUID();
+  await s.decide(approval, "approved", key);
+  assert.deepEqual(s.runtime.overrules, [denied]);
+  await s.decide(approval, "approved", key);
+  await s.f.service.settleSandboxOverrule(approval.interactionId);
+  assert.equal(s.runtime.overrules.length, 1);
+  assert.deepEqual(s.reviewRecord(denied)?.overrule, {
+    interactionId: approval.interactionId,
+    decider: "operator",
+    decision: "accept",
+    decidedAt: s.reviewRecord(denied)?.overrule?.decidedAt,
+    delivered: true,
+  });
+  // The decision event is history: it is never delivered to the agent.
+  assert.deepEqual(
+    storeOf(s.f.service)
+      .pendingEvents(s.seeded.assignmentId)
+      .filter((e) => e.interactionId === approval.interactionId),
+    [],
+  );
+  // The retry is reviewed again, as its own review.
+  const retry = await s.review("approved");
+  assert.deepEqual(
+    storeOf(s.f.service)
+      .sandboxReviews(s.seeded.taskId)
+      .map((r) => [r.identity.reviewId, r.status, r.overrule !== null]),
+    [
+      [denied.reviewId, "denied", true],
+      [retry.reviewId, "approved", false],
+    ],
+  );
+});
+
+test("a declined overrule keeps the denial; a rejected overrule records it was not delivered", async (t) => {
+  const s = await autoReviewTask(t);
+  const kept = await s.review("denied");
+  const [first] = await s.approvals();
+  await s.decide(first!, "denied");
+  assert.deepEqual(s.runtime.overrules, []);
+  assert.equal(s.reviewRecord(kept)?.overrule?.decision, "decline");
+  assert.equal(s.reviewRecord(kept)?.overrule?.delivered, null);
+  s.runtime.overruleAnswer = false;
+  const rejected = await s.review("denied");
+  const second = (await s.approvals()).find(
+    (a) =>
+      a.interactionId === s.reviewRecord(rejected)?.overrule?.interactionId,
+  );
+  await s.decide(second!, "approved");
+  assert.equal(s.runtime.overrules.length, 1);
+  assert.equal(s.reviewRecord(rejected)?.overrule?.delivered, false);
+});
+
+test("an overrule is withdrawn when its turn ends or is stopped, and a later decision is refused", async (t) => {
+  const s = await autoReviewTask(t);
+  const ended = await s.review("denied");
+  s.runtime.endDenials(s.work.turnId!);
+  await s.settled();
+  const [obsolete] = await s.approvals();
+  assert.equal(obsolete?.approvable, false);
+  assert.equal(
+    obsolete?.lifecycle?.resolution,
+    "Obsolete: the turn ended before the overrule was decided",
+  );
+  assert.equal(s.reviewRecord(ended)?.overrule?.decider, "obsolete");
+  await assert.rejects(
+    s.decide(obsolete!, "approved"),
+    (error) => error instanceof OperatorApiError && error.status === 403,
+  );
+  const stopped = await s.review("denied");
+  await s.api.execute({
+    type: "task.stop",
+    key: randomUUID(),
+    taskId: s.seeded.taskId,
+  } as never);
+  await waitFor(
+    () => s.reviewRecord(stopped)?.overrule?.decider === "obsolete",
+  );
+  assert.deepEqual(s.runtime.overrules, []);
+});
+
+test("a denial of a command outside the task workspace offers no overrule, and an agent cannot request one", async (t) => {
+  const s = await autoReviewTask(t);
+  const outside = await s.review("denied", { cwd: "/private/var/empty" });
+  assert.equal(s.reviewRecord(outside)?.cwd, "/private/var/empty");
+  assert.equal(s.reviewRecord(outside)?.overrule, null);
+  const agent = await s.f.runtime.callTool({
+    threadId: s.work.threadId!,
+    turnId: s.work.turnId!,
+    callId: "agent-overrule",
+    tool: "cab_request_approval",
+    arguments: { action: "sandbox.overrule", material: { command: "x" } },
+  });
+  assert.equal(agent.success, false);
+  assert.match(agent.text, /reserved/);
+  assert.deepEqual(await s.approvals(), []);
+});
+
+test("a stop withdraws an open overrule, and a start withdraws one a crash left open", async (t) => {
+  const s = await autoReviewTask(t);
+  const open = await s.review("denied");
+  const interactionId = s.reviewRecord(open)!.overrule!.interactionId;
+  await s.f.service.stop();
+  const data = join(s.f.directory, "data");
+  const db = new DatabaseSync(join(data, "standalone.sqlite"));
+  try {
+    assert.equal(
+      db
+        .prepare(
+          "SELECT overruleDecider FROM sandbox_reviews WHERE interactionId = ?",
+        )
+        .get(interactionId)?.overruleDecider,
+      "obsolete",
+    );
+    // A crash before the stop could withdraw it.
+    db.prepare(
+      "UPDATE sandbox_reviews SET overruleDecider = NULL, overruleDecidedAt = NULL WHERE interactionId = ?",
+    ).run(interactionId);
+    db.prepare(
+      "UPDATE inbox_lifecycle SET status = 'actionable', obsolete = 0, resolution = NULL, resolvedAt = NULL WHERE id = ?",
+    ).run(interactionId);
+    db.prepare(
+      "UPDATE coordination_operator_attention SET status = 'open', resolvedAt = NULL WHERE interactionId = ?",
+    ).run(interactionId);
+  } finally {
+    db.close();
+  }
+  const restarted = new StandaloneService(
+    data,
+    () => new EscalationRuntime(),
+    undefined,
+    { power: { enabled: false } },
+  );
+  await restarted.start();
+  try {
+    const withdrawn = storeOf(restarted).sandboxReviewByOverrule(interactionId);
+    assert.equal(withdrawn?.overrule?.decider, "obsolete");
+    assert.equal(restarted.inboxLifecycle().get(interactionId)?.obsolete, 1);
+  } finally {
+    await restarted.stop();
+  }
 });

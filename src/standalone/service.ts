@@ -164,6 +164,7 @@ import {
   type RuntimeToolResult,
   type RuntimeTurnPolicy,
   type SandboxEscalationEvent,
+  type SandboxReviewEvent,
   type RuntimeTurnSettings,
 } from "./codex.js";
 import {
@@ -968,6 +969,10 @@ export class StandaloneService {
     string,
     { workId: string; interactionId: string; resolve: () => void }
   >();
+  /** Runtimes of open sandbox overrules by interaction, until decided or withdrawn. */
+  private readonly overruleRuntimes = new Map<string, Runtime>();
+  /** Reviewer events, applied one at a time in arrival order. */
+  private sandboxReviewQueue: Promise<void> = Promise.resolve();
   /** Held sandbox escalations by endpoint, until answered or withdrawn. */
   private readonly escalationWaiters = new Map<
     string,
@@ -2731,6 +2736,17 @@ export class StandaloneService {
         this.handleSandboxEscalation(event, runtime)
       );
     });
+    runtime.onSandboxReview?.((event) => {
+      const { threadId, turnId } =
+        event.kind === "itemCompleted" ? event.target : event.identity;
+      this.noteTurnActivity(harness, state, threadId, turnId);
+      // Evidence of another harness's execution, or of a retired runtime, is not recorded.
+      if (
+        event.kind === "overruleEnded" ||
+        (acceptsNew() && !foreign(threadId, turnId))
+      )
+        this.handleSandboxReview(event, runtime);
+    });
     runtime.onUserInputOutcome?.((outcome) => {
       if (!foreign(outcome.threadId, outcome.turnId))
         this.handleUserInputOutcome(outcome);
@@ -3093,6 +3109,16 @@ export class StandaloneService {
           // A restart withdraws what could not be withdrawn now.
         } finally {
           this.finishSandboxEscalation(key);
+        }
+      // No overrule outlives its turn's runtime.
+      for (const interactionId of [...this.overruleRuntimes.keys()])
+        try {
+          if (this.db?.isOpen && this.cache?.isOpen)
+            this.acquired?.coordination?.resolveSandboxOverrule(interactionId);
+        } catch {
+          // A restart withdraws what could not be withdrawn now.
+        } finally {
+          this.overruleRuntimes.delete(interactionId);
         }
     });
     await attempt("conversation-capture cleanup", () =>
@@ -6464,7 +6490,10 @@ export class StandaloneService {
    * Throws when there is none.
    */
   private bindNativeCallback(
-    identity: NativeInputEndpointIdentity,
+    identity: Pick<
+      NativeInputEndpointIdentity,
+      "runtimeGeneration" | "threadId" | "turnId"
+    >,
     runtime: Runtime,
   ) {
     const { state, supervisor } = this.started();
@@ -6522,7 +6551,8 @@ export class StandaloneService {
     if (
       !intent ||
       binding.draftTurn ||
-      state.sandboxLevel(intent.id) !== "escalate-approval"
+      (state.sandboxLevel(intent.id) !== "escalate-approval" &&
+        state.sandboxLevel(intent.id) !== "escalate-auto-review")
     )
       return false;
     const key = nativeEndpointKey(event.identity);
@@ -6710,6 +6740,117 @@ export class StandaloneService {
     } catch {
       // Evidence only: a failed write leaves the record as it was, and a restart withdraws it.
     }
+  }
+
+  private handleSandboxReview(
+    event: SandboxReviewEvent,
+    runtime: Runtime,
+  ): void {
+    this.sandboxReviewQueue = this.sandboxReviewQueue
+      .then(() => this.applySandboxReview(event, runtime))
+      .catch(() => {
+        // Evidence only: a failed write leaves the record as it was.
+      });
+  }
+
+  /**
+   * Records a reviewer decision of an exact running turn admitted at escalate-auto-review
+   * (ADR-1034), and offers the operator an advisory overrule of a denial of a command in the task
+   * workspace while that turn runs. A review that does not bind records nothing and notes an
+   * anomaly on the work it names.
+   */
+  private async applySandboxReview(
+    event: SandboxReviewEvent,
+    runtime: Runtime,
+  ): Promise<void> {
+    const coordination = this.acquired?.coordination;
+    if (!coordination) return;
+    if (event.kind === "itemCompleted") {
+      coordination.completeSandboxReview(
+        event.target,
+        event.exitCode,
+        event.durationMs,
+      );
+      return;
+    }
+    if (event.kind === "overruleEnded") {
+      const overrule = coordination.sandboxReview(event.identity)?.overrule;
+      if (overrule) {
+        this.overruleRuntimes.delete(overrule.interactionId);
+        coordination.resolveSandboxOverrule(overrule.interactionId);
+      }
+      return;
+    }
+    const { state, supervisor } = this.started();
+    let binding: CoordinationExecutionBinding;
+    try {
+      binding = this.bindNativeCallback(event.identity, runtime);
+    } catch {
+      const named = state.runtimeQuestionBinding(
+        event.identity.threadId,
+        event.identity.turnId,
+      );
+      if (named) supervisor.noteAnomaly(named.workId);
+      return;
+    }
+    const intent = state.byWorkId(binding.workId);
+    if (
+      !intent ||
+      binding.draftTurn ||
+      state.sandboxLevel(intent.id) !== "escalate-auto-review"
+    ) {
+      supervisor.noteAnomaly(binding.workId);
+      return;
+    }
+    const cwd = this.escalationCwd(binding.taskId, event.cwd);
+    const record = coordination.recordSandboxReview({
+      identity: event.identity,
+      command: event.command,
+      cwd,
+      // Read once, when the review is first recorded.
+      workspace: coordination.sandboxReview(event.identity)
+        ? { head: null, branch: null, dirty: null }
+        : await this.escalationWorkspace(binding.taskId, event.cwd),
+      status: event.status,
+      riskLevel: event.riskLevel,
+      rationale: event.rationale,
+    });
+    // Only a denial of a command in the task workspace is offered, once, while its turn runs.
+    if (
+      event.overrulable &&
+      record.status === "denied" &&
+      record.overrule === null &&
+      !isAbsolute(cwd)
+    ) {
+      const interactionId = coordination.openSandboxOverrule(event.identity);
+      this.overruleRuntimes.set(interactionId, runtime);
+    }
+  }
+
+  /**
+   * Called after an operator decision on a `sandbox.overrule` approval; idempotent. An approved
+   * overrule is sent once, to the runtime and generation of the denial; Codex then tells the agent
+   * the exact action is approved, and the retry is reviewed again.
+   */
+  async settleSandboxOverrule(interactionId: string): Promise<void> {
+    const { coordination } = this.started();
+    const review = coordination.sandboxReviewByOverrule(interactionId);
+    if (!review?.overrule?.decider) return;
+    const runtime = this.overruleRuntimes.get(interactionId);
+    this.overruleRuntimes.delete(interactionId);
+    if (
+      review.overrule.decision !== "accept" ||
+      !coordination.claimSandboxOverrule(interactionId)
+    )
+      return;
+    const sent =
+      runtime !== undefined &&
+      runtime.currentUserInputGeneration?.() ===
+        review.identity.runtimeGeneration &&
+      (await runtime
+        .overruleSandboxDenial?.(review.identity)
+        .catch(() => false)) === true;
+    if (sent) coordination.recordSandboxOverruleDelivered(interactionId);
   }
 
   private finishSandboxEscalation(key: string): void {
@@ -10292,7 +10433,8 @@ export class StandaloneService {
       const localListening = state.localListening(intent.id) === true;
       const level = state.sandboxLevel(intent.id);
       const skipSandbox = level === "unsandboxed";
-      const escalate = level === "escalate-approval";
+      const escalate =
+        level === "escalate-approval" || level === "escalate-auto-review";
       const policy: RuntimeTurnPolicy | undefined = request.draftTurn
         ? { networkAccess: false, access: "read-only" }
         : networkAccess ||
@@ -10304,7 +10446,14 @@ export class StandaloneService {
               networkAccess,
               ...(localListening ? { localListening: true } : {}),
               ...(skipSandbox ? { skipSandbox: true } : {}),
-              ...(escalate ? { sandboxEscalation: "approval" as const } : {}),
+              ...(escalate
+                ? {
+                    sandboxEscalation:
+                      level === "escalate-auto-review"
+                        ? ("auto-review" as const)
+                        : ("approval" as const),
+                  }
+                : {}),
               ...(gitWritableRoots.length > 0 ? { gitWritableRoots } : {}),
             }
           : undefined;
