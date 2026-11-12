@@ -1231,6 +1231,13 @@ test("codex-overrule links a review to its command item and overrules a denial o
     ).reviewPaired.outcome,
     "untested",
   );
+  // The target item ran another command.
+  const lsItem = classify(
+    "codex-overrule",
+    edit(approved, (e) => e.kind === "item", { command: "/bin/zsh -lc 'ls'" }),
+  );
+  assert.equal(lsItem.targetItemLinked.outcome, "untested");
+  assert.equal(lsItem.linkedItemCompleted.outcome, "untested");
   // Missing turn ids never match each other.
   const unnamed = classify(
     "codex-overrule",
@@ -1395,6 +1402,36 @@ test("codex-overrule links a review to its command item and overrules a denial o
     ["proved", "untested"],
   );
 
+  // The denial's own start missing: untested, not refuted by the retry's start.
+  assert.equal(
+    classify(
+      "codex-overrule",
+      without(
+        denied,
+        (e) =>
+          e.kind === "review" && e.reviewId === "r1" && e.phase === "started",
+      ),
+    ).reviewPaired.outcome,
+    "untested",
+  );
+  // An earlier denial of another command does not hide the probe command's overrule.
+  const ls = (e: Event) => ({
+    ...e,
+    reviewId: "r0",
+    targetItemId: "item-r0",
+    command: "/bin/zsh -lc 'ls'",
+  });
+  const r1Events = (denied.events as Event[]).filter(
+    (e) => e.kind === "review" && e.reviewId === "r1",
+  );
+  assert.equal(
+    classify("codex-overrule", {
+      ...denied,
+      events: [...r1Events.map(ls), ...(denied.events as Event[])],
+    }).overruleAccepted.outcome,
+    "proved",
+  );
+
   // A denial of anything but the probe's own command is never overruled.
   rmSync(logPath, { force: true });
   const other = await run("deny-other");
@@ -1402,7 +1439,7 @@ test("codex-overrule links a review to its command item and overrules a denial o
   assert.deepEqual(overrulesSent(), []);
   assert.equal(
     classify("codex-overrule", other).overruleAccepted.reason,
-    "no overrule sent while the turn ran",
+    "denial not elicited: no denial stimulus used (controller decision D32)",
   );
 });
 

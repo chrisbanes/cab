@@ -271,6 +271,7 @@ export async function runCodexGroup(
         riskLevel: p.review?.riskLevel ?? null,
         rationale: short(p.review?.rationale ?? null),
         command: short(p.action?.command),
+        cwd: p.action?.cwd,
         startedAtMs: p.startedAtMs ?? null,
         completedAtMs: p.completedAtMs ?? null,
       });

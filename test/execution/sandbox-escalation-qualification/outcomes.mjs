@@ -367,6 +367,7 @@ const targetItem = (events, review) =>
           e.kind === "item" &&
           e.type === "commandExecution" &&
           e.id === review.targetItemId &&
+          e.command === review.command &&
           e.turnId === review.turnId &&
           before(events, review, e),
       )
@@ -409,13 +410,21 @@ function codexOverrule(trace) {
     out.targetItemLinked = untested(reason);
     out.linkedItemCompleted = untested(reason);
   } else if (!started) {
-    // A start for the same command in the same turn under another reviewId breaks the pair.
+    // An earlier start for the same command in the same turn that never completed under
+    // its own reviewId breaks the pair.
     const other = events.find(
       (e) =>
         e.kind === "review" &&
         e.phase === "started" &&
         e.turnId === first.turnId &&
-        isCommand(e.command, STIMULI.linked),
+        isCommand(e.command, STIMULI.linked) &&
+        before(events, e, first) &&
+        !events.some(
+          (c) =>
+            c.kind === "review" &&
+            c.phase === "completed" &&
+            c.reviewId === e.reviewId,
+        ),
     );
     out.reviewPaired = other
       ? refuted({ completed: cite(first), started: cite(other) })
@@ -498,9 +507,13 @@ function codexOverrule(trace) {
  * and its response, and the retry's fresh reviewId in the same turn. */
 function overruleCells(trace) {
   const { events } = trace;
+  // The probe's own command, as the harness overrules only that.
   const denial = events.find(
     (e) =>
-      e.kind === "review" && e.phase === "completed" && e.status === "denied",
+      e.kind === "review" &&
+      e.phase === "completed" &&
+      e.status === "denied" &&
+      isCommand(e.command, STIMULI.linked),
   );
   if (!denial)
     return {
