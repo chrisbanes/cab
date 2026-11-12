@@ -103,6 +103,11 @@ const assessmentEvent = (p) => ({
   decision_source: p.decisionSource ?? null,
   action: p.action,
 });
+/** The overrule event shapes, in the order they are tried. */
+const overruleShapes = (denial) => [
+  ["GuardianAssessmentEvent", assessmentEvent(denial)],
+  ["completedNotification", denial],
+];
 
 export async function runCodexGroup(
   group,
@@ -171,6 +176,7 @@ export async function runCodexGroup(
   // Ids of overrule requests, whose JSON-RPC responses are recorded as events.
   const overruleIds = new Set();
   const overrules = [];
+  const overruled = new Set();
   let nextId = 0;
   const request = (method, params) =>
     race(
@@ -270,7 +276,17 @@ export async function runCodexGroup(
       });
       if (phase === "completed" && p.review?.status === "denied") {
         trace.lastDenial = p;
-        if (spec.overrule) overrules.push(overruleRunning(p).catch(() => {}));
+        // Only the probe's own command in the fixture, once per review: never an action
+        // the model chose itself.
+        if (
+          spec.overrule &&
+          !overruled.has(p.reviewId) &&
+          isCommand(p.action?.command, STIMULI.linked) &&
+          p.action?.cwd === workspace
+        ) {
+          overruled.add(p.reviewId);
+          overrules.push(overruleRunning(p).catch(() => {}));
+        }
       }
     } else if (message.method === "item/completed") {
       const item = p.item ?? {};
@@ -344,10 +360,7 @@ export async function runCodexGroup(
 
   async function overrule() {
     const attempts = [];
-    for (const [shape, event] of [
-      ["GuardianAssessmentEvent", assessmentEvent(trace.lastDenial)],
-      ["completedNotification", trace.lastDenial],
-    ]) {
+    for (const [shape, event] of overruleShapes(trace.lastDenial)) {
       try {
         const response = await request("thread/approveGuardianDeniedAction", {
           threadId,
@@ -379,10 +392,7 @@ export async function runCodexGroup(
   // Sent from the denial's completed notification while its turn runs: each shape once, in
   // order, stopping at the first result. Never after turn/completed, never a turn/start.
   async function overruleRunning(denial) {
-    for (const [shape, event] of [
-      ["GuardianAssessmentEvent", assessmentEvent(denial)],
-      ["completedNotification", denial],
-    ]) {
+    for (const [shape, event] of overruleShapes(denial)) {
       if (completedTurns.has(denial.turnId)) return;
       const response = request("thread/approveGuardianDeniedAction", {
         threadId,

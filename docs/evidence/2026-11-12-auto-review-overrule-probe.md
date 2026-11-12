@@ -13,6 +13,15 @@ Host: macOS (Darwin 27.0.0), Apple silicon (arm64), Node v26.13.0.
 
 One run, `npm run sandbox-escalation:live -- --group=codex-overrule`, from a clean checkout at candidate `b763410a` after `npm ci` and `npm run build`, with the offline harness test passing at that candidate. It ran from 09:03:37 to 09:04:15 UTC and exited 0. The fixture root was removed and the App Server child stopped. No rerun was made, so the allowance of one fresh attempt for a diagnosed harness defect is unused.
 
+After the run, review tightened the harness and classifier:
+- The harness overrules a denial only of the probe's own command in the fixture workspace, once per review.
+- A review's start must match its completion's command and target.
+- Linkage is read from an approved review.
+- Missing notifications leave cells untested rather than refuted.
+- An overrule is refuted only when both shapes were rejected while the turn ran.
+
+Reclassifying the stored trace with the final classifier gives the same outcomes, and the offline harness test checks this. No denial arrived in the run, so the overrule guard did not affect it.
+
 ## Stimulus
 
 By controller decision D32, the group uses no denial stimulus. Its one turn asks for an ordinary escalated command, `node chromium.mjs linked`, which launches headless Chromium on a `data:` URL and writes `linked-result.json` in the fixture workspace, with the justification `probe: needs host Chromium`. The turn sets reviewer `auto_review` and the granular policy that enables only `sandbox_approval`, as in the 2026-11-11 `codex-auto-review` group. The harness keeps its overrule path: if a completed review is ever `denied` while its turn runs, it sends `thread/approveGuardianDeniedAction` with the `GuardianAssessmentEvent` mapping, then with the raw completed notification only if the first is rejected, and never after `turn/completed` or as a new turn. The offline test exercises that path against the fake App Server with a scripted denial.

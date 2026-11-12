@@ -4,7 +4,8 @@
 // turn 1; it writes `<label>-result.json` only when accepted. Every client message is
 // appended to the log file named by argv[2]. With argv[3] "failed-turns", every turn fails.
 // A turn with reviewer `auto_review` is reviewed instead: approved, or with argv[3] "deny",
-// denied until the client overrules it, then retried under a fresh review.
+// denied until the client overrules it, then retried under a fresh review. With argv[3]
+// "deny-other", a command the prompt did not ask for is denied and the turn ends.
 import { appendFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { createInterface } from "node:readline";
@@ -15,7 +16,12 @@ const write = (message) => process.stdout.write(`${JSON.stringify(message)}\n`);
 let turns = 0;
 let active;
 let denied;
-function review(reviewId, status, { threadId, turnId, cwd, label }) {
+function review(
+  reviewId,
+  status,
+  { threadId, turnId, cwd, label },
+  command = `node chromium.mjs ${label}`,
+) {
   const base = {
     threadId,
     turnId,
@@ -24,7 +30,7 @@ function review(reviewId, status, { threadId, turnId, cwd, label }) {
     action: {
       type: "command",
       source: "shell",
-      command: `/bin/zsh -lc 'node chromium.mjs ${label}'`,
+      command: `/bin/zsh -lc '${command}'`,
       cwd,
     },
   };
@@ -172,6 +178,14 @@ for await (const line of createInterface({ input: process.stdin })) {
     const label = labels.at(-1);
     if (message.params.approvalsReviewer === "auto_review") {
       const turn = { threadId, turnId, cwd, label };
+      if (process.argv[3] === "deny-other") {
+        review("r1", "denied", turn, "cat notes.txt");
+        write({
+          method: "turn/completed",
+          params: { threadId, turn: { id: turnId, status: turnStatus } },
+        });
+        continue;
+      }
       const deny = process.argv[3] === "deny";
       if (deny) denied = { reviewId: "r1", turn };
       review("r1", deny ? "denied" : "approved", turn);

@@ -326,7 +326,8 @@ const noDenial =
   "denial not elicited: no denial stimulus used (controller decision D32)";
 const terminalReview = ["approved", "denied", "timedOut", "aborted"];
 
-/** A review's own started notification: same reviewId and turnId, no later than completion. */
+/** A review's own started notification: same reviewId, turnId, command and target, before
+ * its completion. */
 const startOf = (events, completed) =>
   events.find(
     (e) =>
@@ -334,12 +335,16 @@ const startOf = (events, completed) =>
       e.phase === "started" &&
       e.reviewId === completed.reviewId &&
       e.turnId === completed.turnId &&
+      e.command === completed.command &&
+      e.targetItemId === completed.targetItemId &&
       before(events, e, completed),
   );
 /** Why a completed review's own events do not show a terminal command review in a turn a
  * client turn/start returned; null when they do. */
+const clientTurn = (trace, turnId) =>
+  typeof turnId === "string" && trace.clientTurns?.includes(turnId) === true;
 const pairDefect = (trace, completed) =>
-  !trace.clientTurns?.includes(completed.turnId)
+  !clientTurn(trace, completed.turnId)
     ? "turn not started by the client"
     : completed.actionType !== "command"
       ? "not a command review"
@@ -366,6 +371,9 @@ const targetItem = (events, review) =>
           before(events, review, e),
       )
     : undefined;
+/** Whether any review notification targets this item. */
+const reviewed = (events, item) =>
+  events.some((e) => e.kind === "review" && e.targetItemId === item.id);
 const cite = (r) => ({
   reviewId: r.reviewId,
   turnId: r.turnId,
@@ -386,7 +394,7 @@ function codexOverrule(trace) {
   const out = {};
   // Every cell is decided once the turn ended; before that, the run failed or timed out.
   if (!events.some((e) => e.kind === "turn")) return out;
-  // The first completed review of the stimulus is the linkage subject.
+  // The first completed review of the stimulus is the pairing subject.
   const first = events.find(
     (e) =>
       e.kind === "review" &&
@@ -426,40 +434,54 @@ function codexOverrule(trace) {
         ),
       ],
     });
-    const item = targetItem(events, first);
-    // A stimulus item in the review's turn whose id differs from targetItemId.
+  }
+  // Linkage needs an approved review: a denied review's item never runs.
+  const subject = events.find(
+    (e) =>
+      e.kind === "review" &&
+      e.phase === "completed" &&
+      e.status === "approved" &&
+      isCommand(e.command, STIMULI.linked) &&
+      reviewPair(trace, e),
+  );
+  if (subject) {
+    const item = targetItem(events, subject);
+    // After the review, a stimulus item in its turn that no review targets.
     const other = events.find(
       (e) =>
         isItem(e, STIMULI.linked) &&
-        e.turnId === first.turnId &&
-        e.id !== first.targetItemId,
+        e.turnId === subject.turnId &&
+        before(events, subject, e) &&
+        !reviewed(events, e),
     );
     out.targetItemLinked = item
-      ? proved({ review: cite(first), item: citeItem(item) })
-      : first.targetItemId === null || other
-        ? refuted({ review: cite(first), item: other ? citeItem(other) : null })
+      ? proved({ review: cite(subject), item: citeItem(item) })
+      : subject.targetItemId === null || other
+        ? refuted({
+            review: cite(subject),
+            item: other ? citeItem(other) : null,
+          })
         : untested("no item/completed for targetItemId", {
-            review: cite(first),
+            review: cite(subject),
           });
     out.linkedItemCompleted = !item
-      ? untested("no linked item", { review: cite(first) })
-      : first.status === "approved" &&
-          item.status === "completed" &&
-          item.exitCode === 0
-        ? proved({ review: cite(first), item: citeItem(item) })
+      ? untested("no linked item", { review: cite(subject) })
+      : item.status === "completed" && item.exitCode === 0
+        ? proved({ review: cite(subject), item: citeItem(item) })
         : untested("linked item did not complete successfully", {
-            review: cite(first),
+            review: cite(subject),
             item: citeItem(item),
           });
-  }
-  if (!out.targetItemLinked) {
-    out.targetItemLinked = untested("review not paired");
-    out.linkedItemCompleted = untested("review not paired");
+  } else if (first) {
+    out.targetItemLinked = untested(
+      "no approved, paired review of the stimulus",
+    );
+    out.linkedItemCompleted = untested(
+      "no approved, paired review of the stimulus",
+    );
   }
   const turnStarts = events.filter((e) => e.kind === "turnStarted");
-  const unrequested = turnStarts.filter(
-    (e) => !trace.clientTurns?.includes(e.turnId),
-  );
+  const unrequested = turnStarts.filter((e) => !clientTurn(trace, e.turnId));
   out.noUnrequestedTurn =
     unrequested.length > 0
       ? refuted({ unrequested: unrequested.map((e) => e.turnId) })
@@ -524,12 +546,16 @@ function overruleCells(trace) {
         shape: accepted.shape,
         response: responseTo(accepted).result,
       })
-    : running.length > 0 &&
-        running.every((o) => responseTo(o)?.error !== undefined)
+    : // Refuted only when every shape was sent while the turn ran and each was rejected.
+      ["GuardianAssessmentEvent", "completedNotification"].every((shape) =>
+          running.some(
+            (o) => o.shape === shape && responseTo(o)?.error !== undefined,
+          ),
+        )
       ? refuted({ denial: denied, attempts })
       : untested(
           running.length > 0
-            ? "no response to the overrule request"
+            ? "not every overrule shape was answered while the turn ran"
             : "no overrule sent while the turn ran",
           { denial: denied, attempts },
         );
@@ -560,7 +586,7 @@ function overruleCells(trace) {
       e.turnId === denial.turnId &&
       e.command === denial.command &&
       before(events, response, e) &&
-      e.id !== denial.targetItemId,
+      !reviewed(events, e),
   );
   if (retry) {
     const item = targetItem(events, retry.completed);

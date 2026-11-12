@@ -1217,10 +1217,32 @@ test("codex-overrule links a review to its command item and overrules a denial o
   assert.equal(
     classify(
       "codex-overrule",
-      edit(approved, isCompleted, { targetItemId: null }),
+      edit(approved, (e) => e.kind === "review", { targetItemId: null }),
     ).targetItemLinked.outcome,
     "refuted",
   );
+  // A start under the same reviewId for another action is not this review's start.
+  assert.equal(
+    classify(
+      "codex-overrule",
+      edit(approved, (e) => e.kind === "review" && e.phase === "started", {
+        command: "/bin/zsh -lc 'ls'",
+      }),
+    ).reviewPaired.outcome,
+    "untested",
+  );
+  // Missing turn ids never match each other.
+  const unnamed = classify(
+    "codex-overrule",
+    edit(
+      { ...approved, clientTurns: [undefined] },
+      (e) => e.kind === "turnStarted",
+      {
+        turnId: undefined,
+      },
+    ),
+  );
+  assert.equal(unnamed.noUnrequestedTurn.outcome, "refuted");
   assert.equal(
     classify(
       "codex-overrule",
@@ -1267,13 +1289,38 @@ test("codex-overrule links a review to its command item and overrules a denial o
   assert.equal(overruled.retryReviewedAgain.outcome, "proved");
   assert.equal(overruled.retryReviewedAgain.evidence.retry.reviewId, "r2");
   assert.equal(overruled.retryReviewedAgain.evidence.item.exitCode, 0);
-  // The linkage subject is the first review: the denial, whose item never ran.
-  assert.equal(overruled.linkedItemCompleted.outcome, "untested");
+  // Linkage comes from the approved retry; the denial's item never ran.
+  assert.equal(overruled.reviewPaired.evidence.completed.reviewId, "r1");
+  assert.equal(overruled.targetItemLinked.outcome, "proved");
+  assert.equal(overruled.targetItemLinked.evidence.item.id, "item-r2");
+  assert.equal(overruled.linkedItemCompleted.outcome, "proved");
 
   const overruleId = (denied.events as Event[]).find(
     (e) => e.kind === "overrule",
   )?.requestId;
   const isRetry = (e: Event) => e.kind === "review" && e.reviewId === "r2";
+  const rejected = (e: Event) =>
+    e.kind === "response" ? { ...e, result: undefined, error: "rejected" } : e;
+  const firstEvents = (denied.events as Event[]).map(rejected);
+  const sentAt = firstEvents.findIndex((e) => e.kind === "response") + 1;
+  const bothRejected = {
+    ...denied,
+    events: [
+      ...firstEvents.slice(0, sentAt),
+      {
+        t: 0,
+        kind: "overrule",
+        requestId: 99,
+        reviewId: "r1",
+        turnId: "turn-1",
+        shape: "completedNotification",
+      },
+      { t: 0, kind: "response", id: 99, error: "rejected" },
+      ...firstEvents
+        .slice(sentAt)
+        .filter((e) => !isRetry(e) && e.kind !== "item"),
+    ],
+  };
   const deniedCells = (trace: Event) => {
     const o = classify("codex-overrule", trace);
     return [o.overruleAccepted.outcome, o.retryReviewedAgain.outcome];
@@ -1297,11 +1344,16 @@ test("codex-overrule links a review to its command item and overrules a denial o
       ["untested", "untested"],
     ],
     [
-      "error response",
+      "first shape rejected, second never sent",
       edit(denied, (e) => e.kind === "response", {
         result: undefined,
         error: "unknown review",
       }),
+      ["untested", "untested"],
+    ],
+    [
+      "both shapes rejected while the turn ran",
+      bothRejected,
       ["refuted", "untested"],
     ],
     [
@@ -1318,13 +1370,13 @@ test("codex-overrule links a review to its command item and overrules a denial o
     [
       "no retry started review",
       without(denied, (e) => isRetry(e) && e.phase === "started"),
-      ["proved", "refuted"],
+      ["proved", "untested"],
     ],
     ["no retry review at all", without(denied, isRetry), ["proved", "refuted"]],
     [
       "retry reuses the denial's reviewId",
       edit(denied, isRetry, { reviewId: "r1" }),
-      ["proved", "refuted"],
+      ["proved", "untested"],
     ],
     [
       "denial without its started review",
@@ -1341,5 +1393,29 @@ test("codex-overrule links a review to its command item and overrules a denial o
   assert.deepEqual(
     deniedCells(without(denied, (e) => isRetry(e) || e.kind === "item")),
     ["proved", "untested"],
+  );
+
+  // A denial of anything but the probe's own command is never overruled.
+  rmSync(logPath, { force: true });
+  const other = await run("deny-other");
+  assert.equal(other.failure, null);
+  assert.deepEqual(overrulesSent(), []);
+  assert.equal(
+    classify("codex-overrule", other).overruleAccepted.reason,
+    "no overrule sent while the turn ran",
+  );
+});
+
+test("the committed codex-overrule probe evidence reclassifies with the current rules", async () => {
+  const { classify } = await load("outcomes.mjs");
+  const evidence = JSON.parse(
+    readFileSync(
+      resolve("docs/evidence/2026-11-12-auto-review-overrule-probe.json"),
+      "utf8",
+    ),
+  );
+  assert.deepEqual(
+    classify("codex-overrule", evidence.trace),
+    evidence.outcomes,
   );
 });
