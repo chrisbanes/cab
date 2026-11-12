@@ -1456,3 +1456,241 @@ test("the committed codex-overrule probe evidence reclassifies with the current 
     evidence.outcomes,
   );
 });
+
+test("the escalate-auto-review live run refuses anything but --live --one-attempt and creates nothing", () => {
+  const roots = () =>
+    existsSync(join(homedir(), ".cache"))
+      ? readdirSync(join(homedir(), ".cache")).filter((name) =>
+          name.startsWith("cab-escalate-auto-review-live-"),
+        )
+      : [];
+  const before = roots();
+  for (const args of [
+    [],
+    ["--live"],
+    ["--one-attempt", "--live"],
+    ["--live", "--one-attempt", "extra"],
+  ]) {
+    const result = spawnSync(
+      process.execPath,
+      [join(directory, "live-escalate-auto-review.mjs"), ...args],
+      { encoding: "utf8", timeout: 10_000 },
+    );
+    assert.equal(result.status, 2, args.join(" "));
+    assert.match(result.stderr, /Refusing/);
+    assert.equal(result.stdout, "");
+  }
+  assert.deepEqual(roots(), before);
+});
+
+test("the escalate-auto-review approval cell proves only from its own turn's events, and denial and overrule stay untested", async () => {
+  const { approvalCell, cwdEligibility, denialCells, ESCALATION_POLICY } =
+    await load("escalate-auto-review-outcomes.mjs");
+  const command = "/bin/zsh -lc 'node chromium.mjs reviewed'";
+  const review = {
+    reviewId: "r1",
+    turnId: "turn-1",
+    targetItemId: "item-1",
+    riskLevel: "low",
+    actionType: "command",
+    command,
+  };
+  const cell = {
+    turnId: "turn-1",
+    wire: {
+      approvalPolicy: ESCALATION_POLICY,
+      approvalsReviewer: "auto_review",
+      sandboxType: "workspaceWrite",
+    },
+    results: { control: "EPERM", reviewed: "ok" },
+    reviews: [
+      { ...review, phase: "started", status: "inProgress" },
+      { ...review, phase: "completed", status: "approved" },
+    ],
+    completions: [
+      {
+        turnId: "turn-1",
+        itemId: "item-1",
+        command,
+        status: "completed",
+        exitCode: 0,
+        durationMs: 900,
+      },
+    ],
+    turnEnds: [{ turnId: "turn-1", status: "completed" }],
+    clientRequests: [],
+    unexpected: [],
+    recorded: [
+      {
+        reviewId: "r1",
+        decider: "reviewer",
+        decision: "accept",
+        outcome: "approved",
+        riskLevel: "low",
+        cwd: ".",
+        exitCode: 0,
+        durationMs: 900,
+      },
+    ],
+  };
+  const proved = approvalCell(cell);
+  assert.equal(proved.outcome, "proved");
+  assert.deepEqual(proved.evidence, {
+    reviewId: "r1",
+    turnId: "turn-1",
+    targetItemId: "item-1",
+    itemStatus: "completed",
+    exitCode: 0,
+    turnStatus: "completed",
+  });
+  const outcome = (patch: Record<string, unknown>) =>
+    approvalCell({ ...cell, ...patch }).outcome;
+  // Stripping each cited event leaves the cell unproved.
+  for (const [label, patch] of [
+    ["no started review", { reviews: [cell.reviews[1]] }],
+    ["no completed review", { reviews: [cell.reviews[0]] }],
+    ["no completion", { completions: [] }],
+    ["no turn end", { turnEnds: [] }],
+    ["no recorded review", { recorded: [] }],
+    // Without cab's own turn id, events naming no turn are not this turn's.
+    [
+      "no turn id",
+      {
+        turnId: null,
+        reviews: cell.reviews.map((r) => ({ ...r, turnId: null })),
+        completions: cell.completions.map((c) => ({ ...c, turnId: null })),
+        turnEnds: [{ turnId: null, status: "completed" }],
+      },
+    ],
+    ["no policy captured", { wire: null }],
+    ["no anomaly record", { unexpected: undefined }],
+    ["no escalated result", { results: { control: "EPERM" } }],
+    ["no control result", { results: { reviewed: "ok" } }],
+  ] as const)
+    assert.equal(outcome(patch), "untested", label);
+  // Events of another turn, review or item are not this cell's.
+  for (const [label, patch] of [
+    [
+      "review of another turn",
+      {
+        reviews: cell.reviews.map((r) => ({ ...r, turnId: "turn-2" })),
+      },
+    ],
+    [
+      "start under another reviewId",
+      { reviews: [{ ...cell.reviews[0], reviewId: "r0" }, cell.reviews[1]] },
+    ],
+    [
+      "completion of another item",
+      { completions: [{ ...cell.completions[0], itemId: "item-9" }] },
+    ],
+    [
+      "completion in another turn",
+      { completions: [{ ...cell.completions[0], turnId: "turn-2" }] },
+    ],
+    [
+      "end of another turn",
+      { turnEnds: [{ turnId: "turn-2", status: "completed" }] },
+    ],
+    [
+      "record of another review",
+      { recorded: [{ ...cell.recorded[0], reviewId: "r9" }] },
+    ],
+  ] as const)
+    assert.equal(outcome(patch), "untested", label);
+  // Present evidence that contradicts the claim refutes it.
+  for (const [label, patch] of [
+    [
+      "control ran in the sandbox",
+      { results: { control: "ok", reviewed: "ok" } },
+    ],
+    ["failed turn", { turnEnds: [{ turnId: "turn-1", status: "failed" }] }],
+    [
+      "target item ran another command",
+      {
+        completions: [{ ...cell.completions[0], command: "/bin/zsh -lc 'ls'" }],
+      },
+    ],
+    [
+      "item exited non-zero",
+      { completions: [{ ...cell.completions[0], exitCode: 1 }] },
+    ],
+    [
+      "recorded as a decline",
+      { recorded: [{ ...cell.recorded[0], decision: "decline" }] },
+    ],
+    [
+      "operator reviewer",
+      { wire: { ...cell.wire, approvalsReviewer: "user" } },
+    ],
+    ["a request reached cab", { clientRequests: [{ itemId: "x" }] }],
+    // A second, conflicting copy of a cited event is not ignored.
+    [
+      "second completion of the item",
+      {
+        completions: [
+          ...cell.completions,
+          { ...cell.completions[0], exitCode: 1 },
+        ],
+      },
+    ],
+    [
+      "second end of the turn",
+      { turnEnds: [...cell.turnEnds, { turnId: "turn-1", status: "failed" }] },
+    ],
+    [
+      "second record of the review",
+      {
+        recorded: [
+          ...cell.recorded,
+          { ...cell.recorded[0], decision: "decline" },
+        ],
+      },
+    ],
+    ["anomaly", { unexpected: ["item/autoApprovalReview/completed"] }],
+  ] as const)
+    assert.equal(outcome(patch), "refuted", label);
+  // A reviewer denial of the benign command leaves approval untested and is only observed.
+  const denied = {
+    ...cell,
+    reviews: cell.reviews.map((r) =>
+      r.phase === "completed" ? { ...r, status: "denied" } : r,
+    ),
+  };
+  assert.equal(approvalCell(denied).outcome, "untested");
+  const cells = denialCells(denied);
+  for (const key of ["denial", "overrule", "reusedReviewId"])
+    assert.equal(
+      cells[key].reason,
+      "denial not elicited: no denial stimulus used (controller decision D32)",
+    );
+  assert.deepEqual(cells.denial.observed, [{ reviewId: "r1", command }]);
+  assert.deepEqual(cwdEligibility(cell), {
+    observed: true,
+    cwd: ".",
+    insideWorkspace: true,
+  });
+  assert.deepEqual(cwdEligibility({ ...cell, recorded: [] }), {
+    observed: false,
+  });
+});
+
+test("the committed escalate-auto-review live evidence reclassifies with the current rules", async () => {
+  const { approvalCell, cwdEligibility, denialCells } = await load(
+    "escalate-auto-review-outcomes.mjs",
+  );
+  const evidence = JSON.parse(
+    readFileSync(
+      resolve("docs/evidence/2026-11-12-escalate-auto-review-live.json"),
+      "utf8",
+    ),
+  );
+  assert.deepEqual(
+    {
+      approval: approvalCell(evidence.cell),
+      ...denialCells(evidence.cell),
+      cwdEligibility: cwdEligibility(evidence.cell),
+    },
+    evidence.verdict,
+  );
+});

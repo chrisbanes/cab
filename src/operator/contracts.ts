@@ -1,6 +1,13 @@
 import { inboxLifecycleSchema } from "../core/inbox-lifecycle.js";
-import { sandboxLevelSchema } from "../core/sandbox-level.js";
-import { sandboxEscalationOutcomes } from "./sandbox-escalation-copy.js";
+import {
+  sandboxLevelSchema,
+  sandboxReviewRiskSchema,
+} from "../core/sandbox-level.js";
+import {
+  sandboxEscalationOutcomes,
+  sandboxOverruleOutcomes,
+  sandboxReviewOutcomes,
+} from "./sandbox-escalation-copy.js";
 import { delegateWithdrawalRefusalCodes } from "../core/delegate-withdrawal.js";
 import {
   maxToolPathChars,
@@ -1492,6 +1499,42 @@ const sandboxEscalationSchema = z
     completedAt: time.nullable(),
   })
   .strict();
+const sandboxReviewSchema = z
+  .object({
+    reviewId: text.min(1),
+    command: safeText,
+    /** The command, cwd or rationale was cut to its recorded limit. */
+    truncated: z.boolean(),
+    cwd: safeText,
+    workspace: z
+      .object({
+        head: z
+          .string()
+          .regex(/^[0-9a-f]{40,64}$/)
+          .nullable(),
+        branch: safeText,
+        dirty: z.boolean().nullable(),
+      })
+      .strict()
+      .nullable(),
+    decider: z.literal("reviewer"),
+    decision: z.enum(["accept", "decline"]).nullable(),
+    outcome: z.enum(sandboxReviewOutcomes),
+    riskLevel: sandboxReviewRiskSchema.nullable(),
+    rationale: safeText,
+    /** The advisory overrule a denial offered; null when none was offered. */
+    overrule: z
+      .object({ interactionId: uuid, outcome: z.enum(sandboxOverruleOutcomes) })
+      .strict()
+      .nullable(),
+    exitCode: z.number().int().safe().nullable(),
+    durationMs: time.nullable(),
+    durationSource: z.enum(["runtime", "service"]).nullable(),
+    startedAt: time,
+    reviewedAt: time.nullable(),
+    completedAt: time.nullable(),
+  })
+  .strict();
 export const interactionSchema = z
   .object({
     lifecycle: inboxLifecycleSchema.optional(),
@@ -2196,6 +2239,12 @@ export const taskSchema = envelope(
        * output is ever recorded. Absent from older services: unavailable, never empty.
        */
       sandboxEscalations: z.array(sandboxEscalationSchema).optional(),
+      /**
+       * Each reviewer decision of the task, oldest first. Command, cwd, workspace branch and
+       * rationale are null when the privacy exclusions would change them. No output is ever
+       * recorded. Absent from older services: unavailable, never empty.
+       */
+      sandboxReviews: z.array(sandboxReviewSchema).optional(),
       /** Result review requests, oldest first. Absent from older services: unavailable, never empty. */
       resultReviews: z.array(resultReviewSchema).optional(),
       completionRequests: z.array(completion),

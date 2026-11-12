@@ -1,0 +1,145 @@
+{
+  "candidate": "339ba2d39da10f0ace75c9df78325f7abe2bf8ba",
+  "candidateClean": true,
+  "node": "v26.13.0",
+  "runtime": {
+    "launcherSha256": "50ab38ba21d0d9f8346f32f41848382f15b556190f3c7a07e885a4fb73e379c8",
+    "version": "codex-cli 0.167.0-alpha.3.2"
+  },
+  "cell": {
+    "turnId": "01a1d004-7644-7b33-a9ab-6a204eef4def",
+    "wire": {
+      "approvalPolicy": {
+        "granular": {
+          "sandbox_approval": true,
+          "rules": false,
+          "mcp_elicitations": false,
+          "skill_approval": false,
+          "request_permissions": false
+        }
+      },
+      "approvalsReviewer": "auto_review",
+      "sandboxType": "workspaceWrite"
+    },
+    "results": {
+      "control": "browserType.launch: EPERM: operation not permitted, mkdtemp '<tmpdir>/playwright-artifacts-X7V97M'",
+      "reviewed": "ok"
+    },
+    "reviews": [
+      {
+        "phase": "started",
+        "reviewId": "693314b4-52c5-4db1-b157-65e475cc77ce",
+        "turnId": "01a1d004-7644-7b33-a9ab-6a204eef4def",
+        "targetItemId": "exec-3aac6afc-1dbe-4745-b083-8d8a9faa7bd1",
+        "status": "inProgress",
+        "riskLevel": null,
+        "rationale": null,
+        "actionType": "command",
+        "command": "/bin/zsh -lc 'node chromium.mjs reviewed'"
+      },
+      {
+        "phase": "completed",
+        "reviewId": "693314b4-52c5-4db1-b157-65e475cc77ce",
+        "turnId": "01a1d004-7644-7b33-a9ab-6a204eef4def",
+        "targetItemId": "exec-3aac6afc-1dbe-4745-b083-8d8a9faa7bd1",
+        "status": "approved",
+        "riskLevel": "low",
+        "rationale": "Auto-review returned a low-risk allow decision.",
+        "actionType": "command",
+        "command": "/bin/zsh -lc 'node chromium.mjs reviewed'"
+      }
+    ],
+    "completions": [
+      {
+        "turnId": "01a1d004-7644-7b33-a9ab-6a204eef4def",
+        "itemId": "exec-5eb584a7-43e5-463a-8c09-daa939ae368d",
+        "command": "/bin/zsh -lc 'node chromium.mjs control'",
+        "status": "completed",
+        "exitCode": 0,
+        "durationMs": 197
+      },
+      {
+        "turnId": "01a1d004-7644-7b33-a9ab-6a204eef4def",
+        "itemId": "exec-3aac6afc-1dbe-4745-b083-8d8a9faa7bd1",
+        "command": "/bin/zsh -lc 'node chromium.mjs reviewed'",
+        "status": "completed",
+        "exitCode": 0,
+        "durationMs": 742
+      }
+    ],
+    "turnEnds": [
+      {
+        "turnId": "01a1d004-7644-7b33-a9ab-6a204eef4def",
+        "status": "completed"
+      }
+    ],
+    "clientRequests": [],
+    "unexpected": [],
+    "recorded": [
+      {
+        "reviewId": "693314b4-52c5-4db1-b157-65e475cc77ce",
+        "decider": "reviewer",
+        "decision": "accept",
+        "outcome": "approved",
+        "riskLevel": "low",
+        "rationale": "Auto-review returned a low-risk allow decision.",
+        "cwd": ".",
+        "overrule": null,
+        "exitCode": 0,
+        "durationMs": 742,
+        "durationSource": "runtime"
+      }
+    ],
+    "inbox": []
+  },
+  "verdict": {
+    "approval": {
+      "outcome": "proved",
+      "checks": {
+        "policySent": true,
+        "controlFailedInSandbox": true,
+        "reviewPaired": true,
+        "reviewApproved": true,
+        "targetItemCompleted": true,
+        "ranOutsideSandbox": true,
+        "turnCompleted": true,
+        "recorded": true,
+        "noClientEscalation": true,
+        "noAnomaly": true
+      },
+      "evidence": {
+        "reviewId": "693314b4-52c5-4db1-b157-65e475cc77ce",
+        "turnId": "01a1d004-7644-7b33-a9ab-6a204eef4def",
+        "targetItemId": "exec-3aac6afc-1dbe-4745-b083-8d8a9faa7bd1",
+        "itemStatus": "completed",
+        "exitCode": 0,
+        "turnStatus": "completed"
+      }
+    },
+    "denial": {
+      "outcome": "untested",
+      "reason": "denial not elicited: no denial stimulus used (controller decision D32)",
+      "observed": []
+    },
+    "overrule": {
+      "outcome": "untested",
+      "reason": "denial not elicited: no denial stimulus used (controller decision D32)"
+    },
+    "reusedReviewId": {
+      "outcome": "untested",
+      "reason": "denial not elicited: no denial stimulus used (controller decision D32)"
+    },
+    "cwdEligibility": {
+      "observed": true,
+      "cwd": ".",
+      "insideWorkspace": true
+    }
+  },
+  "refusedTurns": 0,
+  "pass": true,
+  "failure": null,
+  "cleanup": {
+    "serviceStopped": true,
+    "fixtureRemoved": true
+  }
+}

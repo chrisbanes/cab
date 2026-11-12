@@ -43,7 +43,11 @@ import type {
   SandboxEscalationRecord,
   TaskCompletionRequest,
 } from "../core/coordination.js";
-import { sandboxEscalationOutcome } from "../operator/sandbox-escalation-copy.js";
+import {
+  sandboxEscalationOutcome,
+  sandboxOverruleOutcome,
+  sandboxReviewOutcome,
+} from "../operator/sandbox-escalation-copy.js";
 import type { OperatorCommentReview } from "../core/delivery.js";
 import {
   absentBranchHead,
@@ -4596,6 +4600,36 @@ export class OperatorApi {
           this.sandboxEscalation(e, approvals, excluded),
         );
       })(),
+      sandboxReviews: view.sandboxReviews.map((r) => ({
+        reviewId: r.identity.reviewId,
+        // Model-written or task text: shown only when the privacy exclusions leave it unchanged.
+        command: this.exact(r.command, excluded),
+        truncated: r.truncated,
+        cwd: this.exact(r.cwd, excluded),
+        workspace:
+          r.workspace.head === null
+            ? null
+            : {
+                head: r.workspace.head,
+                branch: this.exact(r.workspace.branch, excluded),
+                dirty: r.workspace.dirty,
+              },
+        decider: r.decider,
+        decision: r.decision,
+        outcome: sandboxReviewOutcome(r),
+        riskLevel: r.riskLevel,
+        rationale: this.exact(r.rationale, excluded),
+        overrule: r.overrule && {
+          interactionId: r.overrule.interactionId,
+          outcome: sandboxOverruleOutcome(r.overrule),
+        },
+        exitCode: r.exitCode,
+        durationMs: r.durationMs,
+        durationSource: r.durationSource,
+        startedAt: r.startedAt,
+        reviewedAt: r.reviewedAt,
+        completedAt: r.completedAt,
+      })),
       resultReviews: view.resultReviews.map((r) => ({
         lifecycle: this.inboxLifecycleView(r.reviewId, excluded),
         reviewId: r.reviewId,

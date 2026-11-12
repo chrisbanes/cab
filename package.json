@@ -49,6 +49,7 @@
     "skip-sandbox:live": "node test/execution/skip-sandbox-qualification/live-skip-sandbox.mjs --live --one-attempt",
     "sandbox-escalation:live": "node test/execution/sandbox-escalation-qualification/live-escalation.mjs --live --one-attempt",
     "escalate-approval:live": "node test/execution/sandbox-escalation-qualification/live-escalate-approval.mjs --live --one-attempt",
+    "escalate-auto-review:live": "node test/execution/sandbox-escalation-qualification/live-escalate-auto-review.mjs --live --one-attempt",
     "drafting:live": "node test/execution/drafting-qualification/live-drafting.mjs",
     "recovery:live": "node test/execution/recovery-qualification/live-runtime.mjs --live",
     "planned-restart:live": "node test/execution/planned-restart-qualification/live-restart.mjs --live",

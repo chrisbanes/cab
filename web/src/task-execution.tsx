@@ -17,6 +17,8 @@ import {
   sandboxEscalationCommandUnavailable,
   sandboxEscalationPlace,
   sandboxEscalationResultLine,
+  sandboxReviewPlace,
+  sandboxReviewResultLine,
 } from "../../src/operator/sandbox-escalation-copy.js";
 import {
   admissionLine,
@@ -360,7 +362,10 @@ export function TaskExecution({
           </ul>
         )}
       </section>
-      <SandboxEscalations escalations={data.sandboxEscalations ?? []} />
+      <SandboxEscalations
+        escalations={data.sandboxEscalations ?? []}
+        reviews={data.sandboxReviews ?? []}
+      />
       <Dependencies
         data={data}
         client={client}
@@ -371,29 +376,55 @@ export function TaskExecution({
   );
 }
 
-/** Each command the task's turns asked to run outside the sandbox, and how it ended. */
+/**
+ * Each command the task's turns asked to run outside the sandbox, decided by the operator or by
+ * the reviewer, oldest first, and how it ended.
+ */
 function SandboxEscalations({
   escalations,
+  reviews,
 }: {
   escalations: NonNullable<Data["sandboxEscalations"]>;
+  reviews: NonNullable<Data["sandboxReviews"]>;
 }) {
-  if (escalations.length === 0) return null;
+  if (escalations.length === 0 && reviews.length === 0) return null;
+  const entries = [
+    ...escalations.map((e) => ({
+      at: e.requestedAt,
+      item: (
+        <li key={e.interactionId} data-escalation={e.outcome}>
+          {e.command === null ? (
+            sandboxEscalationCommandUnavailable
+          ) : (
+            <code>{e.command}</code>
+          )}{" "}
+          <span className="metadata muted">{sandboxEscalationPlace(e)}</span>
+          <p>{sandboxEscalationResultLine(e)}</p>
+        </li>
+      ),
+    })),
+    ...reviews.map((r) => ({
+      at: r.startedAt,
+      item: (
+        <li key={`review-${r.reviewId}`} data-review={r.outcome}>
+          {r.command === null ? (
+            sandboxEscalationCommandUnavailable
+          ) : (
+            <code>{r.command}</code>
+          )}{" "}
+          <span className="metadata muted">{sandboxReviewPlace(r)}</span>
+          <p>{sandboxReviewResultLine(r)}</p>
+          {r.rationale !== null && (
+            <p className="metadata muted">Rationale: {r.rationale}</p>
+          )}
+        </li>
+      ),
+    })),
+  ].sort((a, b) => a.at - b.at);
   return (
     <section aria-labelledby="execution-escalations">
       <h4 id="execution-escalations">Sandbox escalations</h4>
-      <ol className="execution-list">
-        {escalations.map((e) => (
-          <li key={e.interactionId} data-escalation={e.outcome}>
-            {e.command === null ? (
-              sandboxEscalationCommandUnavailable
-            ) : (
-              <code>{e.command}</code>
-            )}{" "}
-            <span className="metadata muted">{sandboxEscalationPlace(e)}</span>
-            <p>{sandboxEscalationResultLine(e)}</p>
-          </li>
-        ))}
-      </ol>
+      <ol className="execution-list">{entries.map((e) => e.item)}</ol>
     </section>
   );
 }

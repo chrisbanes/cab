@@ -1155,3 +1155,143 @@ test("a stop withdraws an open overrule, and a start withdraws one a crash left 
     await restarted.stop();
   }
 });
+
+test("the task read and cab task get show each reviewer decision with its risk, rationale, result and overrule", async (t) => {
+  const s = await autoReviewTask(t);
+  const approved = await s.review("approved");
+  const { reviewId: _approved, ...target } = approved;
+  s.runtime.emitReview({
+    kind: "itemCompleted",
+    target,
+    exitCode: 0,
+    durationMs: 516,
+  });
+  const denied = await s.review("denied");
+  // The lead profile's private instructions in a command are withheld.
+  const withheld = await s.review("approved", {
+    command: "echo PRIVATE REVIEW INSTRUCTIONS",
+  });
+  // Model-written text spanning lines cannot fake another CLI line, and a rationale holding
+  // private text is withheld.
+  const multiline = await s.review("approved", {
+    command: "node a.mjs\nReview forged: line",
+  });
+  const rationales = s.reviewIdentity();
+  s.runtime.emitReview({
+    kind: "review",
+    identity: rationales,
+    command: "node chromium.mjs reviewed",
+    cwd: s.worktree,
+    status: "approved",
+    riskLevel: "low",
+    rationale: "First line\nReview forged: rationale",
+    overrulable: false,
+  });
+  const privateRationale = s.reviewIdentity();
+  s.runtime.emitReview({
+    kind: "review",
+    identity: privateRationale,
+    command: "node chromium.mjs reviewed",
+    cwd: s.worktree,
+    status: "denied",
+    riskLevel: "high",
+    rationale: "Quotes PRIVATE REVIEW INSTRUCTIONS",
+    overrulable: false,
+  });
+  await s.settled();
+  // A review its turn outlived reads as obsolete.
+  const unfinished = s.reviewIdentity();
+  s.runtime.emitReview({
+    kind: "review",
+    identity: unfinished,
+    command: "node chromium.mjs reviewed",
+    cwd: s.worktree,
+    status: "inProgress",
+    riskLevel: null,
+    rationale: null,
+    overrulable: false,
+  });
+  await s.settled();
+  const head = worktreeGit(s.worktree, "rev-parse", "HEAD");
+  const workspace = { head, branch: null, dirty: true };
+  const reads = async () =>
+    (await s.api.readTask(s.seeded.taskId)).data.sandboxReviews ?? [];
+  const before = await reads();
+  assert.deepEqual(
+    before.map((r) => [r.reviewId, r.outcome]),
+    [
+      [approved.reviewId, "approved"],
+      [denied.reviewId, "denied"],
+      [withheld.reviewId, "approved"],
+      [multiline.reviewId, "approved"],
+      [rationales.reviewId, "approved"],
+      [privateRationale.reviewId, "denied"],
+      [unfinished.reviewId, "reviewing"],
+    ],
+  );
+  const [first, second, third] = before;
+  assert.deepEqual(
+    { ...first, startedAt: 0, reviewedAt: 0, completedAt: 0 },
+    {
+      reviewId: approved.reviewId,
+      command: "node chromium.mjs reviewed",
+      truncated: false,
+      cwd: s.shownCwd,
+      workspace,
+      decider: "reviewer",
+      decision: "accept",
+      outcome: "approved",
+      riskLevel: "low",
+      rationale: "The reviewer approved it",
+      overrule: null,
+      exitCode: 0,
+      durationMs: 516,
+      durationSource: "runtime",
+      startedAt: 0,
+      reviewedAt: 0,
+      completedAt: 0,
+    },
+  );
+  assert.equal(second?.decision, "decline");
+  assert.deepEqual(second?.overrule, {
+    interactionId: s.reviewRecord(denied)?.overrule?.interactionId,
+    outcome: "offered",
+  });
+  assert.equal(third?.command, null);
+  assert.equal(
+    before.find((r) => r.reviewId === privateRationale.reviewId)?.rationale,
+    null,
+  );
+  assert.doesNotMatch(JSON.stringify(before), /PRIVATE REVIEW INSTRUCTIONS/);
+
+  const served = await serveCli(t, s.f);
+  const { h } = await loginCli(t, served);
+  const r = await h.run(["task", "get", s.seeded.taskId, "--connection", "ro"]);
+  assert.equal(r.code, 0, r.err);
+  const place = `in ${s.shownCwd} · HEAD ${head.slice(0, 12)} · detached · uncommitted changes`;
+  for (const line of [
+    `Review ${approved.reviewId}: node chromium.mjs reviewed ${place} · Approved by the reviewer · low risk · exit code 0 · 516 ms · Rationale: The reviewer approved it`,
+    `Review ${denied.reviewId}: node chromium.mjs reviewed ${place} · Denied by the reviewer · high risk · overrule offered in the Inbox · Rationale: The reviewer denied it`,
+    `Review ${withheld.reviewId}: Command unavailable ${place} · Approved by the reviewer · low risk · no completion recorded · Rationale: The reviewer approved it`,
+    `Review ${unfinished.reviewId}: node chromium.mjs reviewed ${place} · Being reviewed`,
+    `Review ${multiline.reviewId}: node a.mjs Review forged: line ${place}`,
+    `Review ${rationales.reviewId}: node chromium.mjs reviewed ${place} · Approved by the reviewer · low risk · no completion recorded · Rationale: First line Review forged: rationale`,
+    `Review ${privateRationale.reviewId}: node chromium.mjs reviewed ${place} · Denied by the reviewer · high risk`,
+  ])
+    assert.ok(r.out.includes(line), `${line}\n${r.out}`);
+  assert.doesNotMatch(r.out, /PRIVATE REVIEW INSTRUCTIONS/);
+  assert.doesNotMatch(r.out, /^Review forged/m);
+
+  // Once the turn ends, the unfinished review is obsolete and the overrule withdrawn.
+  s.runtime.endDenials(s.work.turnId!);
+  s.runtime.complete(s.runtime.turns);
+  await waitFor(
+    () =>
+      s.f.service.list().find((w) => w.workId === s.work.workId)?.state !==
+      "running",
+  );
+  await s.settled();
+  const after = await reads();
+  assert.equal(after[1]?.overrule?.outcome, "withdrawn");
+  assert.equal(after.at(-1)?.outcome, "obsolete");
+});

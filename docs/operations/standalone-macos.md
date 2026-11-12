@@ -1183,7 +1183,8 @@ the project stay strict for now.
   agent's code, and an approved command has the service user's full filesystem, process,
   network and credential access.
 - cab records each decision with its risk level, its rationale and, for an approved command,
-  its exit code and duration. The task page and `cab task get` do not show them yet.
+  its exit code and duration. The task's **Execution** tab and `cab task get TASK_ID` list each
+  decision with the escalations, and with the outcome of a denial's overrule.
 - A denial of a command in the task workspace appears in the Inbox as **Overrule a reviewer
   denial** while its turn runs. Approving it tells the agent the exact action is approved; the
   agent may retry it, and the retry is reviewed again, so the overrule is advisory. Declining
