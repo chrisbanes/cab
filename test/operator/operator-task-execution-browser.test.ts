@@ -811,3 +811,82 @@ test("a blocked lead's idle delegate is withdrawn with a reason after a final-en
     .getByText(/Withdrawn by the operator on .*: Replaced by a new delegate/)
     .waitFor();
 });
+
+test(
+  "the Execution tab lists each sandbox escalation with its command, decision, exit code and duration",
+  { browserEngine: "chromium" },
+  async (_t, j) => {
+    const f = await j.start("fixture.create", () =>
+      createOperatorFixture(null, undefined, undefined, j.fixtureOptions),
+    );
+    let browser: Browser | undefined;
+    j.cleanup(
+      (primary) => f.close(browser, primary),
+      "fixture.close",
+      () => f.lifecycle.steps,
+    );
+    const a = await seedReviewTask(f, "Escalation project", "Escalation task");
+    const interactionId = randomUUID();
+    // One approved escalation of the lead whose command finished.
+    f.seedPersistedState((db) => {
+      db.exec("PRAGMA foreign_keys = OFF");
+      db.prepare(
+        `INSERT INTO coordination_interactions (interactionId, taskId, requestingAssignmentId,
+          requestingWorkId, requestingWorkRevision, requestingAssignmentVersion,
+          conversationRevision, kind, status, prompt, action, target, materialHash,
+          materialJson, response, revision)
+        VALUES (?, ?, ?, 'escalation-work', 1, 1, 1, 'approval', 'approved',
+          'Run a command outside the sandbox', 'sandbox.escalate', NULL, ?, ?, 'approved', 2)`,
+      ).run(
+        interactionId,
+        a.taskId,
+        a.assignmentId,
+        "0".repeat(64),
+        JSON.stringify({
+          command: "node chromium.mjs escalated",
+          cwd: ".",
+          reason: "needs host Chromium",
+          workspace: {
+            head: "0123456789abcdef0123456789abcdef01234567",
+            branch: "main",
+            dirty: false,
+          },
+        }),
+      );
+      db.prepare(
+        `INSERT INTO sandbox_escalations (interactionId, taskId, workId, runtimeGeneration,
+          requestId, threadId, turnId, itemId, requestedAt, decider, decision, decidedAt,
+          delivered, exitCode, durationMs, durationSource, completedAt)
+        VALUES (?, ?, 'escalation-work', 'generation', '1', 'thread', 'turn', 'item', 1,
+          'operator', 'accept', 2, 1, 3, 1234, 'runtime', 3)`,
+      ).run(interactionId, a.taskId);
+    });
+    const web = await j.start("fixture.web", () => f.startWeb());
+    browser = await j.start("browser.launch.chromium", () => chromium.launch());
+    const page = await browser.newPage({
+      viewport: { width: 1366, height: 900 },
+    });
+    j.observe(page);
+    page.setDefaultTimeout(5000);
+    await signIn(
+      page,
+      web.origin,
+      web.password,
+      `/tasks/${a.taskId}?section=execution`,
+    );
+    const execution = page.locator("section#execution");
+    await execution
+      .getByRole("heading", { name: "Sandbox escalations" })
+      .waitFor();
+    const row = execution.locator("[data-escalation=approved]");
+    await row
+      .getByText("node chromium.mjs escalated", { exact: true })
+      .waitFor();
+    await row
+      .getByText("in . · HEAD 0123456789ab · on main · no uncommitted changes")
+      .waitFor();
+    await row
+      .getByText("Approved by the operator · exit code 3 · 1.2 s")
+      .waitFor();
+  },
+);

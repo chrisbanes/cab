@@ -1467,6 +1467,8 @@ const sandboxEscalationSchema = z
   .object({
     interactionId: uuid,
     command: safeText,
+    /** The command, cwd or reason was cut to fit the approval limit. */
+    truncated: z.boolean(),
     cwd: safeText,
     workspace: z
       .object({

@@ -14,8 +14,9 @@ import { useCommandSend } from "./command-send.js";
 import { SendFeedback } from "./coordination-actions.js";
 import { ActionLink, Button, ShortId, StatusBadge } from "./components.js";
 import {
+  sandboxEscalationCommand,
+  sandboxEscalationPlace,
   sandboxEscalationResultLine,
-  sandboxEscalationWorkspaceLine,
 } from "../../src/operator/sandbox-escalation-copy.js";
 import {
   admissionLine,
@@ -383,16 +384,8 @@ function SandboxEscalations({
       <ol className="execution-list">
         {escalations.map((e) => (
           <li key={e.interactionId} data-escalation={e.outcome}>
-            {e.command === null ? (
-              "Command unavailable"
-            ) : (
-              <code>{e.command}</code>
-            )}
-            <span className="metadata muted">
-              {" "}
-              in {e.cwd ?? "an unavailable directory"} ·{" "}
-              {sandboxEscalationWorkspaceLine(e.workspace)}
-            </span>
+            <code>{sandboxEscalationCommand(e)}</code>{" "}
+            <span className="metadata muted">{sandboxEscalationPlace(e)}</span>
             <p>{sandboxEscalationResultLine(e)}</p>
           </li>
         ))}

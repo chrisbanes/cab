@@ -2,7 +2,9 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import {
   escalationDuration,
+  sandboxEscalationCommand,
   sandboxEscalationOutcome,
+  sandboxEscalationPlace,
   sandboxEscalationResultLine,
   sandboxEscalationWorkspaceLine,
 } from "../../src/operator/sandbox-escalation-copy.js";
@@ -31,6 +33,7 @@ test("each outcome reads as one line, with an approved command's exit code and d
   ) =>
     sandboxEscalationResultLine({
       outcome,
+      decider: null,
       decision: null,
       exitCode: null,
       durationMs: null,
@@ -48,7 +51,7 @@ test("each outcome reads as one line, with an approved command's exit code and d
   );
   assert.equal(
     line("approved"),
-    "Approved by the operator; the command has not finished",
+    "Approved by the operator; no completion recorded",
   );
   assert.equal(line("declined"), "Declined by the operator");
   assert.equal(line("expired"), "Declined after 15 minutes without an answer");
@@ -57,10 +60,18 @@ test("each outcome reads as one line, with an approved command's exit code and d
     "Withdrawn: the request ended before it was answered",
   );
   assert.equal(
-    line("not-delivered", { decision: "accept" }),
+    line("not-delivered", { decider: "operator", decision: "accept" }),
     "Approved by the operator; the answer was not delivered",
   );
+  // An expiry whose decline was not delivered is still the expiry's, never the operator's.
+  assert.equal(
+    line("not-delivered", { decider: "expiry", decision: "decline" }),
+    "Declined after 15 minutes without an answer; the answer was not delivered",
+  );
   assert.equal(escalationDuration(250), "250 ms");
+  assert.equal(escalationDuration(1234), "1.2 s");
+  assert.equal(escalationDuration(59_960), "1 min 0 s");
+  assert.equal(escalationDuration(119_600), "2 min 0 s");
   assert.equal(escalationDuration(125_000), "2 min 5 s");
 });
 
@@ -79,4 +90,27 @@ test("the workspace line names HEAD, branch and uncommitted changes, or says it 
     "Workspace state unknown",
   );
   assert.equal(sandboxEscalationWorkspaceLine(null), "Workspace state unknown");
+});
+
+test("the command and where it runs read the same on both surfaces, a cut command marked", () => {
+  assert.equal(
+    sandboxEscalationCommand({ command: "node x", truncated: false }),
+    "node x",
+  );
+  assert.equal(
+    sandboxEscalationCommand({ command: "node x", truncated: true }),
+    "node x (cut to fit)",
+  );
+  assert.equal(
+    sandboxEscalationCommand({ command: null, truncated: false }),
+    "Command unavailable",
+  );
+  assert.equal(
+    sandboxEscalationPlace({ cwd: ".", workspace: null }),
+    "in . · Workspace state unknown",
+  );
+  assert.equal(
+    sandboxEscalationPlace({ cwd: null, workspace: null }),
+    "in an unavailable directory · Workspace state unknown",
+  );
 });

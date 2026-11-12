@@ -556,6 +556,10 @@ test("a long command is cut to fit the approval limit and the cut is shown, what
     new TextEncoder().encode(JSON.stringify(material)).byteLength <= 8192,
   );
   assert.equal(approval.approvable, true);
+  // The task read carries the cut marker for the task UI and the CLI.
+  const [escalation] =
+    (await s.api.readTask(s.seeded.taskId)).data.sandboxEscalations ?? [];
+  assert.equal(escalation?.truncated, true);
 });
 
 test("the task read and cab task get show each escalation's command, decision, exit code and duration", async (t) => {
@@ -576,12 +580,27 @@ test("the task read and cab task get show each escalation's command, decision, e
     "echo PRIVATE REVIEW INSTRUCTIONS",
   );
   const read = (await s.api.readTask(s.seeded.taskId)).data.sandboxEscalations;
+  // Times are asserted present or absent, then compared without their values.
+  assert.deepEqual(
+    read?.map((e) => [
+      e.requestedAt > 0,
+      e.decidedAt !== null,
+      e.completedAt !== null,
+    ]),
+    // Approved and completed; declined with no completion; pending.
+    [
+      [true, true, true],
+      [true, true, false],
+      [true, false, false],
+    ],
+  );
   assert.deepEqual(
     read?.map((e) => ({ ...e, requestedAt: 0, decidedAt: 0, completedAt: 0 })),
     [
       {
         interactionId: approved.approval.interactionId,
         command: "node chromium.mjs escalated",
+        truncated: false,
         cwd: s.shownCwd,
         workspace: {
           head: worktreeGit(s.worktree, "rev-parse", "HEAD"),
@@ -601,6 +620,7 @@ test("the task read and cab task get show each escalation's command, decision, e
       {
         interactionId: declined.approval.interactionId,
         command: "node chromium.mjs escalated",
+        truncated: false,
         cwd: s.shownCwd,
         workspace: {
           head: worktreeGit(s.worktree, "rev-parse", "HEAD"),
@@ -620,6 +640,7 @@ test("the task read and cab task get show each escalation's command, decision, e
       {
         interactionId: withheld.approval.interactionId,
         command: null,
+        truncated: false,
         cwd: null,
         workspace: null,
         decider: null,
@@ -642,18 +663,18 @@ test("the task read and cab task get show each escalation's command, decision, e
   assert.equal(r.code, 0, r.err);
   assert.ok(
     r.out.includes(
-      `Escalation ${approved.approval.interactionId}: node chromium.mjs escalated in ${s.shownCwd} · Approved by the operator · exit code 3 · 1.2 s`,
+      `Escalation ${approved.approval.interactionId}: node chromium.mjs escalated in ${s.shownCwd} · HEAD ${worktreeGit(s.worktree, "rev-parse", "HEAD").slice(0, 12)} · detached · uncommitted changes · Approved by the operator · exit code 3 · 1.2 s`,
     ),
     r.out,
   );
   assert.ok(
     r.out.includes(
-      `Escalation ${declined.approval.interactionId}: node chromium.mjs escalated in ${s.shownCwd} · Declined by the operator`,
+      `Escalation ${declined.approval.interactionId}: node chromium.mjs escalated in ${s.shownCwd} · HEAD ${worktreeGit(s.worktree, "rev-parse", "HEAD").slice(0, 12)} · detached · uncommitted changes · Declined by the operator`,
     ),
   );
   assert.ok(
     r.out.includes(
-      `Escalation ${withheld.approval.interactionId}: command unavailable in an unavailable directory · Waiting for an operator answer`,
+      `Escalation ${withheld.approval.interactionId}: Command unavailable in an unavailable directory · Workspace state unknown · Waiting for an operator answer`,
     ),
   );
   assert.doesNotMatch(r.out, /PRIVATE REVIEW INSTRUCTIONS/);

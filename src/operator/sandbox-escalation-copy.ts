@@ -30,15 +30,34 @@ export function sandboxEscalationOutcome(record: {
 /** A duration in milliseconds, as an operator reads it. */
 export function escalationDuration(ms: number): string {
   if (ms < 1000) return `${ms} ms`;
-  const seconds = ms / 1000;
-  return seconds < 60
-    ? `${seconds.toFixed(1)} s`
-    : `${Math.floor(seconds / 60)} min ${Math.round(seconds % 60)} s`;
+  // Rounded once, so 59 960 ms reads 1 min 0 s, never 60.0 s.
+  const tenths = Math.round(ms / 100);
+  if (tenths < 600) return `${(tenths / 10).toFixed(1)} s`;
+  const seconds = Math.round(ms / 1000);
+  return `${Math.floor(seconds / 60)} min ${seconds % 60} s`;
+}
+
+/** The command as recorded, marked when it was cut to fit the approval limit. */
+export function sandboxEscalationCommand(e: {
+  command: string | null;
+  truncated: boolean;
+}): string {
+  if (e.command === null) return "Command unavailable";
+  return e.truncated ? `${e.command} (cut to fit)` : e.command;
+}
+
+/** Where the command was asked to run: its working directory and workspace state. */
+export function sandboxEscalationPlace(e: {
+  cwd: string | null;
+  workspace: Parameters<typeof sandboxEscalationWorkspaceLine>[0];
+}): string {
+  return `in ${e.cwd ?? "an unavailable directory"} · ${sandboxEscalationWorkspaceLine(e.workspace)}`;
 }
 
 /** What happened to the escalation and, once an approved command ran, its exit code and duration. */
 export function sandboxEscalationResultLine(e: {
   outcome: SandboxEscalationOutcome;
+  decider: "operator" | "expiry" | "obsolete" | null;
   decision: "accept" | "decline" | null;
   exitCode: number | null;
   durationMs: number | null;
@@ -54,10 +73,14 @@ export function sandboxEscalationResultLine(e: {
     case "declined":
       return "Declined by the operator";
     case "not-delivered":
-      return `${e.decision === "accept" ? "Approved" : "Declined"} by the operator; the answer was not delivered`;
+      return `${
+        e.decider === "expiry"
+          ? "Declined after 15 minutes without an answer"
+          : `${e.decision === "accept" ? "Approved" : "Declined"} by the operator`
+      }; the answer was not delivered`;
     case "approved":
       return e.completedAt === null
-        ? "Approved by the operator; the command has not finished"
+        ? "Approved by the operator; no completion recorded"
         : [
             "Approved by the operator",
             e.exitCode === null ? "no exit code" : `exit code ${e.exitCode}`,

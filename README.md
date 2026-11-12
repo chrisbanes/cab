@@ -258,7 +258,8 @@ each acceptance scenario to its evidence and disposition.
   Broad host-permitted reads remain enabled, command network access (Codex) and local
   listening for test fixtures (Claude Code) are off, and the sandbox level is strict, unless
   the operator changes them per project; the unsandboxed level lets host tools such as
-  browsers and emulators run (both harnesses). Stop is best-effort: unresolved work
+  browsers and emulators run (both harnesses), and the escalate-approval level lets a Codex
+  task turn run one command outside the sandbox once the operator approves it. Stop is best-effort: unresolved work
   can remain held for reconciliation. See the
   [execution policy](docs/design/standalone.md#default-execution-policy) and
   [acceptance plan](docs/acceptance.md) for the boundaries and required evidence.

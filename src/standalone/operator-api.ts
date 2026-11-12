@@ -423,6 +423,7 @@ function retainedTextLineCount(text: string) {
 /** The material a sandbox escalation recorded; anything else reads as withheld. */
 const escalationMaterialSchema = z.object({
   command: z.string(),
+  truncated: z.boolean().optional(),
   cwd: z.string(),
   workspace: z.object({
     head: z.string().nullable(),
@@ -4194,10 +4195,10 @@ export class OperatorApi {
   /** An escalation's evidence; its command, cwd and workspace come from its approval's disclosed material. */
   private sandboxEscalation(
     e: SandboxEscalationRecord,
-    approvals: readonly CoordinationInteraction[],
+    approvals: ReadonlyMap<string, CoordinationInteraction>,
     excluded: readonly string[] | undefined,
   ) {
-    const approval = approvals.find((a) => a.interactionId === e.interactionId);
+    const approval = approvals.get(e.interactionId);
     const material = escalationMaterialSchema.safeParse(
       approval ? this.interaction(approval, excluded).material : null,
     );
@@ -4205,6 +4206,7 @@ export class OperatorApi {
     return {
       interactionId: e.interactionId,
       command: m?.command ?? null,
+      truncated: m?.truncated === true,
       cwd: m?.cwd ?? null,
       workspace: m?.workspace ?? null,
       decider: e.decider,
@@ -4582,9 +4584,14 @@ export class OperatorApi {
       }),
       questions: view.questions.map((i) => this.interaction(i, excluded)),
       approvals: view.approvals.map((i) => this.interaction(i, excluded)),
-      sandboxEscalations: view.sandboxEscalations.map((e) =>
-        this.sandboxEscalation(e, view.approvals, excluded),
-      ),
+      sandboxEscalations: (() => {
+        const approvals = new Map(
+          view.approvals.map((a) => [a.interactionId, a] as const),
+        );
+        return view.sandboxEscalations.map((e) =>
+          this.sandboxEscalation(e, approvals, excluded),
+        );
+      })(),
       resultReviews: view.resultReviews.map((r) => ({
         lifecycle: this.inboxLifecycleView(r.reviewId, excluded),
         reviewId: r.reviewId,

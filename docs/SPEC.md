@@ -1154,7 +1154,7 @@ effective policy is shown states the level, its grant and these risks in that ha
 At `escalate-approval` a Codex task turn keeps its `workspaceWrite` sandbox policy and sends
 the granular approval policy `{ granular: { sandbox_approval: true, rules: false,
 mcp_elicitations: false, skill_approval: false, request_permissions: false } }` with
-`approvalsReviewer: "user"`; a resumed thread may report that exact policy, and no other.
+`approvalsReviewer: "user"`; a resumed thread may report `never` or that exact policy, and no other.
 Each `item/commandExecution/requestApproval` of that exact admitted turn becomes an Inbox
 approval with action `sandbox.escalate`, a sandbox escalation. Its material is the command,
 the working directory relative to the task workspace, the agent's reason and the workspace's

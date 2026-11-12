@@ -21,7 +21,7 @@ import {
   rmSync,
   writeFileSync,
 } from "node:fs";
-import { homedir } from "node:os";
+import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 import { CodexRuntime } from "../../../dist/src/standalone/codex.js";
 import { OperatorApi } from "../../../dist/src/standalone/operator-api.js";
@@ -450,8 +450,11 @@ evidence.pass =
   evidence.failure === null &&
   evidence.cleanup.fixtureRemoved;
 let output = JSON.stringify(evidence, null, 2);
+// The per-user temporary directory appears in sandboxed failures, such as Playwright's mkdtemp.
 for (const [secret, shown] of [
   [root, "<fixture>"],
+  [realpathSync(tmpdir()), "<tmpdir>"],
+  [tmpdir(), "<tmpdir>"],
   [homedir(), "~"],
 ])
   output = output.replaceAll(secret, shown);
