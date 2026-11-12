@@ -8,13 +8,17 @@ import {
   executionHarnessLabels,
   type FolderListing,
   type ghLoginStateSchema,
+  type issueTrackerCredentialsSchema,
   type OperatorCommand,
   type sourceCredentialStatusSchema,
   unsupportedRuntimeField,
   type Workspace,
 } from "../../src/operator/contracts.js";
 import type { ReadinessCheck } from "../../src/operator/readiness.js";
-import { sourceCredentialExplanation } from "../../src/operator/source-credential.js";
+import {
+  jiraCredentialExplanation,
+  sourceCredentialExplanation,
+} from "../../src/operator/source-credential.js";
 import type { z } from "zod";
 import { unavailableAlert } from "./execution-runtime.js";
 import { addClaudeHref } from "./settings-sections.js";
@@ -529,6 +533,66 @@ export function sourceCredentialLine(
       status.source === "gh" && status.gh.state === "signed-in"
         ? `GitHub source credential: GitHub CLI · @${status.gh.login}`
         : `GitHub source credential: ${kind}`,
+  };
+}
+
+/**
+ * Whether the ready check shows the task-source credential line. A Jira source always
+ * has an installation credential to report; a GitHub source records one only with a
+ * repository, on any code host.
+ */
+export const sourceCredentialShown = (
+  tracker: "github" | "jira",
+  repositoryCount: number,
+) => tracker === "jira" || repositoryCount > 0;
+
+/**
+ * The Jira site credential from the configuration read (the chosen site and whether it
+ * has an installation credential) and the credentials read (usability and account).
+ * Informational only; it never blocks Resume. `undefined` is still loading, `null` a
+ * failed read.
+ */
+export function jiraCredentialLine(
+  projectId: string,
+  source:
+    | { instance?: string | null | undefined; credentialConfigured: boolean }
+    | null
+    | undefined,
+  credentials:
+    | z.infer<typeof issueTrackerCredentialsSchema>["data"]["credentials"]
+    | null
+    | undefined,
+): WaitItem {
+  const unavailable = { text: "Jira credential: status unavailable." };
+  if (source === undefined) return { text: "Jira credential: checking…" };
+  if (source === null) return unavailable;
+  if (credentials === undefined) return { text: "Jira credential: checking…" };
+  if (credentials === null) return unavailable;
+  const link = {
+    label: "Task source settings",
+    href: `/projects/${projectId}/settings?tab=source`,
+  };
+  const site = source.instance;
+  if (site === "")
+    return {
+      text: "Jira credential: no site chosen. The source won't sync until a site and its credential are set.",
+      link,
+    };
+  if (!site) return unavailable;
+  if (!source.credentialConfigured)
+    return {
+      text: `Jira credential: not set for ${site}. The source won't sync until one is set.`,
+      link,
+    };
+  const status = credentials.find((c) => c.instance === site);
+  if (!status) return unavailable;
+  if (!status.usable)
+    return {
+      text: `Jira credential: ${site} · ${jiraCredentialExplanation(status.reason ?? "missing-credential")}. The source won't sync until it's fixed.`,
+      link,
+    };
+  return {
+    text: `Jira credential: ${site} · ${status.account?.displayName ?? "account"}`,
   };
 }
 

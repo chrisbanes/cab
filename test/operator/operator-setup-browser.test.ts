@@ -6,6 +6,7 @@ import { join } from "node:path";
 import type { Page } from "playwright";
 import { DiscoveryFailure } from "../../src/standalone/github-discovery.js";
 import {
+  type BrowserJourney,
   browserSuite,
   captureBrowserEvidence,
 } from "../fixtures/browser-diagnostics.js";
@@ -31,8 +32,9 @@ import {
 
 const test = browserSuite("operator-setup-browser");
 
-test("Jira setup persists the tracker and opens Task source with a usable site chooser", async (_t, journey) => {
-  const site = "fixture.atlassian.net";
+const site = "fixture.atlassian.net";
+/** Env-backed variables for one Jira site credential, restored after the journey. */
+function jiraEnvironment(journey: BrowserJourney) {
   for (const [name, value] of Object.entries({
     FIXTURE_SETUP_JIRA_SITE: `https://${site}`,
     FIXTURE_SETUP_JIRA_EMAIL: "fixture@example.test",
@@ -45,6 +47,86 @@ test("Jira setup persists the tracker and opens Task source with a usable site c
     }, `restore-${name}`);
     process.env[name] = value;
   }
+}
+const jiraSiteCredential = {
+  type: "issue-tracker-credential.configure",
+  actor: "operator",
+  issueTracker: "jira",
+  instance: site,
+  credential: {
+    siteRef: "env:FIXTURE_SETUP_JIRA_SITE",
+    emailRef: "env:FIXTURE_SETUP_JIRA_EMAIL",
+    tokenRef: "env:FIXTURE_SETUP_JIRA_TOKEN",
+  },
+} as const;
+
+test("Setup's ready check reports the Jira credential and re-reads it on Check again", async (_t, journey) => {
+  jiraEnvironment(journey);
+  let accepted = false;
+  const jira = fakeJira((request) =>
+    request.url.pathname.endsWith("/myself")
+      ? accepted
+        ? json({ accountId: "fixture", displayName: "Fixture" })
+        : json({ errorMessages: ["Unauthorized"] }, { status: 401 })
+      : json({ issues: [] }),
+  );
+  const { f, page } = await setupJourney(journey, {
+    jiraFetcher: jira.fetcher,
+  });
+  await stubReadiness(page);
+  await page.getByLabel("Task source", { exact: true }).selectOption("jira");
+  await addRepository(page);
+  const sent = sentCommands(page);
+  const { projectId, ready, resume } = await createProject(page, sent);
+  const link = `/projects/${projectId}/settings?tab=source`;
+  const line = (text: string) => ready.getByText(text);
+  await line(
+    "Jira credential: no site chosen. The source won't sync until a site and its credential are set.",
+  ).waitFor();
+  assert.equal(
+    await ready
+      .getByRole("link", { name: "Task source settings" })
+      .getAttribute("href"),
+    link,
+  );
+  await resume.waitFor();
+  assert.equal(await resume.isEnabled(), true);
+  assert.equal(await ready.getByText(/GitHub source credential/).count(), 0);
+  // Fixed in another tab: Check again re-reads the site and its credential.
+  const d = f.service.domain();
+  d.execute({ ...jiraSiteCredential, key: randomUUID() });
+  d.execute({
+    type: "jira.configure",
+    actor: "operator",
+    key: randomUUID(),
+    projectId,
+    expectedVersion: d.jiraConfiguration(projectId)!.version,
+    instance: site,
+    selections: [],
+    readiness: null,
+  });
+  const check = ready.getByRole("button", { name: "Check again" });
+  await check.click();
+  await line(
+    `Jira credential: ${site} · Jira rejected the email and token. The source won't sync until it's fixed.`,
+  ).waitFor();
+  assert.equal(
+    await ready
+      .getByRole("link", { name: "Task source settings" })
+      .getAttribute("href"),
+    link,
+  );
+  accepted = true;
+  await check.click();
+  await line(`Jira credential: ${site} · Fixture`).waitFor();
+  assert.equal(
+    await ready.getByRole("link", { name: "Task source settings" }).count(),
+    0,
+  );
+});
+
+test("Jira setup persists the tracker and opens Task source with a usable site chooser", async (_t, journey) => {
+  jiraEnvironment(journey);
   const jira = fakeJira((request) =>
     request.url.pathname.endsWith("/myself")
       ? json({ accountId: "fixture", displayName: "Fixture" })
@@ -87,18 +169,7 @@ test("Jira setup persists the tracker and opens Task source with a usable site c
     await page.getByLabel("Jira site", { exact: true }).isEnabled(),
     true,
   );
-  f.service.domain().execute({
-    type: "issue-tracker-credential.configure",
-    actor: "operator",
-    key: randomUUID(),
-    issueTracker: "jira",
-    instance: site,
-    credential: {
-      siteRef: "env:FIXTURE_SETUP_JIRA_SITE",
-      emailRef: "env:FIXTURE_SETUP_JIRA_EMAIL",
-      tokenRef: "env:FIXTURE_SETUP_JIRA_TOKEN",
-    },
-  });
+  f.service.domain().execute({ ...jiraSiteCredential, key: randomUUID() });
   let releasePrivate!: () => void;
   const privateGate = new Promise<void>((resolve) => {
     releasePrivate = resolve;

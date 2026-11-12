@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import { test } from "node:test";
 import {
+  jiraCredentialReasons,
   operatorCommandSchema,
   type HarnessStatus,
   type Workspace,
@@ -10,7 +11,10 @@ import {
   readinessCheckIds,
   readinessSchema,
 } from "../../src/operator/readiness.js";
-import { sourceCredentialExplanation } from "../../src/operator/source-credential.js";
+import {
+  jiraCredentialExplanation,
+  sourceCredentialExplanation,
+} from "../../src/operator/source-credential.js";
 import { ClientError, OperatorClient } from "../../web/src/api.js";
 import { ConfigurationDraft } from "../../web/src/settings-state.js";
 import { settingsHeader } from "../../web/src/settings-view.js";
@@ -21,6 +25,7 @@ import {
   duplicateRows,
   emptyRow,
   folderCaption,
+  jiraCredentialLine,
   listedProject,
   parseTypedRepository,
   pickerStart,
@@ -33,6 +38,7 @@ import {
   setupDeliveryCopy,
   setupSourceCredentialCopy,
   sourceCredentialLine,
+  sourceCredentialShown,
   typedRepositoryId,
   typeRepository,
   verificationCopy,
@@ -747,6 +753,79 @@ test("the ready check states the recorded source credential with a settings link
     assert.deepEqual(sourceCredentialLine(id, unavailable), {
       text: "GitHub source credential: status unavailable.",
     });
+});
+
+test("the ready check shows the source credential line for a Jira source or any repository", () => {
+  // The rule reads the tracker and repository count, never the code host.
+  assert.equal(sourceCredentialShown("github", 0), false);
+  assert.equal(sourceCredentialShown("github", 1), true);
+  assert.equal(sourceCredentialShown("jira", 0), true);
+  assert.equal(sourceCredentialShown("jira", 1), true);
+});
+
+test("jiraCredentialLine reports the Jira site credential in Jira wording", () => {
+  const id = randomUUID();
+  const site = "fixture.atlassian.net";
+  const link = {
+    label: "Task source settings",
+    href: `/projects/${id}/settings?tab=source`,
+  };
+  const configured = { instance: site, credentialConfigured: true };
+  const row = (
+    over: Partial<{
+      usable: boolean;
+      reason: (typeof jiraCredentialReasons)[number] | null;
+    }> = {},
+  ) => ({
+    issueTracker: "jira" as const,
+    instance: site,
+    usable: true,
+    account: { accountId: "acct-1", displayName: "Fixture" },
+    reason: null,
+    ...over,
+  });
+  const checking = { text: "Jira credential: checking…" };
+  const unavailable = { text: "Jira credential: status unavailable." };
+  const cases: [Parameters<typeof jiraCredentialLine>, object][] = [
+    [[id, undefined, [row()]], checking],
+    [[id, configured, undefined], checking],
+    [[id, null, [row()]], unavailable],
+    [[id, configured, null], unavailable],
+    [
+      [id, { instance: null, credentialConfigured: true }, [row()]],
+      unavailable,
+    ],
+    [[id, configured, []], unavailable],
+    [
+      [id, { instance: "", credentialConfigured: false }, []],
+      {
+        text: "Jira credential: no site chosen. The source won't sync until a site and its credential are set.",
+        link,
+      },
+    ],
+    [
+      [id, { instance: site, credentialConfigured: false }, []],
+      {
+        text: `Jira credential: not set for ${site}. The source won't sync until one is set.`,
+        link,
+      },
+    ],
+    ...jiraCredentialReasons.map(
+      (reason): [Parameters<typeof jiraCredentialLine>, object] => [
+        [id, configured, [row({ usable: false, reason })]],
+        {
+          text: `Jira credential: ${site} · ${jiraCredentialExplanation(reason)}. The source won't sync until it's fixed.`,
+          link,
+        },
+      ],
+    ),
+    [[id, configured, [row()]], { text: `Jira credential: ${site} · Fixture` }],
+  ];
+  for (const [args, expected] of cases) {
+    const line = jiraCredentialLine(...args);
+    assert.deepEqual(line, expected);
+    assert.doesNotMatch(line.text, /GitHub|gh\b/);
+  }
 });
 
 test("setup sends a delivery default with any repository, and the login only when signed in", () => {

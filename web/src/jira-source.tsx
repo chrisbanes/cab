@@ -1,5 +1,4 @@
 import { useCallback, useEffect, useId, useState } from "react";
-import type { z } from "zod";
 import {
   issueTrackerCredentialsSchema,
   jiraPreviewSchema,
@@ -34,26 +33,13 @@ import {
   parseRows,
 } from "./settings-changes.js";
 import { ruleText } from "../../src/operator/readiness-text.js";
+import { jiraCredentialExplanation } from "../../src/operator/source-credential.js";
 import type { ObservationResource } from "./sync-placement.js";
 import { NativeSelect } from "./ui/native-select.js";
 import { JiraStatusMappingPanel } from "./status-mapping-config.js";
 
-type Credential = z.infer<
-  typeof issueTrackerCredentialsSchema
->["data"]["credentials"][number];
-
 const envName = /^[A-Z][A-Z0-9_]*$/;
 const blank = () => ({ site: "", email: "", token: "", key: key() });
-
-const reasonCopy: Record<NonNullable<Credential["reason"]>, string> = {
-  "missing-credential": "a variable has no value in the service environment",
-  "site-invalid":
-    "the site variable must be an https:// address with no path or port",
-  "site-mismatch": "the site variable now names a different site",
-  "site-unreachable": "the site could not be reached",
-  "not-jira": "the address is not a Jira Cloud site",
-  unauthorized: "Jira rejected the email and token",
-};
 
 /** The installation's Jira site credentials: three environment variable names per site. */
 function JiraCredentials({
@@ -129,7 +115,7 @@ function JiraCredentials({
             Jira {c.instance} ·{" "}
             {c.usable
               ? `${c.account?.displayName ?? "account"} · read-only use`
-              : reasonCopy[c.reason ?? "missing-credential"]}
+              : jiraCredentialExplanation(c.reason ?? "missing-credential")}
           </p>
           {!shown && (
             <Button
