@@ -2191,3 +2191,372 @@ test("the committed escalate-auto-review live evidence reclassifies with the cur
     evidence.verdict,
   );
 });
+
+test("the Claude escalation live run refuses anything but --live --one-attempt and creates nothing", () => {
+  const roots = () =>
+    existsSync(join(homedir(), ".cache"))
+      ? readdirSync(join(homedir(), ".cache")).filter((name) =>
+          name.startsWith("cab-claude-escalation-live-"),
+        )
+      : [];
+  const before = roots();
+  for (const args of [
+    [],
+    ["--live"],
+    ["--one-attempt", "--live"],
+    ["--live", "--one-attempt", "extra"],
+  ]) {
+    const result = spawnSync(
+      process.execPath,
+      [join(directory, "live-claude-escalation.mjs"), ...args],
+      { encoding: "utf8", timeout: 10_000 },
+    );
+    assert.equal(result.status, 2, args.join(" "));
+    assert.match(result.stderr, /Refusing/);
+    assert.equal(result.stdout, "");
+  }
+  assert.deepEqual(roots(), before);
+});
+
+/** A Claude escalation run whose every required cell is proved from its own events. */
+function claudeRun() {
+  const pre = (
+    t: number,
+    toolUseId: string,
+    command: string,
+    flagged: boolean,
+    decision: string,
+    returnedAt = t + 1,
+  ) => ({
+    t,
+    kind: "pre",
+    toolUseId,
+    tool: "Bash",
+    command,
+    flagged,
+    decision,
+    returnedAt,
+  });
+  const post = (t: number, toolUseId: string) => ({
+    t,
+    kind: "post",
+    event: "PostToolUse",
+    toolUseId,
+  });
+  const turn = (turnId: string) => ({
+    turnId,
+    init: { permissionMode: "auto" },
+    result: { subtype: "success", isError: false },
+    intentState: "completed",
+    unexpected: [] as string[],
+  });
+  return {
+    cells: {
+      approval: {
+        ...turn("turn-a"),
+        events: [
+          pre(10, "a1", "node chromium.mjs control-approval", false, "pass"),
+          post(20, "a1"),
+          pre(30, "a2", "node chromium.mjs approved", true, "allow", 40),
+          post(50, "a2"),
+          pre(60, "a3", "node chromium.mjs declined", true, "deny", 70),
+        ] as Event[],
+        results: {
+          "control-approval": "browserType.launch: EPERM",
+          approved: "ok",
+        },
+        escalations: [
+          {
+            turnId: "turn-a",
+            itemId: "a2",
+            decider: "operator",
+            decision: "accept",
+            exitCode: 0,
+            durationMs: 900,
+            durationSource: "service",
+          },
+          {
+            turnId: "turn-a",
+            itemId: "a3",
+            decider: "operator",
+            decision: "decline",
+            exitCode: null,
+            durationMs: null,
+            durationSource: null,
+          },
+        ],
+        reviews: [] as Event[],
+      },
+      review: {
+        ...turn("turn-r"),
+        events: [
+          pre(10, "r1", "node chromium.mjs control-review", false, "pass"),
+          post(20, "r1"),
+          pre(30, "r2", "node chromium.mjs reviewed", true, "pass"),
+          post(50, "r2"),
+        ] as Event[],
+        results: {
+          "control-review": "browserType.launch: EPERM",
+          reviewed: "ok",
+        },
+        escalations: [] as Event[],
+        reviews: [
+          {
+            turnId: "turn-r",
+            reviewId: "r2",
+            targetItemId: "r2",
+            decider: "reviewer",
+            status: "approved",
+            riskLevel: null,
+            rationale: null,
+            overrule: null,
+            exitCode: 0,
+            durationMs: 4000,
+            durationSource: "runtime",
+          },
+        ],
+      },
+    },
+  };
+}
+
+test("Claude escalation cells prove only from their own turn's events, and the D32 cells stay untested", async () => {
+  const { classifyRun, requiredCells, noDenial, noUndecided } = await load(
+    "claude-escalation-outcomes.mjs",
+  );
+  type Run = ReturnType<typeof claudeRun>;
+  const outcome = (run: Run, key: string) =>
+    (classifyRun(run) as Record<string, { outcome: string; reason?: string }>)[
+      key
+    ];
+  const base = claudeRun();
+  for (const key of requiredCells)
+    assert.equal(outcome(base, key)?.outcome, "proved", key);
+  assert.deepEqual(outcome(base, "undecided"), {
+    outcome: "untested",
+    reason: noUndecided,
+  });
+  assert.deepEqual(outcome(base, "classifierDenial"), {
+    outcome: "untested",
+    reason: noDenial,
+  });
+  assert.equal(classifyRun(base).cancelledAsk.review.observed, false);
+
+  // Stripping any cited event, record, result or terminal status downgrades its cell.
+  const edited = (edit: (run: Run) => void) => {
+    const run = claudeRun();
+    edit(run);
+    return run;
+  };
+  const drop = (events: Event[], kind: string, id: string) =>
+    events.splice(
+      events.findIndex((e) => e.kind === kind && e.toolUseId === id),
+      1,
+    );
+  const notProved = (key: string, run: Run, why: string) =>
+    assert.notEqual(outcome(run, key)?.outcome, "proved", `${key}: ${why}`);
+  const a = (run: Run) => run.cells.approval;
+  const r = (run: Run) => run.cells.review;
+  notProved(
+    "approvalControl",
+    edited((x) => drop(a(x).events, "pre", "a1")),
+    "control hook",
+  );
+  notProved(
+    "approvalControl",
+    edited((x) => drop(a(x).events, "post", "a1")),
+    "control ran",
+  );
+  notProved(
+    "approvalControl",
+    edited(
+      (x) =>
+        delete (a(x).results as Record<string, unknown>)["control-approval"],
+    ),
+    "control result",
+  );
+  notProved(
+    "approve",
+    edited((x) => drop(a(x).events, "pre", "a1")),
+    "same-run control",
+  );
+  notProved(
+    "approve",
+    edited((x) => drop(a(x).events, "pre", "a2")),
+    "approved hook",
+  );
+  notProved(
+    "approve",
+    edited((x) => drop(a(x).events, "post", "a2")),
+    "approved ran",
+  );
+  notProved(
+    "approve",
+    edited((x) => a(x).escalations.splice(0, 1)),
+    "escalation record",
+  );
+  notProved(
+    "approve",
+    edited((x) => delete (a(x).results as Record<string, unknown>).approved),
+    "result file",
+  );
+  notProved(
+    "approve",
+    edited((x) => (a(x).escalations[0]!.turnId = "turn-other")),
+    "another turn's record",
+  );
+  notProved(
+    "approve",
+    edited((x) => (a(x).turnId = "")),
+    "turn id",
+  );
+  notProved(
+    "approve",
+    edited(
+      (x) =>
+        (a(x).result = { subtype: "error_during_execution", isError: true }),
+    ),
+    "terminal status",
+  );
+  notProved(
+    "approve",
+    edited((x) => (a(x).intentState = "held")),
+    "intent state",
+  );
+  notProved(
+    "approve",
+    edited((x) => (a(x).init = { permissionMode: "default" })),
+    "auto mode",
+  );
+  notProved(
+    "decline",
+    edited((x) => drop(a(x).events, "pre", "a3")),
+    "declined hook",
+  );
+  notProved(
+    "decline",
+    edited((x) => a(x).escalations.splice(1, 1)),
+    "decline record",
+  );
+  notProved(
+    "reviewControl",
+    edited((x) => drop(r(x).events, "post", "r1")),
+    "control ran",
+  );
+  notProved(
+    "classifierApproval",
+    edited((x) => drop(r(x).events, "pre", "r1")),
+    "same-run control",
+  );
+  notProved(
+    "classifierApproval",
+    edited((x) => drop(r(x).events, "pre", "r2")),
+    "reviewed hook",
+  );
+  notProved(
+    "classifierApproval",
+    edited((x) => drop(r(x).events, "post", "r2")),
+    "reviewed ran",
+  );
+  notProved(
+    "classifierApproval",
+    edited((x) => r(x).reviews.splice(0, 1)),
+    "review record",
+  );
+  notProved(
+    "classifierApproval",
+    edited((x) => (r(x).reviews[0]!.targetItemId = "r9")),
+    "another item's review",
+  );
+  notProved(
+    "classifierApproval",
+    edited((x) => delete (r(x).results as Record<string, unknown>).reviewed),
+    "result file",
+  );
+  notProved(
+    "classifierApproval",
+    edited((x) => (r(x).unexpected = ["claude/canUseTool:Bash"])),
+    "anomaly",
+  );
+
+  // Present evidence that contradicts a claim refutes it.
+  const refutes = (key: string, run: Run, why: string) =>
+    assert.equal(outcome(run, key)?.outcome, "refuted", `${key}: ${why}`);
+  refutes(
+    "decline",
+    edited((x) =>
+      a(x).events.push({
+        t: 80,
+        kind: "post",
+        event: "PostToolUse",
+        toolUseId: "a3",
+      }),
+    ),
+    "the declined call ran",
+  );
+  refutes(
+    "decline",
+    edited((x) => ((a(x).results as Record<string, unknown>).declined = "ok")),
+    "a declined result file",
+  );
+  refutes(
+    "approve",
+    edited((x) => (a(x).events[2]!.decision = "deny")),
+    "an accepted call refused",
+  );
+  refutes(
+    "approvalControl",
+    edited((x) => a(x).events.push({ t: 15, kind: "ask", toolUseId: "a1" })),
+    "the control was asked about",
+  );
+  refutes(
+    "classifierApproval",
+    edited((x) => (r(x).reviews[0]!.riskLevel = "low" as never)),
+    "an invented risk level",
+  );
+  refutes(
+    "classifierApproval",
+    edited((x) =>
+      r(x).escalations.push({ turnId: "turn-r", itemId: "x" } as never),
+    ),
+    "an Inbox item",
+  );
+  // A control that launched Chromium shows no sandbox, so nothing ran "outside".
+  const open = edited(
+    (x) =>
+      ((a(x).results as Record<string, unknown>)["control-approval"] = "ok"),
+  );
+  assert.equal(outcome(open, "approvalControl")?.outcome, "untested");
+  assert.equal(outcome(open, "approve")?.outcome, "untested");
+  // A repeated stimulus has no result of its own.
+  notProved(
+    "approve",
+    edited((x) => a(x).events.push({ ...a(x).events[2]!, toolUseId: "a2b" })),
+    "a retried call",
+  );
+
+  // An undecided call, if one happens, is an operator escalation and not a review.
+  const undecided = edited((x) => {
+    r(x).events.push(
+      { t: 35, kind: "ask", toolUseId: "r2" },
+      { t: 45, kind: "askResult", toolUseId: "r2", behavior: "allow" },
+    );
+    r(x).reviews.splice(0, 1);
+    r(x).escalations.push({
+      turnId: "turn-r",
+      itemId: "r2",
+      decider: "operator",
+      decision: "accept",
+    } as never);
+  });
+  assert.equal(outcome(undecided, "undecided")?.outcome, "proved");
+  assert.equal(outcome(undecided, "classifierApproval")?.outcome, "untested");
+  // #1715's residual risk: an ask aborted and the call ran anyway is reported, not hidden.
+  const cancelled = edited((x) =>
+    r(x).events.push(
+      { t: 33, kind: "ask", toolUseId: "r2" },
+      { t: 36, kind: "askAborted", toolUseId: "r2" },
+    ),
+  );
+  assert.equal(classifyRun(cancelled).cancelledAsk.review.observed, true);
+});
