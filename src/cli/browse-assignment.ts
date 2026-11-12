@@ -9,8 +9,10 @@ import {
 import {
   claudeUnsandboxedLine,
   codexEscalateApprovalLine,
+  codexEscalateAutoReviewLine,
   codexUnsandboxedLine,
   escalateApprovalRiskLines,
+  escalateAutoReviewRiskLines,
   turnSandboxLevelLine,
   unsandboxedRisk,
   unsandboxedSupersededLine,
@@ -214,7 +216,12 @@ const assignmentGet: BrowseCommand = {
                   ]
                 : g?.sandbox === "escalate-approval"
                   ? [codexEscalateApprovalLine, ...escalateApprovalRiskLines]
-                  : []),
+                  : g?.sandbox === "escalate-auto-review"
+                    ? [
+                        codexEscalateAutoReviewLine,
+                        ...escalateAutoReviewRiskLines,
+                      ]
+                    : []),
             ]
           : []),
         ...(a.brief ? ["", oneLine(a.brief, 400)] : []),

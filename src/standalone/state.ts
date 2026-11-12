@@ -38,7 +38,11 @@ import {
   executionHarnessSchema,
 } from "./execution-harness.js";
 import { transaction, type Database, widenCheck } from "../core/store.js";
-import type { SandboxLevel } from "../core/sandbox-level.js";
+import {
+  earlierSandboxLevelChecks,
+  sandboxLevelCheck,
+  type SandboxLevel,
+} from "../core/sandbox-level.js";
 import type { ReconciledAssignmentProof } from "../core/coordination.js";
 import type {
   RecoveryRecord,
@@ -665,11 +669,11 @@ export class ExecutionState {
     );
     CREATE TABLE IF NOT EXISTS project_sandbox_level (
       projectId TEXT PRIMARY KEY,
-      level TEXT NOT NULL CHECK(level IN ('strict', 'escalate-approval', 'unsandboxed'))
+      level TEXT NOT NULL CHECK(level IN ('strict', 'escalate-approval', 'escalate-auto-review', 'unsandboxed'))
     );
     CREATE TABLE IF NOT EXISTS execution_intent_sandbox_level (
       intentId TEXT PRIMARY KEY REFERENCES execution_intents(id),
-      level TEXT NOT NULL CHECK(level IN ('strict', 'escalate-approval', 'unsandboxed'))
+      level TEXT NOT NULL CHECK(level IN ('strict', 'escalate-approval', 'escalate-auto-review', 'unsandboxed'))
     );
     CREATE TABLE IF NOT EXISTS execution_retry_chains (
       chainId TEXT PRIMARY KEY REFERENCES execution_intents(workId),
@@ -835,18 +839,19 @@ export class ExecutionState {
           FROM execution_intent_dangerously_skip_sandbox;
           DROP TABLE execution_intent_dangerously_skip_sandbox;`),
       );
-    // Level 33: the level gains escalate-approval.
+    // Level 33: the level gains escalate-approval; level 34: escalate-auto-review.
     transaction(this.db, () => {
       for (const table of [
         "project_sandbox_level",
         "execution_intent_sandbox_level",
-      ])
+      ]) {
         widenCheck(
           this.db,
           table,
-          "CHECK(level IN ('strict', 'unsandboxed'))",
-          "CHECK(level IN ('strict', 'escalate-approval', 'unsandboxed'))",
+          earlierSandboxLevelChecks,
+          sandboxLevelCheck,
         );
+      }
     });
     const recoveryIdentityColumns = this.db
       .prepare("PRAGMA table_info(execution_recovery_identities)")
@@ -2114,8 +2119,8 @@ export class ExecutionState {
 
   /**
    * The level admitting this intent now would record: only a task turn that is not a draft turn
-   * takes its project's level, and `escalate-approval` applies only to a Codex task turn (a Claude
-   * turn runs `strict` until its harness supports it). Admission uses the same condition.
+   * takes its project's level, and the escalate levels apply only to a Codex task turn (a Claude
+   * turn runs `strict` until its harness supports them). Admission uses the same condition.
    */
   applicableSandboxLevel(intentId: string, projectId: string): SandboxLevel {
     const work = this.db
@@ -2133,8 +2138,10 @@ export class ExecutionState {
         ...(this.hasTurnRequests ? [work.workId] : []),
       ) as { level: SandboxLevel; harness: string } | undefined;
     if (row?.level === "unsandboxed") return "unsandboxed";
-    return row?.level === "escalate-approval" && row.harness === "codex"
-      ? "escalate-approval"
+    return (row?.level === "escalate-approval" ||
+      row?.level === "escalate-auto-review") &&
+      row.harness === "codex"
+      ? row.level
       : "strict";
   }
 

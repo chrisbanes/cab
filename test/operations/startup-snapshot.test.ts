@@ -856,6 +856,27 @@ function restoreDraftingSchema25(db: DatabaseSync) {
     DROP TABLE drafting_runs_new;`);
 }
 
+/** Level 34 widened two CHECKs and added the review table; narrowing restores the prior DDL. */
+function undoAutoReview(db: DatabaseSync) {
+  db.exec("DROP TABLE sandbox_reviews");
+  for (const table of [
+    "project_sandbox_level",
+    "execution_intent_sandbox_level",
+  ])
+    widenCheck(
+      db,
+      table,
+      "CHECK(level IN ('strict', 'escalate-approval', 'escalate-auto-review', 'unsandboxed'))",
+      "CHECK(level IN ('strict', 'escalate-approval', 'unsandboxed'))",
+    );
+}
+
+/** Level 34 changed only the review tables; then level 33 is undone. */
+function undoLevel34(db: DatabaseSync) {
+  undoAutoReview(db);
+  undoLevel33(db);
+}
+
 /** Level 33 widened two CHECKs and added the escalation table; narrowing restores the prior DDL. */
 function undoEscalateApproval(db: DatabaseSync) {
   db.exec("DROP TABLE sandbox_escalations");
@@ -975,6 +996,8 @@ function restoreRequestSchema21(db: DatabaseSync) {
 
 /** The schema digest each migration level created. Append an entry with every level bump. */
 const SCHEMA_PINS: Record<number, string> = {
+  // The escalate-auto-review sandbox level and the sandbox review evidence table.
+  34: "bfb71a91662c303a6e67e3df9fd396f29af3ce24193057b8ecacd95f6b374b05",
   // The escalate-approval sandbox level and the sandbox escalation evidence table.
   33: "32cf308ca80fb6b48f420e7954c95604e67a29e6bf99ebba6197615af198e0ce",
   // The skip-sandbox booleans become the sandbox level.
@@ -1100,7 +1123,7 @@ test("reasoning migration protects the level 19 schema before adding either tabl
         VALUES (?, 'retained-work', 'Retained prompt', '/retained/workspace', 'completed',
           'retained-thread', 'retained-turn', 'chatgpt', 'workspaceWrite', 'never')`)
         .run(intentId);
-      undoLevel33(before);
+      undoLevel34(before);
       restoreRequestSchema21(before);
       restoreDraftingSchema25(before);
       before.exec(
@@ -1241,7 +1264,7 @@ test("pre-turn refusal migration snapshots the level 20 schema and adds its tabl
     await run(dirs.data, 20);
     const database = join(dirs.data, "standalone.sqlite");
     const before = new DatabaseSync(database);
-    undoLevel33(before);
+    undoLevel34(before);
     restoreRequestSchema21(before);
     restoreDraftingSchema25(before);
     before.exec(
@@ -1395,6 +1418,7 @@ test("sandbox level migration maps level 31 skip-sandbox rows and drops the old 
           VALUES (?, ?, 'p', '/w', 'completed', 'chatgpt', 'workspaceWrite', 'never')`,
           )
           .run(intentId, randomUUID());
+      undoAutoReview(before);
       undoEscalateApproval(before);
       before.exec(undoSandboxLevel);
       // On, off, and (the third of each) no row.
@@ -1457,6 +1481,109 @@ test("sandbox level migration maps level 31 skip-sandbox rows and drops the old 
   }
 });
 
+test("escalate-auto-review migration widens level 33 sandbox levels in place and adds the review table empty", async () => {
+  const dirs = layout();
+  try {
+    await run(dirs.data, 33);
+    const database = join(dirs.data, "standalone.sqlite");
+    const projectId = randomUUID(),
+      intentId = randomUUID();
+    const before = new DatabaseSync(database);
+    try {
+      new DomainStore(before).execute({
+        type: "project.create",
+        actor: "operator",
+        key: randomUUID(),
+        projectId,
+        name: "Review project",
+        leadProfileId: null,
+        instructions: "Retained instructions",
+      });
+      before
+        .prepare(
+          `INSERT INTO execution_intents
+          (id, workId, prompt, workspace, state, accountType, sandbox, approval)
+          VALUES (?, ?, 'p', '/w', 'completed', 'chatgpt', 'workspaceWrite', 'never')`,
+        )
+        .run(intentId, randomUUID());
+      undoAutoReview(before);
+      before
+        .prepare(
+          "INSERT INTO project_sandbox_level (projectId, level) VALUES (?, 'escalate-approval')",
+        )
+        .run(projectId);
+      before
+        .prepare(
+          "INSERT INTO execution_intent_sandbox_level (intentId, level) VALUES (?, 'escalate-approval')",
+        )
+        .run(intentId);
+      assert.throws(() =>
+        before
+          .prepare(
+            "UPDATE project_sandbox_level SET level = 'escalate-auto-review'",
+          )
+          .run(),
+      );
+    } finally {
+      before.close();
+    }
+    assert.equal(schemaDigest(dirs.data), SCHEMA_PINS[33]);
+    await run(dirs.data);
+    const snapshot = readStartupState(dirs.data)?.snapshot;
+    assert.equal(snapshot?.from, 33);
+    assert.ok(snapshot?.path);
+    assert.equal(schemaDigest(snapshot.path), SCHEMA_PINS[33]);
+    assert.equal(schemaDigest(dirs.data), SCHEMA_PINS[MIGRATION_LEVEL]);
+    const current = new DatabaseSync(database);
+    try {
+      assert.equal(
+        new DomainStore(current).sandboxLevel(projectId),
+        "escalate-approval",
+      );
+      assert.equal(
+        current
+          .prepare(
+            "SELECT level FROM execution_intent_sandbox_level WHERE intentId = ?",
+          )
+          .get(intentId)?.level,
+        "escalate-approval",
+      );
+      current
+        .prepare(
+          "UPDATE project_sandbox_level SET level = 'escalate-auto-review'",
+        )
+        .run();
+      current
+        .prepare(
+          "UPDATE execution_intent_sandbox_level SET level = 'escalate-auto-review'",
+        )
+        .run();
+      assert.equal(
+        current.prepare("SELECT COUNT(*) AS n FROM sandbox_reviews").get()?.n,
+        0,
+      );
+      assert.deepEqual(current.prepare("PRAGMA foreign_key_check").all(), []);
+    } finally {
+      current.close();
+    }
+    // A further start finds nothing to migrate and keeps the widened tables and their rows.
+    await run(dirs.data);
+    assert.equal(schemaDigest(dirs.data), SCHEMA_PINS[MIGRATION_LEVEL]);
+    const reopened = new DatabaseSync(database, { readOnly: true });
+    try {
+      assert.equal(
+        new DomainStore(reopened).sandboxLevel(projectId),
+        "escalate-auto-review",
+      );
+    } finally {
+      reopened.close();
+    }
+    assert.equal(recordedLevel(dirs.data), MIGRATION_LEVEL);
+  } finally {
+    dirs.cleanup();
+  }
+});
+
 test("escalate-approval migration widens level 32 sandbox levels in place and adds the escalation table empty", async () => {
   const dirs = layout();
   try {
@@ -1482,6 +1609,7 @@ test("escalate-approval migration widens level 32 sandbox levels in place and ad
           VALUES (?, ?, 'p', '/w', 'completed', 'chatgpt', 'workspaceWrite', 'never')`,
         )
         .run(intentId, randomUUID());
+      undoAutoReview(before);
       undoEscalateApproval(before);
       before
         .prepare(
@@ -1677,7 +1805,7 @@ test("Inbox lifecycle migration snapshots level 22 and initializes both tables w
     await run(dirs.data, 22);
     const database = join(dirs.data, "standalone.sqlite"),
       before = new DatabaseSync(database);
-    undoLevel33(before);
+    undoLevel34(before);
     before.exec(
       `${undoLevel28}${undoLevel24}DROP TABLE inbox_lifecycle_receipts; DROP TABLE inbox_lifecycle`,
     );
@@ -1711,7 +1839,7 @@ test("request-only refusal migration snapshots level 21 and preserves restart li
   try {
     await run(dirs.data, 21);
     const db = new DatabaseSync(join(dirs.data, "standalone.sqlite"));
-    undoLevel33(db);
+    undoLevel34(db);
     restoreRequestSchema21(db);
     restoreDraftingSchema25(db);
     db.exec(
@@ -1765,7 +1893,7 @@ test("withdrawn-state migration rebuilds level 28 assignments and keeps every ro
       profileId = randomUUID(),
       children = [randomUUID(), randomUUID(), randomUUID()];
     try {
-      undoLevel33(before);
+      undoLevel34(before);
       const domain = new DomainStore(before);
       domain.execute({
         type: "profile.create",
@@ -1884,7 +2012,7 @@ test("withdrawn-state migration refuses an assignment schema it does not recogni
     await run(dirs.data, 28);
     const database = join(dirs.data, "standalone.sqlite");
     const before = new DatabaseSync(database);
-    undoLevel33(before);
+    undoLevel34(before);
     rebuildAssignmentCheck(
       before,
       "CHECK(state IN ('pending','running','completed','held'))",

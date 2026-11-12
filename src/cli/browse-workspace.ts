@@ -15,6 +15,7 @@ import {
 import { commandNetworkDisclosure } from "../operator/command-network-copy.js";
 import {
   escalateApprovalLines,
+  escalateAutoReviewLines,
   sandboxLevelLabels,
   unsandboxedGrantLines,
   unsandboxedRisk,
@@ -299,7 +300,9 @@ const projectGet: BrowseCommand = {
             ]
           : d.sandbox === "escalate-approval"
             ? escalateApprovalLines
-            : []),
+            : d.sandbox === "escalate-auto-review"
+              ? escalateAutoReviewLines
+              : []),
         "",
         d.profiles.length
           ? table(

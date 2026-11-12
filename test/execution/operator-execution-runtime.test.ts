@@ -17,10 +17,13 @@ import {
 } from "../../src/operator/local-listening-copy.js";
 import {
   claudeEscalateApprovalLine,
+  claudeEscalateAutoReviewLine,
   claudeUnsandboxedLine,
   codexEscalateApprovalLine,
+  codexEscalateAutoReviewLine,
   codexUnsandboxedLine,
   escalateApprovalRiskLines,
+  escalateAutoReviewRiskLines,
   unsandboxedRiskLines,
 } from "../../src/operator/sandbox-level-copy.js";
 import {
@@ -450,6 +453,30 @@ test("both harnesses' disclosures state the unsandboxed grant and risks within t
       codexEscalateApprovalLine,
       claudeEscalateApprovalLine,
       ...escalateApprovalRiskLines,
+    ].every((line) => line.length <= 300),
+  );
+  // The escalate-auto-review level: the reviewer, its cost and limits, and the advisory overrule.
+  assert.match(codexEscalateAutoReviewLine, /reviewer auto_review decides/);
+  assert.match(claudeEscalateAutoReviewLine, /run at the strict level/);
+  assert.ok(codex.lines.includes(codexEscalateAutoReviewLine));
+  for (const risk of escalateAutoReviewRiskLines)
+    assert.ok(codex.lines.includes(risk), risk);
+  assert.ok(claude.lines.includes(claudeEscalateAutoReviewLine));
+  const reviewer = escalateAutoReviewRiskLines.join(" ");
+  for (const word of [
+    /extra model call/,
+    /availability depends on the account and model/,
+    /does not contain agent-written code/,
+    /advisory overrule/,
+    /retry is reviewed again/,
+    /not yet proven against a live denial/,
+  ])
+    assert.match(reviewer, word);
+  assert.ok(
+    [
+      codexEscalateAutoReviewLine,
+      claudeEscalateAutoReviewLine,
+      ...escalateAutoReviewRiskLines,
     ].every((line) => line.length <= 300),
   );
   for (const disclosure of [claude, codex]) {

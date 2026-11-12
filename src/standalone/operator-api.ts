@@ -71,6 +71,8 @@ import { approvalHeadlines } from "../operator/delivery-action-copy.js";
 import {
   sandboxEscalationAction,
   sandboxEscalationHeadline,
+  sandboxOverruleAction,
+  sandboxOverruleHeadline,
 } from "../core/sandbox-level.js";
 import {
   type DomainCommand,
@@ -3811,6 +3813,8 @@ export class OperatorApi {
       if (!approval.approvable) return null;
       if (approval.action === sandboxEscalationAction)
         return sandboxEscalationHeadline;
+      if (approval.action === sandboxOverruleAction)
+        return sandboxOverruleHeadline;
       return approval.action !== null &&
         Object.hasOwn(approvalHeadlines, approval.action)
         ? approvalHeadlines[approval.action as keyof typeof approvalHeadlines]
@@ -10875,8 +10879,10 @@ export class OperatorApi {
                 );
       // Answers a held sandbox escalation; any other approval has no escalation record, and a
       // replayed decision finds the reply already claimed and sends nothing.
-      if (c.type === "approval.decide")
+      if (c.type === "approval.decide") {
         await this.service.settleSandboxEscalation(c.interactionId);
+        await this.service.settleSandboxOverrule(c.interactionId);
+      }
       return commandReceiptSchema.parse({
         kind: "coordination",
         key: c.key,

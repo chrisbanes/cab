@@ -1,7 +1,12 @@
 import { UnstackStore } from "./unstack.js";
 import { assertCleanupOwnershipAvailableWithinTransaction } from "./project-cleanup-reservations.js";
 import { projectDeleteCommandSchema } from "./project-lifecycle.js";
-import { sandboxLevelSchema, type SandboxLevel } from "./sandbox-level.js";
+import {
+  earlierSandboxLevelChecks,
+  sandboxLevelCheck,
+  sandboxLevelSchema,
+  type SandboxLevel,
+} from "./sandbox-level.js";
 import {
   archiveBlockers,
   assertProjectWritable,
@@ -961,7 +966,7 @@ export class DomainStore {
         );
         CREATE TABLE IF NOT EXISTS project_sandbox_level (
           projectId TEXT PRIMARY KEY REFERENCES domain_projects(id),
-          level TEXT NOT NULL CHECK(level IN ('strict', 'escalate-approval', 'unsandboxed'))
+          level TEXT NOT NULL CHECK(level IN ('strict', 'escalate-approval', 'escalate-auto-review', 'unsandboxed'))
         );
         CREATE TABLE IF NOT EXISTS scheduler_project_capacity_limits (
           projectId TEXT PRIMARY KEY REFERENCES domain_projects(id),
@@ -989,12 +994,12 @@ export class DomainStore {
           SELECT projectId, CASE enabled WHEN 1 THEN 'unsandboxed' ELSE 'strict' END
           FROM project_dangerously_skip_sandbox;
           DROP TABLE project_dangerously_skip_sandbox;`);
-      // Level 33: the level gains escalate-approval.
+      // Level 33: the level gains escalate-approval; level 34: escalate-auto-review.
       widenCheck(
         this.db,
         "project_sandbox_level",
-        "CHECK(level IN ('strict', 'unsandboxed'))",
-        "CHECK(level IN ('strict', 'escalate-approval', 'unsandboxed'))",
+        earlierSandboxLevelChecks,
+        sandboxLevelCheck,
       );
       const version = this.db
         .prepare("SELECT version FROM domain_schema")

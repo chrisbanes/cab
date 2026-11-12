@@ -147,6 +147,11 @@ export const projectDeletionStatements = [
     sql: "DELETE FROM coordination_runtime_questions WHERE interactionId IN (SELECT value FROM json_each(:interactions))",
   },
   {
+    table: "sandbox_reviews",
+    where: "taskId IN (SELECT value FROM json_each(:tasks))",
+    sql: "DELETE FROM sandbox_reviews WHERE taskId IN (SELECT value FROM json_each(:tasks))",
+  },
+  {
     table: "sandbox_escalations",
     where: "taskId IN (SELECT value FROM json_each(:tasks))",
     sql: "DELETE FROM sandbox_escalations WHERE taskId IN (SELECT value FROM json_each(:tasks))",

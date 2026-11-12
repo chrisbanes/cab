@@ -2228,7 +2228,7 @@ test("local listening is a switch with its disclosure that saves as a versioned 
   assert.equal(d.localListening(ids.atlas), false);
 });
 
-test("the sandbox level asks for confirmation when made unsandboxed and saves strict or escalate-approval without one", async (_t, journey) => {
+test("the sandbox level asks for confirmation when made unsandboxed and saves strict or an escalate level without one", async (_t, journey) => {
   const { f, ids, page } = await startSettings(
     journey,
     "/projects/:atlas/settings",
@@ -2320,6 +2320,37 @@ test("the sandbox level asks for confirmation when made unsandboxed and saves st
   await dialog.waitFor();
   await dialog.getByRole("button", { name: "Cancel" }).click();
   assert.equal(d.sandboxLevel(ids.atlas), "escalate-approval");
+
+  // Escalate with reviewer saves at once and states the reviewer's cost, the advisory overrule
+  // and that Claude Code turns stay strict.
+  await level.selectOption("escalate-auto-review");
+  await changes(page)
+    .getByText("Sandbox level: Escalate with approval → Escalate with reviewer")
+    .waitFor();
+  const reviewed = commandBody(page);
+  await save.click();
+  assert.equal((await reviewed).sandbox, "escalate-auto-review");
+  assert.equal(await dialog.count(), 0);
+  await savedOutcome(page);
+  assert.equal(d.sandboxLevel(ids.atlas), "escalate-auto-review");
+  await page
+    .getByText(
+      "The sandbox level is escalate-auto-review for this project's Codex task turns; its Claude Code task turns stay strict.",
+    )
+    .waitFor();
+  for (const line of [
+    /reviewer auto_review decides each request/,
+    /does not contain agent-written code/,
+    /advisory overrule/,
+    /Claude Code task turns in a project at the escalate-auto-review level/,
+  ])
+    await page.getByText(line).first().waitFor();
+  // Leaving it for unsandboxed still asks.
+  await level.selectOption("unsandboxed");
+  await save.click();
+  await dialog.waitFor();
+  await dialog.getByRole("button", { name: "Cancel" }).click();
+  assert.equal(d.sandboxLevel(ids.atlas), "escalate-auto-review");
 });
 
 test("diagnostic capture sits beside command network access and saves both modes as versioned changes", async (_t, journey) => {

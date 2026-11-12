@@ -9,6 +9,7 @@ import type { SandboxLevel } from "../core/sandbox-level.js";
 export const sandboxLevelLabels: Record<SandboxLevel, string> = {
   strict: "Strict",
   "escalate-approval": "Escalate with approval",
+  "escalate-auto-review": "Escalate with reviewer",
   unsandboxed: "Unsandboxed (dangerous)",
 };
 
@@ -31,6 +32,28 @@ export const escalateApprovalLines = [
   codexEscalateApprovalLine,
   claudeEscalateApprovalLine,
   ...escalateApprovalRiskLines,
+];
+
+/** What the escalate-auto-review level sends Codex for a task turn. */
+export const codexEscalateAutoReviewLine =
+  "A project at the escalate-auto-review level keeps its Codex task turns sandboxed, with an approval policy that allows only sandbox escalation, and reviewer auto_review decides each request instead of the operator. Draft, read-only and unbound turns stay strict.";
+
+/** Claude Code has no reviewer seam yet, so its task turns stay strict. */
+export const claudeEscalateAutoReviewLine =
+  "Claude Code task turns in a project at the escalate-auto-review level run at the strict level for now; they cannot ask to run a command outside the sandbox.";
+
+/** What a reviewer decision costs and covers, and the advisory overrule of a denial. */
+export const escalateAutoReviewRiskLines = [
+  "Each review is an extra model call on the operator's account, and the reviewer's availability depends on the account and model. It judges the requested command only: it does not contain agent-written code, and an approved command runs with the service user's full access.",
+  "cab records each decision with its risk level and rationale. A denial offers an advisory overrule in the Inbox while its turn runs: the agent is told the exact action is approved, and its retry is reviewed again. The overrule is not yet proven against a live denial.",
+  "A request that still reaches cab waits in the Inbox as at the escalate-approval level. Processes an approved command starts can outlive the turn; cab does not clean them up.",
+];
+
+/** The escalate-auto-review level for surfaces that show the level rather than one harness. */
+export const escalateAutoReviewLines = [
+  codexEscalateAutoReviewLine,
+  claudeEscalateAutoReviewLine,
+  ...escalateAutoReviewRiskLines,
 ];
 
 /** What the unsandboxed level sends Codex for a task turn. */
@@ -69,7 +92,9 @@ export const projectSandboxLevelLine = (level: SandboxLevel) =>
     ? "The sandbox level is unsandboxed for this project's task turns in both harnesses."
     : level === "escalate-approval"
       ? "The sandbox level is escalate-approval for this project's Codex task turns; its Claude Code task turns stay strict."
-      : "The sandbox level is strict for this project.";
+      : level === "escalate-auto-review"
+        ? "The sandbox level is escalate-auto-review for this project's Codex task turns; its Claude Code task turns stay strict."
+        : "The sandbox level is strict for this project.";
 
 /** `null` is a turn with no recorded admission: not admitted yet, held before admission, or admitted before the level existed. */
 export const turnSandboxLevelLine = (level: SandboxLevel | null) =>
@@ -79,4 +104,6 @@ export const turnSandboxLevelLine = (level: SandboxLevel | null) =>
       ? "Admitted at the unsandboxed sandbox level."
       : level === "escalate-approval"
         ? "Admitted at the escalate-approval sandbox level."
-        : "Admitted at the strict sandbox level.";
+        : level === "escalate-auto-review"
+          ? "Admitted at the escalate-auto-review sandbox level."
+          : "Admitted at the strict sandbox level.";

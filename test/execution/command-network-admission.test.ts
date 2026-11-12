@@ -373,57 +373,55 @@ test("a drafting run, a draft turn and an unadmitted turn never record the unsan
   }
 });
 
-test("only a Codex task turn is admitted at the escalate-approval level; the rest record strict", () => {
-  const { f, setSandbox, ready, admit } = admissionFixture();
-  try {
-    f.db.exec(
-      "UPDATE scheduler_capacity_limits SET globalLimit = 20 WHERE singleton = 1",
-    );
-    const earlier = ready(taskA, "codex");
-    assert.equal(admit(earlier), true);
-    setSandbox("escalate-approval");
-    const codex = ready(taskA, "codex");
-    const claude = ready(taskB, "claude");
-    assert.equal(
-      f.state.applicableSandboxLevel(codex.id, projectId),
-      "escalate-approval",
-    );
-    assert.equal(admit(codex), true);
-    assert.equal(admit(claude), true);
-    assert.equal(f.state.sandboxLevel(codex.id), "escalate-approval");
-    assert.equal(f.state.sandboxLevel(claude.id), "strict");
-    // A running turn keeps its level; only later admissions see a change.
-    assert.equal(f.state.sandboxLevel(earlier.id), "strict");
-    const drafting = f.state.create(
-      "drafting:escalate",
-      "draft",
-      "/tmp/net-escalate",
-    );
-    assert.equal(f.state.begin(drafting.id, { projectId }), true);
-    assert.equal(f.state.sandboxLevel(drafting.id), "strict");
-    new SchedulerStore(f.db);
-    const state = new ExecutionState(f.db);
-    const draft = ready(taskB, "codex");
-    f.db
-      .prepare(
-        "INSERT INTO turn_requests (requestKey, workId, kind, prompt, state, draftTurn) VALUES (?, ?, 'assignment', 'Draft', 'active', 1)",
-      )
-      .run(randomUUID(), draft.workId);
-    assert.equal(state.begin(draft.id, { projectId }), true);
-    assert.equal(state.sandboxLevel(draft.id), "strict");
-    const unbound = state.create(
-      "escalate-unbound",
-      "work",
-      "/tmp/net-unbound",
-    );
-    assert.equal(state.begin(unbound.id, { projectId }), true);
-    assert.equal(state.sandboxLevel(unbound.id), "strict");
-    setSandbox("strict");
-    assert.equal(state.sandboxLevel(codex.id), "escalate-approval");
-  } finally {
-    f.close();
-  }
-});
+for (const level of ["escalate-approval", "escalate-auto-review"] as const)
+  test(`only a Codex task turn is admitted at the ${level} level; the rest record strict`, () => {
+    const { f, setSandbox, ready, admit } = admissionFixture();
+    try {
+      f.db.exec(
+        "UPDATE scheduler_capacity_limits SET globalLimit = 20 WHERE singleton = 1",
+      );
+      const earlier = ready(taskA, "codex");
+      assert.equal(admit(earlier), true);
+      setSandbox(level);
+      const codex = ready(taskA, "codex");
+      const claude = ready(taskB, "claude");
+      assert.equal(f.state.applicableSandboxLevel(codex.id, projectId), level);
+      assert.equal(admit(codex), true);
+      assert.equal(admit(claude), true);
+      assert.equal(f.state.sandboxLevel(codex.id), level);
+      assert.equal(f.state.sandboxLevel(claude.id), "strict");
+      // A running turn keeps its level; only later admissions see a change.
+      assert.equal(f.state.sandboxLevel(earlier.id), "strict");
+      const drafting = f.state.create(
+        `drafting:${level}`,
+        "draft",
+        `/tmp/net-${level}`,
+      );
+      assert.equal(f.state.begin(drafting.id, { projectId }), true);
+      assert.equal(f.state.sandboxLevel(drafting.id), "strict");
+      new SchedulerStore(f.db);
+      const state = new ExecutionState(f.db);
+      const draft = ready(taskB, "codex");
+      f.db
+        .prepare(
+          "INSERT INTO turn_requests (requestKey, workId, kind, prompt, state, draftTurn) VALUES (?, ?, 'assignment', 'Draft', 'active', 1)",
+        )
+        .run(randomUUID(), draft.workId);
+      assert.equal(state.begin(draft.id, { projectId }), true);
+      assert.equal(state.sandboxLevel(draft.id), "strict");
+      const unbound = state.create(
+        `${level}-unbound`,
+        "work",
+        "/tmp/net-unbound",
+      );
+      assert.equal(state.begin(unbound.id, { projectId }), true);
+      assert.equal(state.sandboxLevel(unbound.id), "strict");
+      setSandbox("strict");
+      assert.equal(state.sandboxLevel(codex.id), level);
+    } finally {
+      f.close();
+    }
+  });
 
 test("the live network run refuses to start without --live --one-attempt", () => {
   const run = spawnSync(
@@ -699,27 +697,31 @@ test("a task turn of either harness runs with skipSandbox only when admitted at 
   assert.equal(service.sandboxLevelFor("unknown-work"), null);
 });
 
-test("only a Codex task turn runs with the escalation policy when admitted at escalate-approval", async (t) => {
-  const { service, project, configure, start, turnOf, finished } =
-    await recordingService(t);
-  for (const harness of ["codex", "claude"] as const) {
-    const projectId = project(harness);
-    configure(projectId, { sandbox: "escalate-approval" });
-    await start(projectId, `${harness} escalate`);
-    const intent = await finished();
-    assert.deepEqual(
-      turnOf(intent)?.policy,
-      harness === "codex"
-        ? { networkAccess: false, sandboxEscalation: "approval" }
-        : undefined,
-      harness,
-    );
-    assert.equal(
-      service.sandboxLevelFor(intent.workId),
-      harness === "codex" ? "escalate-approval" : "strict",
-    );
-  }
-});
+for (const [level, sandboxEscalation] of [
+  ["escalate-approval", "approval"],
+  ["escalate-auto-review", "auto-review"],
+] as const)
+  test(`only a Codex task turn runs with the escalation policy when admitted at ${level}`, async (t) => {
+    const { service, project, configure, start, turnOf, finished } =
+      await recordingService(t);
+    for (const harness of ["codex", "claude"] as const) {
+      const projectId = project(harness);
+      configure(projectId, { sandbox: level });
+      await start(projectId, `${harness} escalate`);
+      const intent = await finished();
+      assert.deepEqual(
+        turnOf(intent)?.policy,
+        harness === "codex"
+          ? { networkAccess: false, sandboxEscalation }
+          : undefined,
+        harness,
+      );
+      assert.equal(
+        service.sandboxLevelFor(intent.workId),
+        harness === "codex" ? level : "strict",
+      );
+    }
+  });
 
 test("the service hints skipSandbox to preflight only for a task turn of an unsandboxed project", async (t) => {
   const { service, runtime, project, configure, start, finished } =

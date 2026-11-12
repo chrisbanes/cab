@@ -32,6 +32,11 @@ import {
 import { EventEmitter } from "node:events";
 import { z } from "zod";
 import { supportedRuntimeSettingsSchema } from "../core/execution-runtime.js";
+import {
+  type SandboxReviewIdentity,
+  sandboxReviewRiskSchema,
+  sandboxReviewStatusSchema,
+} from "../core/sandbox-level.js";
 import type { ExecutionHarness } from "./execution-harness.js";
 import type {
   ExactExecutionIdentity,
@@ -426,6 +431,48 @@ const escalatedItemSchema = z.object({
       .catch(null),
   }),
 });
+/**
+ * An `item/autoApprovalReview/{started,completed}` notification. Codex marks the payload
+ * unstable, so cab checks it at runtime and fails closed on any other shape.
+ */
+const reviewNotificationSchema = z.object({
+  threadId: z.string().min(1),
+  turnId: z.string().min(1),
+  reviewId: z.string().min(1),
+  targetItemId: z.string().min(1).nullable(),
+  review: z.object({
+    status: sandboxReviewStatusSchema,
+    riskLevel: sandboxReviewRiskSchema.nullable().optional(),
+    rationale: z.string().nullable().optional(),
+  }),
+  action: z.object({ type: z.string() }).passthrough(),
+});
+/** The only reviewed action cab records: a command with its working directory. */
+const reviewedCommandSchema = z.object({
+  type: z.literal("command"),
+  command: z.string().min(1),
+  // Overrule eligibility compares it with the task workspace, so only an absolute path is taken.
+  cwd: z.string().min(1).refine(isAbsolute),
+});
+/**
+ * `codex_protocol::protocol::GuardianAssessmentEvent`, mapped from a denial's completed
+ * notification; the mapping the 2026-11-12 probe kept (docs/evidence/
+ * 2026-11-12-auto-review-overrule-probe.md), not yet proven against a live denial.
+ */
+const guardianAssessmentEvent = (p: Record<string, unknown>) => {
+  const review = (p.review ?? {}) as Record<string, unknown>;
+  return {
+    id: p.reviewId,
+    target_item_id: p.targetItemId ?? null,
+    turn_id: p.turnId,
+    status: review.status,
+    risk_level: review.riskLevel ?? null,
+    user_authorization: review.userAuthorization ?? null,
+    rationale: review.rationale ?? null,
+    decision_source: p.decisionSource ?? null,
+    action: p.action,
+  };
+};
 const serverRequestResolvedSchema = z.object({
   threadId: z.string(),
   requestId: z.union([z.string(), z.number()]),
@@ -726,8 +773,33 @@ export interface RuntimeTurnPolicy {
    * Set when the turn was admitted at the escalate-approval level, which only a Codex task turn
    * can be: the turn keeps its sandbox and may ask to run one command outside it.
    */
-  sandboxEscalation?: "approval";
+  sandboxEscalation?: "approval" | "auto-review";
 }
+
+/**
+ * A reviewer decision on an escalate-auto-review turn (ADR-1034): a started or completed review
+ * of a command, the completion of a reviewed command item, or the end of a denial's turn, after
+ * which it can no longer be overruled.
+ */
+export type SandboxReviewEvent =
+  | {
+      kind: "review";
+      identity: SandboxReviewIdentity;
+      command: string;
+      cwd: string;
+      status: z.infer<typeof sandboxReviewStatusSchema>;
+      riskLevel: z.infer<typeof sandboxReviewRiskSchema> | null;
+      rationale: string | null;
+      /** A denial whose turn still runs, so the operator may overrule it. */
+      overrulable: boolean;
+    }
+  | {
+      kind: "itemCompleted";
+      target: Omit<SandboxReviewIdentity, "reviewId">;
+      exitCode: number | null;
+      durationMs: number | null;
+    }
+  | { kind: "overruleEnded"; identity: SandboxReviewIdentity; reason: string };
 
 /**
  * A command an escalate-approval turn asked to run outside the sandbox (ADR-1034), then how it
@@ -788,6 +860,12 @@ export interface Runtime {
     identity: NativeInputEndpointIdentity,
     decision: "accept" | "decline",
   ): Promise<boolean>;
+  onSandboxReview?(listener: (event: SandboxReviewEvent) => void): void;
+  /**
+   * Overrules a reviewer denial once, while its turn runs in this process; false when it was not
+   * sent, was rejected, or its turn ended before the answer.
+   */
+  overruleSandboxDenial?(identity: SandboxReviewIdentity): Promise<boolean>;
   start(): Promise<void>;
   stop(): Promise<void>;
   startThread(
@@ -987,6 +1065,198 @@ export class CodexRuntime implements Runtime {
     listener: (event: SandboxEscalationEvent) => boolean,
   ): void {
     this.sandboxEscalation = listener;
+  }
+  private sandboxReviewListener?: (event: SandboxReviewEvent) => void;
+  /**
+   * Threads whose current turn sent reviewer `auto_review`; the turn id is null until
+   * `turn/start` answers, and `interrupted` once cab stopped it.
+   */
+  private readonly reviewTurns = new Map<
+    string,
+    { turnId: string | null; interrupted?: true }
+  >();
+  /** Each thread's last ended or replaced turn, whose late reviews and completion are ignored. */
+  private readonly endedReviewTurns = new Map<string, string>();
+  /** Reviews of current review turns by thread and review, until the turn ends. */
+  private readonly reviews = new Map<
+    string,
+    {
+      identity: SandboxReviewIdentity;
+      child: ChildProcessWithoutNullStreams;
+      /** A denial's completed notification, retained only to overrule it. */
+      denial?: Record<string, unknown>;
+      overruled?: true;
+      ended?: true;
+      itemCompleted?: true;
+    }
+  >();
+  onSandboxReview(listener: (event: SandboxReviewEvent) => void): void {
+    this.sandboxReviewListener = listener;
+  }
+  async overruleSandboxDenial(
+    identity: SandboxReviewIdentity,
+  ): Promise<boolean> {
+    const entry = this.reviews.get(
+      `${identity.threadId}\u0000${identity.reviewId}`,
+    );
+    const running = () => {
+      const turn = this.reviewTurns.get(identity.threadId);
+      return turn?.turnId === identity.turnId && !turn.interrupted;
+    };
+    if (
+      !entry?.denial ||
+      entry.overruled ||
+      entry.ended ||
+      entry.child !== this.child ||
+      entry.identity.turnId !== identity.turnId ||
+      !running()
+    )
+      return false;
+    entry.overruled = true;
+    // Read when the answer arrives, before any later line of the same read ends the turn: an
+    // answer after the turn ended cannot show the overrule reached the running turn.
+    let answeredWhileRunning = false;
+    try {
+      await this.request(
+        "thread/approveGuardianDeniedAction",
+        {
+          threadId: identity.threadId,
+          event: guardianAssessmentEvent(entry.denial),
+        },
+        () => {
+          answeredWhileRunning = running();
+        },
+      );
+    } catch {
+      return false;
+    }
+    return answeredWhileRunning;
+  }
+  private emitReview(event: SandboxReviewEvent): void {
+    try {
+      this.sandboxReviewListener?.(event);
+    } catch {
+      // Evidence only; the listener records its own failures.
+    }
+  }
+  /**
+   * A review of a turn cab started with reviewer `auto_review`, of a command with a target item;
+   * anything else is reported as unexpected, which holds the work.
+   */
+  private receiveReview(
+    child: ChildProcessWithoutNullStreams,
+    method: string,
+    params: unknown,
+  ): void {
+    if (!this.sandboxReviewListener) return;
+    const named = threadTurnIdentitySchema.safeParse(params);
+    // A review that arrives after its turn ended is evidence only: neither recorded nor held.
+    if (
+      named.success &&
+      this.endedReviewTurns.get(named.data.threadId) === named.data.turnId
+    )
+      return;
+    const reviewTurn = named.success
+      ? this.reviewTurns.get(named.data.threadId)
+      : undefined;
+    const parsed = reviewNotificationSchema.safeParse(params);
+    const action = parsed.success
+      ? reviewedCommandSchema.safeParse(parsed.data.action)
+      : undefined;
+    if (
+      !named.success ||
+      reviewTurn === undefined ||
+      (reviewTurn.turnId !== null && reviewTurn.turnId !== named.data.turnId) ||
+      !parsed.success ||
+      !action?.success ||
+      parsed.data.targetItemId === null ||
+      this.nativeGeneration === undefined
+    ) {
+      this.reportUnexpected(
+        { method, ...(named.success ? named.data : {}) },
+        child,
+      );
+      return;
+    }
+    const identity: SandboxReviewIdentity = {
+      runtimeGeneration: this.nativeGeneration,
+      threadId: parsed.data.threadId,
+      turnId: parsed.data.turnId,
+      reviewId: parsed.data.reviewId,
+      targetItemId: parsed.data.targetItemId,
+    };
+    const key = `${identity.threadId}\u0000${identity.reviewId}`;
+    const entry = this.reviews.get(key) ?? { identity, child };
+    this.reviews.set(key, entry);
+    const completed = method.endsWith("/completed");
+    const denied = completed && parsed.data.review.status === "denied";
+    if (denied && !entry.ended && !reviewTurn.interrupted)
+      entry.denial = params as Record<string, unknown>;
+    this.emitReview({
+      kind: "review",
+      identity,
+      command: action.data.command,
+      cwd: action.data.cwd,
+      // A started notification is in progress whatever status it carries.
+      status: completed ? parsed.data.review.status : "inProgress",
+      riskLevel: parsed.data.review.riskLevel ?? null,
+      rationale: parsed.data.review.rationale ?? null,
+      overrulable: entry.denial !== undefined && !entry.overruled,
+    });
+  }
+  /** Reports a reviewed command item's completion once, never its output. */
+  private completeReviewedItem(params: unknown): void {
+    const completed = escalatedItemSchema.safeParse(params);
+    if (!completed.success) return;
+    const entry = [...this.reviews.values()].find(
+      (e) =>
+        !e.itemCompleted &&
+        e.identity.threadId === completed.data.threadId &&
+        e.identity.turnId === completed.data.turnId &&
+        e.identity.targetItemId === completed.data.item.id,
+    );
+    if (!entry) return;
+    for (const e of this.reviews.values())
+      if (
+        e.identity.threadId === entry.identity.threadId &&
+        e.identity.targetItemId === entry.identity.targetItemId
+      )
+        e.itemCompleted = true;
+    const { reviewId: _reviewId, ...target } = entry.identity;
+    this.emitReview({
+      kind: "itemCompleted",
+      target,
+      exitCode: completed.data.item.exitCode ?? null,
+      durationMs: completed.data.item.durationMs ?? null,
+    });
+  }
+  /**
+   * Denials of matching reviews can no longer be overruled; each is reported once. `drop` also
+   * forgets the reviews, once their turn is over.
+   */
+  private endReviews(
+    reason: string,
+    {
+      threadId,
+      turnId,
+      drop,
+    }: { threadId?: string; turnId?: string; drop: boolean },
+  ): void {
+    for (const [key, entry] of this.reviews) {
+      if (
+        (threadId !== undefined && entry.identity.threadId !== threadId) ||
+        (turnId !== undefined && entry.identity.turnId !== turnId)
+      )
+        continue;
+      if (entry.denial && !entry.ended && !entry.overruled)
+        this.emitReview({
+          kind: "overruleEnded",
+          identity: entry.identity,
+          reason,
+        });
+      entry.ended = true;
+      if (drop) this.reviews.delete(key);
+    }
   }
   async replySandboxEscalation(
     identity: NativeInputEndpointIdentity,
@@ -2501,20 +2771,31 @@ export class CodexRuntime implements Runtime {
       this.nativeReadbacks.delete(threadId);
     }
     const escalate =
-      policy?.sandboxEscalation === "approval" &&
+      policy?.sandboxEscalation !== undefined &&
       policy.access !== "read-only" &&
       policy.skipSandbox !== true;
+    const reviewer =
+      policy?.sandboxEscalation === "auto-review" ? "auto_review" : "user";
     // Escalations of the thread's earlier turns, tombstones included, are over.
     for (const [key, entry] of this.escalations)
       if (entry.identity.threadId === threadId) this.escalations.delete(key);
+    this.endReviews("New turn requested", { threadId, drop: true });
+    // The thread's earlier turn, review turn or not, is over: its late reviews are dropped, and its
+    // late completion never ends this turn's pending start.
+    const priorTurn = this.reviewTurns.get(threadId)?.turnId ?? previousTurn;
+    if (priorTurn) this.endedReviewTurns.set(threadId, priorTurn);
     if (escalate) this.escalationTurns.set(threadId, null);
     else this.escalationTurns.delete(threadId);
+    // An escalation the reviewer does not decide still reaches cab, as at escalate-approval.
+    if (escalate && reviewer === "auto_review")
+      this.reviewTurns.set(threadId, { turnId: null });
+    else this.reviewTurns.delete(threadId);
     const started = this.request("turn/start", {
       threadId,
       cwd: workspace,
       input: [{ type: "text", text: prompt }],
       approvalPolicy: escalate ? sandboxEscalationApprovalPolicy : "never",
-      ...(escalate ? { approvalsReviewer: "user" } : {}),
+      ...(escalate ? { approvalsReviewer: reviewer } : {}),
       sandboxPolicy:
         policy?.access === "read-only"
           ? readOnlyPolicy()
@@ -2536,12 +2817,16 @@ export class CodexRuntime implements Runtime {
         // A turn that never started cannot escalate.
         if (this.escalationTurns.get(threadId) === null)
           this.escalationTurns.delete(threadId);
+        if (this.reviewTurns.get(threadId)?.turnId === null)
+          this.reviewTurns.delete(threadId);
         throw error;
       }),
     );
     this.nativeTurns.set(threadId, response.turn.id);
     if (escalate && this.escalationTurns.get(threadId) === null)
       this.escalationTurns.set(threadId, response.turn.id);
+    if (this.reviewTurns.get(threadId)?.turnId === null)
+      this.reviewTurns.set(threadId, { turnId: response.turn.id });
     if (this.persistedTerminal(threadId, response.turn.id) !== null)
       this.retireNativeTurn(
         threadId,
@@ -2555,6 +2840,9 @@ export class CodexRuntime implements Runtime {
   async interruptTurn(threadId: string, turnId: string): Promise<void> {
     this.cancelNativeTurn(threadId, turnId, "Turn interrupted");
     this.endEscalations("Turn interrupted", threadId, turnId);
+    const reviewTurn = this.reviewTurns.get(threadId);
+    if (reviewTurn?.turnId === turnId) reviewTurn.interrupted = true;
+    this.endReviews("Turn interrupted", { threadId, turnId, drop: false });
     emptyResponseSchema.parse(
       await this.request("turn/interrupt", { threadId, turnId }),
     );
@@ -2764,6 +3052,13 @@ export class CodexRuntime implements Runtime {
       this.receiveNativeNotification(message.method, message.params);
     if (message.method === "item/completed" && this.escalations.size > 0)
       this.completeEscalation(message.params);
+    if (message.method === "item/completed" && this.reviews.size > 0)
+      this.completeReviewedItem(message.params);
+    if (
+      message.method === "item/autoApprovalReview/started" ||
+      message.method === "item/autoApprovalReview/completed"
+    )
+      this.receiveReview(child, message.method, message.params);
     if (message.method === "turn/completed") {
       const terminal = completedTurn.safeParse(message.params);
       if (!terminal.success) {
@@ -2842,6 +3137,27 @@ export class CodexRuntime implements Runtime {
           terminal.data.turn.id
         )
           this.escalationTurns.delete(terminal.data.threadId);
+        this.endReviews("Turn ended", {
+          threadId: terminal.data.threadId,
+          turnId: terminal.data.turn.id,
+          drop: true,
+        });
+        const reviewTurn = this.reviewTurns.get(terminal.data.threadId);
+        // A pending start (null) is this turn, since completion can arrive before the turn/start
+        // answer, unless it names the earlier turn that start replaced and saw no end of.
+        if (
+          reviewTurn &&
+          (reviewTurn.turnId === terminal.data.turn.id ||
+            (reviewTurn.turnId === null &&
+              this.endedReviewTurns.get(terminal.data.threadId) !==
+                terminal.data.turn.id))
+        ) {
+          this.reviewTurns.delete(terminal.data.threadId);
+          this.endedReviewTurns.set(
+            terminal.data.threadId,
+            terminal.data.turn.id,
+          );
+        }
         this.finishConversationTurn(
           terminal.data.threadId,
           terminal.data.turn.id,
@@ -3306,6 +3622,9 @@ export class CodexRuntime implements Runtime {
     this.endEscalations("Runtime lost");
     this.escalations.clear();
     this.escalationTurns.clear();
+    this.endReviews("Runtime lost", { drop: true });
+    this.reviewTurns.clear();
+    this.endedReviewTurns.clear();
     this.nativeGeneration = undefined;
     this.threadSnapshots.clear();
     this.nativeTurns.clear();
