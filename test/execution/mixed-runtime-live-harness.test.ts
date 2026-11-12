@@ -339,15 +339,17 @@ test("the skill and subagent facets are accepted, and their briefs name the tool
 });
 
 test("facet turns that follow their brief need no repair turn, and the crash follow-up resumes the session", async () => {
-  const { SLEEP, facetOutcome, setupJourney, shellOnly } = await import(
-    pathToFileURL(
-      resolve("test/execution/mixed-runtime-qualification/service-child.mjs"),
-    ).href
-  );
+  const { CRASH_SLEEP, SLEEP, facetOutcome, setupJourney, shellOnly } =
+    await import(
+      pathToFileURL(
+        resolve("test/execution/mixed-runtime-qualification/service-child.mjs"),
+      ).href
+    );
   // The bundled CLI refuses a command whose first part is `sleep N`, N >= 25.
   for (const brief of [
     facetOutcome("stop", { workerProfileId: "w", nonce: "n" }),
     shellOnly(SLEEP),
+    shellOnly(CRASH_SLEEP),
   ])
     assert.doesNotMatch(brief, /verbatim: sleep\s+\d/);
   const root = mkdtempSync(join(tmpdir(), "c5-repair-"));
@@ -440,7 +442,7 @@ test("facet turns that follow their brief need no repair turn, and the crash fol
         taskId,
         recipientAssignmentId: binding.assignmentId,
         expectedAssignmentVersion: binding.assignmentVersion,
-        message: shellOnly(SLEEP),
+        message: shellOnly(CRASH_SLEEP),
       });
       await settle(before + 2);
       assert.equal(prompts.length - before, 2);

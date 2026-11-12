@@ -46,7 +46,7 @@ import {
   INSTALLED_SKILL,
   NESTED_SKILL,
   NESTED_SKILL_ANSWER,
-  SLEEP,
+  CRASH_SLEEP,
   setupJourney,
   shellOnly,
   startJourneyService,
@@ -1441,7 +1441,7 @@ async function crashJourney(withSubagent) {
     taskId: ids.taskId,
     recipientAssignmentId: completed.binding.assignmentId,
     expectedAssignmentVersion: completed.binding.assignmentVersion,
-    message: withSubagent ? subagentSleep : shellOnly(SLEEP),
+    message: withSubagent ? subagentSleep : shellOnly(CRASH_SLEEP),
   });
   const record = await waitUntil(
     async () => running((await snapshot(first, ids.taskId)).recovery),
@@ -1485,7 +1485,17 @@ async function crashJourney(withSubagent) {
     (await snapshot(second, ids.taskId)).recovery.find(
       (r) => r.workId === record.workId,
     );
-  const held = await read();
+  const releasedNow = (r) =>
+    Boolean(r?.observations.some((o) => o.kind === "held-turn-released"));
+  // Start-up releases the crashed turn once its Claude CLI exit is verified.
+  const held = await waitUntil(
+    async () => {
+      const r = await read();
+      return releasedNow(r) ? r : null;
+    },
+    60_000,
+    "crashed turn released",
+  );
   // ponytail: in-process OperatorApi read; the HTTP `execution.read` token scope is not exercised.
   const operator = await second.call("operatorRead", {
     workId: record.workId,
@@ -1494,7 +1504,7 @@ async function crashJourney(withSubagent) {
   await delay(30_000);
   const quiet = await snapshot(second, ids.taskId);
   const retained = await read();
-  const allHeld = (h) => Boolean(h?.writer && h.capacity && h.uncertainty);
+  const freed = (h) => Boolean(h && !h.writer && !h.capacity);
   evidence.observations = {
     serviceKill: killed,
     cliExitedByItself: cli.exitedByItself,
@@ -1516,54 +1526,30 @@ async function crashJourney(withSubagent) {
     startTurnInQuietWindow: quiet.turns.length + quiet.refused.length,
     holdsAfterQuietWindow: retained?.holds ?? null,
     recoveryRoute:
-      "service seam resolveHeldExecution; no operator HTTP or CLI route",
+      "held-turn release at start-up, then the service's Start again; no operator HTTP or CLI route",
   };
+  // The released request stays held for Start again; nothing starts until the operator asks.
   if (
-    held?.intent.state !== "held" ||
-    !allHeld(held.holds) ||
-    !allHeld(retained?.holds) ||
+    !freed(held.holds) ||
+    !freed(retained?.holds) ||
+    !releasedNow(retained) ||
     operator.state !== "held" ||
     evidence.observations.startTurnInQuietWindow !== 0
   )
     throw new Error(
-      "the crash did not leave a visible, retained uncertainty hold",
+      "the crash did not release the turn without resubmitting it",
     );
-  stage("recover");
-  await second.call("resolve", {
-    receipt: {
-      workId: held.workId,
-      workRevision: held.generation.workRevision,
-      requestSequence: held.generation.requestSequence,
-      threadId: held.intent.threadId,
-      turnId: held.intent.turnId,
-      processIdentity: held.processIdentity,
-      termination: { kind: "process-exit" },
-      effects: "settled",
-      workspace: "preserved",
-    },
-  });
   if (withSubagent) {
-    // Scope: holds visible, the CLI and its tool processes ended by recorded identity, and
-    // the resolution releasing the holds. A resumed turn after a mid-subagent crash did not
-    // complete for haiku or sonnet in earlier attempts, so it is recorded as not demonstrated.
-    const after = await snapshot(second, ids.taskId);
-    const released = after.recovery.find((r) => r.workId === record.workId);
-    evidence.observations.holdsAfterResolve = released?.holds ?? null;
+    // Scope: the CLI and its tool processes ended by recorded identity, and the release
+    // freeing the holds. A resumed turn after a mid-subagent crash did not complete for
+    // haiku or sonnet in earlier attempts, so it is recorded as not demonstrated.
     evidence.observations.resumedTurnAfterSubagentCrash = "not-demonstrated";
-    const h = released?.holds;
-    if (!h || h.writer || h.capacity || h.uncertainty)
-      throw new Error("holds were not released by the recovery resolution");
-    if (after.turns.length + after.refused.length !== 0)
-      throw new Error("a turn started during recovery");
     return;
   }
-  await second.call("message", {
-    key: randomUUID(),
+  stage("recover");
+  await second.call("startAgain", {
     taskId: ids.taskId,
-    recipientAssignmentId: held.binding.assignmentId,
-    expectedAssignmentVersion: held.binding.assignmentVersion,
-    message:
-      "Recovered after a service crash. Run no command. Call cab_report_result exactly once with summary C5 recovered, and end the turn.",
+    workId: record.workId,
   });
   let resumed;
   try {
@@ -1598,8 +1584,13 @@ async function crashJourney(withSubagent) {
     holdsAfterRecovery: released?.holds ?? null,
   });
   evidence.startTurn.turns = 2 + after.turns.length;
+  evidence.observations.crashBatchDeliveries = after.turns.filter(
+    (t) => t.crashBatch,
+  ).length;
   if (after.turns.length !== 1 || after.refused.length !== 0)
     throw new Error("recovery started other than exactly one turn");
+  if (evidence.observations.crashBatchDeliveries !== 1)
+    throw new Error("Start again did not deliver the crashed batch once");
   if (!evidence.observations.sameThread)
     throw new Error("the recovered turn did not resume the same session");
   const h = released?.holds;

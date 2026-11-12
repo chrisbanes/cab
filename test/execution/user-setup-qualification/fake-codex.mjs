@@ -15,6 +15,25 @@ const terminal = (threadId, turnId, status = "completed") =>
     method: "turn/completed",
     params: { threadId, turn: { id: turnId, status } },
   });
+const report = (threadId, turnId) => {
+  const id = randomUUID();
+  calls.set(id, [threadId, turnId]);
+  setTimeout(
+    () =>
+      send({
+        id,
+        method: "item/tool/call",
+        params: {
+          threadId,
+          turnId,
+          callId: id,
+          tool: "cab_report_result",
+          arguments: { summary: "NATIVE_LIFECYCLE_DONE_1569" },
+        },
+      }),
+    20,
+  );
+};
 createInterface({ input: process.stdin }).on("line", (line) => {
   const m = JSON.parse(line);
   if (!m.method) {
@@ -54,9 +73,16 @@ createInterface({ input: process.stdin }).on("line", (line) => {
       threadId = p.threadId;
     send({ id: m.id, result: { turn: { id: turnId } } });
     const text = JSON.stringify(p.input);
-    if (text.includes("/bin/sleep 120")) {
-      const child = spawn("/bin/sleep", ["120"], { stdio: "ignore" });
+    const seconds = /\/bin\/sleep (\d+)/.exec(text)?.[1];
+    if (seconds) {
+      const child = spawn("/bin/sleep", [seconds], { stdio: "ignore" });
       sleeps.set(turnId, child);
+      // A sleep that ends by itself is followed by the result; an interrupted one is not.
+      child.on("exit", (code) => {
+        if (code !== 0 || sleeps.get(turnId) !== child) return;
+        sleeps.delete(turnId);
+        report(threadId, turnId);
+      });
       send({
         method: "item/started",
         params: {
@@ -65,36 +91,20 @@ createInterface({ input: process.stdin }).on("line", (line) => {
           item: {
             id: randomUUID(),
             type: "commandExecution",
-            command: "/bin/sleep 120",
+            command: `/bin/sleep ${seconds}`,
             cwd: process.cwd(),
             status: "inProgress",
           },
         },
       });
-    } else {
-      const id = randomUUID();
-      calls.set(id, [threadId, turnId]);
-      setTimeout(
-        () =>
-          send({
-            id,
-            method: "item/tool/call",
-            params: {
-              threadId,
-              turnId,
-              callId: id,
-              tool: "cab_report_result",
-              arguments: { summary: "NATIVE_LIFECYCLE_DONE_1569" },
-            },
-          }),
-        20,
-      );
-    }
+    } else report(threadId, turnId);
   } else if (m.method === "turn/interrupt") {
+    // Only a turn this process is running ends; another process's turn sends nothing.
+    const running = sleeps.has(p.turnId);
     sleeps.get(p.turnId)?.kill("SIGTERM");
     sleeps.delete(p.turnId);
     send({ id: m.id, result: {} });
-    terminal(p.threadId, p.turnId, "interrupted");
+    if (running) terminal(p.threadId, p.turnId, "interrupted");
   } else if (m.id !== undefined) send({ id: m.id, result: {} });
 });
 process.on("SIGTERM", () => {

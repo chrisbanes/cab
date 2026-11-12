@@ -107,7 +107,13 @@ export async function startJourneyService({
         settings,
         policy,
       );
-      observed.turns.push({ harness, threadId, turnId, at: Date.now() });
+      observed.turns.push({
+        harness,
+        threadId,
+        turnId,
+        at: Date.now(),
+        crashBatch: String(prompt).includes(CRASH_SLEEP),
+      });
       observed.skillPlugins.push(settings?.skills?.plugins ?? []);
       return turnId;
     };
@@ -182,6 +188,8 @@ const PROBE =
   "env | cut -d= -f1 > env-names.txt; env > env-full.txt; ps -E -o command= -p $PPID > ps-parent.txt 2>&1 || echo ps-error > ps-parent.txt";
 
 export const SLEEP = "/bin/sleep 120";
+/** Bounded, so the crashed batch that Start again delivers afresh ends by itself. */
+export const CRASH_SLEEP = "/bin/sleep 60";
 
 /** The probe brief: one verbatim Bash command, then a result so no repair turn follows. */
 export const shellOnly = (command) =>
@@ -423,7 +431,13 @@ async function child() {
     setup: (args) => setupJourney(current.service, args),
     snapshot: ({ taskId }) =>
       snapshot(current.service, current.observed, taskId),
-    resolve: ({ receipt }) => current.service.resolveHeldExecution(receipt),
+    startAgain: ({ taskId, workId }) =>
+      current.service.startAgain({
+        key: randomUUID(),
+        taskId,
+        expectedVersion: Number(current.service.domain().task(taskId).version),
+        workId,
+      }),
     message: (args) =>
       current.service.coordinationView().postOperatorMessage(args),
     stopTask: ({ taskId }) => current.service.stopTask(taskId),
