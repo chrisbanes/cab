@@ -899,6 +899,36 @@ and level, recorded by `npm run skip-sandbox:live` in the [live record](evidence
 | Project deletion removes both tables | `project-deletion.test.ts` |
 | A live task turn in each harness at `unsandboxed` launches Chromium and boots the emulator, and at `strict` does neither, with the same runtime policy as skip sandbox sent | [live evidence](evidence/2026-11-11-sandbox-level-live.md) |
 
+## Sandbox escalation
+
+At the `escalate-approval` sandbox level ([ADR-1034](adr/1034-harness-native-sandbox-escalation.md))
+a Codex task turn keeps its sandbox and can ask to run one command outside it; the operator
+approves or declines it in the Inbox. The service, the Codex runtime and the operator surfaces
+are covered by deterministic suites; the harness contracts are proved by the
+[probe](evidence/sandbox-escalation-probe-2026-11-11.md), and approve and decline through cab by
+one bounded live run, `npm run escalate-approval:live`, in the
+[live record](evidence/2026-11-12-escalate-approval-live.md), which CI does not repeat.
+
+| Criteria | Evidence |
+| --- | --- |
+| The operator can choose `escalate-approval`, versioned and operator-only through the API and `project prepare --sandbox`; the startup migration widens the stored levels in place | `operator-command-network.test.ts`, `startup-snapshot.test.ts` |
+| Only a Codex task turn is admitted at the level and runs with the escalation policy; Claude Code task turns, draft turns, drafting runs and unbound turns record `strict` | `command-network-admission.test.ts` |
+| An escalate-approval turn sends the granular policy with only `sandbox_approval` and reviewer `user`, keeps `workspaceWrite`, and a resume accepts that exact policy and no other; strict, read-only and unsandboxed turns are unchanged | `codex-runtime.test.ts` |
+| Other approval kinds, a command approval that also asks for network or extra permissions, and a command approval on another turn get the unexpected-request denial and hold | `codex-runtime.test.ts` |
+| An escalation becomes an Inbox approval with the command, workspace-relative cwd, reason and HEAD, branch and dirty flag; approve answers `accept` and decline `decline` exactly once, a replay or retransmission sends nothing more, and cab never answers `acceptForSession` or an amendment | `sandbox-escalation-service.test.ts`, `codex-runtime.test.ts` |
+| A request without an exact admitted turn and generation is refused, agents cannot request `sandbox.escalate`, and its approval never authorizes a delivery action | `sandbox-escalation-service.test.ts` |
+| Unanswered for 15 minutes it is declined and resolves as expired, and a later decision conflicts; a decision racing the expiry records one decision and one reply | `sandbox-escalation-service.test.ts` |
+| Turn end, Stop, interrupt, Codex resolving it, runtime loss, service stop and restart withdraw it as obsolete with no reply, and Codex's resolution notices are no anomaly | `sandbox-escalation-service.test.ts`, `codex-runtime.test.ts` |
+| Each escalation records decider, decision, delivery, exit code and duration, and no output; the task read, Execution tab and `cab task get` show them, withheld under the privacy exclusions | `sandbox-escalation-service.test.ts`, `sandbox-escalation-presentation.test.ts` |
+| Settings saves the level without a confirmation, still asks when leaving it for `unsandboxed`, and with both policy disclosures, `project get` and `assignment get` states its risks and that Claude Code turns stay `strict` | `operator-project-config-general-browser.test.ts`, `operator-execution-runtime.test.ts`, `operator-cli-browse.test.ts`, `neutral-runtime-copy.test.ts` |
+| Project deletion removes the escalation evidence | `project-deletion.test.ts` |
+| A live Codex task turn through cab: an approved escalation runs outside the sandbox and records operator, `accept`, exit code and duration; a declined one runs nothing; a follow-up turn resumes with the persisted policy | [live record](evidence/2026-11-12-escalate-approval-live.md) |
+
+Limits: "Other approval kinds are still refused" is proved deterministically against a fake App
+Server, not live, because the probe's model had no permission-request tool. A Codex version that
+sends several approval callbacks for one command (`approvalId`) is not qualified; the second is
+declined and the work held. The live record states what it observed of both.
+
 ## Draft turns
 
 A draft turn is a read-only turn of the project lead on a task that is not Ready. The

@@ -2228,7 +2228,7 @@ test("local listening is a switch with its disclosure that saves as a versioned 
   assert.equal(d.localListening(ids.atlas), false);
 });
 
-test("the sandbox level asks for confirmation when made unsandboxed and saves strict without one", async (_t, journey) => {
+test("the sandbox level asks for confirmation when made unsandboxed and saves strict or escalate-approval without one", async (_t, journey) => {
   const { f, ids, page } = await startSettings(
     journey,
     "/projects/:atlas/settings",
@@ -2294,6 +2294,32 @@ test("the sandbox level asks for confirmation when made unsandboxed and saves st
   assert.equal(await dialog.count(), 0);
   await savedOutcome(page);
   assert.equal(d.sandboxLevel(ids.atlas), "strict");
+
+  // Escalate with approval saves at once and states that Claude Code turns stay strict.
+  await page
+    .getByText(
+      /Claude Code task turns in a project at the escalate-approval level/,
+    )
+    .first()
+    .waitFor();
+  await level.selectOption("escalate-approval");
+  const escalate = commandBody(page);
+  await save.click();
+  assert.equal((await escalate).sandbox, "escalate-approval");
+  assert.equal(await dialog.count(), 0);
+  await savedOutcome(page);
+  assert.equal(d.sandboxLevel(ids.atlas), "escalate-approval");
+  await page
+    .getByText(
+      "The sandbox level is escalate-approval for this project's Codex task turns; its Claude Code task turns stay strict.",
+    )
+    .waitFor();
+  // Leaving it for unsandboxed still asks.
+  await level.selectOption("unsandboxed");
+  await save.click();
+  await dialog.waitFor();
+  await dialog.getByRole("button", { name: "Cancel" }).click();
+  assert.equal(d.sandboxLevel(ids.atlas), "escalate-approval");
 });
 
 test("diagnostic capture sits beside command network access and saves both modes as versioned changes", async (_t, journey) => {

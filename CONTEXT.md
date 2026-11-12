@@ -314,13 +314,24 @@ _Avoid_: Assignment identity when referring only to an execution session
 
 **Sandbox level**:
 A per-project setting, `sandbox`, that the operator chooses for a project's task turns
-(ADR-1034). `strict`, the default, keeps the harness sandbox. `unsandboxed` runs task turns
-without it, so they can launch host tools such as browsers and Android emulators; agents then
-act with the service user's full filesystem, process, network and credential access, and
-command network access and local listening are superseded. The level is recorded when a turn
-is admitted; draft turns, drafting runs, read-only turns and turns without a task binding are
+(ADR-1034). `strict`, the default, keeps the harness sandbox. `escalate-approval` keeps it but
+lets a Codex task turn ask to run one command outside it, a **Sandbox escalation**; Claude Code
+task turns stay `strict` at this level for now. `unsandboxed` runs task turns without the
+sandbox, so they can launch host tools such as browsers and Android emulators; agents then act
+with the service user's full filesystem, process, network and credential access, and command
+network access and local listening are superseded. The level is recorded when a turn is
+admitted; draft turns, drafting runs, read-only turns and turns without a task binding are
 always `strict`.
 _Avoid_: Skip sandbox, sandbox bypass, when referring to the setting
+
+**Sandbox escalation**:
+One command that a task turn admitted at `escalate-approval` asks to run outside the sandbox.
+It is an Inbox approval showing the command, its working directory, the agent's reason and
+the workspace's HEAD, branch and uncommitted-changes flag. Approve runs that one command;
+decline refuses it. One left unanswered for 15 minutes is declined, and one whose turn ends
+first is withdrawn as obsolete. Its evidence records who decided, the decision, the exit code
+and the duration, never the command's output.
+_Avoid_: Sandbox bypass, permission grant, when referring to one approved command
 
 **Task workspace**:
 The working files allocated to a task, retained independently of its conversations.
