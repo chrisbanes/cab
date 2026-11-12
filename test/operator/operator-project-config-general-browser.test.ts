@@ -2298,7 +2298,7 @@ test("the sandbox level asks for confirmation when made unsandboxed and saves st
   // Escalate with approval saves at once and states that it applies in both harnesses.
   await page
     .getByText(
-      /Claude Code task turns in a project at the escalate-approval level/,
+      /runs its Claude Code task turns sandboxed in auto permission mode/,
     )
     .first()
     .waitFor();
