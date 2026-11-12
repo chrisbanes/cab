@@ -2068,7 +2068,8 @@ a delivery operation or a runtime question, carries no notice.
 Preserve the task, assignment and conversation hierarchy: the task retains the
 outcome and accountable lead, assignments identify delegated responsibility, and
 each delegated assignment appears where the lead delegated it as a collapsible
-sub-conversation with its assignment, agent and harness. Do not invent narrative
+sub-conversation with its agent, harness, state and the brief's first sentence, with
+the full brief on request. Do not invent narrative
 summaries, recommendations or ownership when the evidence is absent. Unavailable or
 stale evidence remains explicit: omitted items, expired tool activity and activity a
 harness does not capture are inline gaps, and an absent tool row is not evidence
@@ -2700,8 +2701,9 @@ exact references and anchors.
 
 - The composer starts with the lead as a visible, removable `@lead` recipient. Other
   assignments are added from a task-scoped picker; two assignments of one agent are
-  told apart by their short assignment ID. Removing every recipient is a deliberate
-  record-only comment that wakes nobody, and a refresh never restores a removed
+  told apart by the brief's first sentence, and by short assignment ID only when that
+  also matches. Removing every recipient is a deliberate record-only comment that
+  wakes nobody, and a refresh never restores a removed
   recipient. An assignment's Reply action selects exactly that assignment.
 - Recipients are chosen by assignment identity and expected version. A name, `@name` or
   agent in the text, whoever wrote it, resolves nothing and wakes nothing; agents

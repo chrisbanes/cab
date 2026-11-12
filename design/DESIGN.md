@@ -215,7 +215,7 @@ fixed application dimensions.
 | Compact progress | Task progress across Overview, List, Board and Inbox entry points |
 | Review components | Criterion rows, local-feedback context, and the result review panel (decision, recommendation, what changed, criteria, evidence and uncertainty in reading order, then one labelled response fieldset) |
 | Inspection components | Observation strip, selectable code line, editor row with separate gutter, marker and source |
-| Conversation components | Pinned attention card (phone: one-line banner), agent text with raw-text view and Copy (always visible on an assignment's latest turn, revealed on hover or focus for earlier ones, always visible on touch), working status line (polite, throttled, static under reduced motion), tinted operator message, request and result cards, grouped tool row with per-command output, file-change row, delegation sub-conversation, gap marker, composer, Jump to latest |
+| Conversation components | Pinned attention card (phone: one-line banner), agent text with a per-message menu holding Raw text (or Formatted) and Copy (its trigger always visible on an assignment's latest turn and while open, revealed on hover or focus for earlier ones, always visible on touch; Escape closes it and returns focus to the trigger), working status line (polite, throttled, static under reduced motion), tinted operator message, request card, result card (its destination shown only when unresolved), grouped tool row with per-command output, file-change row, delegation sub-conversation (agent, harness and state in its header, the brief's first sentence, and a Full brief toggle for a longer brief), gap marker, composer, Jump to latest |
 
 Rules:
 
@@ -228,7 +228,11 @@ Rules:
   mono subtitle, at most one outline action).
 - The Reply destination (Comment on task, Message task lead, Post GitHub comment) is
   a segmented radio group named Send to; Send is the only primary button in Reply.
-  An unavailable destination stays focusable with `aria-disabled` and its reason.
+  An unavailable destination stays focusable with `aria-disabled` and its reason;
+  Post GitHub comment is hidden when the project doesn't permit issue comments, unless
+  it is the selected destination. A shared comment has one line above the box, and
+  the fuller sending rules sit in a closed "How sending works" disclosure below the
+  recipient preview.
 - Use a navigation row for anything that only opens another view. Keep buttons for
   actions, with one primary action per view. Desktop buttons hug their label.
 - Stop uses the destructive treatment and confirms first; reversible states show

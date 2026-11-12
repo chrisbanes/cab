@@ -1546,7 +1546,7 @@ export function TaskWorkspace({
             : delivery
               ? "Comment posted."
               : receipt.kind === "task-comment"
-                ? sentText(receipt.deliveries, data?.commentRecipients ?? [])
+                ? sentText(receipt.deliveries, commentFacts)
                 : receipt.kind === "draft-turn"
                   ? draftTurnSentNotice(data?.lead?.name ?? "the lead")
                   : receipt.kind === "coordination" && receipt.resumedLead
@@ -2037,8 +2037,13 @@ export function TaskWorkspace({
   )
     state.destination = "comment";
   const destination = state.destination;
-  // The shared comment's recipients are the server's per-assignment read, never inferred from text.
-  const commentFacts = data?.commentRecipients ?? [];
+  // The shared comment's recipients are the server's per-assignment read, never inferred from text;
+  // the brief is joined from the task read only to label same-named recipients.
+  const commentFacts = (data?.commentRecipients ?? []).map((fact) => ({
+    ...fact,
+    brief: data?.assignments.find((a) => a.assignmentId === fact.assignmentId)
+      ?.brief,
+  }));
   const commentIds = selectedRecipientIds(
     commentFacts,
     state.commentRecipients,
@@ -2201,6 +2206,12 @@ export function TaskWorkspace({
       />
     );
   const comment = commentAvailability(data.commentPolicy);
+  // Without a comment grant the option is hidden, unless it is selected: then it stays, disabled
+  // with its reason and the draft kept, so a tracker-bound draft is never re-routed silently.
+  const githubOffered =
+    !!data.source &&
+    (data.commentPolicy?.reasonCode !== "no-comment-grant" ||
+      destination === "github");
   // Exactly one sentence sits above the box: what this destination does now.
   const replyNote =
     destination === "comment"
@@ -2273,7 +2284,7 @@ export function TaskWorkspace({
             </span>
           </label>
         )}
-        {data.source && (
+        {githubOffered && (
           <label className="reply-destination-option">
             <input
               type="radio"
@@ -2294,7 +2305,7 @@ export function TaskWorkspace({
             <span>Post {trackerName(data.source)} comment</span>
           </label>
         )}
-        {data.source && comment.sentence && (
+        {githubOffered && comment.sentence && (
           <span id={githubReasonId} className="sr-only">
             {comment.sentence}
           </span>

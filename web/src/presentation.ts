@@ -102,6 +102,18 @@ export const codeSentence = (
 const lineMarkers =
   /^\s*(?:#{1,6}\s+|(?:[-*+]|\d+\.)\s+)?(?:\[[ xX]\](?:\s+|$))?/;
 
+/**
+ * A delegation brief's summary line, and whether the full brief holds anything that line does not
+ * show verbatim (a heading, another line, a link destination or formatting), so it is offered.
+ */
+export function briefSummary(brief: string | null | undefined): {
+  line: string;
+  full: boolean;
+} {
+  const { line } = outcomeLine(brief ?? null);
+  return { line, full: (brief ?? "").trim() !== line };
+}
+
 /** Inline Markdown markers removed, keeping their text; intraword underscores and spaced `*` stay. */
 const plainInline = (line: string) =>
   line

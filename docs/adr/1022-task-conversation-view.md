@@ -36,7 +36,8 @@ why meant reassembling it across tabs, so the task view was hard to read.
   operator messages and follow-ups, questions and their answers, approvals, results,
   delegations and tool activity. Assistant text renders as sanitized Markdown with a
   raw-text view. Delegated assignments appear inline, where the lead delegated them,
-  as collapsible sub-conversations that keep their assignment, agent and harness.
+  as collapsible sub-conversations that show the agent, harness, state and the brief's
+  first sentence, with the full brief on request.
 - A question or approval can be answered from the attention card or from its place in
   the conversation. Both show the same request state; neither creates a second
   request.

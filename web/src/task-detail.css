@@ -949,24 +949,71 @@ a.task-source-chip:hover {
   line-height: 1.6;
 }
 
-.conv-actions {
+.conv-agent > header {
   display: flex;
-  flex-wrap: wrap;
-  gap: var(--space-8);
+  align-items: center;
+  gap: var(--space-4);
+}
+
+/* The per-message menu: an icon trigger at the end of the header and a small popover, not a
+   framed workspace disclosure. */
+.task-workspace details.conv-menu {
+  position: relative;
+  margin: 0 0 0 auto;
+  padding: 0;
+  border: 0;
+}
+
+.task-workspace .conv-menu > summary {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  min-height: 0;
+  height: 28px;
+  border-radius: var(--radius-md);
+  color: var(--fg-2);
+  list-style: none;
+  cursor: pointer;
+}
+
+.conv-menu > summary::-webkit-details-marker {
+  display: none;
+}
+
+.conv-menu > summary:hover,
+.conv-menu[open] > summary {
+  background: var(--raised);
+}
+
+.conv-menu > summary svg {
+  width: 16px;
+  height: 16px;
+}
+
+.conv-menu-items {
+  position: absolute;
+  right: 0;
+  z-index: 10;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+  min-width: 160px;
+  padding: var(--space-8);
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-xl);
+  background: var(--overlay);
 }
 
 /*
- * Opacity, not display, keeps Copy in the tab order and the entry's height steady. Only a
- * pointer that hovers hides it; touch devices always show it.
+ * Opacity, not display, keeps the trigger in the tab order and the header's height steady. Only
+ * a pointer that hovers hides it on earlier turns; touch devices and an open menu always show it.
  */
 @media (hover: hover) and (pointer: fine) {
-  .conv-agent:not([data-latest]) .conv-copy {
+  .conv-agent:not([data-latest]):not(:hover):not(:focus-within)
+    .conv-menu:not([open])
+    > summary {
     opacity: 0;
-  }
-
-  .conv-agent:not([data-latest]):hover .conv-copy,
-  .conv-agent:not([data-latest]):focus-within .conv-copy {
-    opacity: 1;
   }
 }
 
@@ -1165,15 +1212,17 @@ a.task-source-chip:hover {
   cursor: pointer;
 }
 
-.conv-delegation-head .identifier-line {
-  color: var(--fg-3);
-  font-family: var(--font-mono);
-  font-size: var(--type-xs);
-}
-
 .conv-delegation-summary {
   margin: 0;
   padding: 0 var(--space-12) var(--space-8);
+}
+
+.conv-delegation-brief {
+  margin: 0 var(--space-12) var(--space-8);
+}
+
+.conv-delegation-brief > [data-slot="button"] {
+  margin-bottom: var(--space-8);
 }
 
 .conv-delegation-message {
@@ -1191,6 +1240,7 @@ a.task-source-chip:hover {
 
 @media (max-width: 1120px) {
   .conv-delegation-head,
+  .conv-delegation-brief [data-slot="button"],
   .assignment-facts > summary,
   .conversation > [data-slot="button"],
   .conversation-status [data-slot="button"],
@@ -1199,6 +1249,11 @@ a.task-source-chip:hover {
   .conv-gap [data-slot="button"],
   .plan-card [data-slot="button"] {
     min-height: 44px;
+  }
+
+  .task-workspace .conv-menu > summary {
+    width: 44px;
+    height: 44px;
   }
 }
 
@@ -1278,7 +1333,9 @@ a.task-source-chip:hover {
 .comment-recipients ul {
   margin: 0;
 }
+/* The row anchors the picker, so its list is capped to the row's width, not the trigger's offset. */
 .recipient-row {
+  position: relative;
   display: flex;
   flex-wrap: wrap;
   align-items: center;
@@ -1300,8 +1357,11 @@ a.task-source-chip:hover {
   border-radius: 999px;
   background: var(--raised);
 }
-.recipient-picker {
-  position: relative;
+/* A brief line in a label can hold a long path; it wraps rather than widening the dock. */
+.recipient-chip,
+.recipient-picker [data-slot="button"] {
+  min-width: 0;
+  overflow-wrap: anywhere;
 }
 /* The open picker floats over the composer's rest, so choosing never makes the docked card scroll. */
 .recipient-picker ul {
@@ -1312,7 +1372,8 @@ a.task-source-chip:hover {
   display: flex;
   flex-direction: column;
   gap: var(--space-4);
-  min-width: max-content;
+  width: max-content;
+  max-width: min(32rem, 100%);
   padding: var(--space-8);
   border: 1px solid var(--line-strong);
   border-radius: var(--radius-xl);
@@ -1324,6 +1385,21 @@ a.task-source-chip:hover {
 }
 .comment-preview p {
   margin: 0;
+}
+/* The fuller sending rules, closed by default below the preview. */
+.task-workspace details.reply-help {
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+.task-workspace .reply-help > summary {
+  width: fit-content;
+  color: var(--fg-2);
+  font-size: var(--type-xs);
+  font-weight: var(--weight-medium);
+}
+.reply-help p {
+  margin: var(--space-4) 0 0;
 }
 
 /* Keep Reply inside its conversation column; overflow keeps short screens usable. */

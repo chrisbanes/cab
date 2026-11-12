@@ -10,7 +10,9 @@ import {
 import { createOperatorFixture } from "../fixtures/operator-web.js";
 import { markTaskReady, seedReviewTask } from "../fixtures/task-review.js";
 import {
+  admissionText,
   commentNote,
+  commentRulesText,
   recordOnlyText,
 } from "../../web/src/task-comment-model.js";
 
@@ -40,7 +42,9 @@ async function seed(f: Fixture) {
     taskId: a.taskId,
     assignmentId: pendingId,
     profileId: a.profileId,
-    brief: "Independent focus review",
+    // A long first sentence, as briefs with paths have, so labels must wrap on a phone.
+    brief:
+      "Independent focus review of /Users/example/projects/cab/web/src/task-comment-composer.tsx.",
     resultDestination: "lead",
     requesterAssignmentId: a.assignmentId,
   });
@@ -108,7 +112,8 @@ for (const engine of ["chromium", "webkit"] as const)
       // The lead is a visible, removable recipient and the one sentence above the box says what the box does.
       const first = await chips(page).allInnerTexts();
       assert.equal(first.length, 1);
-      assert.match(first[0] ?? "", /^@lead Task lead · [0-9a-f]{8}/);
+      assert.match(first[0] ?? "", /^@lead Task lead/);
+      assert.doesNotMatch(first[0] ?? "", /[0-9a-f]{8}/);
       assert.equal(
         await page.locator("#reply p").first().innerText(),
         commentNote,
@@ -181,16 +186,23 @@ for (const engine of ["chromium", "webkit"] as const)
         () => document.activeElement?.textContent === "Add recipient",
       );
 
-      // Same-named assignments are told apart by short identity, never by name.
+      // Same-named assignments are told apart by their brief's first sentence, not by ID.
       const texts = await chips(page).allInnerTexts();
       assert.equal(new Set(texts).size, 2);
       assert.ok(
-        texts.every((t) => /Task lead · [0-9a-f]{8}/.test(t)),
+        texts.every((t) => /Task lead · \S/.test(t) && !/[0-9a-f]{8}/.test(t)),
         texts.join(),
       );
       await add.click();
+      // On a phone the open picker, long labels and all, stays within the screen.
+      await page.setViewportSize({ width: 390, height: 844 });
+      const right = await options.evaluate(
+        (e) => e.getBoundingClientRect().right,
+      );
+      assert.ok(right <= 390, `picker right edge ${right}`);
+      await page.setViewportSize({ width: 1366, height: 900 });
       await options
-        .getByRole("button", { name: new RegExp(a.pendingId.slice(0, 8)) })
+        .getByRole("button", { name: /Task lead · Independent focus review/ })
         .click();
 
       // The mixed preview names input for a running or pending assignment and a resume for a completed one.
@@ -199,9 +211,12 @@ for (const engine of ["chromium", "webkit"] as const)
         .getByText(/receives this as input/)
         .first()
         .waitFor();
-      await page
-        .getByText(/Pause, Stop, capacity, readiness and permissions/)
-        .waitFor();
+      // The fuller rules sit behind a closed help disclosure that opens by keyboard.
+      assert.equal(await page.getByText(admissionText).isVisible(), false);
+      await page.locator(".reply-help > summary").focus();
+      await page.keyboard.press("Enter");
+      await page.getByText(commentRulesText).waitFor();
+      await page.getByText(admissionText).waitFor();
       await captureBrowserEvidence(
         page,
         `${engine}-1366-mixed-recipient-preview`,
@@ -366,7 +381,7 @@ test("a refused send keeps the whole draft and selection and says who cannot rec
   await add.click();
   await page
     .getByRole("list", { name: "Assignments to add" })
-    .getByRole("button", { name: new RegExp(a.pendingId.slice(0, 8)) })
+    .getByRole("button", { name: /Independent focus review/ })
     .click();
   assert.equal(await chips(page).count(), 2);
   await box.fill("Two of you, please.");
@@ -401,7 +416,7 @@ test("a refused send keeps the whole draft and selection and says who cannot rec
   // Removing the unavailable recipient is the operator's choice, and the same draft then sends.
   await page
     .getByRole("button", {
-      name: new RegExp(`^Remove @.*${a.pendingId.slice(0, 8)}`),
+      name: /^Remove @.*Independent focus review/,
     })
     .click();
   await sendButton(page).click();

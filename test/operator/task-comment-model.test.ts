@@ -59,16 +59,47 @@ test("a task with no lead selects nobody, and an unavailable lead stays visible"
   assert.equal(hasBlockedRecipient([lead, worker], []), false);
 });
 
-test("same-named assignments are told apart by their short identity, never by name", () => {
-  const a = fact({ role: "delegate", name: "Worker" });
-  const b = fact({ role: "delegate", name: "Worker" });
+test("same-named assignments are told apart by their brief's first sentence, never by name alone", () => {
+  const a = fact({
+    role: "delegate",
+    name: "Worker",
+    brief: "Review keyboard support. Check Enter at commit 0123abcd.",
+  });
+  const b = fact({
+    role: "delegate",
+    name: "Worker",
+    brief: "Check focus return.",
+  });
   const lead = fact({ role: "lead", name: "Lead" });
   const facts = [lead, a, b];
-  assert.notEqual(recipientLabel(a, facts), recipientLabel(b, facts));
-  assert.match(recipientLabel(a, facts), /^Worker · [0-9a-f]{8}$/);
+  assert.equal(recipientLabel(a, facts), "Worker · Review keyboard support.");
+  assert.equal(recipientLabel(b, facts), "Worker · Check focus return.");
   assert.equal(recipientLabel(lead, facts), "Lead");
   assert.equal(chipLabel(lead, facts), "@lead Lead");
-  assert.match(chipLabel(a, facts), /^@Worker · /);
+  assert.equal(chipLabel(b, facts), "@Worker · Check focus return.");
+});
+
+test("same-named assignments with the same brief line fall back to their short identity", () => {
+  const brief = "Review keyboard support.";
+  const a = fact({ role: "delegate", name: "Worker", brief });
+  const b = fact({ role: "delegate", name: "Worker", brief });
+  const c = fact({ role: "delegate", name: "Worker" });
+  const d = fact({ role: "delegate", name: "Worker" });
+  const facts = [a, b, c, d];
+  assert.equal(
+    recipientLabel(a, facts),
+    `Worker · ${brief} · ${a.assignmentId.slice(0, 8)}`,
+  );
+  assert.equal(
+    recipientLabel(b, facts),
+    `Worker · ${brief} · ${b.assignmentId.slice(0, 8)}`,
+  );
+  // With no brief there is no sentence to show, so the short identity alone tells them apart.
+  assert.equal(
+    recipientLabel(c, facts),
+    `Worker · ${c.assignmentId.slice(0, 8)}`,
+  );
+  assert.notEqual(recipientLabel(c, facts), recipientLabel(d, facts));
 });
 
 test("a selection that left the task is shown and blocks the send", () => {

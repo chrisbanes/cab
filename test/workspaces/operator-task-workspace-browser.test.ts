@@ -208,7 +208,7 @@ test("production workspace retains literal captured text, pending request, focus
     .getAttribute("data-record-id");
   assert.ok(readingId);
   const reading = log.locator(`[data-record-id="${readingId}"]`);
-  const readingButton = reading.getByRole("button", { name: /^Raw text/ });
+  const readingButton = reading.getByLabel(/^Actions for /);
   await reading.scrollIntoViewIfNeeded();
   const readingY = await reading.evaluate(
     (el) => el.getBoundingClientRect().top,

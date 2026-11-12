@@ -5,8 +5,10 @@ import {
   useMemo,
   useRef,
   useState,
+  type KeyboardEvent,
   type ReactNode,
 } from "react";
+import { Ellipsis } from "lucide-react";
 import {
   executionHarnessLabels,
   taskToolOutputSchema,
@@ -14,9 +16,10 @@ import {
   type TaskRead,
 } from "../../src/operator/contracts.js";
 import type { OperatorClient } from "./api.js";
-import { ActionLink, Button, ShortId, StatusBadge } from "./components.js";
+import { ActionLink, Button, StatusBadge } from "./components.js";
 import { outsideWorkspace } from "../../src/operator/tool-limits.js";
-import { clockLabel } from "./presentation.js";
+import { briefSummary, clockLabel, shortId } from "./presentation.js";
+import { assignmentDistinction } from "./assignment-labels.js";
 import { CopyButton } from "./action-feedback.js";
 import { WorkingStatus } from "./working-status.js";
 import {
@@ -369,9 +372,7 @@ export function TaskConversation({
         Conversation
       </h3>
       <p className="metadata muted">
-        {lead ? `Led by ${lead.name} · ${lead.state}. ` : "No task lead yet. "}
-        Captured text and curated tool activity, oldest first. It is not a
-        complete transcript.
+        {lead ? `Led by ${lead.name} · ${lead.state}.` : "No task lead yet."}
       </p>
       {timeline.error && (
         <p role="alert" className="conversation-status">
@@ -517,6 +518,14 @@ function Item({ item, ctx }: { item: ConversationItem; ctx: Context }) {
 /** Parsing Markdown is the costly part of a render; the reply box re-renders the page per keystroke. */
 const FormattedText = memo(MarkdownPreview);
 
+/** Escape closes a per-message menu and returns focus to its trigger, as the header's Task actions do. */
+function closeMenuOnEscape(event: KeyboardEvent<HTMLDetailsElement>) {
+  if (event.key !== "Escape" || !event.currentTarget.open) return;
+  event.preventDefault();
+  event.currentTarget.open = false;
+  event.currentTarget.querySelector("summary")?.focus();
+}
+
 const time = (entry: TimelineEntry) => (
   <time dateTime={new Date(entry.at).toISOString()}>
     {clockLabel(entry.at)}
@@ -571,6 +580,29 @@ function Entry({
         >
           <header>
             <strong>{who}</strong> {time(entry)}
+            {entry.text !== null && (
+              <details className="conv-menu" onKeyDown={closeMenuOnEscape}>
+                <summary aria-label={`Actions for ${turnName}`}>
+                  <Ellipsis aria-hidden="true" />
+                </summary>
+                <div className="conv-menu-items">
+                  <Button
+                    variant="secondary"
+                    aria-label={`${raw ? "Formatted" : "Raw text"} of ${turnName}`}
+                    onClick={() => ctx.toggle(`c:raw:${entry.entryId}`)}
+                  >
+                    {raw ? "Formatted" : "Raw text"}
+                  </Button>
+                  {entry.lifecycle === "completed" && (
+                    <CopyButton
+                      text={entry.text}
+                      of={turnName}
+                      resetMs={2000}
+                    />
+                  )}
+                </div>
+              </details>
+            )}
           </header>
           {entry.text === null ? (
             <p className="muted">No text captured for this item.</p>
@@ -578,22 +610,6 @@ function Entry({
             <pre className="conv-raw">{entry.text}</pre>
           ) : (
             <FormattedText text={entry.text} />
-          )}
-          {entry.text !== null && (
-            <div className="conv-actions">
-              <Button
-                variant="secondary"
-                aria-label={`${raw ? "Formatted" : "Raw text"} of ${turnName}`}
-                onClick={() => ctx.toggle(`c:raw:${entry.entryId}`)}
-              >
-                {raw ? "Formatted" : "Raw text"}
-              </Button>
-              {entry.lifecycle === "completed" && (
-                <span className="conv-copy">
-                  <CopyButton text={entry.text} of={turnName} resetMs={2000} />
-                </span>
-              )}
-            </div>
           )}
         </article>
       );
@@ -645,12 +661,9 @@ function Entry({
             <strong>Result</strong> from {who} {time(entry)}
           </header>
           <p className="conv-text">{entry.summary}</p>
-          <p className="metadata muted">
-            {entry.destinationDisposition === "delivered"
-              ? "Delivered to its destination."
-              : "Destination unresolved."}{" "}
-            <ShortId value={entry.resultId} />
-          </p>
+          {entry.destinationDisposition === "unresolved" && (
+            <p className="metadata muted">Destination unresolved.</p>
+          )}
           <ActionLink
             variant="secondary"
             href={`/tasks/${ctx.taskId}?section=review&result=${entry.resultId}`}
@@ -958,15 +971,28 @@ function Delegation({
     item.id !== ctx.data.leadAssignmentId &&
     (ctx.data.commentRecipients?.find((r) => r.assignmentId === item.id)
       ?.mode ?? "unavailable") !== "unavailable";
-  const brief = a?.brief?.trim().split("\n")[0];
+  const brief = briefSummary(a?.brief);
+  const briefKey = `c:brief:${item.id}`;
+  const briefOpen = ctx.expanded(briefKey);
+  const name = a?.name ?? item.entry?.name ?? "Assignment";
+  // Same-agent cards are told apart as recipients are: the brief line, then the short ID.
+  const distinction = a ? assignmentDistinction(a, ctx.data.assignments) : [];
+  const label = [name, ...distinction].join(" · ");
+  const collisionId = distinction.find((part) => part === shortId(item.id));
   const result = ctx.data.results
     .filter((r) => r.assignmentId === item.id)
     .at(-1);
+  const delegatedEarlier =
+    item.entry === null && (item.items.length > 0 || ctx.earlier);
+  const summary = [
+    brief.line,
+    !open && result ? `Result: ${(result.summary ?? "").slice(0, 120)}` : "",
+  ].filter(Boolean);
   return (
     <section
       className="conv-delegation"
       data-record-id={`delegation:${item.id}`}
-      aria-label={`Delegated assignment ${a?.name ?? item.entry?.name ?? ""}`}
+      aria-label={`Delegated assignment ${label}`}
     >
       <h4>
         <button
@@ -975,14 +1001,18 @@ function Delegation({
           aria-expanded={open}
           onClick={() => ctx.toggle(key)}
         >
-          <strong>{a?.name ?? item.entry?.name ?? "Assignment"}</strong>
-          <span className="identifier-line">
-            <ShortId value={item.id} focusable={false} />
-            {runtime && ` · ${executionHarnessLabels[runtime.harness]}`}
-            {item.entry === null &&
-              (item.items.length > 0 || ctx.earlier) &&
-              " · delegated earlier"}
-          </span>
+          <strong>{name}</strong>
+          {(runtime || collisionId || delegatedEarlier) && (
+            <span className="muted">
+              {[
+                runtime && executionHarnessLabels[runtime.harness],
+                collisionId,
+                delegatedEarlier && "delegated earlier",
+              ]
+                .filter(Boolean)
+                .join(" · ")}
+            </span>
+          )}
           {state && (
             <StatusBadge
               tone={
@@ -998,11 +1028,23 @@ function Delegation({
           )}
         </button>
       </h4>
-      {!open && (brief || result) && (
+      {summary.length > 0 && (
         <p className="metadata muted conv-delegation-summary">
-          {brief}
-          {result && ` · Result: ${(result.summary ?? "").slice(0, 120)}`}
+          {summary.join(" · ")}
         </p>
+      )}
+      {brief.full && a?.brief && (
+        <div className="conv-delegation-brief">
+          <Button
+            variant="secondary"
+            aria-expanded={briefOpen}
+            aria-label={`Full brief of ${label}`}
+            onClick={() => ctx.toggle(briefKey)}
+          >
+            Full brief
+          </Button>
+          {briefOpen && <FormattedText text={a.brief} />}
+        </div>
       )}
       {open && a && canMessage && (
         <div className="conv-delegation-message">

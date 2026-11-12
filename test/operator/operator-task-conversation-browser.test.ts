@@ -60,7 +60,11 @@ async function seed(f: Fixture, filler = earlier) {
     elder = randomUUID(),
     waiter = randomUUID();
   for (const [assignmentId, brief, requester] of [
-    [worker, "Review keyboard support", a.assignmentId],
+    [
+      worker,
+      "Review keyboard support. Check Enter and Escape in the command menu at commit 0123abcd.",
+      a.assignmentId,
+    ],
     [nested, "Check focus return", worker],
     [elder, "Audit the older notes", a.assignmentId],
     [waiter, "Cover toolbar launch", a.assignmentId],
@@ -388,7 +392,13 @@ for (const [label, viewport] of [
       "a decided approval does not keep Reply undocked",
     );
 
-    // 2. Markdown renders without executing; Raw text shows the source.
+    // The intro names the lead without a transcript caveat; gaps carry that in place.
+    assert.doesNotMatch(
+      (await page.locator("#conversation > p.metadata").textContent()) ?? "",
+      /not a complete transcript/,
+    );
+
+    // 2. Markdown renders without executing; Raw text, in the message's menu, shows the source.
     const intro = log.locator(".conv-agent", { hasText: "First:" });
     assert.equal(
       await intro.locator("strong", { hasText: "bold" }).textContent(),
@@ -402,12 +412,14 @@ for (const [label, viewport] of [
     );
     assert.equal(await log.locator("script").count(), 0);
     assert.equal(await page.evaluate(() => "pwned" in window), false);
+    await intro.getByLabel(/^Actions for /).click();
     await intro.getByRole("button", { name: "Raw text" }).click();
     assert.match(
       (await intro.locator("pre").textContent()) ?? "",
       /\*\*bold\*\*.*<script>window\.pwned = 1<\/script>/s,
     );
     await intro.getByRole("button", { name: "Formatted" }).click();
+    await intro.getByLabel(/^Actions for /).click();
     const text = (await log.textContent()) ?? "";
     const order = [
       "First:",
@@ -533,15 +545,64 @@ for (const [label, viewport] of [
         0,
     );
 
-    // 4. The delegation names its profile, assignment and harness, and nests the grandchild.
+    // 4. The delegation names its agent, harness and state with the brief's first sentence,
+    // keeps the full brief on request, and nests the grandchild.
     const delegation = log.locator(`[data-record-id="delegation:${s.worker}"]`);
     const head = delegation.getByRole("button").first();
     assert.equal(await head.getAttribute("aria-expanded"), "false");
-    assert.match((await head.textContent()) ?? "", /Codex/);
+    const headText = (await head.textContent()) ?? "";
+    assert.match(headText, /Codex/);
+    assert.match(headText, /completed/);
+    assert.doesNotMatch(headText, new RegExp(s.worker.slice(0, 8)));
+    await delegation.getByText("Review keyboard support.").first().waitFor();
+    assert.equal(await delegation.getByText(/0123abcd/).count(), 0);
+    const fullBrief = delegation.getByRole("button", { name: /^Full brief/ });
+    assert.equal(await fullBrief.getAttribute("aria-expanded"), "false");
+    await fullBrief.focus();
+    await page.keyboard.press("Enter");
+    await delegation.getByText(/at commit 0123abcd/).waitFor();
+    assert.equal(await fullBrief.getAttribute("aria-expanded"), "true");
+    // The open brief survives a re-read of the task and its timeline.
+    const reread = page.waitForResponse((r) =>
+      new URL(r.url()).pathname.endsWith("/timeline"),
+    );
+    await refresh(page);
+    await reread;
+    assert.equal(await fullBrief.getAttribute("aria-expanded"), "true");
+    await delegation.getByText(/at commit 0123abcd/).waitFor();
+    // Same-agent cards never share an accessible name.
+    const names = await log
+      .locator("[data-record-id^='delegation:']")
+      .evaluateAll((cards) => cards.map((c) => c.getAttribute("aria-label")));
+    assert.ok(names.length >= 2, names.join(" | "));
+    assert.equal(new Set(names).size, names.length, names.join(" | "));
     await head.click();
     await delegation
       .getByText("Worker found the menu opens on Enter.")
       .waitFor();
+    // A delivered result shows no ID and no destination line; an unresolved one says so.
+    const resultCard = delegation.locator(".conv-result").first();
+    const resultText = (await resultCard.textContent()) ?? "";
+    assert.doesNotMatch(resultText, /Delivered to its destination/);
+    assert.doesNotMatch(resultText, new RegExp(s.result.resultId.slice(0, 8)));
+    assert.equal(
+      await resultCard
+        .getByRole("link", { name: "Open result" })
+        .getAttribute("href"),
+      `/tasks/${s.taskId}?section=review&result=${s.result.resultId}`,
+    );
+    const unresolvedUrl = "**/api/operator/tasks/*/timeline?limit=50";
+    await page.route(unresolvedUrl, async (route) => {
+      const response = await route.fetch();
+      const json = await response.json();
+      for (const entry of json.data.entries)
+        if (entry.kind === "result")
+          entry.destinationDisposition = "unresolved";
+      await route.fulfill({ response, json });
+    });
+    await refresh(page);
+    await resultCard.getByText("Destination unresolved.").waitFor();
+    await page.unroute(unresolvedUrl);
     const child = delegation.locator(
       `[data-record-id="delegation:${s.nested}"]`,
     );
@@ -659,11 +720,14 @@ for (const [label, viewport] of [
       log.locator(".conv-entry").evaluateAll((entries) => {
         const e = entries.find((x) => x.getBoundingClientRect().bottom > 120);
         return e
-          ? { text: e.textContent, top: e.getBoundingClientRect().top }
+          ? {
+              id: e.getAttribute("data-record-id"),
+              top: e.getBoundingClientRect().top,
+            }
           : null;
       });
     const shown = await firstShown();
-    assert.ok(shown?.text);
+    assert.ok(shown?.id);
     const entries = await log.locator(".conv-entry").count();
     await load.evaluate((button) => (button as HTMLButtonElement).click());
     await log
@@ -671,8 +735,7 @@ for (const [label, viewport] of [
       .waitFor({ state: "attached" });
     assert.ok((await log.locator(".conv-entry").count()) > entries);
     const held = await log
-      .locator(".conv-entry", { hasText: shown.text.slice(0, 40) })
-      .first()
+      .locator(`.conv-entry[data-record-id="${shown.id}"]`)
       .evaluate((e) => e.getBoundingClientRect().top);
     assert.ok(Math.abs(held - shown.top) <= 2, "visible entry held");
 
@@ -1307,55 +1370,65 @@ async function openWith<S extends { taskId: string }>(
 
 const turn = (log: Locator, text: string) =>
   log.locator("article.conv-agent", { hasText: text });
-const opacity = (button: Locator) =>
-  button.evaluate((e) => getComputedStyle(e.parentElement as Element).opacity);
+const opacity = (trigger: Locator) =>
+  trigger.evaluate((e) => getComputedStyle(e).opacity);
+const menu = (entry: Locator) => entry.getByLabel(/^Actions for /);
 
-test("Copy is visible on the latest turn, revealed on focus for earlier ones, and copies the Markdown source", async (_t, j) => {
+test("the message menu shows on the latest turn, is revealed on focus for earlier ones, and works by keyboard", async (_t, j) => {
   const { page, log } = await openWith(j, {}, (f) => seed(f, 2));
   await log.getByText("Second: all steps ran.").waitFor();
-  const latest = turn(log, "Second: all steps ran.").getByRole("button", {
-    name: /^Copy /,
-  });
-  const first = turn(log, "First:").getByRole("button", { name: /^Copy / });
-  assert.equal(await opacity(latest), "1");
-  assert.equal(await opacity(first), "0");
-  await first.focus();
-  assert.equal(await opacity(first), "1");
+  const first = turn(log, "First:");
+  const trigger = menu(first);
+  assert.equal(await opacity(menu(turn(log, "Second: all steps ran."))), "1");
+  assert.equal(await opacity(trigger), "0");
+  await trigger.focus();
+  assert.equal(await opacity(trigger), "1");
   await page.mouse.move(0, 0);
-  await first.evaluate((e) => (e as HTMLElement).blur());
-  await turn(log, "First:").hover();
-  assert.equal(await opacity(first), "1");
+  await trigger.evaluate((e) => (e as HTMLElement).blur());
+  await first.hover();
+  assert.equal(await opacity(trigger), "1");
+  await page.mouse.move(0, 0);
 
+  // Keyboard: open the menu, copy the Markdown source, show the raw text, then Escape back.
   const source =
     "First: **bold** and a [link](https://example.com/docs) <script>window.pwned = 1</script>\n\n- item one";
-  await first.click();
-  await turn(log, "First:")
-    .getByRole("button", { name: /^Copied / })
-    .waitFor();
+  await trigger.focus();
+  await page.keyboard.press("Enter");
+  const copy = first.getByRole("button", { name: /^Copy / });
+  await copy.waitFor();
+  await page.keyboard.press("Tab");
+  await page.keyboard.press("Tab");
+  assert.match(
+    await page.evaluate(() => document.activeElement?.textContent ?? ""),
+    /^Copy/,
+  );
+  await page.keyboard.press("Enter");
+  await first.getByRole("button", { name: /^Copied / }).waitFor();
   assert.equal(
     await page.evaluate(() => navigator.clipboard.readText()),
     source,
   );
-  await turn(log, "First:")
-    .getByRole("button", { name: /^Raw text / })
-    .click();
-  await turn(log, "First:").locator("pre.conv-raw").waitFor();
-  await turn(log, "First:")
-    .getByRole("button", { name: /^Copied / })
-    .or(turn(log, "First:").getByRole("button", { name: /^Copy / }))
-    .click();
+  await page.keyboard.press("Shift+Tab");
+  await page.keyboard.press("Enter");
+  await first.locator("pre.conv-raw").waitFor();
+  assert.equal(await opacity(trigger), "1", "an open menu stays visible");
+  await page.keyboard.press("Escape");
   assert.equal(
-    await page.evaluate(() => navigator.clipboard.readText()),
-    source,
+    await first
+      .locator("details.conv-menu")
+      .evaluate((e) => (e as HTMLDetailsElement).open),
+    false,
   );
-  // Operator turns carry no Copy.
   assert.equal(
-    await log.locator(".conv-operator").getByText("Copy").count(),
-    0,
+    await trigger.evaluate((e) => e === document.activeElement),
+    true,
+    "Escape returns focus to the trigger",
   );
+  // Operator turns carry no menu.
+  assert.equal(await log.locator(".conv-operator .conv-menu").count(), 0);
 });
 
-test("Copy is always visible on a touch device", async (_t, j) => {
+test("the message menu and a full brief are reachable by touch", async (_t, j) => {
   const { page, log } = await openWith(
     j,
     { viewport: phone, hasTouch: true, isMobile: true },
@@ -1370,9 +1443,64 @@ test("Copy is always visible on a touch device", async (_t, j) => {
     ),
     true,
   );
-  assert.equal(
-    await opacity(turn(log, "First:").getByRole("button", { name: /^Copy / })),
-    "1",
+  const first = turn(log, "First:");
+  assert.equal(await opacity(menu(first)), "1");
+  await menu(first).tap();
+  await first.getByRole("button", { name: /^Raw text / }).tap();
+  await first.locator("pre.conv-raw").waitFor();
+  const fullBrief = log.getByRole("button", { name: /^Full brief/ }).first();
+  await fullBrief.tap();
+  assert.equal(await fullBrief.getAttribute("aria-expanded"), "true");
+  await log.getByText(/at commit 0123abcd/).waitFor();
+});
+
+test("same-agent delegations whose brief lines match show their short IDs", async (_t, j) => {
+  const twin = randomUUID();
+  const { s, log } = await openWith(j, {}, async (f) => {
+    const s = await seed(f, 2);
+    f.service.domain().execute({
+      type: "assignment.create",
+      actor: "operator",
+      key: randomUUID(),
+      projectId: s.projectId,
+      taskId: s.taskId,
+      assignmentId: twin,
+      profileId: s.profileId,
+      brief: "Cover toolbar launch",
+      resultDestination: "requester",
+      requesterAssignmentId: s.assignmentId,
+    });
+    f.seedPersistedState((db) =>
+      db
+        .prepare(
+          "INSERT INTO coordination_delegations(assignmentId, delegatedAt) VALUES (?, ?)",
+        )
+        .run(twin, t0 + 8200),
+    );
+    return s;
+  });
+  await log.getByText("Second: all steps ran.").waitFor();
+  for (const [id, other] of [
+    [s.waiter, twin],
+    [twin, s.waiter],
+  ] as const) {
+    const card = log.locator(`[data-record-id="delegation:${id}"]`);
+    const head = (await card.getByRole("button").first().textContent()) ?? "";
+    assert.match(head, new RegExp(id.slice(0, 8)), "its own short ID is shown");
+    assert.doesNotMatch(head, new RegExp(other.slice(0, 8)));
+    assert.match(
+      (await card.getAttribute("aria-label")) ?? "",
+      new RegExp(`Cover toolbar launch · ${id.slice(0, 8)}$`),
+    );
+  }
+  // A card whose brief line is unique shows no ID.
+  assert.doesNotMatch(
+    (await log
+      .locator(`[data-record-id="delegation:${s.worker}"]`)
+      .getByRole("button")
+      .first()
+      .textContent()) ?? "",
+    new RegExp(s.worker.slice(0, 8)),
   );
 });
 

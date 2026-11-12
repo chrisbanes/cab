@@ -3270,9 +3270,21 @@ test("The GitHub reply says what posting does in one sentence and keeps its draf
   );
   assert.deepEqual(commands, []);
 
-  // The grant returns: the tab works again, still on GitHub, with the draft kept.
+  // Leaving GitHub without a grant hides the option; the grant's return brings it back.
+  await group.getByRole("radio", { name: "Comment on task" }).check();
+  await page.waitForFunction(
+    () =>
+      ![...document.querySelectorAll(".reply-destination-option")].some((e) =>
+        e.textContent?.includes("Post GitHub comment"),
+      ),
+  );
+  assert.equal(await tab.count(), 0);
   a.setGrant("allow");
   await refreshTask(page, a.taskId);
+  await tab.waitFor();
+  await tab.check();
+
+  // The grant returns: the tab works again, on GitHub, with the draft kept.
   await page
     .getByText("Posts a comment on the GitHub issue.", { exact: true })
     .waitFor();
@@ -3398,11 +3410,11 @@ test("An unavailable GitHub comment gives its reason in the inspector and on a f
   assert.equal(await page.locator("#github-comment-reason").count(), 0);
 
   // A reason code's sentence is asserted against commentAvailability in the comment policy tests.
-  a.setGrant(null);
+  a.setGrant("allow", false);
   await refreshTask(page, a.taskId);
   const tab = await unavailableComment(
     page,
-    commentReasonSentences["no-comment-grant"],
+    commentReasonSentences["no-delivery-credential"],
   );
   // An arrow key from the sibling destination reaches it, so the reason is readable by keyboard.
   await lead.focus();
@@ -3427,6 +3439,19 @@ test("An unavailable GitHub comment gives its reason in the inspector and on a f
       .count(),
     0,
   );
+
+  // Without a comment grant the option is hidden; the inspector still says why.
+  a.setGrant(null);
+  await refreshTask(page, a.taskId);
+  await inspector
+    .getByText(commentReasonSentences["no-comment-grant"], { exact: true })
+    .waitFor();
+  assert.match(
+    (await inspector.innerText()).replace(/\s+/g, " "),
+    /GitHub commenting unavailable/,
+  );
+  assert.equal(await tab.count(), 0);
+  assert.equal(await page.locator("#github-comment-reason").count(), 0);
   assert.deepEqual(commands, []);
 });
 
