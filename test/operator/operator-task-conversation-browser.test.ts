@@ -261,13 +261,22 @@ function appendEntry(
 const refresh = (page: Page) =>
   page.evaluate(() => window.dispatchEvent(new Event("cab-task-changed")));
 /** The newest conversation entry is in view, as it is when the page follows the bottom. */
-const atBottom = (page: Page) =>
-  page.evaluate(
-    () =>
-      (document.getElementById("conversation-end")?.getBoundingClientRect()
-        .bottom ?? Number.POSITIVE_INFINITY) <=
-      innerHeight + 1,
-  );
+const bottomInView = () =>
+  (document.getElementById("conversation-end")?.getBoundingClientRect()
+    .bottom ?? Number.POSITIVE_INFINITY) <=
+  innerHeight + 1;
+const atBottom = (page: Page) => page.evaluate(bottomInView);
+/** Waits for the page's own follow scroll to bring the newest entry into view. */
+async function reachesBottom(page: Page, j: BrowserJourney, message: string) {
+  const reached = await page
+    .waitForFunction(bottomInView, undefined, { timeout: 5000 })
+    .then(
+      () => true,
+      () => false,
+    );
+  if (!reached) await j.capture(page, "not-at-bottom", false);
+  assert.equal(reached, true, message);
+}
 
 for (const [label, viewport] of [
   ["1366 x 900", desktop],
@@ -672,7 +681,7 @@ for (const [label, viewport] of [
     appendEntry(f, s, "Fresh while at the bottom");
     await refresh(page);
     await log.getByText("Fresh while at the bottom").waitFor();
-    assert.equal(await atBottom(page), true, "stays at the bottom");
+    await reachesBottom(page, j, "stays at the bottom");
 
     const reply = page.getByLabel("Editable reply");
     await reply.fill("An unfinished reply");
@@ -685,6 +694,7 @@ for (const [label, viewport] of [
       anchor.evaluate((el) => ({
         y: el.getBoundingClientRect().top,
         scrollY,
+        innerHeight,
         height: document.documentElement.scrollHeight,
         conversationEnd: document
           .getElementById("conversation-end")
@@ -692,6 +702,10 @@ for (const [label, viewport] of [
         focused: document.activeElement?.outerHTML.slice(0, 300),
       }));
     const before = await position();
+    assert.ok(
+      before.y >= 0 && before.y < before.innerHeight,
+      `reading position held: anchor in view ${JSON.stringify({ before })}`,
+    );
     appendEntry(f, s, "Fresh while reading");
     await refresh(page);
     const jump = page.getByRole("button", { name: /jump to latest/i });
@@ -707,7 +721,7 @@ for (const [label, viewport] of [
     assert.equal(await reply.inputValue(), "An unfinished reply");
     await jump.click();
     await log.getByText("Fresh while reading").waitFor();
-    assert.equal(await atBottom(page), true);
+    await reachesBottom(page, j, "Jump to latest reaches the bottom");
     assert.equal(await reply.inputValue(), "An unfinished reply");
 
     // 7. Load earlier prepends without moving what is in view.
@@ -1367,6 +1381,74 @@ async function openWith<S extends { taskId: string }>(
   const log = page.getByRole("log", { name: "Task conversation" });
   return { f, s, web, page, log };
 }
+
+test("a scroll made while a task read is in flight is kept when the read lands", async (_t, j) => {
+  const { page, log } = await openWith(j, {}, (f) => seed(f));
+  await log.getByText("Second: all steps ran.").waitFor();
+  // The page opens at the latest entry; scroll away only once it has landed there.
+  await reachesBottom(page, j, "opens at the latest");
+  // An entry in the middle of the view, with room to scroll on either side.
+  const id = await page.evaluate(() => {
+    scrollTo(0, (document.documentElement.scrollHeight - innerHeight) / 2);
+    return [...document.querySelectorAll<HTMLElement>(".conv-entry")].find(
+      (e) => e.getBoundingClientRect().top > innerHeight / 3,
+    )?.dataset.recordId;
+  });
+  assert.ok(id);
+  // The read captures the reading position through history.replaceState; the operator
+  // scrolls once, before the read commits.
+  await page.evaluate((id) => {
+    const w = window as typeof window & { scrolled?: object[] };
+    const replace = history.replaceState;
+    w.scrolled = [];
+    history.replaceState = (...args) => {
+      history.replaceState = replace;
+      replace.apply(history, args);
+      queueMicrotask(() => {
+        scrollBy(0, 240);
+        const entry = document.querySelector(
+          `.conv-entry[data-record-id="${id}"]`,
+        );
+        w.scrolled?.push({ scrollY, top: entry?.getBoundingClientRect().top });
+      });
+    };
+  }, id);
+  const reread = page.waitForResponse((r) =>
+    new URL(r.url()).pathname.endsWith("/timeline"),
+  );
+  await refresh(page);
+  await reread;
+  const landed = await page.evaluate(
+    (id) =>
+      new Promise((resolve) =>
+        requestAnimationFrame(() =>
+          requestAnimationFrame(() =>
+            resolve({
+              scrolled: (window as typeof window & { scrolled?: object[] })
+                .scrolled,
+              after: {
+                scrollY,
+                top: document
+                  .querySelector(`.conv-entry[data-record-id="${id}"]`)
+                  ?.getBoundingClientRect().top,
+              },
+            }),
+          ),
+        ),
+      ),
+    id,
+  );
+  const { scrolled, after } = landed as {
+    scrolled: Array<{ scrollY: number; top: number }>;
+    after: { scrollY: number; top: number };
+  };
+  assert.equal(scrolled.length, 1, JSON.stringify(landed));
+  const kept =
+    Math.abs(after.scrollY - scrolled[0]!.scrollY) <= 2 &&
+    Math.abs(after.top - scrolled[0]!.top) <= 2;
+  if (!kept) await j.capture(page, "scroll-undone", false);
+  assert.ok(kept, `scroll kept: ${JSON.stringify(landed)}`);
+});
 
 const turn = (log: Locator, text: string) =>
   log.locator("article.conv-agent", { hasText: text });

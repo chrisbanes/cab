@@ -535,7 +535,16 @@ export function TaskWorkspace({
     first = useRef(true),
     restoreReadingFocus = useRef(true),
     capturedFocus = useRef<HTMLElement | null>(null),
-    material = useRef<string | null>(null);
+    material = useRef<string | null>(null),
+    beforeCommit = useRef<{ anchor: object; top: number } | null>(null);
+  // Where the captured entry sits as this component renders, before its update changes the DOM.
+  const held = anchorElement.current;
+  beforeCommit.current =
+    anchor.current &&
+    held?.isConnected &&
+    held.dataset.recordId === anchor.current.id
+      ? { anchor: anchor.current, top: held.getBoundingClientRect().top }
+      : null;
   const params = new URLSearchParams((path.split("?")[1] ?? "").split("#")[0]);
   const wide = useMediaQuery("(min-width: 1024px)");
   const phone = useMediaQuery("(max-width: 759px)");
@@ -872,6 +881,16 @@ export function TaskWorkspace({
       "",
     );
   };
+  /**
+   * Holds the captured entry where it was just before this commit, so a scroll made since the
+   * capture, such as while a read was in flight, is kept; otherwise where it was captured.
+   */
+  const holdAnchor = (a: { y: number }, el: HTMLElement) =>
+    scrollBy(
+      0,
+      el.getBoundingClientRect().top -
+        (beforeCommit.current?.anchor === a ? beforeCommit.current.top : a.y),
+    );
   const refresh = () => {
     capture();
     resource.refresh();
@@ -996,7 +1015,7 @@ export function TaskWorkspace({
           (e) => e.dataset.recordId === a.id && !e.closest("[data-pinned]"),
         )
       : null;
-    if (a && el) scrollBy(0, el.getBoundingClientRect().top - a.y);
+    if (a && el) holdAnchor(a, el);
   }, [paneVisible, focus]);
   /** Move to a section in place, on its tab. */
   const reveal = (id: string) => {
@@ -1299,12 +1318,12 @@ export function TaskWorkspace({
       // The conversation's newest entry is in view with the page's other columns, so hold the
       // reading position first, then follow what arrived.
       if (state.tab === "overview") {
-        if (a && el) scrollBy(0, el.getBoundingClientRect().top - a.y);
+        if (a && el) holdAnchor(a, el);
         if (appended) followLatest();
         setUpdates(false);
       } else followLatest();
     } else {
-      if (a && el) scrollBy(0, el.getBoundingClientRect().top - a.y);
+      if (a && el) holdAnchor(a, el);
       if (newMaterial || appended) setUpdates(true);
     }
   }, [data, state, path, timeline.window, timeline.error]);
