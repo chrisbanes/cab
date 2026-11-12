@@ -212,6 +212,56 @@ test("merging a stacked blocker removes its branch, GitLab retargets the depende
   });
 });
 
+test("a stacked dependent merges after GitLab retargets it to a remote default that moved from the saved link ref", async (t) => {
+  const f = await gitLabStack(t);
+  const [a, b] = f.tasks as [string, string];
+  // The code host's default moved from the saved `main` to `release` before the bottom task's
+  // workspace started, so provisioning recorded `release` as its base. The link still names `main`.
+  git(f.source, "branch", "release", "main");
+  f.gitlab.state.heads.set("release", f.gitlab.state.heads.get("main")!);
+  await f.waitTurn(a);
+  f.readDb((db) => {
+    const row = db
+      .prepare(
+        "SELECT repositories FROM task_workspace_bindings WHERE taskId = ?",
+      )
+      .get(a) as { repositories: string };
+    const repositories = JSON.parse(row.repositories) as Record<
+      string,
+      unknown
+    >[];
+    db.prepare(
+      "UPDATE task_workspace_bindings SET repositories = ? WHERE taskId = ?",
+    ).run(
+      JSON.stringify(
+        repositories.map((r) => ({
+          ...r,
+          base: { mode: "remote-default", fetch: true },
+          baseBranch: "release",
+        })),
+      ),
+      a,
+    );
+  });
+  await f.open(a, "release");
+  const lower = f.branchOf(a)!.branch;
+  await f.open(b, lower);
+  assert.equal((await f.merge(a, "release")).success, true);
+  assert.equal(f.mrOf(b).target_branch, "release");
+  await f.service.refreshGitHub();
+  const bound = f.service.delivery().delivery(b);
+  assert.equal(bound?.acceptedBaseRef, "release");
+  assert.equal(bound?.baseChange, null);
+  await f.nextTurn(b);
+  const top = await f.merge(b, "release");
+  assert.equal(top.success, true, top.text);
+  assert.notEqual(
+    f.last(b, "pr.merge")?.observation?.reason,
+    "stacked-pr-retarget-pending",
+  );
+  assert.equal(f.gitlab.merges[1]?.body.sha, f.mrOf(b).sha);
+});
+
 test("a retargeted merge request's newest pipeline at its head decides its check, whatever the list order", async (t) => {
   const f = await twoLayer(t);
   assert.equal((await f.merge(f.a, "main")).success, true);

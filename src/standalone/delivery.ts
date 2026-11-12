@@ -635,9 +635,14 @@ export class DeliveryCoordinator {
       action.kind === "pr.merge"
         ? this.codeHost(caller.projectId, target)
         : null;
+    // The base retarget acceptance resolves, so both agree after the remote default moves.
     const linkBases =
       mergeHost?.codeHost === "gitlab"
-        ? acceptableBaseRefs(mergeHost.ref)
+        ? acceptableBaseRefs(
+            this.repositoryBase(caller.taskId, caller.projectId, {
+              repositoryId: target,
+            }),
+          )
         : undefined;
     const lowerChain =
       action.kind === "pr.merge"
