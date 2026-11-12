@@ -949,12 +949,12 @@ and the operator surfaces are covered by deterministic suites; the
 | Turn end, Stop, interrupt, a new turn, runtime loss, service stop and restart withdraw an undecided overrule, and a later decision is refused; agents cannot request `sandbox.overrule` | `sandbox-escalation-service.test.ts`, `codex-runtime.test.ts` |
 | An escalation that still reaches cab at this level follows the `escalate-approval` path, including the 15-minute expiry | `sandbox-escalation-service.test.ts` |
 | Settings saves the level without a confirmation and states the reviewer's cost, that it does not contain agent-written code, the advisory and unproven overrule, and that Claude Code turns stay `strict`, as do both policy disclosures | `operator-project-config-general-browser.test.ts`, `operator-execution-runtime.test.ts`, `neutral-runtime-copy.test.ts` |
+| Each reviewer decision is shown in the task read, on the Execution tab with the escalations in time order, and by `cab task get` with its decision, risk, rationale, an approved command's exit code and duration, and its overrule's outcome; command, cwd, branch and rationale are withheld under the privacy exclusions, a review its turn outlived reads as obsolete, and a multi-line command or rationale is flattened in the CLI | `sandbox-escalation-service.test.ts`, `sandbox-escalation-presentation.test.ts`, `operator-task-execution-browser.test.ts` |
 | Project deletion removes the review evidence | `project-deletion.test.ts` |
 
 Limits: the overrule is not proven against a live denial. The probe used no denial stimulus, so
 `thread/approveGuardianDeniedAction`, its event mapping and the re-review are qualified only
-against a fake App Server. No live run through cab is recorded yet, and the task's Execution tab
-and `cab task get` do not yet show reviewer decisions.
+against a fake App Server. No live run through cab is recorded yet.
 
 ## Draft turns
 

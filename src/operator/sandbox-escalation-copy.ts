@@ -112,3 +112,121 @@ export function sandboxEscalationWorkspaceLine(
         : "no uncommitted changes",
   ].join(" · ");
 }
+
+/** How a reviewer decision ended (ADR-1034); `obsolete` is a review its turn outlived no longer. */
+export const sandboxReviewOutcomes = [
+  "reviewing",
+  "approved",
+  "denied",
+  "timed-out",
+  "aborted",
+  "obsolete",
+] as const;
+export type SandboxReviewOutcome = (typeof sandboxReviewOutcomes)[number];
+
+/** A review still in progress whose work no longer runs ended with its turn, undecided. */
+export function sandboxReviewOutcome(review: {
+  status: "inProgress" | "approved" | "denied" | "timedOut" | "aborted";
+  running: boolean;
+}): SandboxReviewOutcome {
+  switch (review.status) {
+    case "inProgress":
+      return review.running ? "reviewing" : "obsolete";
+    case "timedOut":
+      return "timed-out";
+    default:
+      return review.status;
+  }
+}
+
+/** What happened to the advisory overrule a denial offered. */
+export const sandboxOverruleOutcomes = [
+  "offered",
+  "approved",
+  "sent",
+  "not-delivered",
+  "declined",
+  "withdrawn",
+] as const;
+export type SandboxOverruleOutcome = (typeof sandboxOverruleOutcomes)[number];
+
+export function sandboxOverruleOutcome(overrule: {
+  decider: "operator" | "obsolete" | null;
+  decision: "accept" | "decline" | null;
+  delivered: boolean | null;
+}): SandboxOverruleOutcome {
+  if (overrule.decider === null) return "offered";
+  if (overrule.decider === "obsolete") return "withdrawn";
+  if (overrule.decision === "decline") return "declined";
+  return overrule.delivered === null
+    ? "approved"
+    : overrule.delivered
+      ? "sent"
+      : "not-delivered";
+}
+
+const overruleLines: Record<SandboxOverruleOutcome, string> = {
+  offered: "overrule offered in the Inbox",
+  approved: "overrule approved",
+  sent: "overruled by the operator; the retry is reviewed again",
+  "not-delivered": "overrule approved but not delivered",
+  declined: "overrule declined",
+  withdrawn: "overrule withdrawn: the turn ended",
+};
+
+/**
+ * What the reviewer decided, with its risk level, an approved command's exit code and duration,
+ * and a denial's overrule. The rationale is shown on its own.
+ */
+export function sandboxReviewResultLine(r: {
+  outcome: SandboxReviewOutcome;
+  riskLevel: "low" | "medium" | "high" | "critical" | null;
+  exitCode: number | null;
+  durationMs: number | null;
+  completedAt: number | null;
+  overrule: { outcome: SandboxOverruleOutcome } | null;
+}): string {
+  const risk = r.riskLevel === null ? [] : [`${r.riskLevel} risk`];
+  switch (r.outcome) {
+    case "reviewing":
+      return "Being reviewed";
+    case "obsolete":
+      return "Withdrawn: the turn ended before the review completed";
+    case "timed-out":
+      return "Declined: the review timed out";
+    case "aborted":
+      return "Declined: the review was aborted";
+    case "denied":
+      return [
+        "Denied by the reviewer",
+        ...risk,
+        ...(r.overrule ? [overruleLines[r.overrule.outcome]] : []),
+      ].join(" · ");
+    case "approved":
+      return [
+        "Approved by the reviewer",
+        ...risk,
+        ...(r.completedAt === null
+          ? ["no completion recorded"]
+          : [
+              r.exitCode === null ? "no exit code" : `exit code ${r.exitCode}`,
+              ...(r.durationMs === null
+                ? []
+                : [escalationDuration(r.durationMs)]),
+            ]),
+      ].join(" · ");
+  }
+}
+
+/** Where a reviewed command was asked to run, and whether its recorded text was cut. */
+export function sandboxReviewPlace(r: {
+  cwd: string | null;
+  workspace: Parameters<typeof sandboxEscalationWorkspaceLine>[0];
+  truncated: boolean;
+}): string {
+  return [
+    `in ${r.cwd ?? "an unavailable directory"}`,
+    sandboxEscalationWorkspaceLine(r.workspace),
+    ...(r.truncated ? ["review cut to its recorded limit"] : []),
+  ].join(" · ");
+}

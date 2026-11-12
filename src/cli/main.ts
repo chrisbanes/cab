@@ -65,6 +65,8 @@ import {
   sandboxEscalationCommandUnavailable,
   sandboxEscalationPlace,
   sandboxEscalationResultLine,
+  sandboxReviewPlace,
+  sandboxReviewResultLine,
 } from "../operator/sandbox-escalation-copy.js";
 
 export type { CliDeps } from "./types.js";
@@ -956,6 +958,11 @@ async function run(
           (e) =>
             // Model-written, so flattened: a multi-line command cannot fake another line.
             `Escalation ${e.interactionId}: ${oneLine(e.command ?? sandboxEscalationCommandUnavailable, 200)} ${oneLine(sandboxEscalationPlace(e), 1200)} · ${sandboxEscalationResultLine(e)}`,
+        ),
+        ...(read.data.sandboxReviews ?? []).map(
+          (r) =>
+            // Model-written, so flattened: a multi-line command or rationale cannot fake a line.
+            `Review ${oneLine(r.reviewId, 100)}: ${oneLine(r.command ?? sandboxEscalationCommandUnavailable, 200)} ${oneLine(sandboxReviewPlace(r), 1200)} · ${sandboxReviewResultLine(r)}${r.rationale === null ? "" : ` · Rationale: ${oneLine(r.rationale, 400)}`}`,
         ),
         ...read.data.unresolvedResults.map((r) =>
           r.availability === "available"

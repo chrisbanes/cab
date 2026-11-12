@@ -6,6 +6,10 @@ import {
   sandboxEscalationPlace,
   sandboxEscalationResultLine,
   sandboxEscalationWorkspaceLine,
+  sandboxOverruleOutcome,
+  sandboxReviewOutcome,
+  sandboxReviewPlace,
+  sandboxReviewResultLine,
 } from "../../src/operator/sandbox-escalation-copy.js";
 
 test("an escalation's outcome follows its decider, decision and delivery", () => {
@@ -104,5 +108,104 @@ test("where the command runs reads the same on both surfaces, a cut request mark
   assert.equal(
     sandboxEscalationPlace({ cwd: ".", workspace: null, truncated: true }),
     "in . · Workspace state unknown · request cut to fit the approval limit",
+  );
+});
+
+test("a reviewer decision's outcome follows its status, and a review its turn outlived is obsolete", () => {
+  for (const [status, running, outcome] of [
+    ["inProgress", true, "reviewing"],
+    ["inProgress", false, "obsolete"],
+    ["approved", false, "approved"],
+    ["denied", true, "denied"],
+    ["timedOut", true, "timed-out"],
+    ["aborted", false, "aborted"],
+  ] as const)
+    assert.equal(sandboxReviewOutcome({ status, running }), outcome, status);
+});
+
+test("an overrule's outcome follows its decider, decision and delivery", () => {
+  const outcome = (
+    decider: "operator" | "obsolete" | null,
+    decision: "accept" | "decline" | null,
+    delivered: boolean | null,
+  ) => sandboxOverruleOutcome({ decider, decision, delivered });
+  assert.equal(outcome(null, null, null), "offered");
+  assert.equal(outcome("obsolete", null, null), "withdrawn");
+  assert.equal(outcome("operator", "decline", null), "declined");
+  assert.equal(outcome("operator", "accept", null), "approved");
+  assert.equal(outcome("operator", "accept", true), "sent");
+  assert.equal(outcome("operator", "accept", false), "not-delivered");
+});
+
+test("each reviewer decision reads as one line, with risk, an approved command's result and a denial's overrule", () => {
+  const base = {
+    riskLevel: null,
+    exitCode: null,
+    durationMs: null,
+    completedAt: null,
+    overrule: null,
+  } as const;
+  const line = (r: Partial<Parameters<typeof sandboxReviewResultLine>[0]>) =>
+    sandboxReviewResultLine({ ...base, outcome: "approved", ...r });
+  assert.equal(
+    line({ riskLevel: "low", exitCode: 0, durationMs: 516, completedAt: 1 }),
+    "Approved by the reviewer · low risk · exit code 0 · 516 ms",
+  );
+  assert.equal(
+    line({ riskLevel: "low" }),
+    "Approved by the reviewer · low risk · no completion recorded",
+  );
+  assert.equal(
+    line({ completedAt: 1 }),
+    "Approved by the reviewer · no exit code",
+  );
+  assert.equal(
+    line({
+      outcome: "denied",
+      riskLevel: "high",
+      overrule: { outcome: "offered" },
+    }),
+    "Denied by the reviewer · high risk · overrule offered in the Inbox",
+  );
+  for (const [outcome, text] of [
+    ["approved", "overrule approved"],
+    ["sent", "overruled by the operator; the retry is reviewed again"],
+    ["not-delivered", "overrule approved but not delivered"],
+    ["declined", "overrule declined"],
+    ["withdrawn", "overrule withdrawn: the turn ended"],
+  ] as const)
+    assert.equal(
+      line({ outcome: "denied", overrule: { outcome } }),
+      `Denied by the reviewer · ${text}`,
+    );
+  // No overrule: the command was outside the workspace or the turn ended first.
+  assert.equal(line({ outcome: "denied" }), "Denied by the reviewer");
+  assert.equal(line({ outcome: "reviewing" }), "Being reviewed");
+  assert.equal(
+    line({ outcome: "obsolete" }),
+    "Withdrawn: the turn ended before the review completed",
+  );
+  assert.equal(
+    line({ outcome: "timed-out" }),
+    "Declined: the review timed out",
+  );
+  assert.equal(
+    line({ outcome: "aborted" }),
+    "Declined: the review was aborted",
+  );
+});
+
+test("where a reviewed command runs is shown, with a cut review marked", () => {
+  assert.equal(
+    sandboxReviewPlace({ cwd: null, workspace: null, truncated: true }),
+    "in an unavailable directory · Workspace state unknown · review cut to its recorded limit",
+  );
+  assert.equal(
+    sandboxReviewPlace({
+      cwd: ".",
+      workspace: { head: "a".repeat(40), branch: "main", dirty: false },
+      truncated: false,
+    }),
+    "in . · HEAD aaaaaaaaaaaa · on main · no uncommitted changes",
   );
 });

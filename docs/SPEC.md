@@ -1201,9 +1201,12 @@ interrupted or replaced, when the runtime is lost, or when the service stops or 
 agents cannot request the action. The overrule is not proven against a live denial: the
 [probe](evidence/2026-11-12-auto-review-overrule-probe.md) proved only that a review names its
 command item. An escalation that still reaches cab at this level follows the
-`escalate-approval` path. Claude Code task turns in such a project are admitted `strict`. The
-reviewer decisions are recorded but not yet shown on the task's Execution tab or by
-`cab task get`.
+`escalate-approval` path. Claude Code task turns in such a project are admitted `strict`. Each
+reviewer decision (decision, risk level, rationale, an approved command's exit code and
+duration, and the outcome of a denial's overrule) is shown with the escalations on the task's
+Execution tab and by `cab task get`; the command, working directory, branch and rationale are
+withheld under the privacy exclusions, and a review whose turn ended before it completed reads
+as obsolete.
 cab enforces only what it sends the runtime; none of the three settings is an allow-list,
 a proxy or a host filter, and MCP and app tools, web tools and model transport are
 separate surfaces.
