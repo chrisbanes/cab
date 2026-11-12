@@ -175,7 +175,11 @@ export function ReadyCheck({
     (shown && Boolean(credential.link)) ||
     Boolean(delivery?.link) ||
     (Boolean(created.repositories?.length) &&
-      Boolean(configuration.state.error));
+      Boolean(configuration.state.error)) ||
+    // A Jira line shows even without repositories, so its failed reads are retried too.
+    (shown &&
+      tracker === "jira" &&
+      Boolean(configuration.state.error || jiraCredentials.state.error));
   // Its own key: the project configuration General tab loads into `project.configure:<id>`.
   const resume = useDraft(p.drafts, `project.resume:${projectId}`);
   // A recorded create is version 1 (see matchesConfigurationReceipt).
