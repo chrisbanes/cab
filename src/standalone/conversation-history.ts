@@ -174,20 +174,7 @@ export function sanitizeConversationText(
 
   // Spans are found on the original text and merged, so neither an exact value nor
   // a pattern can rewrite the other's anchor (an instruction holding `token=…`).
-  const spans: [number, number][] = [];
-  for (const value of values)
-    for (
-      let at = text.indexOf(value);
-      at !== -1;
-      at = text.indexOf(value, at + value.length)
-    )
-      spans.push([at, at + value.length]);
-  for (const [pattern, kept] of patterns)
-    for (const match of text.matchAll(pattern)) {
-      const start = match.index + (match[1]?.length ?? 0);
-      spans.push([start, match.index + match[0].length - kept]);
-    }
-  spans.sort((a, b) => a[0] - b[0]);
+  const spans = redactionSpans(text, values);
   let result = "";
   let end = 0;
   for (const [start, stop] of spans) {
@@ -199,6 +186,66 @@ export function sanitizeConversationText(
     end = stop;
   }
   return result + text.slice(end);
+}
+
+/**
+ * Each redacted `[start, stop)` span of `text`, sorted by start, with `matchEnd`: the end of
+ * the text its match needs, including a pattern's kept trailing characters.
+ */
+function redactionSpans(
+  text: string,
+  values: readonly string[],
+): [start: number, stop: number, matchEnd: number][] {
+  const spans: [number, number, number][] = [];
+  for (const value of values)
+    for (
+      let at = text.indexOf(value);
+      at !== -1;
+      at = text.indexOf(value, at + value.length)
+    )
+      spans.push([at, at + value.length, at + value.length]);
+  for (const [pattern, kept] of patterns)
+    for (const match of text.matchAll(pattern)) {
+      const start = match.index + (match[1]?.length ?? 0);
+      const end = match.index + match[0].length;
+      spans.push([start, end - kept, end]);
+    }
+  return spans.sort((a, b) => a[0] - b[0]);
+}
+
+/**
+ * `text` cut to at most `maxBytes` UTF-8 bytes, never inside a redactable span (an excluded
+ * value or credential pattern found on the whole text) nor inside a word: a cut fragment would
+ * no longer match its redaction when the stored text is read.
+ */
+export function capBytesOutsideRedaction(
+  text: string,
+  maxBytes: number,
+  excludedValues: readonly string[],
+): string {
+  if (Buffer.byteLength(text, "utf8") <= maxBytes) return text;
+  let cut = 0;
+  let bytes = 0;
+  for (const char of text) {
+    bytes += Buffer.byteLength(char, "utf8");
+    if (bytes > maxBytes) break;
+    cut += char.length;
+  }
+  const spans = redactionSpans(
+    text,
+    excludedValues.filter((value) => value.length > 0),
+  );
+  // Each step only moves the cut earlier, so the loop ends.
+  for (;;) {
+    const inside = spans.find(([start, , end]) => start < cut && cut < end);
+    if (inside) {
+      cut = inside[0];
+      continue;
+    }
+    const word = text.slice(0, cut).replace(/\S*$/, "").length;
+    if (word === cut) return text.slice(0, cut);
+    cut = word;
+  }
 }
 
 /** True when the text survives redaction unchanged, so it may be disclosed as-is. */
