@@ -1,0 +1,384 @@
+{
+  "group": "claude-auto-hook-allow",
+  "candidate": "441d9336b381eaab0a950d5a1f95a4132686b9c7",
+  "candidateClean": true,
+  "host": {
+    "platform": "darwin",
+    "release": "27.0.0",
+    "arch": "arm64",
+    "node": "v26.13.0"
+  },
+  "codex": {
+    "launcherSha256": "50ab38ba21d0d9f8346f32f41848382f15b556190f3c7a07e885a4fb73e379c8",
+    "version": "codex-cli 0.167.0-alpha.3.2"
+  },
+  "claude": {
+    "sdk": "0.3.319",
+    "sdkDeclaredClaudeCode": "2.1.319",
+    "installed": "2.1.322 (Claude Code)"
+  },
+  "confounds": {},
+  "deadlineMs": 720000,
+  "outcomes": {
+    "controlRunsSandboxed": {
+      "outcome": "proved",
+      "evidence": {
+        "toolUseId": "toolu_01JyZEx5iopchurejt11maUR",
+        "result": {
+          "chromium": "browserType.launch: Target page, context or browser has been closed Browser logs: <launching> ~/Library/Caches/ms-playwright/chromium_headless_shell-1254/chrome-headless-shell-mac-arm64/chrome-headless-shell --disable-field-trial-config --disable-background-networking --disable-background"
+        },
+        "postHook": "PostToolUse",
+        "canUseTool": false
+      }
+    },
+    "hookAllowRunsOutside": {
+      "outcome": "proved",
+      "evidence": {
+        "control": {
+          "chromium": "browserType.launch: Target page, context or browser has been closed Browser logs: <launching> ~/Library/Caches/ms-playwright/chromium_headless_shell-1254/chrome-headless-shell-mac-arm64/chrome-headless-shell --disable-field-trial-config --disable-background-networking --disable-background"
+        },
+        "hookAllowed": {
+          "chromium": "ok"
+        },
+        "toolUseId": "toolu_01GE5BY15MA6ULGHN8BE1mZ1",
+        "controlToolUseId": "toolu_01JyZEx5iopchurejt11maUR"
+      }
+    },
+    "hookAllowBypassesClassifier": {
+      "outcome": "untested",
+      "reason": "no per-call classifier signal for the comparison call",
+      "evidence": {
+        "hookAllowed": {
+          "toolUseId": "toolu_01GE5BY15MA6ULGHN8BE1mZ1",
+          "signals": [],
+          "canUseTool": false
+        },
+        "classified": {
+          "toolUseId": "toolu_012ryP8DXaJq6QCy4DYVmB39",
+          "signals": []
+        },
+        "unattributed": []
+      }
+    },
+    "hookHoldBeyondDefault": {
+      "outcome": "proved",
+      "evidence": {
+        "toolUseId": "toolu_01GE5BY15MA6ULGHN8BE1mZ1",
+        "hookInputAtMs": 5592,
+        "hookReturnAtMs": 80596,
+        "heldMs": 75004,
+        "aborted": false,
+        "postHook": {
+          "event": "PostToolUse",
+          "atMs": 81685
+        }
+      }
+    },
+    "onFailureBlockSupported": {
+      "outcome": "proved",
+      "evidence": {
+        "hookOnFailureSupported": true,
+        "hooksApplied": true,
+        "sentMatcher": {
+          "timeout": 960,
+          "onFailure": "block"
+        }
+      }
+    },
+    "supportsAutoModeReported": {
+      "outcome": "proved",
+      "evidence": {
+        "models": [
+          {
+            "value": "default",
+            "supportsAutoMode": true
+          },
+          {
+            "value": "sonnet",
+            "supportsAutoMode": true
+          },
+          {
+            "value": "fable",
+            "supportsAutoMode": true
+          },
+          {
+            "value": "opus",
+            "supportsAutoMode": true
+          },
+          {
+            "value": "haiku",
+            "supportsAutoMode": true
+          }
+        ],
+        "sessionModel": "claude-sonnet-5-5"
+      }
+    }
+  },
+  "cleanup": {
+    "fixtureRemoved": true,
+    "claudeTasksRemoved": true
+  },
+  "trace": {
+    "events": [
+      {
+        "t": 944,
+        "query": 1,
+        "kind": "initialize",
+        "hookOnFailureSupported": true,
+        "hooksApplied": true,
+        "models": [
+          {
+            "value": "default",
+            "supportsAutoMode": true
+          },
+          {
+            "value": "sonnet",
+            "supportsAutoMode": true
+          },
+          {
+            "value": "fable",
+            "supportsAutoMode": true
+          },
+          {
+            "value": "opus",
+            "supportsAutoMode": true
+          },
+          {
+            "value": "haiku",
+            "supportsAutoMode": true
+          }
+        ]
+      },
+      {
+        "t": 1078,
+        "query": 1,
+        "kind": "message",
+        "type": "system",
+        "subtype": "init",
+        "permissionMode": "auto",
+        "model": "claude-sonnet-5-5"
+      },
+      {
+        "t": 2242,
+        "query": 1,
+        "kind": "message",
+        "type": "rate_limit_event"
+      },
+      {
+        "t": 2402,
+        "query": 1,
+        "kind": "toolUse",
+        "toolUseId": "toolu_01JyZEx5iopchurejt11maUR",
+        "command": "node chromium.mjs control",
+        "dangerouslyDisableSandbox": false
+      },
+      {
+        "t": 2402,
+        "query": 1,
+        "kind": "message",
+        "type": "assistant"
+      },
+      {
+        "t": 2408,
+        "query": 1,
+        "kind": "hook",
+        "event": "PreToolUse",
+        "toolUseId": "toolu_01JyZEx5iopchurejt11maUR",
+        "command": "node chromium.mjs control",
+        "dangerouslyDisableSandbox": false,
+        "timeout": null,
+        "decision": "pass"
+      },
+      {
+        "t": 4135,
+        "query": 1,
+        "kind": "hook",
+        "event": "PostToolUse",
+        "toolUseId": "toolu_01JyZEx5iopchurejt11maUR",
+        "response": "{\"stdout\":\"\",\"stderr\":\"\",\"interrupted\":false,\"isImage\":false,\"noOutputExpected\":false}"
+      },
+      {
+        "t": 4138,
+        "query": 1,
+        "kind": "toolResult",
+        "toolUseId": "toolu_01JyZEx5iopchurejt11maUR",
+        "isError": false,
+        "text": "(Bash completed with no output)"
+      },
+      {
+        "t": 4138,
+        "query": 1,
+        "kind": "message",
+        "type": "user"
+      },
+      {
+        "t": 5590,
+        "query": 1,
+        "kind": "toolUse",
+        "toolUseId": "toolu_01GE5BY15MA6ULGHN8BE1mZ1",
+        "command": "node chromium.mjs hook-allowed",
+        "dangerouslyDisableSandbox": true
+      },
+      {
+        "t": 5590,
+        "query": 1,
+        "kind": "message",
+        "type": "assistant"
+      },
+      {
+        "t": 5592,
+        "query": 1,
+        "kind": "hook",
+        "event": "PreToolUse",
+        "toolUseId": "toolu_01GE5BY15MA6ULGHN8BE1mZ1",
+        "command": "node chromium.mjs hook-allowed",
+        "dangerouslyDisableSandbox": true,
+        "timeout": null,
+        "decision": "allow"
+      },
+      {
+        "t": 80596,
+        "query": 1,
+        "kind": "hookReturn",
+        "toolUseId": "toolu_01GE5BY15MA6ULGHN8BE1mZ1",
+        "decision": "allow",
+        "aborted": false
+      },
+      {
+        "t": 81685,
+        "query": 1,
+        "kind": "hook",
+        "event": "PostToolUse",
+        "toolUseId": "toolu_01GE5BY15MA6ULGHN8BE1mZ1",
+        "response": "{\"stdout\":\"\",\"stderr\":\"\",\"interrupted\":false,\"isImage\":false,\"noOutputExpected\":false,\"dangerouslyDisableSandbox\":true}"
+      },
+      {
+        "t": 81689,
+        "query": 1,
+        "kind": "toolResult",
+        "toolUseId": "toolu_01GE5BY15MA6ULGHN8BE1mZ1",
+        "isError": false,
+        "text": "(Bash completed with no output)"
+      },
+      {
+        "t": 81689,
+        "query": 1,
+        "kind": "message",
+        "type": "user"
+      },
+      {
+        "t": 83171,
+        "query": 1,
+        "kind": "toolUse",
+        "toolUseId": "toolu_012ryP8DXaJq6QCy4DYVmB39",
+        "command": "node chromium.mjs classified",
+        "dangerouslyDisableSandbox": true
+      },
+      {
+        "t": 83171,
+        "query": 1,
+        "kind": "message",
+        "type": "assistant"
+      },
+      {
+        "t": 83173,
+        "query": 1,
+        "kind": "hook",
+        "event": "PreToolUse",
+        "toolUseId": "toolu_012ryP8DXaJq6QCy4DYVmB39",
+        "command": "node chromium.mjs classified",
+        "dangerouslyDisableSandbox": true,
+        "timeout": null,
+        "decision": "pass"
+      },
+      {
+        "t": 87489,
+        "query": 1,
+        "kind": "hook",
+        "event": "PostToolUse",
+        "toolUseId": "toolu_012ryP8DXaJq6QCy4DYVmB39",
+        "response": "{\"stdout\":\"\",\"stderr\":\"\",\"interrupted\":false,\"isImage\":false,\"noOutputExpected\":false,\"dangerouslyDisableSandbox\":true}"
+      },
+      {
+        "t": 87491,
+        "query": 1,
+        "kind": "toolResult",
+        "toolUseId": "toolu_012ryP8DXaJq6QCy4DYVmB39",
+        "isError": false,
+        "text": "(Bash completed with no output)"
+      },
+      {
+        "t": 87491,
+        "query": 1,
+        "kind": "message",
+        "type": "user"
+      },
+      {
+        "t": 88075,
+        "query": 1,
+        "kind": "message",
+        "type": "assistant"
+      },
+      {
+        "t": 88091,
+        "query": 1,
+        "kind": "message",
+        "type": "result",
+        "subtype": "success",
+        "isError": false
+      }
+    ],
+    "queries": [
+      {
+        "n": 1,
+        "done": true,
+        "resultSubtype": "success",
+        "resultIsError": false,
+        "elapsedMs": 88597
+      }
+    ],
+    "results": {
+      "control": {
+        "chromium": "browserType.launch: Target page, context or browser has been closed Browser logs: <launching> ~/Library/Caches/ms-playwright/chromium_headless_shell-1254/chrome-headless-shell-mac-arm64/chrome-headless-shell --disable-field-trial-config --disable-background-networking --disable-background"
+      },
+      "hook-allowed": {
+        "chromium": "ok"
+      },
+      "classified": {
+        "chromium": "ok"
+      }
+    },
+    "options": [
+      {
+        "cwd": "<fixture>/ws",
+        "pathToClaudeCodeExecutable": "/opt/homebrew/bin/claude",
+        "settingSources": [],
+        "strictMcpConfig": true,
+        "permissionMode": "auto",
+        "tools": ["Bash"],
+        "allowedTools": [],
+        "maxTurns": 6,
+        "sandbox": {
+          "enabled": true,
+          "failIfUnavailable": true,
+          "allowUnsandboxedCommands": true,
+          "autoAllowBashIfSandboxed": true,
+          "network": {
+            "allowedDomains": []
+          },
+          "filesystem": {
+            "allowWrite": ["<fixture>/ws"]
+          }
+        },
+        "envOverrides": {},
+        "preToolUseMatcher": {
+          "timeout": 960,
+          "onFailure": "block"
+        }
+      }
+    ],
+    "deadline": false,
+    "failure": null
+  },
+  "pass": true
+}

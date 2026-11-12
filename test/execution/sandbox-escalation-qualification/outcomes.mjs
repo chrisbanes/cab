@@ -35,6 +35,14 @@ export const SUB_CONTRACTS = {
     "observableDecisions",
     "undecidedReachCanUseTool",
   ],
+  "claude-auto-hook-allow": [
+    "controlRunsSandboxed",
+    "hookAllowRunsOutside",
+    "hookAllowBypassesClassifier",
+    "hookHoldBeyondDefault",
+    "onFailureBlockSupported",
+    "supportsAutoModeReported",
+  ],
   "claude-timing": [
     "ceilingAboveDefault",
     "envClampsLargerRequest",
@@ -64,6 +72,8 @@ export const STIMULI = {
   echoDeny: "echo probe-hook-deny",
   autoEscalated: "node chromium.mjs auto-escalated",
   curl: "curl -sS -m 5 https://probe.invalid/",
+  hookAllowed: "node chromium.mjs hook-allowed",
+  classified: "node chromium.mjs classified",
 };
 /** Claude Code rejects `sleep N` chained with other commands, so waits use a Node timer. */
 export const wait = (ms) =>
@@ -829,6 +839,217 @@ function claudeAuto(trace) {
   return out;
 }
 
+// The two stream messages through which the classifier could decide a call.
+const classifierSignal = (e) =>
+  e.kind === "message" &&
+  e.type === "system" &&
+  ["permission_check_status", "permission_denied"].includes(e.subtype);
+/** The claude-auto-hook-allow group's hook hold (its spec's `holdMs`). */
+const hookAllowHoldMs = 75_000;
+
+function claudeAutoHookAllow(trace) {
+  const { events, results } = trace;
+  const out = {};
+  const init = events.find(
+    (e) => e.kind === "message" && e.type === "system" && e.subtype === "init",
+  );
+  const initialize = events.find((e) => e.kind === "initialize");
+  if (initialize && !initialize.error) {
+    out.onFailureBlockSupported =
+      initialize.hookOnFailureSupported === true &&
+      initialize.hooksApplied !== false
+        ? proved({
+            hookOnFailureSupported: true,
+            hooksApplied: initialize.hooksApplied,
+            sentMatcher: trace.options?.[0]?.preToolUseMatcher ?? null,
+          })
+        : refuted({
+            hookOnFailureSupported: initialize.hookOnFailureSupported,
+            hooksApplied: initialize.hooksApplied,
+          });
+    const reported = initialize.models.filter(
+      (m) => typeof m.supportsAutoMode === "boolean",
+    );
+    out.supportsAutoModeReported =
+      reported.length > 0
+        ? proved({ models: initialize.models, sessionModel: init?.model })
+        : refuted({ models: initialize.models });
+  }
+  // Every other cell needs a session that really ran in auto mode.
+  if (init?.permissionMode !== "auto") return out;
+  const pre = preHooks(events);
+  const resultFor = (id) =>
+    events.find((e) => e.kind === "toolResult" && e.toolUseId === id);
+  const postFor = (id) =>
+    events.find(
+      (e) =>
+        e.kind === "hook" && e.event !== "PreToolUse" && e.toolUseId === id,
+    );
+  const askedFor = (id) =>
+    events.some((e) => e.kind === "canUseTool" && e.toolUseId === id);
+  // Its own call ran: a PostToolUse and no error result, with no permission callback.
+  const ranOk = (id) =>
+    postFor(id)?.event === "PostToolUse" &&
+    !resultFor(id)?.isError &&
+    !askedFor(id);
+  // Result files are keyed by label, so a stimulus run twice has no result of its own.
+  const once = (command, flagged, decision) => {
+    const calls = pre.filter(
+      (e) =>
+        isCommand(e.command, command) &&
+        e.dangerouslyDisableSandbox === flagged &&
+        e.decision === decision,
+    );
+    return {
+      call: calls.length === 1 ? calls[0] : undefined,
+      repeated: calls.length > 1,
+    };
+  };
+  const repeated = (label) => untested(`${label} call made more than once`);
+  const controls = once(STIMULI.control, false, "pass");
+  const control = controls.call;
+  const controlRan = control && ranOk(control.toolUseId);
+  if (controls.repeated) out.controlRunsSandboxed = repeated("control");
+  else if (control) {
+    const controlEvidence = {
+      toolUseId: control.toolUseId,
+      result: results.control ?? null,
+      postHook: postFor(control.toolUseId)?.event ?? null,
+      canUseTool: askedFor(control.toolUseId),
+    };
+    out.controlRunsSandboxed =
+      controlRan && blocked(results.control)
+        ? proved(controlEvidence)
+        : controlRan && ran(results.control)
+          ? untested(
+              "control launched Chromium; the sandbox is not shown",
+              controlEvidence,
+            )
+          : resultFor(control.toolUseId)?.isError && !results.control
+            ? refuted({
+                ...controlEvidence,
+                toolResult: resultFor(control.toolUseId).text,
+              })
+            : untested("control wrote no result", controlEvidence);
+  }
+  const hookAllowCells = [
+    "hookAllowRunsOutside",
+    "hookHoldBeyondDefault",
+    "hookAllowBypassesClassifier",
+  ];
+  const allowedOnce = once(STIMULI.hookAllowed, true, "allow");
+  if (allowedOnce.repeated) {
+    for (const key of hookAllowCells) out[key] = repeated("hook-allowed");
+    return out;
+  }
+  const allowed = allowedOnce.call;
+  const released =
+    allowed &&
+    events.find(
+      (e) => e.kind === "hookReturn" && e.toolUseId === allowed.toolUseId,
+    );
+  if (!allowed || !released) return out;
+  const id = allowed.toolUseId;
+  const post = postFor(id);
+  const held = {
+    toolUseId: id,
+    hookInputAtMs: allowed.t,
+    hookReturnAtMs: released.t,
+    heldMs: released.t - allowed.t,
+    aborted: released.aborted,
+    postHook: post ? { event: post.event, atMs: post.t } : null,
+  };
+  // An aborted hold (the deadline or the query ending) says nothing about the CLI.
+  if (released.aborted) {
+    for (const key of hookAllowCells)
+      out[key] = untested("the hook hold was aborted", held);
+    return out;
+  }
+  // A call that ran before its hook returned was not held by it.
+  out.hookHoldBeyondDefault =
+    held.heldMs < hookAllowHoldMs || (post && post.t < released.t)
+      ? refuted(held)
+      : post
+        ? proved(held)
+        : untested("the held call did not run after its hook returned", held);
+  const signals = events.filter(classifierSignal);
+  const named = (
+    toolUseId,
+    subtypes = ["permission_check_status", "permission_denied"],
+  ) =>
+    signals
+      .filter(
+        (e) =>
+          e.toolUseIds?.includes(toolUseId) && subtypes.includes(e.subtype),
+      )
+      .map((e) => ({ subtype: e.subtype, atMs: e.t, detail: e.detail }));
+  const legs = {
+    control: results.control ?? null,
+    hookAllowed: results["hook-allowed"] ?? null,
+    toolUseId: id,
+  };
+  if (!results["hook-allowed"] || !ranOk(id))
+    out.hookAllowRunsOutside = resultFor(id)?.isError
+      ? refuted({
+          ...legs,
+          toolResult: resultFor(id).text,
+          signals: named(id),
+          canUseTool: askedFor(id),
+        })
+      : untested("hook-allowed call did not run with a result", legs);
+  else if (!controlRan || !results.control)
+    out.hookAllowRunsOutside = untested("no same-run sandboxed control", legs);
+  else if (ran(results.control))
+    out.hookAllowRunsOutside = untested(
+      "sandboxed control also launched Chromium",
+      legs,
+    );
+  else
+    out.hookAllowRunsOutside =
+      blocked(results.control) && ran(results["hook-allowed"])
+        ? proved({ ...legs, controlToolUseId: control.toolUseId })
+        : refuted(legs);
+  // Bypass needs a comparison: a non-denial classifier signal naming a classified call
+  // that then ran shows approvals are signalled per call, so silence for the
+  // hook-allowed call means something. A denial-only signal shows nothing about approvals.
+  const classifiedOnce = once(STIMULI.classified, true, "pass");
+  const classified = classifiedOnce.call;
+  const evidence = {
+    hookAllowed: {
+      toolUseId: id,
+      signals: named(id),
+      canUseTool: askedFor(id),
+    },
+    classified: classified
+      ? {
+          toolUseId: classified.toolUseId,
+          signals: named(classified.toolUseId),
+        }
+      : null,
+    unattributed: signals
+      .filter((e) => !e.toolUseIds?.length)
+      .map((e) => ({ subtype: e.subtype, atMs: e.t })),
+  };
+  out.hookAllowBypassesClassifier =
+    evidence.hookAllowed.signals.length > 0 || evidence.hookAllowed.canUseTool
+      ? refuted(evidence)
+      : !ranOk(id)
+        ? untested("hook-allowed call did not run", evidence)
+        : classifiedOnce.repeated
+          ? untested("classified call made more than once", evidence)
+          : evidence.unattributed.length > 0
+            ? untested("classifier signals not attributable per call", evidence)
+            : !ranOk(classified?.toolUseId) ||
+                named(classified.toolUseId, ["permission_check_status"])
+                  .length === 0
+              ? untested(
+                  "no per-call classifier signal for the comparison call",
+                  evidence,
+                )
+              : proved(evidence);
+  return out;
+}
+
 function waitCall(events, query, ms) {
   const pre = preHooks(events, query).find((e) =>
     isCommand(e.command, wait(ms)),
@@ -925,6 +1146,7 @@ const classifiers = {
   "codex-overrule": codexOverrule,
   "claude-sandbox": claudeSandbox,
   "claude-auto": claudeAuto,
+  "claude-auto-hook-allow": claudeAutoHookAllow,
   "claude-timing": claudeTiming,
 };
 

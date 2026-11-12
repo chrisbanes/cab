@@ -27,6 +27,7 @@ const deadlines = {
   "codex-overrule": 15,
   "claude-sandbox": 12,
   "claude-auto": 12,
+  "claude-auto-hook-allow": 12,
   "claude-timing": 25,
 };
 const args = process.argv.slice(2);

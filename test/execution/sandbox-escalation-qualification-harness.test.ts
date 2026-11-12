@@ -896,6 +896,503 @@ test("claude auto group sends auto mode with unsandboxed commands allowed and re
   assert.ok(!text.includes(homedir().replace(/\//g, "-")));
 });
 
+test("the claude-auto-hook-allow group holds the flagged call under auto with cab's matcher options", async (t) => {
+  const grammar = spawnSync(
+    process.execPath,
+    [
+      join(directory, "live-escalation.mjs"),
+      "--live",
+      "--one-attempt",
+      "--group=claude-auto-hook-allow",
+      "extra",
+    ],
+    { encoding: "utf8", timeout: 10_000 },
+  );
+  assert.equal(grammar.status, 2);
+  assert.match(grammar.stderr, /\|claude-auto-hook-allow\|/);
+
+  const { runClaudeGroup, CLAUDE_GROUPS } = await load("claude-groups.mjs");
+  const { classify } = await load("outcomes.mjs");
+  const [spec] = CLAUDE_GROUPS["claude-auto-hook-allow"];
+  assert.equal(spec.holdMs, 75_000);
+  assert.equal(spec.decide("node chromium.mjs control", 1, false), "pass");
+  assert.equal(spec.decide("node chromium.mjs control", 1, true), "deny");
+  assert.equal(spec.decide("node chromium.mjs hook-allowed", 2, true), "allow");
+  assert.equal(spec.decide("node chromium.mjs hook-allowed", 2, false), "deny");
+  assert.equal(spec.decide("node chromium.mjs classified", 3, true), "pass");
+  assert.equal(
+    spec.decide("node chromium.mjs classified; id", 3, true),
+    "deny",
+  );
+  assert.equal(spec.decide("node chromium.mjs control", 5, false), "deny");
+  // The live hold is 75 s; offline it only has to be a real wait.
+  spec.holdMs = 20;
+  t.after(() => {
+    spec.holdMs = 75_000;
+  });
+  type Hook = (
+    input: Event,
+    id: string,
+    context: { signal: AbortSignal },
+  ) => Promise<{ hookSpecificOutput?: { permissionDecision?: string } }>;
+  type FakeOptions = {
+    permissionMode: string;
+    allowedTools: string[];
+    sandbox: Record<string, unknown>;
+    hooks: {
+      PreToolUse: [{ hooks: [Hook]; timeout?: number; onFailure?: string }];
+    };
+  };
+  const seen: FakeOptions[] = [];
+  const signal = new AbortController().signal;
+  const decisions: (string | undefined)[] = [];
+  const fakeQuery = ({ options }: { options: FakeOptions }) => {
+    seen.push(options);
+    const stream = (async function* () {
+      yield {
+        type: "system",
+        subtype: "init",
+        permissionMode: options.permissionMode,
+        model: "fake",
+      };
+      const pre = options.hooks.PreToolUse[0].hooks[0];
+      for (const [id, command, flag] of [
+        ["c1", "node chromium.mjs control", false],
+        ["c2", "node chromium.mjs hook-allowed", true],
+        ["c3", "node chromium.mjs classified", true],
+      ] as const) {
+        const out = await pre(
+          {
+            hook_event_name: "PreToolUse",
+            tool_name: "Bash",
+            tool_input: { command, dangerouslyDisableSandbox: flag },
+            tool_use_id: id,
+          },
+          id,
+          { signal },
+        );
+        decisions.push(out.hookSpecificOutput?.permissionDecision ?? "pass");
+      }
+      yield {
+        type: "system",
+        subtype: "permission_check_status",
+        nested: { tool_use_id: "c3" },
+      };
+      yield { type: "result", subtype: "success" };
+    })();
+    return Object.assign(stream, {
+      initializationResult: async () => ({
+        hook_on_failure_supported: true,
+        hooks_applied: true,
+        account: { email: "someone@example.invalid" },
+      }),
+      supportedModels: async () => [
+        { value: "default", displayName: "Default", supportsAutoMode: true },
+      ],
+    });
+  };
+  const trace = await runClaudeGroup("claude-auto-hook-allow", {
+    query: fakeQuery,
+    workspace: workspace(t),
+    env: {},
+    executable: "/fake/claude",
+    deadlineMs: 10_000,
+  });
+  assert.equal(trace.failure, null);
+  const [sent] = seen;
+  assert.equal(sent?.permissionMode, "auto");
+  assert.deepEqual(sent?.allowedTools, []);
+  assert.deepEqual(sent?.sandbox, {
+    enabled: true,
+    failIfUnavailable: true,
+    allowUnsandboxedCommands: true,
+    autoAllowBashIfSandboxed: true,
+    network: { allowedDomains: [] },
+    filesystem: {
+      allowWrite: [trace.options[0].cwd],
+    },
+  });
+  const { hooks, ...matcher } = sent?.hooks.PreToolUse[0] ?? {};
+  assert.equal(hooks?.length, 1);
+  assert.deepEqual(matcher, { timeout: 960, onFailure: "block" });
+  assert.deepEqual(trace.options[0].preToolUseMatcher, matcher);
+  assert.deepEqual(decisions, ["pass", "allow", "pass"]);
+  const input = trace.events.find(
+    (e: Event) => e.kind === "hook" && e.toolUseId === "c2",
+  );
+  const released = trace.events.find((e: Event) => e.kind === "hookReturn");
+  assert.equal(released.toolUseId, "c2");
+  assert.equal(released.aborted, false);
+  assert.ok(released.t >= input.t + 15);
+  // Only the hook-option and auto-mode fields of the initialize reply are kept.
+  const initialize = trace.events.find((e: Event) => e.kind === "initialize");
+  assert.deepEqual(
+    { ...initialize, t: 0 },
+    {
+      t: 0,
+      query: 1,
+      kind: "initialize",
+      hookOnFailureSupported: true,
+      hooksApplied: true,
+      models: [{ value: "default", supportsAutoMode: true }],
+    },
+  );
+  assert.ok(!JSON.stringify(trace).includes("example.invalid"));
+  // Ids are taken from the whole system payload, however nested.
+  assert.deepEqual(
+    trace.events.find((e: Event) => e.subtype === "permission_check_status")
+      .toolUseIds,
+    ["c3"],
+  );
+  const outcomes = classify("claude-auto-hook-allow", trace);
+  assert.equal(outcomes.onFailureBlockSupported.outcome, "proved");
+  assert.equal(outcomes.supportsAutoModeReported.outcome, "proved");
+  // The fake ran nothing, so no cell that needs a run is proved.
+  for (const key of [
+    "controlRunsSandboxed",
+    "hookAllowRunsOutside",
+    "hookAllowBypassesClassifier",
+    "hookHoldBeyondDefault",
+  ])
+    assert.notEqual(outcomes[key].outcome, "proved", key);
+});
+
+test("claude-auto-hook-allow cells prove only from their own same-run events", async () => {
+  const { classify } = await load("outcomes.mjs");
+  const hook = (
+    t: number,
+    toolUseId: string,
+    command: string,
+    flag: boolean,
+    decision: string,
+  ) => ({
+    t,
+    query: 1,
+    kind: "hook",
+    event: "PreToolUse",
+    toolUseId,
+    command,
+    dangerouslyDisableSandbox: flag,
+    timeout: null,
+    decision,
+  });
+  const post = (t: number, toolUseId: string) => ({
+    t,
+    query: 1,
+    kind: "hook",
+    event: "PostToolUse",
+    toolUseId,
+    response: "{}",
+  });
+  const signal = (
+    t: number,
+    ids: string[],
+    subtype = "permission_check_status",
+  ) => ({
+    t,
+    query: 1,
+    kind: "message",
+    type: "system",
+    subtype,
+    detail: "{}",
+    toolUseIds: ids,
+  });
+  const events: Event[] = [
+    {
+      t: 0,
+      query: 1,
+      kind: "message",
+      type: "system",
+      subtype: "init",
+      permissionMode: "auto",
+      model: "m",
+    },
+    {
+      t: 1,
+      query: 1,
+      kind: "initialize",
+      hookOnFailureSupported: true,
+      hooksApplied: true,
+      models: [{ value: "default", supportsAutoMode: true }],
+    },
+    hook(10, "c1", "node chromium.mjs control", false, "pass"),
+    post(2_000, "c1"),
+    hook(3_000, "c2", "node chromium.mjs hook-allowed", true, "allow"),
+    {
+      t: 78_000,
+      query: 1,
+      kind: "hookReturn",
+      toolUseId: "c2",
+      decision: "allow",
+      aborted: false,
+    },
+    post(80_000, "c2"),
+    hook(81_000, "c3", "node chromium.mjs classified", true, "pass"),
+    signal(82_000, ["c3"]),
+    post(84_000, "c3"),
+  ];
+  const results = {
+    control: { chromium: "browserType.launch: EPERM" },
+    "hook-allowed": { chromium: "ok" },
+    classified: { chromium: "ok" },
+  };
+  const options = [{ preToolUseMatcher: { timeout: 960, onFailure: "block" } }];
+  const run = (evs: Event[], res: Record<string, unknown> = results) =>
+    classify("claude-auto-hook-allow", { events: evs, results: res, options });
+  const all = run(events);
+  for (const [key, value] of Object.entries(all))
+    assert.equal((value as { outcome: string }).outcome, "proved", key);
+  assert.equal(all.hookHoldBeyondDefault.evidence.heldMs, 75_000);
+  assert.equal(all.hookAllowRunsOutside.evidence.controlToolUseId, "c1");
+
+  // Stripping any cited event downgrades its cell from proved.
+  const without = (drop: (e: Event) => boolean) =>
+    run(events.filter((e) => !drop(e)));
+  const downgraded = (key: string, out: Record<string, { outcome: string }>) =>
+    assert.notEqual(out[key]?.outcome, "proved", key);
+  downgraded(
+    "hookAllowRunsOutside",
+    run(events, { ...results, control: undefined }),
+  );
+  downgraded(
+    "hookAllowRunsOutside",
+    without((e) => e.toolUseId === "c1"),
+  );
+  downgraded(
+    "controlRunsSandboxed",
+    without((e) => e.toolUseId === "c1"),
+  );
+  downgraded(
+    "controlRunsSandboxed",
+    without(
+      (e) =>
+        e.kind === "hook" && e.event === "PostToolUse" && e.toolUseId === "c1",
+    ),
+  );
+  downgraded(
+    "hookAllowRunsOutside",
+    run(events, { ...results, "hook-allowed": undefined }),
+  );
+  downgraded(
+    "hookAllowBypassesClassifier",
+    without((e) => e.subtype === "permission_check_status"),
+  );
+  downgraded(
+    "hookAllowBypassesClassifier",
+    run(
+      events.map((e) =>
+        e.subtype === "permission_check_status" ? { ...e, toolUseIds: [] } : e,
+      ),
+    ),
+  );
+  downgraded(
+    "hookAllowBypassesClassifier",
+    without((e) => e.toolUseId === "c3"),
+  );
+  downgraded(
+    "hookAllowBypassesClassifier",
+    without(
+      (e) =>
+        e.kind === "hook" && e.event === "PostToolUse" && e.toolUseId === "c2",
+    ),
+  );
+  downgraded(
+    "hookHoldBeyondDefault",
+    without((e) => e.kind === "hookReturn"),
+  );
+  downgraded(
+    "hookHoldBeyondDefault",
+    without(
+      (e) =>
+        e.kind === "hook" && e.event === "PostToolUse" && e.toolUseId === "c2",
+    ),
+  );
+  for (const key of ["onFailureBlockSupported", "supportsAutoModeReported"])
+    downgraded(
+      key,
+      without((e) => e.kind === "initialize"),
+    );
+  // Not in auto mode: none of the run cells counts.
+  const notAuto = run(
+    events.map((e) =>
+      e.subtype === "init" ? { ...e, permissionMode: "default" } : e,
+    ),
+  );
+  for (const key of [
+    "controlRunsSandboxed",
+    "hookAllowRunsOutside",
+    "hookAllowBypassesClassifier",
+    "hookHoldBeyondDefault",
+  ])
+    assert.equal(notAuto[key].outcome, "untested", key);
+
+  // Present evidence that contradicts a claim refutes it.
+  const refutedBy = (key: string, out: Record<string, { outcome: string }>) =>
+    assert.equal(out[key]?.outcome, "refuted", key);
+  refutedBy(
+    "hookAllowBypassesClassifier",
+    run([...events, signal(79_000, ["c2"], "permission_denied")]),
+  );
+  refutedBy(
+    "hookAllowBypassesClassifier",
+    run([
+      ...events,
+      { t: 79_000, query: 1, kind: "canUseTool", toolUseId: "c2" },
+    ]),
+  );
+  refutedBy(
+    "hookHoldBeyondDefault",
+    run(events.map((e) => (e.kind === "hookReturn" ? { ...e, t: 63_000 } : e))),
+  );
+  refutedBy(
+    "hookHoldBeyondDefault",
+    run(
+      events.map((e) =>
+        e.kind === "hook" && e.event === "PostToolUse" && e.toolUseId === "c2"
+          ? { ...e, t: 70_000 }
+          : e,
+      ),
+    ),
+  );
+  refutedBy(
+    "hookAllowRunsOutside",
+    run(events, { ...results, "hook-allowed": { chromium: "EPERM" } }),
+  );
+  // Branch C: the hook allowed it but the call never ran.
+  const deniedAfterAllow = run(
+    [
+      ...events.filter(
+        (e) =>
+          !(
+            e.kind === "hook" &&
+            e.event === "PostToolUse" &&
+            e.toolUseId === "c2"
+          ),
+      ),
+      {
+        t: 78_100,
+        query: 1,
+        kind: "toolResult",
+        toolUseId: "c2",
+        isError: true,
+        text: "denied",
+      },
+    ],
+    { ...results, "hook-allowed": undefined },
+  );
+  refutedBy("hookAllowRunsOutside", deniedAfterAllow);
+  assert.equal(deniedAfterAllow.hookHoldBeyondDefault.outcome, "untested");
+  refutedBy(
+    "onFailureBlockSupported",
+    run(
+      events.map((e) =>
+        e.kind === "initialize" ? { ...e, hookOnFailureSupported: null } : e,
+      ),
+    ),
+  );
+  refutedBy(
+    "supportsAutoModeReported",
+    run(
+      events.map((e) =>
+        e.kind === "initialize"
+          ? { ...e, models: [{ value: "default", supportsAutoMode: null }] }
+          : e,
+      ),
+    ),
+  );
+  // An aborted hold (deadline or query end) says nothing about the CLI: no branch C.
+  const aborted = run(
+    events.map((e) => (e.kind === "hookReturn" ? { ...e, aborted: true } : e)),
+  );
+  for (const key of [
+    "hookHoldBeyondDefault",
+    "hookAllowRunsOutside",
+    "hookAllowBypassesClassifier",
+  ])
+    assert.equal(aborted[key]?.outcome, "untested", key);
+  // A denial-only signal for a comparison call that never ran shows nothing about
+  // approvals, so it cannot prove the bypass (branch A).
+  const deniedComparison = run(
+    [
+      ...events.filter(
+        (e) =>
+          e.subtype !== "permission_check_status" &&
+          !(e.event === "PostToolUse" && e.toolUseId === "c3"),
+      ),
+      signal(82_000, ["c3"], "permission_denied"),
+      {
+        t: 82_100,
+        query: 1,
+        kind: "toolResult",
+        toolUseId: "c3",
+        isError: true,
+        text: "denied",
+      },
+    ],
+    { ...results, classified: undefined },
+  );
+  assert.equal(
+    deniedComparison.hookAllowBypassesClassifier?.outcome,
+    "untested",
+  );
+  // A retry shares the label's result file, so neither call has a result of its own.
+  const retried = run([
+    ...events,
+    hook(85_000, "c4", "node chromium.mjs hook-allowed", true, "allow"),
+    {
+      t: 160_000,
+      query: 1,
+      kind: "hookReturn",
+      toolUseId: "c4",
+      decision: "allow",
+      aborted: false,
+    },
+    post(161_000, "c4"),
+    hook(162_000, "c5", "node chromium.mjs control", false, "pass"),
+    post(163_000, "c5"),
+  ]);
+  for (const key of [
+    "controlRunsSandboxed",
+    "hookAllowRunsOutside",
+    "hookHoldBeyondDefault",
+    "hookAllowBypassesClassifier",
+  ])
+    assert.equal(retried[key]?.outcome, "untested", key);
+  // The hook-allowed call must itself have run: an error result is no run.
+  downgraded(
+    "hookAllowRunsOutside",
+    run([
+      ...events,
+      {
+        t: 80_500,
+        query: 1,
+        kind: "toolResult",
+        toolUseId: "c2",
+        isError: true,
+        text: "denied",
+      },
+    ]),
+  );
+  // A control that launched Chromium shows no sandbox, so nothing ran "outside".
+  const open = run(events, { ...results, control: { chromium: "ok" } });
+  assert.equal(open.controlRunsSandboxed.outcome, "untested");
+  assert.equal(open.hookAllowRunsOutside.outcome, "untested");
+});
+
+test("the committed claude-auto-hook-allow probe evidence reclassifies with the current rules", async () => {
+  const { classify } = await load("outcomes.mjs");
+  const evidence = JSON.parse(
+    readFileSync(
+      resolve("docs/evidence/2026-11-12-claude-auto-hook-allow-probe.json"),
+      "utf8",
+    ),
+  );
+  assert.deepEqual(
+    classify("claude-auto-hook-allow", evidence.trace),
+    evidence.outcomes,
+  );
+});
+
 test("the escalate-approval live run refuses anything but --live --one-attempt and creates nothing", () => {
   const roots = () =>
     existsSync(join(homedir(), ".cache"))
