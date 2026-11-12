@@ -9,6 +9,7 @@ import {
   projectLifecyclePresentation,
   visibleProjects,
   taskProjectReadOnly,
+  taskReadOnlyNotice,
   deletionConfirmationReady,
 } from "../../web/src/project-lifecycle-model.js";
 
@@ -48,6 +49,18 @@ test("pickers hide archived projects by default and history includes both withou
     projects.map((project) => project.id),
     ["A", "B", "C"],
   );
+});
+
+test("a read-only task names an archived project, otherwise the unavailable lifecycle", () => {
+  assert.equal(
+    taskReadOnlyNotice({ archived: true }),
+    "This project is archived. Tasks and history are read-only.",
+  );
+  for (const project of [{ archived: false }, undefined])
+    assert.equal(
+      taskReadOnlyNotice(project),
+      "Project lifecycle is unavailable; writes are disabled.",
+    );
 });
 
 test("direct task lifecycle permits active writes even when the default picker omits its project; missing or mismatched lifecycle refuses", () => {

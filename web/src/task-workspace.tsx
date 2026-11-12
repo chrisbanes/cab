@@ -1,6 +1,9 @@
 import { TaskUnstack } from "./task-unstack.js";
 import { randomUUID } from "./browser-crypto.js";
-import { taskProjectReadOnly } from "./project-lifecycle-model.js";
+import {
+  taskProjectReadOnly,
+  taskReadOnlyNotice,
+} from "./project-lifecycle-model.js";
 import { ApprovalReview } from "./approval-review.js";
 import { IssueChangedSinceHandback } from "./issue-change-notice.js";
 import { useSendEntry } from "./command-send.js";
@@ -2860,9 +2863,7 @@ export function TaskWorkspace({
         />
         {projectReadOnly && (
           <p role="status">
-            {data.project?.archived
-              ? "This project is archived. Tasks and history are read-only."
-              : "Project lifecycle is unavailable; writes are disabled."}{" "}
+            {taskReadOnlyNotice(data.project)}{" "}
             <a href={`/projects/${data.task.projectId}/settings`}>
               Project settings
             </a>

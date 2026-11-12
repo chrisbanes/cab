@@ -104,5 +104,10 @@ The operator CLI is outside the budget: it has no screens.
   pending; the draft stays in the form, and clearing the note then Mark reviewed still records it.
 - A draft in the Inbox survives moving to another request and back; dismissing a review
   records no response, and Restore returns it.
+- A draft left on a review that is no longer pending reads as unsendable with **Discard
+  draft**, which removes it from both the Inbox and the task page and cannot be undone. A
+  draft on a pending review is kept as before.
+- In an archived project the Inbox, like the task page, shows the review read-only with
+  "This project is archived. Tasks and history are read-only." and offers no response.
 - A review the lead withdrew reads "Withdrawn by the lead" with its reason; one whose task
   closed reads "Closed with the task".

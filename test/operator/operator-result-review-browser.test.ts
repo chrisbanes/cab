@@ -278,6 +278,106 @@ test("a refresh after a newer result turns an open review read-only without a se
   assert.equal(responses(s.posts).length, 0);
 });
 
+/** Archives directly: the seeded task still has assignments to drain. */
+function archive(s: Awaited<ReturnType<typeof start>>) {
+  s.f.seedPersistedState((db) =>
+    db
+      .prepare(
+        "UPDATE domain_projects SET archived=1,version=version+1 WHERE id=?",
+      )
+      .run(s.projectId),
+  );
+}
+
+test("an archived project's Inbox review reads with no response controls", async (_t, journey) => {
+  const s = await start(
+    journey,
+    desktop,
+    ({ taskId, reviewId }) => `/inbox?task=${taskId}&request=${reviewId}`,
+  );
+  const detail = s.page.locator(".inbox-detail"),
+    panel = detail.getByRole("region", { name: "Result review" });
+  await assertMaterial(panel);
+  await panel.getByRole("button", { name: "Mark reviewed" }).waitFor();
+  archive(s);
+  await s.page
+    .getByRole("button", { name: "Refresh", exact: true })
+    .first()
+    .click();
+  await detail
+    .getByText("This project is archived. Tasks and history are read-only.")
+    .waitFor();
+  // The review stays readable; an archived project serves no artifact preview.
+  for (const text of [recommendation, uncertainty])
+    await panel.getByText(text, { exact: true }).waitFor();
+  for (const name of ["Mark reviewed", "Send feedback"])
+    assert.equal(await detail.getByRole("button", { name }).count(), 0);
+  assert.equal(
+    await detail.getByLabel("Note or feedback for the lead").count(),
+    0,
+  );
+  assert.equal(
+    await detail
+      .getByRole("link", { name: "Open task", exact: true })
+      .getAttribute("href"),
+    `/tasks/${s.taskId}`,
+  );
+  assert.equal(responses(s.posts).length, 0);
+});
+
+test("a stale review draft can be discarded and stays gone on the task page and on reselection", async (_t, journey) => {
+  const inboxPath = `/inbox?task=`;
+  const s = await start(
+    journey,
+    desktop,
+    ({ taskId, reviewId }) => `${inboxPath}${taskId}&request=${reviewId}`,
+  );
+  const navigate = (path: string) =>
+    s.page.evaluate((to) => {
+      history.pushState(null, "", to);
+      dispatchEvent(new PopStateEvent("popstate"));
+    }, path);
+  const panel = s.page.getByRole("region", { name: "Result review" }),
+    draft = "Stale feedback",
+    discard = panel.getByRole("button", { name: "Discard draft" });
+  await panel.getByLabel("Note or feedback for the lead").fill(draft);
+  assert.equal(await discard.count(), 0, "a pending review offers no Discard");
+  s.result("Revised toolbar after a second pass.");
+  await s.page
+    .getByRole("button", { name: "Refresh", exact: true })
+    .first()
+    .click();
+  await panel.getByText("Superseded by a newer result").waitFor();
+  await panel.getByRole("heading", { name: "Your unsent draft" }).waitFor();
+  await panel.getByText(draft, { exact: true }).waitFor();
+  await discard.waitFor();
+  // The task page shows the same draft: the store is shared.
+  await navigate(`/tasks/${s.taskId}?request=${s.reviewId}`);
+  await s.page.waitForURL(/\/tasks\//);
+  await panel.getByText(draft, { exact: true }).waitFor();
+  await discard.click();
+  const done = panel.getByText("Draft discarded.");
+  await done.waitFor();
+  assert.ok(
+    await done.evaluate((el) => Boolean(document.activeElement?.contains(el))),
+    "the outcome takes focus",
+  );
+  assert.equal(await panel.getByText(draft, { exact: true }).count(), 0);
+  for (const path of [
+    `${inboxPath}${s.taskId}&request=${s.reviewId}`,
+    "/inbox",
+    `${inboxPath}${s.taskId}&request=${s.reviewId}`,
+  ])
+    await navigate(path);
+  await panel.getByText("Superseded by a newer result").waitFor();
+  assert.equal(
+    await panel.getByRole("heading", { name: "Your unsent draft" }).count(),
+    0,
+  );
+  assert.equal(await panel.getByText(draft, { exact: true }).count(), 0);
+  assert.equal(responses(s.posts).length, 0);
+});
+
 test("a dismissed review stays pending with no response, and Restore returns it", async (_t, journey) => {
   const s = await start(
     journey,

@@ -53,7 +53,8 @@ shows its blocking link or explanation instead, and no Fix is invented for it.
 The operator CLI is outside the budget: it has no screens.
 
 Work refused before it ran is not a wait: it is shown as Not started with **Start again**
-beside it, from task detail, the Inbox and Home, and **Reset task** in the task header. See
+beside it, from task detail, the Inbox and Home, and **Reset task** in the task header.
+In an archived project the Inbox shows the read-only notice instead of **Start again**. See
 [Triage an uncertain execution](triage-uncertainty.md#not-started-refused-before-it-ran).
 
 ## Recovery

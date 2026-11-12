@@ -30,7 +30,8 @@ type Outcome =
       details?: OutcomeField[];
     }
   /** Refused: worded once a newer task read shows why. */
-  | { kind: "refused"; against: TaskRead["data"] };
+  | { kind: "refused"; against: TaskRead["data"] }
+  | { kind: "discarded" };
 
 /**
  * The decision-focused review of one result: the decision and the lead's recommendation, what
@@ -265,8 +266,23 @@ export function ResultReviewPanel({
       {review.status !== "pending" && text && !pending && (
         <div>
           <h4 className="small-heading">Your unsent draft</h4>
+          <p className="metadata muted">
+            This review is no longer pending, so the draft can't be sent.
+          </p>
           <Literal text={draft} />
+          <Button
+            variant="secondary"
+            onClick={() => {
+              setDraft("");
+              setOutcome({ kind: "discarded" });
+            }}
+          >
+            Discard draft
+          </Button>
         </div>
+      )}
+      {outcome?.kind === "discarded" && (
+        <ActionOutcome tone="success" message="Draft discarded." focus />
       )}
       {outcome?.kind === "recorded" && (
         <ActionOutcome
