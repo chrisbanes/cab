@@ -2818,6 +2818,12 @@ test("classifier decisions on passed flagged calls are recorded as reviews; an u
       true,
     );
     asked.push(await pending);
+    // A classifier denial frame for a call the operator decides is not a review.
+    yield denied("toolu_ask", "classifier");
+    // A repeated id is refused, so one call is never both an escalation and a review.
+    asked.push(
+      await session.hook("Bash", flagged("node chromium.mjs ask"), "toolu_ask"),
+    );
     await session.postHook(
       "Bash",
       flagged("node chromium.mjs ask"),
@@ -2862,6 +2868,12 @@ test("classifier decisions on passed flagged calls are recorded as reviews; an u
       riskLevel: null,
       overrulable: false,
     });
+    // The runtime times an approval from the hook; normalise it before comparing.
+    const timed = reviews.find((r) => r.kind === "itemCompleted");
+    assert.ok(
+      timed?.kind === "itemCompleted" && typeof timed.durationMs === "number",
+    );
+    timed.durationMs = 0;
     assert.deepEqual(reviews, [
       {
         ...review("toolu_ran", "node chromium.mjs"),
@@ -2872,7 +2884,7 @@ test("classifier decisions on passed flagged calls are recorded as reviews; an u
         kind: "itemCompleted",
         target: target("toolu_ran"),
         exitCode: 2,
-        durationMs: null,
+        durationMs: 0,
       },
       {
         ...review("toolu_denied", "curl x"),
@@ -2887,6 +2899,13 @@ test("classifier decisions on passed flagged calls are recorded as reviews; an u
     );
     assert.deepEqual(asked, [
       { behavior: "allow", updatedInput: flagged("node chromium.mjs ask") },
+      {
+        hookSpecificOutput: {
+          hookEventName: "PreToolUse",
+          permissionDecision: "deny",
+          permissionDecisionReason: "Commands never run outside the sandbox",
+        },
+      },
       { behavior: "deny", message: "cab grants no permissions" },
     ]);
     assert.equal(f.unexpected.length, 1);

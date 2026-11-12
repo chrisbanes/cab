@@ -1230,7 +1230,10 @@ policy, so Claude's auto-mode classifier decides only a Bash call that sets
 - A call the classifier leaves undecided reaches `canUseTool` and becomes the same
   `sandbox.escalate` approval, with the 15-minute expiry.
 - A remembered call that runs with no `canUseTool` callback is recorded as a reviewer decision
-  `approved`, with the command's exit code and a service-measured duration.
+  `approved` once it has run, with the command's exit code. Its duration is measured by the
+  runtime from the hook passing the call on to its post-tool hook, so it includes the
+  classifier's decision. Its workspace state is read after the command ran. A repeated
+  `tool_use_id` is refused.
 - A `system` / `permission_denied` message for it with `decision_reason_type: "classifier"` is
   recorded as `denied`, with Claude Code's reason as the rationale.
 - Neither has a risk level, and a denial offers no overrule. The review id and target are the

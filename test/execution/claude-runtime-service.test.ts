@@ -1528,7 +1528,8 @@ test("at escalate-auto-review a Claude classifier approval is recorded with its 
         rationale: null,
         overrule: null,
         exitCode: 0,
-        durationSource: "service",
+        // Timed by the runtime from the hook: the approval is known only after the command ran.
+        durationSource: "runtime",
       },
       {
         command: "curl x",

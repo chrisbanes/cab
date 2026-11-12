@@ -1195,9 +1195,12 @@ For Claude Code task turns at this level:
 - cab's hook still refuses every call outside its tool policy, so the classifier decides only
   Bash calls that ask to leave the sandbox.
 - A call the classifier leaves undecided waits in the Inbox as at the escalate-approval level.
-- cab records a classifier approval when the command runs without asking you, with its exit
-  code. It records a denial when Claude Code reports one. Neither has a risk level or rationale,
-  and a denial has no overrule.
+- Each classifier decision is an extra model call on the Claude account.
+- cab records a classifier approval once the command has run without asking you, with its exit
+  code and the time from cab's hook to its end, which includes the classifier's decision. The
+  workspace state it shows is read after the command ran. cab records a denial, with Claude
+  Code's reason, when Claude Code reports one. Neither has a risk level, and a denial has no
+  overrule.
 - A Bash command can ask for up to 60 minutes. One that times out keeps running in the
   background.
 

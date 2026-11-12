@@ -49,7 +49,7 @@ export const claudeEscalateAutoReviewLine =
 
 /** What cab can observe of Claude's classifier decisions (#1678, #1682 T1). */
 export const claudeAutoReviewEvidenceLine =
-  "For Claude Code, cab records a classifier approval when the call runs without asking and a denial when Claude Code reports one, with no risk level, rationale or overrule. A call the classifier leaves undecided waits in the Inbox. A live denial and an undecided call are untested.";
+  "For Claude Code, cab records a classifier approval once the call has run without asking, and a denial, with Claude Code's reason, when Claude Code reports one. Neither has a risk level or overrule. A call left undecided waits in the Inbox. A live denial and an undecided call are untested.";
 
 /** What any review costs and covers, in either harness. */
 export const autoReviewCostLine =

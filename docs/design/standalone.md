@@ -349,9 +349,9 @@ Codex's reviewer decides each escalation; cab records each decision, and a denia
 the task workspace offers the operator an advisory Inbox overrule while the turn runs. A Claude
 Code task turn at this level runs in `auto` like one at `escalate-approval`, but its hook passes
 each flagged Bash call to Claude's classifier after the tool policy checks; a call the classifier
-leaves undecided becomes the same Inbox approval. cab records a classifier approval when the call
-runs without asking and a denial when Claude Code reports one, with no risk level, rationale or
-overrule.
+leaves undecided becomes the same Inbox approval. cab records a classifier approval once the call
+has run without asking and a denial, with Claude Code's reason, when Claude Code reports one; neither
+has a risk level or overrule.
 The three values are recorded at admission (`execution_intent_network_access`,
 `execution_intent_local_listening` and `execution_intent_sandbox_level`), so a later change reaches only later admissions and a
 running turn keeps its policy. Claude Code turns, drafting runs and requests without a task

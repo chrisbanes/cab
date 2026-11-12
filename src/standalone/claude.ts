@@ -677,6 +677,8 @@ interface ClaudeTurn {
       fields: Record<string, unknown>;
       cwd: string | undefined;
       routed: boolean;
+      /** When the hook passed it on; an approval's duration starts here. */
+      passedAt: number;
     }
   >;
   /** Why the turn's stream was rejected, when a named reason applies. */
@@ -1800,12 +1802,18 @@ export class ClaudeRuntime implements Runtime {
         // The allowlist above has run; the classifier decides only this flagged Bash call.
         if (!turn.autoConfirmed)
           return refuse("Claude Code has not confirmed auto permission mode");
-        if (typeof fields.data.command !== "string")
+        // One decision per call: a repeated id could otherwise be both an escalation and a review.
+        if (
+          typeof fields.data.command !== "string" ||
+          turn.reviewed.has(input.data.tool_use_id) ||
+          turn.escalations.has(input.data.tool_use_id)
+        )
           return refuse("Commands never run outside the sandbox");
         turn.reviewed.set(input.data.tool_use_id, {
           fields: fields.data,
           cwd: input.data.cwd,
           routed: false,
+          passedAt: Date.now(),
         });
         return {};
       }
@@ -2007,7 +2015,9 @@ export class ClaudeRuntime implements Runtime {
           kind: "itemCompleted",
           target,
           exitCode: decision.exitCode,
-          durationMs: null,
+          // The approval is inferred only after the command ran, so the service cannot time it
+          // from the decision; this span from the hook also includes the classifier's decision.
+          durationMs: Math.max(0, Date.now() - call.passedAt),
         });
     } catch {
       // Evidence only: a failing listener never alters the turn.

@@ -478,10 +478,11 @@ test("both harnesses' disclosures state the unsandboxed grant and risks within t
     claudeEscalateAutoReviewLine,
     /classifier decides each Bash call/,
   );
-  // Claude's decisions carry no risk level, rationale or overrule, and the gaps are disclosed.
+  // Claude's decisions carry no risk level or overrule, a denial keeps Claude Code's reason, and
+  // the gaps are disclosed.
   assert.match(
     claudeAutoReviewEvidenceLine,
-    /no risk level, rationale or overrule.*untested/,
+    /with Claude Code's reason.*Neither has a risk level or overrule.*untested/,
   );
   assert.ok(codex.lines.includes(codexEscalateAutoReviewLine));
   for (const risk of escalateAutoReviewRiskLines)
