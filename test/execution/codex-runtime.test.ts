@@ -4047,6 +4047,10 @@ function escalationFakeRuntime() {
     "      write({ id: 'exec', method: 'execCommandApproval', params: base });",
     "      write({ id: 'cmd', method: 'item/commandExecution/requestApproval', params: { ...base, itemId: 'c', command: 'ls', cwd: message.params.cwd } });",
     "    }",
+    "  } else if (message.method === 'turn/interrupt') {",
+    "    write({ id: message.id, result: {} });",
+    "    write({ method: 'serverRequest/resolved', params: { threadId: 'thread-1', requestId: 'esc-' + turns } });",
+    "    finish(message.params.turnId);",
     "  } else if (message.method === undefined && asked.has(message.id)) {",
     "    const turnId = asked.get(message.id);",
     "    const accepted = message.result?.decision === 'accept';",
@@ -4434,7 +4438,7 @@ test("a request retransmitted before and after its answer stays one request with
   }
 });
 
-test("Codex resolving an escalation itself withdraws it unanswered; a resolution naming no request stays unexpected", async () => {
+test("Codex resolving an escalation itself, or after an interrupt, ends it once with no reply; a resolution naming no request stays unexpected", async () => {
   const { root, runtime, replies, cleanup } = escalationFakeRuntime();
   const events: SandboxEscalationEvent[] = [];
   const unexpected: Array<{ method: string; threadId?: string }> = [];
@@ -4473,6 +4477,33 @@ test("Codex resolving an escalation itself withdraws it unanswered; a resolution
     );
     assert.deepEqual(replies("esc-1"), []);
     assert.deepEqual(unexpected, []);
+    // An interrupt ends the pending escalation once; Codex's resolution of it afterwards is
+    // no anomaly.
+    const interrupted = await bounded(
+      runtime.startTurn(
+        "thread-1",
+        root,
+        "escalate",
+        undefined,
+        escalationPolicy,
+      ),
+      3000,
+    );
+    await eventually(() => events.length === 3);
+    await bounded(runtime.interruptTurn("thread-1", interrupted), 3000);
+    assert.deepEqual(
+      events
+        .slice(3)
+        .map((event) => [
+          event.kind,
+          "reason" in event ? event.reason : undefined,
+        ]),
+      [["ended", "Turn interrupted"]],
+    );
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    assert.equal(events.length, 4);
+    assert.deepEqual(replies("esc-2"), []);
+    assert.equal(unexpected.length, 0);
     await bounded(
       runtime.startTurn("thread-1", root, "stray-resolution"),
       3000,
@@ -4481,7 +4512,7 @@ test("Codex resolving an escalation itself withdraws it unanswered; a resolution
     assert.deepEqual(unexpected, [
       { method: "unmatched-native-resolution", threadId: "thread-1" },
     ]);
-    assert.equal(events.length, 2);
+    assert.equal(events.length, 4);
   } finally {
     await cleanup();
   }

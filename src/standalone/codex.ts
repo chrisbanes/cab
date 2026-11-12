@@ -969,13 +969,18 @@ export class CodexRuntime implements Runtime {
   private sandboxEscalation?: (event: SandboxEscalationEvent) => boolean;
   /** Threads whose current turn sent the escalation policy; null until `turn/start` answers. */
   private readonly escalationTurns = new Map<string, string | null>();
-  /** Escalation requests of live turns, by endpoint, until their command item completes. */
+  /**
+   * Escalation requests by endpoint, until Codex resolves them or their command item completes.
+   * One that ended unanswered stays as a tombstone, so its late resolution is no anomaly; the
+   * thread's next turn or a lost runtime clears it.
+   */
   private readonly escalations = new Map<
     string,
     {
       identity: NativeInputEndpointIdentity;
       child: ChildProcessWithoutNullStreams;
       answered?: "accept" | "decline";
+      ended?: true;
     }
   >();
   onSandboxEscalation(
@@ -988,7 +993,8 @@ export class CodexRuntime implements Runtime {
     decision: "accept" | "decline",
   ): Promise<boolean> {
     const entry = this.escalations.get(nativeEndpointKey(identity));
-    if (!entry || entry.answered || entry.child !== this.child) return false;
+    if (!entry || entry.answered || entry.ended || entry.child !== this.child)
+      return false;
     entry.answered = decision;
     try {
       await this.send(
@@ -1006,25 +1012,22 @@ export class CodexRuntime implements Runtime {
       return false;
     }
   }
-  /** Ends matching escalations; an unanswered one is reported, and none can be answered after. */
+  /** Ends matching unanswered escalations once each; none can be answered after. */
   private endEscalations(
     reason: string,
     threadId?: string,
     turnId?: string,
   ): void {
-    for (const [key, entry] of this.escalations) {
+    for (const entry of this.escalations.values()) {
       if (
+        entry.answered ||
+        entry.ended ||
         (threadId !== undefined && entry.identity.threadId !== threadId) ||
         (turnId !== undefined && entry.identity.turnId !== turnId)
       )
         continue;
-      this.escalations.delete(key);
-      if (!entry.answered)
-        this.emitEscalation({
-          kind: "ended",
-          identity: entry.identity,
-          reason,
-        });
+      entry.ended = true;
+      this.emitEscalation({ kind: "ended", identity: entry.identity, reason });
     }
   }
   /** Takes a command approval of an escalate-approval turn; false leaves it to the denial path. */
@@ -1078,14 +1081,14 @@ export class CodexRuntime implements Runtime {
         entry.identity.threadId === threadId &&
         entry.identity.requestId === requestId
       ) {
-        if (!entry.answered) {
-          this.escalations.delete(key);
+        if (entry.answered) return true;
+        this.escalations.delete(key);
+        if (!entry.ended)
           this.emitEscalation({
             kind: "ended",
             identity: entry.identity,
             reason: "Resolved by the runtime before an answer",
           });
-        }
         return true;
       }
     return false;
@@ -1101,6 +1104,7 @@ export class CodexRuntime implements Runtime {
         entry.identity.itemId === completed.data.item.id
       ) {
         this.escalations.delete(key);
+        if (entry.ended) continue;
         // Codex settled an unanswered request itself, so nobody can answer it any more.
         this.emitEscalation(
           entry.answered
@@ -2500,6 +2504,9 @@ export class CodexRuntime implements Runtime {
       policy?.sandboxEscalation === "approval" &&
       policy.access !== "read-only" &&
       policy.skipSandbox !== true;
+    // Escalations of the thread's earlier turns, tombstones included, are over.
+    for (const [key, entry] of this.escalations)
+      if (entry.identity.threadId === threadId) this.escalations.delete(key);
     if (escalate) this.escalationTurns.set(threadId, null);
     else this.escalationTurns.delete(threadId);
     const started = this.request("turn/start", {
@@ -3297,6 +3304,7 @@ export class CodexRuntime implements Runtime {
     for (const endpoint of [...this.nativeEndpoints.values()])
       this.cancelUserInput(endpoint.call.identity, "Runtime lost");
     this.endEscalations("Runtime lost");
+    this.escalations.clear();
     this.escalationTurns.clear();
     this.nativeGeneration = undefined;
     this.threadSnapshots.clear();
