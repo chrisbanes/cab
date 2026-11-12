@@ -228,7 +228,8 @@ export function ResultReviewPanel({
           </p>
         ))}
       </details>
-      {review.status === "pending" && !readOnly && (
+      {/* A retained send stays retryable after a refresh shows the review answered. */}
+      {(review.status === "pending" || pending) && !readOnly && (
         <fieldset className="result-review-response" disabled={busy}>
           <legend className="small-heading">Your response</legend>
           <label htmlFor={noteId}>Note or feedback for the lead</label>
@@ -254,7 +255,7 @@ export function ResultReviewPanel({
             </Button>
             <Button
               onClick={() => void send("feedback")}
-              disabled={!text || (Boolean(pending) && !retrying("feedback"))}
+              disabled={pending ? !retrying("feedback") : !text}
             >
               {retrying("feedback") ? "Retry Send feedback" : "Send feedback"}
             </Button>

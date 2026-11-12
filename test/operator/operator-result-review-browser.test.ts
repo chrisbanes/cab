@@ -371,6 +371,69 @@ test("refused feedback to a lead that cannot receive it keeps the draft and the 
   );
 });
 
+test("a task-page review draft survives following Changes and going Back", async (_t, journey) => {
+  const s = await start(
+    journey,
+    desktop,
+    ({ taskId, reviewId }) => `/tasks/${taskId}?request=${reviewId}`,
+  );
+  const panel = s.page.getByRole("region", { name: "Result review" }),
+    note = panel.getByLabel("Note or feedback for the lead");
+  await assertMaterial(panel);
+  await note.fill("Half-written task-page feedback");
+  await panel.getByRole("link", { name: /^Changes/ }).click();
+  await s.page.waitForURL(/section=changes/);
+  await s.page.goBack();
+  await panel.waitFor();
+  assert.equal(await note.inputValue(), "Half-written task-page feedback");
+  assert.equal(responses(s.posts).length, 0);
+});
+
+test("a lost reply stays retryable after a refresh shows the review answered, and the replay yields the receipt", async (_t, journey) => {
+  const s = await start(
+    journey,
+    desktop,
+    ({ taskId, reviewId }) => `/inbox?task=${taskId}&request=${reviewId}`,
+  );
+  const panel = s.page.getByRole("region", { name: "Result review" });
+  await assertMaterial(panel);
+  // The service records the response; only its reply is lost.
+  await s.page.route(
+    "**/api/operator/commands",
+    async (route) => {
+      await route.fetch();
+      await route.abort();
+    },
+    { times: 1 },
+  );
+  await panel
+    .getByLabel("Note or feedback for the lead")
+    .fill("Keep the old toolbar.");
+  await panel.getByRole("button", { name: "Send feedback" }).click();
+  await panel.getByText("Reply unavailable.").waitFor();
+  await s.page
+    .getByRole("button", { name: "Refresh", exact: true })
+    .first()
+    .click();
+  await panel.getByText("Feedback sent", { exact: true }).waitFor();
+  const retry = panel.getByRole("button", { name: "Retry Send feedback" });
+  await retry.waitFor();
+  await retry.click();
+  await panel.getByText("Feedback sent to the lead.").waitFor();
+  assert.equal(await panel.getByText("Reply unavailable.").count(), 0);
+  assert.equal(await retry.count(), 0);
+  const sent = responses(s.posts);
+  assert.equal(sent.length, 2);
+  assert.equal(sent[0]?.key, sent[1]?.key, "the retry replays the same key");
+  assert.equal(
+    s.f.service
+      .coordinationView()
+      .readTask(s.taskId)
+      .messages.filter((m) => m.eventType === "assignment-follow-up").length,
+    1,
+  );
+});
+
 test("a withdrawn review reads as withdrawn by the lead, with its reason", async (_t, journey) => {
   const s = await start(journey, desktop, () => "/");
   s.f.seedPersistedState((db) => {

@@ -67,9 +67,10 @@ export class InboxState {
   returnFocus: { id: string; index: number } | null = null;
   /** Where the selection last stood in the queue, so Previous/Next continue after it leaves. */
   anchor: QueueAnchor | null = null;
-  /** Unsent result review drafts, kept while the operator moves between requests. */
+  /** Unsent result review drafts by review, shared with task detail; cleared only by `clear`. */
   reviewDrafts = new Map<string, string>();
-  clear() {
+  /** A fresh view of the queue; unsent review drafts survive it. */
+  resetView() {
     this.project = "";
     this.kind = "";
     this.scrollTop = 0;
@@ -77,6 +78,10 @@ export class InboxState {
     this.auto = null;
     this.returnFocus = null;
     this.anchor = null;
+  }
+  /** Sign-out and session changes: the view and every unsent draft. */
+  clear() {
+    this.resetView();
     this.reviewDrafts.clear();
   }
 }
@@ -569,7 +574,7 @@ export function Inbox({
               aria-label="Inbox status"
               value={status}
               onChange={(e) => {
-                state.clear();
+                state.resetView();
                 autoFor.current = e.target.value;
                 navigate(
                   `/inbox${e.target.value === "actionable" ? "" : `?status=${e.target.value}`}`,

@@ -399,6 +399,7 @@ export function TaskWorkspace({
   onHeader,
   drafts,
   releaseDraft,
+  reviewDrafts,
 }: {
   client: OperatorClient;
   session: Session;
@@ -414,6 +415,8 @@ export function TaskWorkspace({
   onHeader?: (report: TaskHeaderReport | null) => void;
   /** Hands an Improve with lead run on to the app's durable release. */
   releaseDraft: ReleaseRun;
+  /** Unsent result review drafts by review, the Inbox's store, so leaving the page keeps them. */
+  reviewDrafts: Map<string, string>;
 }) {
   // Improve with lead opens on demand, and again after a reload while it has work to show.
   const [improveOpen, setImproveOpen] = useState<boolean | null>(null);
@@ -2464,6 +2467,7 @@ export function TaskWorkspace({
             reviewId={resultReview.reviewId}
             onChanged={refreshAll}
             readOnly={projectReadOnly}
+            drafts={reviewDrafts}
           />
         ) : reviewing ? (
           <ApprovalReview

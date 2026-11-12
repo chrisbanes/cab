@@ -1392,6 +1392,7 @@ export function App() {
                 onHeader={setTaskHeader}
                 releaseDraft={releaseDraft}
                 questionStates={questionStates.current}
+                reviewDrafts={inboxState.current.reviewDrafts}
                 state={taskStates.current.forTask(
                   pathname.split("/")[2] ?? "",
                   entryKey,
