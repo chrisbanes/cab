@@ -1,6 +1,12 @@
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
-import { chromium, type Browser, type Locator, type Page } from "playwright";
+import {
+  chromium,
+  type Browser,
+  type Locator,
+  type Page,
+  webkit,
+} from "playwright";
 import {
   browserSuite,
   type BrowserJourney,
@@ -1353,6 +1359,10 @@ async function openWith<S extends { taskId: string }>(
   j: BrowserJourney,
   contextOptions: Parameters<Browser["newContext"]>[0],
   prepare: (f: Fixture) => Promise<S>,
+  {
+    engine = "chromium",
+    initScript,
+  }: { engine?: "chromium" | "webkit"; initScript?: () => void } = {},
 ) {
   const f = await j.start("fixture.create", () =>
     createOperatorFixture(null, undefined, undefined, j.fixtureOptions),
@@ -1365,14 +1375,19 @@ async function openWith<S extends { taskId: string }>(
   );
   const s = await prepare(f);
   const web = await j.start("fixture.web", () => f.startWeb());
-  browser = await j.start("browser.launch", () => chromium.launch());
+  browser = await j.start("browser.launch", () =>
+    (engine === "webkit" ? webkit : chromium).launch(),
+  );
   const context = await browser.newContext({
     viewport: desktop,
     ...contextOptions,
   });
-  await context.grantPermissions(["clipboard-read", "clipboard-write"], {
-    origin: web.origin,
-  });
+  // WebKit does not grant clipboard-read; no WebKit case here uses the clipboard.
+  if (engine === "chromium")
+    await context.grantPermissions(["clipboard-read", "clipboard-write"], {
+      origin: web.origin,
+    });
+  if (initScript) await context.addInitScript(initScript);
   const page = await context.newPage();
   j.observe(page);
   page.setDefaultTimeout(5000);
@@ -1382,8 +1397,38 @@ async function openWith<S extends { taskId: string }>(
   return { f, s, web, page, log };
 }
 
-test("a scroll made while a task read is in flight is kept when the read lands", async (_t, j) => {
-  const { page, log } = await openWith(j, {}, (f) => seed(f));
+/** Chromium without native scroll anchoring, as WebKit is: the page's check and the CSS both say so. */
+function withoutNativeAnchoring() {
+  const supports = CSS.supports.bind(CSS) as (...args: string[]) => boolean;
+  CSS.supports = ((...args: string[]) =>
+    args[0]?.includes("overflow-anchor")
+      ? false
+      : supports(...args)) as typeof CSS.supports;
+  document.addEventListener("DOMContentLoaded", () => {
+    const style = document.createElement("style");
+    style.textContent = "* { overflow-anchor: none !important }";
+    document.head.append(style);
+  });
+}
+
+/**
+ * The operator scrolls between the read's capture of the reading position and its commit;
+ * the "Refreshing" notice the read shows above the conversation must not move the entry either.
+ */
+async function scrollKeptAcrossRead(
+  j: BrowserJourney,
+  variant: "native" | "emulated" | "webkit",
+) {
+  const { page, log } = await openWith(
+    j,
+    {},
+    (f) => seed(f),
+    variant === "webkit"
+      ? { engine: "webkit" }
+      : variant === "emulated"
+        ? { initScript: withoutNativeAnchoring }
+        : {},
+  );
   await log.getByText("Second: all steps ran.").waitFor();
   // The page opens at the latest entry; scroll away only once it has landed there.
   await reachesBottom(page, j, "opens at the latest");
@@ -1424,6 +1469,7 @@ test("a scroll made while a task read is in flight is kept when the read lands",
         requestAnimationFrame(() =>
           requestAnimationFrame(() =>
             resolve({
+              cssSupports: CSS.supports("overflow-anchor", "auto"),
               scrolled: (window as typeof window & { scrolled?: object[] })
                 .scrolled,
               after: {
@@ -1438,17 +1484,29 @@ test("a scroll made while a task read is in flight is kept when the read lands",
       ),
     id,
   );
-  const { scrolled, after } = landed as {
+  const { cssSupports, scrolled, after } = landed as {
+    cssSupports: boolean;
     scrolled: Array<{ scrollY: number; top: number }>;
     after: { scrollY: number; top: number };
   };
   assert.equal(scrolled.length, 1, JSON.stringify(landed));
+  if (variant === "emulated")
+    assert.equal(cssSupports, false, JSON.stringify(landed));
   const kept =
     Math.abs(after.scrollY - scrolled[0]!.scrollY) <= 2 &&
     Math.abs(after.top - scrolled[0]!.top) <= 2;
   if (!kept) await j.capture(page, "scroll-undone", false);
   assert.ok(kept, `scroll kept: ${JSON.stringify(landed)}`);
-});
+}
+
+const scrollKept =
+  "a scroll made while a task read is in flight is kept when the read lands";
+test(scrollKept, (_t, j) => scrollKeptAcrossRead(j, "native"));
+test(`${scrollKept} without native scroll anchoring`, (_t, j) =>
+  scrollKeptAcrossRead(j, "emulated"));
+test(`${scrollKept} in WebKit`, { browserEngine: "webkit" }, (_t, j) =>
+  scrollKeptAcrossRead(j, "webkit"),
+);
 
 const turn = (log: Locator, text: string) =>
   log.locator("article.conv-agent", { hasText: text });

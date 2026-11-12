@@ -239,6 +239,8 @@ function TabPanel({
     </div>
   );
 }
+// Chromium moves `scrollY` itself to hold what is in view as content changes; WebKit does not.
+const nativeScrollAnchoring = CSS.supports("overflow-anchor", "auto");
 /**
  * Keeps a restored reading position while late content lays out above it, until the reader
  * scrolls or types or a moment passes; returns the function that ends the hold.
@@ -529,7 +531,8 @@ export function TaskWorkspace({
     linkFollow = useRef(0),
     followLink = useRef<(link: ConversationTarget) => void>(() => {});
   const scope = useRef(true),
-    anchor = useRef<{ id: string; y: number } | null>(null),
+    // `scrollY` is the page's offset at the capture; an anchor restored from history has none.
+    anchor = useRef<{ id: string; y: number; scrollY?: number } | null>(null),
     anchorElement = useRef<HTMLElement | null>(null),
     bottom = useRef(false),
     first = useRef(true),
@@ -851,11 +854,12 @@ export function TaskWorkspace({
       (e) => !visible.some((child) => child !== e && e.contains(child)),
     );
     anchorElement.current = el ?? null;
-    anchor.current = el
+    const read = el
       ? { id: el.dataset.recordId ?? "", y: el.getBoundingClientRect().top }
       : null;
+    anchor.current = read && { ...read, scrollY };
     state.scrollY = scrollY;
-    state.readingAnchor = anchor.current;
+    state.readingAnchor = read;
     capturedFocus.current =
       document.activeElement instanceof HTMLElement
         ? document.activeElement
@@ -884,13 +888,24 @@ export function TaskWorkspace({
   /**
    * Holds the captured entry where it was just before this commit, so a scroll made since the
    * capture, such as while a read was in flight, is kept; otherwise where it was captured.
+   * Without native scroll anchoring, only a scroll moves `scrollY`, so the scroll since the
+   * capture is kept exactly and a shift from content above the entry is undone.
    */
-  const holdAnchor = (a: { y: number }, el: HTMLElement) =>
-    scrollBy(
-      0,
-      el.getBoundingClientRect().top -
-        (beforeCommit.current?.anchor === a ? beforeCommit.current.top : a.y),
-    );
+  const holdAnchor = (a: { y: number; scrollY?: number }, el: HTMLElement) =>
+    nativeScrollAnchoring
+      ? scrollBy(
+          0,
+          el.getBoundingClientRect().top -
+            (beforeCommit.current?.anchor === a
+              ? beforeCommit.current.top
+              : a.y),
+        )
+      : scrollBy(
+          0,
+          el.getBoundingClientRect().top -
+            a.y +
+            (scrollY - (a.scrollY ?? scrollY)),
+        );
   const refresh = () => {
     capture();
     resource.refresh();
