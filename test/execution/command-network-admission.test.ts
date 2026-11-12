@@ -383,7 +383,7 @@ test("a drafting run, a draft turn and an unadmitted turn never record the unsan
 });
 
 for (const level of ["escalate-approval", "escalate-auto-review"] as const)
-  test(`a task turn is admitted at the ${level} level when its harness has the seam; the rest record strict`, () => {
+  test(`a task turn of either harness is admitted at the ${level} level; the rest record strict`, () => {
     const { f, setSandbox, ready, admit } = admissionFixture();
     try {
       f.db.exec(
@@ -398,11 +398,7 @@ for (const level of ["escalate-approval", "escalate-auto-review"] as const)
       assert.equal(admit(codex), true);
       assert.equal(admit(claude), true);
       assert.equal(f.state.sandboxLevel(codex.id), level);
-      // Claude Code has the escalate-approval seam; auto-review stays Codex only.
-      assert.equal(
-        f.state.sandboxLevel(claude.id),
-        level === "escalate-approval" ? level : "strict",
-      );
+      assert.equal(f.state.sandboxLevel(claude.id), level);
       // A running turn keeps its level; only later admissions see a change.
       assert.equal(f.state.sandboxLevel(earlier.id), "strict");
       const drafting = f.state.create(
@@ -722,7 +718,7 @@ for (const [level, sandboxEscalation] of [
   ["escalate-approval", "approval"],
   ["escalate-auto-review", "auto-review"],
 ] as const)
-  test(`a task turn runs with the escalation policy when admitted at ${level}, in each harness with the seam`, async (t) => {
+  test(`a task turn of either harness runs with the escalation policy when admitted at ${level}`, async (t) => {
     const { service, project, configure, start, turnOf, finished } =
       await recordingService(t);
     for (const harness of ["codex", "claude"] as const) {
@@ -730,16 +726,12 @@ for (const [level, sandboxEscalation] of [
       configure(projectId, { sandbox: level });
       await start(projectId, `${harness} escalate`);
       const intent = await finished();
-      const admitted = harness === "codex" || level === "escalate-approval";
       assert.deepEqual(
         turnOf(intent)?.policy,
-        admitted ? { networkAccess: false, sandboxEscalation } : undefined,
+        { networkAccess: false, sandboxEscalation },
         harness,
       );
-      assert.equal(
-        service.sandboxLevelFor(intent.workId),
-        admitted ? level : "strict",
-      );
+      assert.equal(service.sandboxLevelFor(intent.workId), level);
     }
   });
 
@@ -803,8 +795,7 @@ test("the service hints sandboxEscalation to preflight only for a task turn admi
   for (const [level, hint] of [
     ["strict", "absent"],
     ["escalate-approval", "approval"],
-    // Claude Code is admitted strict at auto-review, so its preflight asks for nothing.
-    ["escalate-auto-review", "absent"],
+    ["escalate-auto-review", "auto-review"],
   ] as const) {
     configure(projectId, { sandbox: level });
     await start(projectId, `task ${level}`);

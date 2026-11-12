@@ -37,7 +37,7 @@ const allowed: Record<string, { reason: string; lines?: string[] }> = {
       '"A project at the unsandboxed level runs its Codex task turns with sandbox policy dangerFullAccess; the approval policy stays never. Draft, read-only and unbound turns stay strict.";',
       '"A project at the escalate-approval level keeps its Codex task turns sandboxed, with an approval policy that allows only sandbox escalation: a turn can ask to run one command outside the sandbox. Draft, read-only and unbound turns stay strict.";',
       '"A project at the escalate-auto-review level keeps its Codex task turns sandboxed, with an approval policy that allows only sandbox escalation, and reviewer auto_review decides each request instead of the operator. Draft, read-only and unbound turns stay strict.";',
-      `? "The sandbox level is escalate-auto-review for this project's Codex task turns; its Claude Code task turns stay strict."`,
+      '"Codex records each decision with its risk level and rationale. A Codex denial offers an advisory overrule in the Inbox while its turn runs: the agent is told the exact action is approved, and its retry is reviewed again. The overrule is not yet proven against a live denial.",',
     ],
   },
   [join("src", "core", "execution-runtime.ts")]: {

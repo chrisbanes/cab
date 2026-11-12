@@ -263,8 +263,9 @@ each acceptance scenario to its evidence and disposition.
   browsers and emulators run (both harnesses), and the escalate-approval level lets a Codex
   or Claude Code task turn run one command outside the sandbox once the operator approves it
   (Claude's classifier can still refuse an approved call); at the
-  escalate-auto-review level Codex's reviewer decides instead, with an advisory operator overrule
-  of a denial. Stop is best-effort: unresolved work
+  escalate-auto-review level the harness's reviewer decides instead: Codex's, with an advisory
+  operator overrule of a denial, or Claude Code's auto-mode classifier, with undecided calls
+  left to the operator. Stop is best-effort: unresolved work
   can remain held for reconciliation. See the
   [execution policy](docs/design/standalone.md#default-execution-policy) and
   [acceptance plan](docs/acceptance.md) for the boundaries and required evidence.

@@ -34,6 +34,7 @@ import {
   type RuntimeTurnPolicy,
   type RuntimeTurnSettings,
   type SandboxEscalationEvent,
+  type SandboxReviewEvent,
   type UnexpectedRequest,
 } from "./codex.js";
 import {
@@ -232,6 +233,14 @@ const postToolUseSchema = z.discriminatedUnion("hook_event_name", [
     ...subagentFields,
   }),
 ]);
+/** SDK 0.3.319 `SDKPermissionDeniedMessage`: an auto-denied call, e.g. by the classifier. */
+const permissionDeniedSchema = z.object({
+  type: z.literal("system"),
+  subtype: z.literal("permission_denied"),
+  tool_use_id: z.string().min(1),
+  decision_reason_type: z.string().optional(),
+  decision_reason: z.string().optional(),
+});
 const bashResponseSchema = z.object({
   stdout: z.string(),
   stderr: z.string(),
@@ -639,7 +648,7 @@ interface TurnOutcome {
   failure?: RuntimeTerminalFailureEvidence;
 }
 
-/** One flagged Bash call of an escalate-approval turn, keyed by its tool_use_id. */
+/** One flagged Bash call held for the operator, keyed by its tool_use_id. */
 interface ClaudeEscalation {
   identity: NativeInputEndpointIdentity;
   /** Answers the held hook; cleared once it has been answered or ended. */
@@ -653,11 +662,25 @@ interface ClaudeTurn {
   threadId: string;
   turnId: string;
   abort: AbortController;
-  /** Set on a task turn admitted at escalate-approval. */
-  escalation?: "approval";
+  /** Set on a task turn admitted at an escalate level. */
+  escalation?: "approval" | "auto-review";
   /** Claude Code's init reported `auto`; until then flagged Bash is refused. */
   autoConfirmed: boolean;
   escalations: Map<string, ClaudeEscalation>;
+  /**
+   * Flagged Bash calls an escalate-auto-review hook passed to the classifier, by tool_use_id.
+   * `routed` once the classifier left the call to `canUseTool`, so the operator decides it.
+   */
+  reviewed: Map<
+    string,
+    {
+      fields: Record<string, unknown>;
+      cwd: string | undefined;
+      routed: boolean;
+      /** When the hook passed it on; an approval's duration starts here. */
+      passedAt: number;
+    }
+  >;
   /** Why the turn's stream was rejected, when a named reason applies. */
   malformedReason?: string;
   child?: ChildProcess;
@@ -725,6 +748,7 @@ export class ClaudeRuntime implements Runtime {
     turnId: string;
   }) => void;
   private sandboxEscalation?: (event: SandboxEscalationEvent) => boolean;
+  private sandboxReview?: (event: SandboxReviewEvent) => void;
 
   constructor(private readonly options: ClaudeRuntimeOptions) {}
 
@@ -762,6 +786,10 @@ export class ClaudeRuntime implements Runtime {
     listener: (event: SandboxEscalationEvent) => boolean,
   ): void {
     this.sandboxEscalation = listener;
+  }
+  /** Classifier decisions of escalate-auto-review turns, as far as Claude Code shows them. */
+  onSandboxReview(listener: (event: SandboxReviewEvent) => void): void {
+    this.sandboxReview = listener;
   }
 
   /** Answers a held escalation once; false when it is not held by this generation. */
@@ -967,14 +995,14 @@ export class ClaudeRuntime implements Runtime {
   }
 
   /**
-   * An escalate-approval turn needs auto mode, looked up by the model's `value` as the settings
-   * read lists it; it is never downgraded to another mode.
+   * An escalate turn needs auto mode, looked up by the model's `value` as the settings read lists
+   * it; it is never downgraded to another mode.
    */
   private autoModeProblem(
     settings: RuntimeTurnSettings | undefined,
     escalation: "approval" | "auto-review" | undefined,
   ): string | undefined {
-    if (escalation !== "approval") return undefined;
+    if (escalation === undefined) return undefined;
     const model = settings?.model ?? "default";
     return this.autoModels.has(model)
       ? undefined
@@ -1144,11 +1172,12 @@ export class ClaudeRuntime implements Runtime {
     if ("unavailable" in environment) throw new Error(environment.unavailable);
     const sandboxed = policy?.access === "read-only" || !policy?.skipSandbox;
     // Only a writable task turn escalates; draft and read-only turns stay strict.
-    const escalate =
-      policy?.sandboxEscalation === "approval" && policy.access !== "read-only";
+    const escalation =
+      policy?.access === "read-only" ? undefined : policy?.sandboxEscalation;
+    const escalate = escalation !== undefined;
     const problem =
       this.settingsProblem(settings) ??
-      this.autoModeProblem(settings, escalate ? "approval" : undefined);
+      this.autoModeProblem(settings, escalation);
     if (problem) throw new Error(`Claude runtime unavailable: ${problem}`);
     const model = settings?.model ?? undefined;
     const effort =
@@ -1181,9 +1210,10 @@ export class ClaudeRuntime implements Runtime {
       threadId,
       turnId: randomUUID(),
       abort: new AbortController(),
-      ...(escalate ? { escalation: "approval" as const } : {}),
+      ...(escalation ? { escalation } : {}),
       autoConfirmed: false,
       escalations: new Map(),
+      reviewed: new Map(),
       released: false,
       interrupted: false,
       malformed: false,
@@ -1215,7 +1245,7 @@ export class ClaudeRuntime implements Runtime {
     const canUseTool: CanUseTool = async (
       toolName,
       toolInput,
-      { toolUseID },
+      { toolUseID, signal },
     ) => {
       // Auto mode's classifier may still ask about a call the operator accepted (#1682 T1,
       // branch B); that one call is allowed once, so it opens no second Inbox item.
@@ -1223,6 +1253,21 @@ export class ClaudeRuntime implements Runtime {
       if (toolName === "Bash" && accepted?.accepted && !accepted.permitted) {
         accepted.permitted = true;
         return { behavior: "allow", updatedInput: toolInput };
+      }
+      // A flagged call the classifier left undecided goes to the operator, as at escalate-approval.
+      const reviewed = turn.reviewed.get(toolUseID);
+      if (toolName === "Bash" && reviewed && !reviewed.routed) {
+        reviewed.routed = true;
+        const refusal = await this.holdEscalation(
+          turn,
+          toolUseID,
+          reviewed.cwd,
+          reviewed.fields,
+          signal,
+        );
+        return refusal === undefined
+          ? { behavior: "allow", updatedInput: toolInput }
+          : { behavior: "deny", message: refusal };
       }
       this.unexpected?.({
         method: `claude/canUseTool:${toolName}`,
@@ -1566,6 +1611,7 @@ export class ClaudeRuntime implements Runtime {
       // An error result throws after it is yielded; outcome is decided below.
     }
     this.endEscalations(turn, "Turn ended");
+    turn.reviewed.clear();
     const exitVerified = await this.verifyExit(turn);
     turn.done = true;
     if (!turn.released) {
@@ -1649,6 +1695,18 @@ export class ClaudeRuntime implements Runtime {
         this.conversation?.({ ...item, kind: "started" });
         this.conversation?.({ ...item, kind: "completed", text: block.text });
       });
+      return true;
+    }
+    if (
+      head.data.type === "system" &&
+      head.data.subtype === "permission_denied"
+    ) {
+      const denied = permissionDeniedSchema.safeParse(message);
+      if (denied.success && denied.data.decision_reason_type === "classifier")
+        this.recordClassifierDecision(turn, denied.data.tool_use_id, {
+          status: "denied",
+          rationale: denied.data.decision_reason ?? null,
+        });
       return true;
     }
     if (head.data.type === "result") {
@@ -1740,9 +1798,29 @@ export class ClaudeRuntime implements Runtime {
     ) {
       if (!fields.success || !turn.escalation)
         return refuse("Commands never run outside the sandbox");
+      if (turn.escalation === "auto-review") {
+        // The allowlist above has run; the classifier decides only this flagged Bash call.
+        if (!turn.autoConfirmed)
+          return refuse("Claude Code has not confirmed auto permission mode");
+        // One decision per call: a repeated id could otherwise be both an escalation and a review.
+        if (
+          typeof fields.data.command !== "string" ||
+          turn.reviewed.has(input.data.tool_use_id) ||
+          turn.escalations.has(input.data.tool_use_id)
+        )
+          return refuse("Commands never run outside the sandbox");
+        turn.reviewed.set(input.data.tool_use_id, {
+          fields: fields.data,
+          cwd: input.data.cwd,
+          routed: false,
+          passedAt: Date.now(),
+        });
+        return {};
+      }
       const refusal = await this.holdEscalation(
         turn,
-        input.data,
+        input.data.tool_use_id,
+        input.data.cwd,
         fields.data,
         signal,
       );
@@ -1782,11 +1860,12 @@ export class ClaudeRuntime implements Runtime {
 
   /**
    * Sends a flagged Bash call to the operator and waits for the answer, the turn's end or the
-   * hook's own abort. Undefined allows the call; otherwise the refusal reason.
+   * caller's own abort. Undefined allows the call; otherwise the refusal reason.
    */
   private async holdEscalation(
     turn: ClaudeTurn,
-    call: z.infer<typeof hookInputSchema>,
+    toolUseId: string,
+    cwd: string | undefined,
     fields: Record<string, unknown>,
     signal: AbortSignal | undefined,
   ): Promise<string | undefined> {
@@ -1794,16 +1873,16 @@ export class ClaudeRuntime implements Runtime {
     if (!turn.autoConfirmed)
       return "Claude Code has not confirmed auto permission mode";
     const identity = nativeInputEndpointIdentitySchema.safeParse({
-      requestId: call.tool_use_id,
+      requestId: toolUseId,
       runtimeGeneration: this.generation,
       threadId: turn.threadId,
       turnId: turn.turnId,
-      itemId: call.tool_use_id,
+      itemId: toolUseId,
     });
     if (
       typeof fields.command !== "string" ||
       !identity.success ||
-      turn.escalations.has(call.tool_use_id) ||
+      turn.escalations.has(toolUseId) ||
       turn.abort.signal.aborted ||
       signal?.aborted
     )
@@ -1818,21 +1897,21 @@ export class ClaudeRuntime implements Runtime {
       accepted: false,
       permitted: false,
     };
-    turn.escalations.set(call.tool_use_id, entry);
+    turn.escalations.set(toolUseId, entry);
     if (
       !this.emitEscalation({
         kind: "requested",
         identity: identity.data,
         command: fields.command,
-        cwd: call.cwd ?? turn.workspace[0] ?? "",
+        cwd: cwd ?? turn.workspace[0] ?? "",
         reason:
           typeof fields.description === "string" ? fields.description : null,
       })
     ) {
-      turn.escalations.delete(call.tool_use_id);
+      turn.escalations.delete(toolUseId);
       return refused;
     }
-    // The hook's own abort is its timeout or the CLI cancelling it.
+    // The caller's abort is the hook's timeout or the CLI cancelling the hook or permission ask.
     const hookEnded = () =>
       this.endEscalation(entry, "Claude Code cancelled the held call");
     const turnEnded = () => this.endEscalation(entry, "Turn stopped");
@@ -1845,7 +1924,7 @@ export class ClaudeRuntime implements Runtime {
       entry.accepted = true;
       return undefined;
     }
-    turn.escalations.delete(call.tool_use_id);
+    turn.escalations.delete(toolUseId);
     if (decision === "decline")
       this.emitEscalation({
         kind: "completed",
@@ -1898,6 +1977,53 @@ export class ClaudeRuntime implements Runtime {
     });
   }
 
+  /**
+   * A classifier decision on a flagged call an escalate-auto-review hook passed through. It has no
+   * risk level or rationale of its own and no overrule; a call routed to the operator is not one.
+   */
+  private recordClassifierDecision(
+    turn: ClaudeTurn,
+    toolUseId: string,
+    decision:
+      | { status: "approved"; exitCode: number | null }
+      | { status: "denied"; rationale: string | null },
+  ): void {
+    const call = turn.reviewed.get(toolUseId);
+    const generation = this.generation;
+    if (!call || !generation) return;
+    turn.reviewed.delete(toolUseId);
+    if (call.routed) return;
+    const target = {
+      runtimeGeneration: generation,
+      threadId: turn.threadId,
+      turnId: turn.turnId,
+      targetItemId: toolUseId,
+    };
+    try {
+      this.sandboxReview?.({
+        kind: "review",
+        identity: { ...target, reviewId: toolUseId },
+        command: String(call.fields.command),
+        cwd: call.cwd ?? turn.workspace[0] ?? "",
+        status: decision.status,
+        riskLevel: null,
+        rationale: decision.status === "denied" ? decision.rationale : null,
+        overrulable: false,
+      });
+      if (decision.status === "approved")
+        this.sandboxReview?.({
+          kind: "itemCompleted",
+          target,
+          exitCode: decision.exitCode,
+          // The approval is inferred only after the command ran, so the service cannot time it
+          // from the decision; this span from the hook also includes the classifier's decision.
+          durationMs: Math.max(0, Date.now() - call.passedAt),
+        });
+    } catch {
+      // Evidence only: a failing listener never alters the turn.
+    }
+  }
+
   /** Records the tool outcome; the result is always `{}` so capture never steers the turn. */
   private async postToolUse(turn: ClaudeTurn, raw: unknown) {
     const input = postToolUseSchema.safeParse(raw);
@@ -1912,6 +2038,11 @@ export class ClaudeRuntime implements Runtime {
         output: code ? call.error.slice(code[0].length) : call.error,
       });
       this.completeEscalation(turn, call.tool_use_id, exitCode);
+      // It ran with no permission ask, so the classifier approved it.
+      this.recordClassifierDecision(turn, call.tool_use_id, {
+        status: "approved",
+        exitCode,
+      });
       return {};
     }
     if (call.tool_name === todoTool) {
@@ -1928,6 +2059,10 @@ export class ClaudeRuntime implements Runtime {
         ? 0
         : null;
     this.completeEscalation(turn, call.tool_use_id, exitCode);
+    this.recordClassifierDecision(turn, call.tool_use_id, {
+      status: "approved",
+      exitCode,
+    });
     this.emitTool(turn, "completed", call, {
       status: "completed",
       exitCode,

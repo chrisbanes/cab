@@ -771,8 +771,9 @@ export interface RuntimeTurnPolicy {
   skipSandbox?: boolean;
   /**
    * Set when a task turn was admitted at an escalate level: the turn keeps its sandbox and may
-   * ask to run one command outside it. Codex takes both levels; Claude Code takes `approval`,
-   * where its PreToolUse hook holds the call for the operator (ADR-1034).
+   * ask to run one command outside it, in either harness. Claude Code's PreToolUse hook holds the
+   * call for the operator at `approval`, and passes it to Claude's classifier at `auto-review`
+   * (ADR-1034).
    */
   sandboxEscalation?: "approval" | "auto-review";
 }
