@@ -337,8 +337,8 @@ _Avoid_: Sandbox bypass, permission grant, when referring to one approved comman
 **Reviewer decision**:
 Codex's reviewer approving or denying one command that a task turn admitted at
 `escalate-auto-review` asks to run outside the sandbox. cab records it with its risk level and
-rationale, and an approved command's exit code and duration. A denial offers the operator an
-advisory overrule in the Inbox while its turn runs: Codex then tells the agent the exact action
+rationale, and an approved command's exit code and duration. A denial of a command in the task
+workspace offers the operator an advisory overrule in the Inbox while its turn runs: Codex then tells the agent the exact action
 is approved, and the agent's retry is reviewed again.
 _Avoid_: Operator approval, when the reviewer decided
 

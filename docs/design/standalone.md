@@ -340,6 +340,10 @@ approval policy that allows only sandbox escalation, with reviewer `user`; each 
 run outside the sandbox becomes an Inbox approval the operator answers `accept` or `decline`,
 declined after 15 minutes unanswered and withdrawn when its turn ends. A Claude Code task turn at
 this level is admitted `strict`. An approved command has the same access as an unsandboxed one.
+At `escalate-auto-review` a Codex task turn sends the same policy with reviewer `auto_review`, so
+Codex's reviewer decides each escalation; cab records each decision, and a denial of a command in
+the task workspace offers the operator an advisory Inbox overrule while the turn runs. A Claude
+Code task turn at this level is admitted `strict`.
 The three values are recorded at admission (`execution_intent_network_access`,
 `execution_intent_local_listening` and `execution_intent_sandbox_level`), so a later change reaches only later admissions and a
 running turn keeps its policy. Claude Code turns, drafting runs and requests without a task

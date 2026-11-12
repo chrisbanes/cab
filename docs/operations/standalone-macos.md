@@ -1189,7 +1189,8 @@ the project stay strict for now.
   agent may retry it, and the retry is reviewed again, so the overrule is advisory. Declining
   keeps the denial. It is withdrawn when the turn ends or stops. The overrule has not yet been
   proven against a live denial.
-- A request the reviewer does not decide reaches the Inbox as at the escalate-approval level.
+- A request that still reaches cab, rather than the reviewer, waits in the Inbox as at the
+  escalate-approval level. A review that times out or is aborted counts as a denial.
 
 ## Startup snapshot
 
