@@ -28,6 +28,7 @@ import type {
   InboxEvent,
   OperatorAttention,
   ResultReview,
+  SandboxEscalationRecord,
   TaskCompletionRequest,
   UnresolvedResultDestination,
 } from "../core/coordination.js";
@@ -220,6 +221,8 @@ export interface CoordinationTaskView {
     }
   >;
   approvals: CoordinationInteraction[];
+  /** The task's sandbox escalations, oldest first; command and cwd are in their approval's material. */
+  sandboxEscalations: SandboxEscalationRecord[];
   resultReviews: ResultReview[];
   completionRequests: TaskCompletionRequest[];
   routing: {
@@ -574,6 +577,7 @@ export class CoordinationView {
       approvals: interactions.filter(
         (interaction) => interaction.kind === "approval",
       ),
+      sandboxEscalations: this.coordination.sandboxEscalations(id),
       resultReviews: this.coordination.resultReviews(id),
       completionRequests,
       routing: { dispositions, attempts },

@@ -14,6 +14,10 @@ import { useCommandSend } from "./command-send.js";
 import { SendFeedback } from "./coordination-actions.js";
 import { ActionLink, Button, ShortId, StatusBadge } from "./components.js";
 import {
+  sandboxEscalationResultLine,
+  sandboxEscalationWorkspaceLine,
+} from "../../src/operator/sandbox-escalation-copy.js";
+import {
   admissionLine,
   evidenceNotice,
   evidenceWarning,
@@ -355,12 +359,44 @@ export function TaskExecution({
           </ul>
         )}
       </section>
+      <SandboxEscalations escalations={data.sandboxEscalations ?? []} />
       <Dependencies
         data={data}
         client={client}
         session={session}
         onChanged={onChanged}
       />
+    </section>
+  );
+}
+
+/** Each command the task's turns asked to run outside the sandbox, and how it ended. */
+function SandboxEscalations({
+  escalations,
+}: {
+  escalations: NonNullable<Data["sandboxEscalations"]>;
+}) {
+  if (escalations.length === 0) return null;
+  return (
+    <section aria-labelledby="execution-escalations">
+      <h4 id="execution-escalations">Sandbox escalations</h4>
+      <ol className="execution-list">
+        {escalations.map((e) => (
+          <li key={e.interactionId} data-escalation={e.outcome}>
+            {e.command === null ? (
+              "Command unavailable"
+            ) : (
+              <code>{e.command}</code>
+            )}
+            <span className="metadata muted">
+              {" "}
+              in {e.cwd ?? "an unavailable directory"} ·{" "}
+              {sandboxEscalationWorkspaceLine(e.workspace)}
+            </span>
+            <p>{sandboxEscalationResultLine(e)}</p>
+          </li>
+        ))}
+      </ol>
     </section>
   );
 }

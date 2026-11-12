@@ -61,6 +61,7 @@ import { connectionOrigin, ServiceClient } from "./transport.js";
 import type { CliDeps, Result, Values } from "./types.js";
 import { rejectUnusedFlags } from "./write.js";
 import { stackSummary } from "../operator/stacking-copy.js";
+import { sandboxEscalationResultLine } from "../operator/sandbox-escalation-copy.js";
 
 export type { CliDeps } from "./types.js";
 
@@ -947,6 +948,10 @@ async function run(
         ...(read.data.stackDelivery?.failedBlocker
           ? ["Stacked blocker failed: Unstack or Cancel this task"]
           : []),
+        ...(read.data.sandboxEscalations ?? []).map(
+          (e) =>
+            `Escalation ${e.interactionId}: ${e.command ?? "command unavailable"} in ${e.cwd ?? "an unavailable directory"} · ${sandboxEscalationResultLine(e)}`,
+        ),
         ...read.data.unresolvedResults.map((r) =>
           r.availability === "available"
             ? `Undelivered result ${r.resultId}: cab result deliver ${task.id} ${r.resultId}`

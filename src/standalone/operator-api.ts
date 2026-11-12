@@ -40,8 +40,10 @@ import {
 } from "../core/command-results.js";
 import type {
   CoordinationInteraction,
+  SandboxEscalationRecord,
   TaskCompletionRequest,
 } from "../core/coordination.js";
+import { sandboxEscalationOutcome } from "../operator/sandbox-escalation-copy.js";
 import type { OperatorCommentReview } from "../core/delivery.js";
 import {
   absentBranchHead,
@@ -418,6 +420,17 @@ function retainedTextLineCount(text: string) {
   for (const character of text) if (character === "\n") count++;
   return text.endsWith("\n") ? count : count + 1;
 }
+/** The material a sandbox escalation recorded; anything else reads as withheld. */
+const escalationMaterialSchema = z.object({
+  command: z.string(),
+  cwd: z.string(),
+  workspace: z.object({
+    head: z.string().nullable(),
+    branch: z.string().nullable(),
+    dirty: z.boolean().nullable(),
+  }),
+});
+
 export class OperatorApiError extends Error {
   constructor(
     readonly status: number,
@@ -4178,6 +4191,33 @@ export class OperatorApi {
       updatedAt: i.updatedAt,
     };
   }
+  /** An escalation's evidence; its command, cwd and workspace come from its approval's disclosed material. */
+  private sandboxEscalation(
+    e: SandboxEscalationRecord,
+    approvals: readonly CoordinationInteraction[],
+    excluded: readonly string[] | undefined,
+  ) {
+    const approval = approvals.find((a) => a.interactionId === e.interactionId);
+    const material = escalationMaterialSchema.safeParse(
+      approval ? this.interaction(approval, excluded).material : null,
+    );
+    const m = material.success ? material.data : null;
+    return {
+      interactionId: e.interactionId,
+      command: m?.command ?? null,
+      cwd: m?.cwd ?? null,
+      workspace: m?.workspace ?? null,
+      decider: e.decider,
+      decision: e.decision,
+      outcome: sandboxEscalationOutcome(e),
+      exitCode: e.exitCode,
+      durationMs: e.durationMs,
+      durationSource: e.durationSource,
+      requestedAt: e.requestedAt,
+      decidedAt: e.decidedAt,
+      completedAt: e.completedAt,
+    };
+  }
   /** The repository's link; an unlinked repository is taken to be on github.com. */
   private link(taskId: string, repositoryId: string) {
     const d = this.domain();
@@ -4542,6 +4582,9 @@ export class OperatorApi {
       }),
       questions: view.questions.map((i) => this.interaction(i, excluded)),
       approvals: view.approvals.map((i) => this.interaction(i, excluded)),
+      sandboxEscalations: view.sandboxEscalations.map((e) =>
+        this.sandboxEscalation(e, view.approvals, excluded),
+      ),
       resultReviews: view.resultReviews.map((r) => ({
         lifecycle: this.inboxLifecycleView(r.reviewId, excluded),
         reviewId: r.reviewId,

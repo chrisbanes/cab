@@ -2513,6 +2513,17 @@ export class CoordinationStore {
     return row ? sandboxEscalationRecord(row) : undefined;
   }
 
+  /** A task's escalations, oldest first. */
+  sandboxEscalations(taskId: string): SandboxEscalationRecord[] {
+    return (
+      this.db
+        .prepare(
+          "SELECT * FROM sandbox_escalations WHERE taskId = ? ORDER BY requestedAt, interactionId",
+        )
+        .all(uuid.parse(taskId)) as Row[]
+    ).map(sandboxEscalationRecord);
+  }
+
   /**
    * Declines an escalation left unanswered for 15 minutes, or withdraws one whose turn or runtime
    * generation ended (`obsolete`, no decision). A decision already recorded, by the operator or an
