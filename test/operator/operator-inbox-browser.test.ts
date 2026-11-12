@@ -1558,10 +1558,14 @@ test("the request pane shows kind, position, identities and a sticky response ba
     )
       taskReads.push(request.url());
   });
-  // The first workspace read can land after the first Inbox read and make the Inbox reread once
-  // more, so which side of the click that reread falls on depends on load. Each Inbox read that
-  // completes from the click on may bring one task reread, and nothing else may.
-  let inboxReads = 0,
+  // Seeded requests created in the same second sort by random id, so the wide Inbox may open the
+  // approval by itself: its one selection read then comes before the click, and the click reads
+  // nothing. Only an Inbox read that arrives after the first approval read starts (the reread
+  // once the first workspace read lands, or a poll on the running installed clock) may bring one
+  // task reread, so only those are credited.
+  // shortcut: an Inbox response that arrives before that read starts but commits after it settles
+  // goes uncredited (a false failure); that needs a whole task round trip inside one Inbox commit.
+  let inboxReadsSinceSelection = 0,
     inboxInFlight = 0;
   const isInbox = (url: string) =>
     new URL(url).pathname === "/api/operator/inbox";
@@ -1574,16 +1578,16 @@ test("the request pane shows kind, position, identities and a sticky response ba
   page.on("requestfinished", settled);
   page.on("requestfailed", settled);
   page.on("response", (r) => {
-    if (isInbox(r.url()) && r.ok()) inboxReads++;
+    if (isInbox(r.url()) && r.ok() && taskReads.length)
+      inboxReadsSinceSelection++;
   });
   const rows = page.locator(".inbox-row"),
     detail = page.getByRole("region", { name: "Selected request" });
   await rows.nth(3).waitFor();
-  // A read counted before the click whose result commits after it still rereads the task, so
-  // every started Inbox read finishes and renders before the count is taken.
+  // When a question opened first, an Inbox read still in flight at the click would be credited
+  // without rereading the approval, so started reads finish first.
   await until(() => inboxInFlight === 0, "no Inbox read in flight");
   await settle(page);
-  const inboxReadsBeforeClick = inboxReads;
   phase = "selection";
   readJournal.push(`selection starts with ${taskReads.length} task reads`);
   await page.locator('.inbox-row[data-kind="approval"]').click();
@@ -1652,13 +1656,12 @@ test("the request pane shows kind, position, identities and a sticky response ba
   await captureBrowserEvidence(page, "1366-inbox-approval-pane", {
     fullPage: false,
   });
-  // One task read per selection, and at most one more per Inbox read (a poll, or a reread
-  // after the workspace changes), however many parts of the page show the task.
+  // One task read per selection, and at most one more per Inbox read since it (a poll, or a
+  // reread after the workspace changes), however many parts of the page show the task.
   await settle(page);
   assert.ok(
-    taskReads.length >= 1 &&
-      taskReads.length - 1 <= inboxReads - inboxReadsBeforeClick,
-    `${taskReads.length} task reads for ${inboxReads - inboxReadsBeforeClick} Inbox reads; ${JSON.stringify(readJournal)}`,
+    taskReads.length >= 1 && taskReads.length - 1 <= inboxReadsSinceSelection,
+    `${taskReads.length} task reads for ${inboxReadsSinceSelection} Inbox reads; ${JSON.stringify(readJournal)}`,
   );
   const reread = page.waitForResponse(
     (r) =>
@@ -1669,8 +1672,8 @@ test("the request pane shows kind, position, identities and a sticky response ba
   await settle(page);
   assert.ok(
     taskReads.length - 1 >= 1 &&
-      taskReads.length - 1 <= inboxReads - inboxReadsBeforeClick,
-    `${taskReads.length - 1} task rereads for ${inboxReads - inboxReadsBeforeClick} Inbox reads`,
+      taskReads.length - 1 <= inboxReadsSinceSelection,
+    `${taskReads.length - 1} task rereads for ${inboxReadsSinceSelection} Inbox reads`,
   );
 
   // Previous/Next move through the filtered queue as a row click does.
