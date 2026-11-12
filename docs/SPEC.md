@@ -1388,7 +1388,8 @@ typed values and says so. The service lists folders only under the operator's ho
 repository is recorded with a provisional identity until discovery can name it.
 Advanced routing and external source configuration can follow later.
 Task tracker defaults to GitHub. Jira Cloud records the chosen tracker without a site,
-credential or selections; the ready check links to Task source to configure them.
+credential or selections; the ready check links to Task source to configure them
+and shows the informational Jira credential line for the chosen site.
 Repository/code-host setup remains independent of the task tracker. Jira setup never
 links a GitHub Project or records a GitHub source credential.
 The Task source tab configures either tracker and shows a top-level chooser, locked

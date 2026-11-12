@@ -73,9 +73,12 @@ note, **Cancel** and then **Create paused project** at every width.
    project" alert:
    - Lists what was recorded (instructions, repository access, linked GitHub
      Project) and states that nothing has run. Repositories were verified before the
-     project was recorded, so no checkout item can follow. The GitHub source
-     credential line, with its **Check again**, appears only when the project has a
-     repository: setup records the credential only then.
+     project was recorded, so no checkout item can follow. The task-source
+     credential line follows the tracker. A GitHub source shows its GitHub source
+     credential when the project has a repository on any code host: setup records
+     the credential only then. A Jira source always shows the Jira credential for its
+     chosen site, including "no site chosen". The line is informational and never
+     holds Resume; when it links to Task source settings, **Check again** re-reads it.
    - Lists any item that would make the lead's work wait, from the workspace and
      readiness reads: no lead agent, the lead's runtime unavailable or not enabled,
      a model or reasoning effort the lead's runtime does not accept (Fix opens the
@@ -122,9 +125,10 @@ note, **Cancel** and then **Create paused project** at every width.
 
 The Task source choice in step 1 defaults to GitHub. Jira Cloud records only the
 tracker: setup collects no Jira site, credential or JQL. The ready check links to
-Task source to configure them afterwards. Repository discovery and code hosts remain
-independent; Jira setup can still link GitHub repositories, but does not link a
-GitHub Project or record a GitHub source credential.
+Task source to configure them afterwards and reports the Jira credential line.
+Repository discovery and code hosts remain independent; Jira setup can still link
+GitHub repositories, but does not link a GitHub Project or record a GitHub source
+credential.
 
 ## Recovery
 

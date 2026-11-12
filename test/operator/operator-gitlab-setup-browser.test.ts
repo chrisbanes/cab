@@ -84,6 +84,20 @@ test("Setup lists GitLab projects and creates a GitLab link from a picked checko
   await page.getByText(`Created Forge. It's paused.`).waitFor();
   await page.getByText(`${host}/group/app (main)`, { exact: false }).waitFor();
   const [project] = f.service.domain().projects();
+  // The GitHub task source still reports its credential, whatever the code host.
+  const ready = page.getByRole("region", { name: "Ready check" });
+  await ready
+    .getByText(
+      "GitHub source credential: not set. The source won't sync until one is set.",
+    )
+    .waitFor();
+  assert.equal(
+    await ready
+      .getByRole("link", { name: "Task source settings" })
+      .getAttribute("href"),
+    `/projects/${project?.id}/settings?tab=source`,
+  );
+  await ready.getByRole("button", { name: "Check again" }).waitFor();
   const links = f.service.domain().repositoryLinks(String(project?.id)).links;
   assert.deepEqual(
     links.map((l) => ({

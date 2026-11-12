@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useId, useRef, useState } from "react";
 import {
   composerOptionsSchema,
+  issueTrackerCredentialsSchema,
   type OperatorCommand,
   projectConfigurationSchema,
   sourceObservationSchema,
@@ -16,7 +17,9 @@ import {
   type ReadinessRead,
   readyCheckItems,
   deliveryReadyLine,
+  jiraCredentialLine,
   sourceCredentialLine,
+  sourceCredentialShown,
 } from "./setup-model.js";
 import type { TabProps } from "./project-config.js";
 import type { ConfigurationDraft } from "./settings-state.js";
@@ -121,10 +124,37 @@ export function ReadyCheck({
     // Only the linked Project's Import issues panel reads them.
     Boolean(created.githubProject),
   );
-  const credential = sourceCredentialLine(
-    projectId,
-    configuration.state.error ? null : configuration.state.data?.data.source,
+  const source = configuration.state.error
+    ? null
+    : configuration.state.data?.data.source;
+  // The loaded configuration names the current tracker; until then, the created one.
+  const tracker = configuration.state.data
+    ? (configuration.state.data.data.source.tracker ?? "github")
+    : (created.tracker ?? "github");
+  // Jira usability lives with the installation's site credentials, not the configuration.
+  const jiraCredentials = useOperatorResource(
+    csrf,
+    useCallback(
+      (signal: AbortSignal) =>
+        p.client.read(
+          "/api/operator/issue-tracker-credentials",
+          issueTrackerCredentialsSchema,
+          signal,
+        ),
+      [p.client],
+    ),
+    tracker === "jira",
   );
+  const credential =
+    tracker === "jira"
+      ? jiraCredentialLine(
+          projectId,
+          source,
+          jiraCredentials.state.error
+            ? null
+            : jiraCredentials.state.data?.data.credentials,
+        )
+      : sourceCredentialLine(projectId, source);
   const delivery = created.repositories?.length
     ? deliveryReadyLine(
         projectId,
@@ -134,16 +164,15 @@ export function ReadyCheck({
         configuration.state.data?.data.repositories.links ?? [],
       )
     : null;
-  // Only a project with a repository records a source credential; a repository-free
-  // project shows no credential line and has none to check again.
-  // The source credential line concerns GitHub sources only.
-  const withRepositories = Boolean(
-    created.tracker !== "jira" &&
-      created.repositories?.some((r) => r.codeHost !== "gitlab"),
+  // A GitHub source records a credential only with a repository, on any code host, so a
+  // repository-free GitHub project has no line to check again; a Jira source always has one.
+  const shown = sourceCredentialShown(
+    tracker,
+    created.repositories?.length ?? 0,
   );
   // A source fixed in another tab is re-read by Check again, as readiness items are.
   const recheckCredential =
-    (withRepositories && Boolean(credential.link)) ||
+    (shown && Boolean(credential.link)) ||
     Boolean(delivery?.link) ||
     (Boolean(created.repositories?.length) &&
       Boolean(configuration.state.error));
@@ -224,7 +253,7 @@ export function ReadyCheck({
           {created.githubProject && (
             <li>GitHub Project linked as an inactive discovery source.</li>
           )}
-          {withRepositories && (
+          {shown && (
             <li id={credentialReasonId}>
               {credential.text}
               {credential.link && (
@@ -337,7 +366,7 @@ export function ReadyCheck({
             )}
             <p className="metadata muted">
               {(items.some((item) => item.link) ||
-                (withRepositories && credential.link) ||
+                (shown && credential.link) ||
                 delivery?.link) &&
                 "Links open in a new tab. "}
               Fix the item, then check again here. If you leave this page,
@@ -352,6 +381,7 @@ export function ReadyCheck({
                   void readiness.refresh();
                   void options.refresh();
                   void configuration.refresh();
+                  if (tracker === "jira") void jiraCredentials.refresh();
                   if (created.githubProject) void observations.refresh();
                   p.refresh();
                   // The result takes focus: the button leaves when a failed read starts again.
