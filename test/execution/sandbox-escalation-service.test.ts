@@ -853,6 +853,57 @@ test("a reviewer approval is recorded with its risk, rationale, exit code and du
   });
 });
 
+test("a review bound on arrival is recorded with its command result even when the turn completes before the write", async (t) => {
+  const s = await autoReviewTask(t);
+  // Hold the review queue, as a slow workspace Git read or an earlier write would.
+  let release!: () => void;
+  const queue = s.f.service as unknown as { sandboxReviewQueue: Promise<void> };
+  queue.sandboxReviewQueue = new Promise<void>((done) => {
+    release = done;
+  });
+  const at = s.reviewIdentity();
+  const base = {
+    kind: "review" as const,
+    identity: at,
+    command: "node chromium.mjs reviewed",
+    cwd: s.worktree,
+    overrulable: false,
+  };
+  s.runtime.emitReview({
+    ...base,
+    status: "inProgress",
+    riskLevel: null,
+    rationale: null,
+  });
+  s.runtime.emitReview({
+    ...base,
+    status: "approved",
+    riskLevel: "low",
+    rationale: "The reviewer approved it",
+  });
+  const { reviewId: _reviewId, ...target } = at;
+  s.runtime.emitReview({
+    kind: "itemCompleted",
+    target,
+    exitCode: 0,
+    durationMs: 42,
+  });
+  s.runtime.complete(s.runtime.turns);
+  await waitFor(
+    () =>
+      s.f.service.list().find((w) => w.workId === s.work.workId)?.state !==
+      "running",
+  );
+  release();
+  await s.settled();
+  const record = s.reviewRecord(at);
+  assert.equal(record?.workId, s.work.workId);
+  assert.equal(record?.taskId, s.seeded.taskId);
+  assert.equal(record?.decision, "accept");
+  assert.equal(record?.exitCode, 0);
+  assert.equal(record?.durationMs, 42);
+});
+
 test("a timed-out or aborted review is recorded as a decline, and a request that still reaches cab follows the escalate-approval path", async (t) => {
   const s = await autoReviewTask(t, 50);
   for (const status of ["timedOut", "aborted"] as const) {

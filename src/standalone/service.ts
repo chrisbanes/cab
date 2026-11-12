@@ -6815,8 +6815,10 @@ export class StandaloneService {
     if (!binding) return;
     // The runtime reports only absolute working directories, so a relative one is inside.
     const cwd = this.escalationCwd(binding.taskId, event.cwd);
+    // The binding validated on arrival: the turn may have completed while this write waited.
     const record = coordination.recordSandboxReview({
       identity: event.identity,
+      binding,
       command: event.command,
       cwd,
       // Read once, when the review is first recorded.

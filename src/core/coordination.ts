@@ -2773,13 +2773,14 @@ export class CoordinationStore {
   }
 
   /**
-   * Records a reviewer decision of an escalate-auto-review Codex turn (ADR-1034), bound to the
-   * exact current work of its thread and turn: a started review, then its completion. A review
-   * already completed keeps its decision. The command, cwd and rationale are cut to fixed limits
-   * and the cut is marked; no output is ever recorded.
+   * Records a reviewer decision of an escalate-auto-review Codex turn (ADR-1034) against the work
+   * its turn was bound to when the review arrived, which may since have ended: a started review,
+   * then its completion. A review already completed keeps its decision. The command, cwd and
+   * rationale are cut to fixed limits and the cut is marked; no output is ever recorded.
    */
   recordSandboxReview(input: {
     identity: SandboxReviewIdentity;
+    binding: { taskId: string; workId: string };
     command: string;
     cwd: string;
     workspace: {
@@ -2824,9 +2825,6 @@ export class CoordinationStore {
             );
         return this.sandboxReview(identity)!;
       }
-      const binding = this.currentBinding(identity.threadId, identity.turnId);
-      if (!binding || Number(binding.draftTurn) === 1)
-        throw new Error("Sandbox review is not bound to current work");
       this.db
         .prepare(
           `INSERT INTO sandbox_reviews
@@ -2841,8 +2839,8 @@ export class CoordinationStore {
           identity.turnId,
           identity.reviewId,
           identity.targetItemId,
-          String(binding.taskId),
-          String(binding.workId),
+          uuid.parse(input.binding.taskId),
+          input.binding.workId,
           command,
           cwd,
           input.workspace.head,
