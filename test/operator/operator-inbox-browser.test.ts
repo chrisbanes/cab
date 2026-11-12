@@ -10,6 +10,7 @@ import { signOutFromSidebar } from "../fixtures/operator-account.js";
 import { exhaustibleRuntime } from "../fixtures/runtime-exhaustion.js";
 import { clockLabel } from "../../src/operator/clock-label.js";
 import { createOperatorFixture } from "../fixtures/operator-web.js";
+import { until } from "../fixtures/until.js";
 import {
   noPageOverflow,
   unpairedBadges,
@@ -1559,7 +1560,7 @@ test("the request pane shows kind, position, identities and a sticky response ba
   });
   // Seeded requests created in the same second sort by random id, so the wide Inbox may open the
   // approval by itself: its one selection read then comes before the click, and the click reads
-  // nothing. Only an Inbox read that completes after the first approval read starts (the reread
+  // nothing. Only an Inbox read that arrives after the first approval read starts (the reread
   // once the first workspace read lands, or a poll on the running installed clock) may bring one
   // task reread, so only those are credited.
   // shortcut: an Inbox response that arrives before that read starts but commits after it settles
@@ -1583,6 +1584,10 @@ test("the request pane shows kind, position, identities and a sticky response ba
   const rows = page.locator(".inbox-row"),
     detail = page.getByRole("region", { name: "Selected request" });
   await rows.nth(3).waitFor();
+  // When a question opened first, an Inbox read still in flight at the click would be credited
+  // without rereading the approval, so started reads finish first.
+  await until(() => inboxInFlight === 0, "no Inbox read in flight");
+  await settle(page);
   phase = "selection";
   readJournal.push(`selection starts with ${taskReads.length} task reads`);
   await page.locator('.inbox-row[data-kind="approval"]').click();
