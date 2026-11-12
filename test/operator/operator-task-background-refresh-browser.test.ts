@@ -135,12 +135,19 @@ test("a task workspace timer poll keeps the conversation, position and status qu
     page,
     `**/api/operator/tasks/${a.taskId}*`,
   );
+  const shellRead = await holdResponse(page, "**/api/operator/workspace");
   await refresh();
   await explicit.entered;
+  await shellRead.entered;
   await page
     .getByText("Refreshing. Showing the last fetched data.", { exact: true })
     .first()
     .waitFor();
+  assert.equal(
+    await status.count(),
+    1,
+    "the shell's workspace reread shows no notice above the task",
+  );
   assert.equal(
     await page
       .getByRole("heading", { name: "Latest result", exact: true })
@@ -148,8 +155,10 @@ test("a task workspace timer poll keeps the conversation, position and status qu
     1,
   );
   explicit.release();
+  shellRead.release();
   await page.waitForLoadState("networkidle");
   await explicit.stop();
+  await shellRead.stop();
   await page.waitForFunction(
     () => document.querySelector(".resource-status") === null,
   );

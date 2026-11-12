@@ -1387,7 +1387,11 @@ export function App() {
                 drafts={drafts.current}
                 taskId={pathname.split("/")[2] ?? ""}
                 path={path}
-                onRefresh={refreshAll}
+                // The task shows its own refresh status; a shell notice above it would move the conversation.
+                onRefresh={() => {
+                  workspace.poll({ supersede: true });
+                  inboxSummary.refresh();
+                }}
                 workspace={workspace.state.data}
                 onHeader={setTaskHeader}
                 releaseDraft={releaseDraft}
