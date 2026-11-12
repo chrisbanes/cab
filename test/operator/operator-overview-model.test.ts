@@ -114,6 +114,12 @@ test("attention puts uncertain interventions first, then other interventions, th
     orderAttention([question, other, approval, held], undefined),
     [other, held, approval, question],
   );
+  // A result review ranks with questions and approvals, by age.
+  const review = item({ kind: "result-review", createdAt: 15 });
+  assert.deepEqual(
+    orderAttention([question, review, approval, held], [uncertain, calm]),
+    [held, approval, review, question],
+  );
 });
 
 test("the dashed row names the next two requests beyond the cards", () => {

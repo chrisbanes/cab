@@ -213,7 +213,7 @@ fixed application dimensions.
 | Domain components | Request row, board card, source identity chip, execution blocker, recorded response, structured answers, phone headers, navigation row, column tabs |
 | Action feedback | Success line, Details toggle and panel, warning and destructive alerts, Copy button (Copy, Copied, Copy unavailable) |
 | Compact progress | Task progress across Overview, List, Board and Inbox entry points |
-| Review components | Criterion rows and local-feedback context |
+| Review components | Criterion rows, local-feedback context, and the result review panel (decision, recommendation, what changed, criteria, evidence and uncertainty in reading order, then one labelled response fieldset) |
 | Inspection components | Observation strip, selectable code line, editor row with separate gutter, marker and source |
 | Conversation components | Pinned attention card (phone: one-line banner), agent text with raw-text view and Copy (always visible on an assignment's latest turn, revealed on hover or focus for earlier ones, always visible on touch), working status line (polite, throttled, static under reduced motion), tinted operator message, request and result cards, grouped tool row with per-command output, file-change row, delegation sub-conversation, gap marker, composer, Jump to latest |
 
@@ -243,6 +243,8 @@ Make the next decision obvious, and keep its evidence close:
 - **Attention:** show the specific decision/intervention, requester when known,
   reason the operator is needed and available response. Keep relevant evidence
   close. Use consistent meaning across Overview, Inbox, List/Board and task detail.
+  A result review request opens the one review panel wherever it is reached; label what
+  the lead reported apart from what cab recorded.
 - **Work views:** distinguish work state, next actor and attention without changing
   the existing board mapping. A running agent alone is insufficient evidence of a
   repair. Show unknown responsibility honestly. Keep readiness, completed work,

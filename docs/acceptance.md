@@ -713,6 +713,15 @@ them:
   requirements are distinguishable from the viewed revision. No baseline,
   unknown comparison and failed refresh are explicit. Viewing alone never
   records approval or clears an independent hold.
+- **Result review requests:** a review the lead requested appears once in the Inbox
+  and opens the same panel from Home, the Inbox and the task's attention card. The
+  operator reaches the decision, recommendation, criteria, evidence and remaining
+  uncertainty without the conversation, within the review-result budget. What the lead
+  reported stays labelled apart from what cab recorded, and a validation's checked head
+  is compared with the head cab recorded for the result. A response records once with a
+  receipt; a superseded, withdrawn or closed review takes none, and a stale send keeps its
+  draft. Routine results raise no review, and neither response approves, merges or
+  completes the task.
 - **Assignment context:** captured supplier/brief/instruction/agent/source
   references are distinct from current requirements, with omissions visible.
   Available references are not labelled read without evidence; secrets and

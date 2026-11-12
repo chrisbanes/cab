@@ -28,7 +28,10 @@ export function InboxContext({
     holds = task
       ? holdNotices(
           task,
-          item.kind === "question" ? "answer" : "approve",
+          // A review is not an approval, so its holds read as for an answer.
+          item.kind === "question" || item.kind === "result-review"
+            ? "answer"
+            : "approve",
           item.kind === "approval" ? (item.interactionId ?? item.id) : null,
         )
       : [];

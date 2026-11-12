@@ -29,11 +29,13 @@ type Request =
     >
   | Pick<RuntimeInboxItem, "id" | "kind" | "destination" | "createdAt">;
 /**
- * A question opens in the Inbox's own selection; other kinds go to their exact destination,
- * which for a runtime is its settings.
+ * A question or result review opens in the Inbox's own selection; other kinds go to their exact
+ * destination, which for a runtime is its settings.
  */
 export const requestHref = (item: Request) =>
-  item.kind === "question" ? inboxSelectionHref(item) : item.destination;
+  item.kind === "question" || item.kind === "result-review"
+    ? inboxSelectionHref(item)
+    : item.destination;
 /** Who is responsible for an uncertain execution: only an intervention request names that. */
 export const interventionRequester = (
   items: readonly (

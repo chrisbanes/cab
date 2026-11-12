@@ -53,6 +53,7 @@ import { inboxSelectionHref } from "../../src/operator/attention.js";
 import { closeResolvedNotifications } from "./notifications.js";
 import { shortcutApplies } from "./focus-mode.js";
 import { QuestionResponse } from "./question-response.js";
+import { ResultReviewPanel } from "./result-review.js";
 import type { QuestionResponseStates } from "./question-response-state.js";
 import "./inbox.css";
 export class InboxState {
@@ -66,7 +67,10 @@ export class InboxState {
   returnFocus: { id: string; index: number } | null = null;
   /** Where the selection last stood in the queue, so Previous/Next continue after it leaves. */
   anchor: QueueAnchor | null = null;
-  clear() {
+  /** Unsent result review drafts by review, shared with task detail; cleared only by `clear`. */
+  reviewDrafts = new Map<string, string>();
+  /** A fresh view of the queue; unsent review drafts survive it. */
+  resetView() {
     this.project = "";
     this.kind = "";
     this.scrollTop = 0;
@@ -74,6 +78,11 @@ export class InboxState {
     this.auto = null;
     this.returnFocus = null;
     this.anchor = null;
+  }
+  /** Sign-out and session changes: the view and every unsent draft. */
+  clear() {
+    this.resetView();
+    this.reviewDrafts.clear();
   }
 }
 /** What the Inbox asks the shell header to show; the shell only merges it into its props. */
@@ -463,9 +472,23 @@ export function Inbox({
       </button>
     );
   };
-  const isQuestion =
+  // A review is known by its item, or by the task read before the queue lists it.
+  const isReview =
+      selected?.kind === "result-review" ||
+      (!selected &&
+        Boolean(
+          task.state.data?.data.resultReviews?.some(
+            (r) => r.reviewId === selectedId,
+          ),
+        )),
+    isQuestion =
       selected?.kind === "question" ||
-      (!selected && !selectedId?.startsWith("intervention:") && !runtimeId),
+      (!selected &&
+        !isReview &&
+        !selectedId?.startsWith("intervention:") &&
+        !runtimeId),
+    // Questions and reviews put their response first, then visibility and identities.
+    responseFirst = isQuestion || isReview,
     selectedHeading = selected ? requestHeading(selected) : null,
     KindIcon = selected ? requestKindIcons[selected.kind] : null,
     { previous, next } = queueSteps(rows, selected?.id ?? null, state.anchor),
@@ -551,7 +574,7 @@ export function Inbox({
               aria-label="Inbox status"
               value={status}
               onChange={(e) => {
-                state.clear();
+                state.resetView();
                 autoFor.current = e.target.value;
                 navigate(
                   `/inbox${e.target.value === "actionable" ? "" : `?status=${e.target.value}`}`,
@@ -796,8 +819,8 @@ export function Inbox({
                     ))}
                 </div>
               )}
-              {!isQuestion && meta}
-              {selected && !isQuestion && (
+              {!responseFirst && meta}
+              {selected && !responseFirst && (
                 <InboxVisibility
                   key={`${selected.id}:${selected.lifecycle?.status}`}
                   item={selected}
@@ -807,15 +830,39 @@ export function Inbox({
                 />
               )}
               {selected?.lifecycle &&
-              selected.lifecycle.status !== "actionable" ? (
+              selected.lifecycle.status !== "actionable" &&
+              // A resolved review still shows its outcome and material.
+              !(isReview && selected.lifecycle.status === "resolved") ? (
                 <p>
                   {selected.lifecycle.status === "resolved"
                     ? "This request is resolved and cannot be answered or restored."
                     : selected.kind === "question" ||
                         selected.kind === "approval"
                       ? "Dismissed. This request remains unanswered but is no longer required for completion."
-                      : "Dismissed from Inbox. The underlying condition is unchanged."}
+                      : selected.kind === "result-review"
+                        ? "Dismissed. The review stays pending and no response was recorded."
+                        : "Dismissed from Inbox. The underlying condition is unchanged."}
                 </p>
+              ) : isReview ? (
+                task.state.data ? (
+                  <ResultReviewPanel
+                    key={selectedId}
+                    client={client}
+                    session={session}
+                    task={task.state.data.data}
+                    reviewId={selectedId}
+                    onChanged={resource.refresh}
+                    // Without its queue item the pane's heading cannot name the decision.
+                    showDecision={!selected}
+                    drafts={state.reviewDrafts}
+                  />
+                ) : (
+                  <ResourceStatus
+                    state={task.state}
+                    retry={task.refresh}
+                    label="Review"
+                  />
+                )
               ) : isQuestion && taskId ? (
                 <QuestionResponse
                   client={client}
@@ -854,7 +901,7 @@ export function Inbox({
               ) : (
                 <p>Selected request is unavailable.</p>
               )}
-              {selected && isQuestion && (
+              {selected && responseFirst && (
                 <InboxVisibility
                   key={`${selected.id}:${selected.lifecycle?.status}`}
                   item={selected}
@@ -863,7 +910,7 @@ export function Inbox({
                   onChanged={resource.refresh}
                 />
               )}
-              {isQuestion && meta}
+              {responseFirst && meta}
             </div>
           </>
         ) : (
@@ -923,7 +970,9 @@ function InboxVisibility({
           action === "dismiss"
             ? item.kind === "question" || item.kind === "approval"
               ? "Dismissed. No answer or agent input was sent. This request is no longer required for completion."
-              : "Dismissed. Only Inbox visibility changed; the underlying condition is unchanged."
+              : item.kind === "result-review"
+                ? "Dismissed. No response was recorded; the review stays pending."
+                : "Dismissed. Only Inbox visibility changed; the underlying condition is unchanged."
             : item.kind === "question" || item.kind === "approval"
               ? "Restored. No work was started. A pending request is required for completion again."
               : "Restored. No work was started.",

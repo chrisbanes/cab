@@ -1235,12 +1235,12 @@ desktop sidebar. Present task activity, assignments, dependencies, results and
 relevant controls together in task detail. Cover attention needed, normal work in
 progress and first-project/first-task experiences.
 
-The attention inbox contains unresolved questions, approvals and problems requiring
-operator intervention, including an execution runtime whose automatic restarts are
-exhausted. Routine progress, completions requiring no decision and
+The attention inbox contains unresolved questions, approvals, result review requests and
+problems requiring operator intervention, including an execution runtime whose automatic
+restarts are exhausted. Routine progress, completions requiring no decision and
 normal dependency waiting do not create attention items. Order attention by
 urgency, then age: execution uncertainty and problems requiring intervention first,
-then questions and approvals oldest first. Show project and task context on each
+then questions, approvals and result reviews oldest first. Show project and task context on each
 task item, or the runtime for a runtime problem. Unresolved questions, pending approvals and failures remain visible even
 when related history is collapsed.
 
@@ -1251,7 +1251,8 @@ one delegate's hold does not clear the lead's: a remaining intervention names th
 assignment/work or task hold still requiring action.
 
 Dismiss records a time and optional note. A dismissed question or approval remains unanswered
-but no longer blocks completion as an open interaction. A withheld question is dismissible
+but no longer blocks completion as an open interaction. A dismissed result review stays pending
+with no response recorded; it never blocked completion. A withheld question is dismissible
 without disclosing or reconstructing its form. Restore reinstates the completion requirement
 only while the request remains actionable. Completion rejection identifies the blocking
 interaction and links to its answer/dismiss controls; historical rejections without captured
@@ -1982,8 +1983,12 @@ remote-write reconciliation and permission rules.
 
 The task Overview is the task's conversation
 ([ADR-1022](adr/1022-task-conversation-view.md)). The pinned Decisions and holds
-card lists open questions and approvals, execution uncertainty or Stop, active source
-holds, interventions, wait reasons and operator-action recovery. Normal writer and
+card lists open questions and approvals, pending result review requests, execution
+uncertainty or Stop, active source holds, interventions, wait reasons and operator-action
+recovery. A review link (`?request=` naming a review) opens the review panel in the card:
+the decision, the lead's recommendation, what changed, criteria, evidence and remaining
+uncertainty, then Mark reviewed or Send feedback. The same panel serves the Inbox and is
+reached from Home; conversation stays one link away. Normal writer and
 capacity holds while a turn starts or runs stay on Execution, and waiting for capacity
 is named by the strip, never pinned. Beneath the card the lead's conversation runs oldest
 to newest. First arrival shows the newest entry with Reply docked at the bottom of
