@@ -303,7 +303,9 @@ for (const engine of [
         0,
         "once the original is confirmed, an inapplicable Stop is removed",
       );
-      await page.unroute(taskRead);
+      // The command route is already gone. Waiting lets an in-flight read finish its own
+      // fetch-then-fulfil instead of racing a removed handler ("Route is already handled").
+      await page.unrouteAll({ behavior: "wait" });
       await page.evaluate(() =>
         window.dispatchEvent(new Event("cab-task-changed")),
       );
