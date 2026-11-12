@@ -223,7 +223,10 @@ export function capBytesOutsideRedaction(
   maxBytes: number,
   excludedValues: readonly string[],
 ): string {
-  if (Buffer.byteLength(text, "utf8") <= maxBytes) return text;
+  const textBytes = Buffer.byteLength(text, "utf8");
+  if (textBytes <= maxBytes) return text;
+  // Spans need the whole text, so text too large to redact keeps nothing.
+  if (textBytes > maxHistoryTextBytes) return "";
   let cut = 0;
   let bytes = 0;
   for (const char of text) {
@@ -242,9 +245,9 @@ export function capBytesOutsideRedaction(
       cut = inside[0];
       continue;
     }
-    const word = text.slice(0, cut).replace(/\S*$/, "").length;
-    if (word === cut) return text.slice(0, cut);
-    cut = word;
+    const trimmed = text.slice(0, cut).replace(/\S*$/, "").length;
+    if (trimmed === cut) return text.slice(0, cut);
+    cut = trimmed;
   }
 }
 

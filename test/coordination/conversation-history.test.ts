@@ -1223,7 +1223,9 @@ test("a byte cap never keeps part of a redactable span", () => {
   );
 
   const secret = 'start password: "a b c" end';
-  assert.equal(capChecked(secret, secret.indexOf("b"), []), "start password: ");
+  // A word-boundary cut here would keep `"a b`, leaving `b` unredacted.
+  assert.equal(capChecked(secret, secret.indexOf("c"), []), "start password: ");
+  // The header and URL cuts also stop before the credential.
   const header = "see Authorization: Bearer one two three";
   assert.equal(
     capChecked(header, header.indexOf("two"), []),
@@ -1253,6 +1255,8 @@ test("a byte cap cuts plain text at a word boundary and whole UTF-8 characters",
   assert.equal(capBytesOutsideRedaction(plain, plain.length, ["delta"]), plain);
   for (let max = 0; max < plain.length; max++)
     assert.equal(capBytesOutsideRedaction(plain, max, [""]), old(plain, max));
+  // Text too large to search for spans keeps nothing rather than block on it.
+  assert.equal(capBytesOutsideRedaction("a ".repeat(40 * 1024), 1024, []), "");
 
   // Every byte limit, including those inside a multi-byte character or the path: the
   // word-boundary result, except that a partly kept path is dropped whole.
