@@ -225,8 +225,8 @@ export function capBytesOutsideRedaction(
 ): string {
   const textBytes = Buffer.byteLength(text, "utf8");
   if (textBytes <= maxBytes) return text;
-  // Spans need the whole text, so text too large to redact keeps nothing.
-  if (textBytes > maxHistoryTextBytes) return "";
+  // Spans need the whole text; keep nothing rather than search a far larger one on the event loop.
+  if (textBytes > 16 * maxBytes) return "";
   let cut = 0;
   let bytes = 0;
   for (const char of text) {
