@@ -79,7 +79,7 @@
     "class-variance-authority": "0.7.1",
     "clsx": "2.1.1",
     "fast-sha256": "1.3.0",
-    "lucide-react": "1.70.0",
+    "lucide-react": "1.71.0",
     "pdfjs-dist": "6.5.438",
     "react": "19.3.1",
     "react-dom": "19.3.1",
