@@ -414,8 +414,8 @@ GitLab dependent after an accepted retarget. A GitLab dependent's head does not 
 GitLab retargets it, so normally nothing is adopted and the dependent merges as it is.
 
 For a bound stacked dependent, a refresh can adopt an outside head after the
-exact lower PR is freshly proven merged and the dependent's retarget to the linked base
-is accepted. Cab fetches that head under the existing bounded isolated fetch, proves
+exact lower PR is freshly proven merged and the dependent's retarget to the task's
+resolved base is accepted. Cab fetches that head under the existing bounded isolated fetch, proves
 ancestry from the provider's fresh base object, and compares the ordered commit ranges:
 equal nonzero counts, equal stable patch IDs and exact raw commit-message bytes.
 Rehashed commit/tree/blob objects feed deterministic isolated diffs. The durable proof

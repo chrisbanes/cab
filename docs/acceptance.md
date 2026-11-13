@@ -1120,11 +1120,11 @@ retarget still pending, and a dependency change during merge preflight send noth
 closed blocker holds the dependent as failed; the 20-merge-request limit stacks no further
 dependent and shows its reason; unchanged outside rebases are adopted with their proof
 after an accepted retarget and reworded ones keep the outside-change hold. GitLab Unstack
-must show the per-host confirmation (only this merge request is retargeted to the link's
-base, merge requests stacked on it stay on its branch, a restack follows only after the
-retarget is confirmed, merged layers are unaffected, cab cannot undo merges or adoption),
-one target-branch edit, read-back recovery of a lost response without a second edit, a
-422 refusal without further writes, and no edit after an outside retarget.
+must show the per-host confirmation (only this merge request is retargeted to the task's
+base branch, merge requests stacked on it stay on its branch, a restack follows only
+after the retarget is confirmed, merged layers are unaffected, cab cannot undo merges or
+adoption), one target-branch edit, read-back recovery of a lost response without a second
+edit, a 422 refusal without further writes, and no edit after an outside retarget.
 
 Bounded live evidence on gitlab.com must cover a two-layer stack, bottom-up merge with
 source-branch removal, GitLab's retarget and its acceptance, and Unstack of the top layer.

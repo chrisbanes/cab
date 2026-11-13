@@ -21,6 +21,11 @@ test("shared Unstack copy states full captured provider effect, conditional rest
   );
   assert.match(unstackConfirmation, /cannot undo merges or automatic adoption/);
   assert.match(
+    unstackConfirmation,
+    /Only this pull request is retargeted to the task’s base branch\./,
+  );
+  assert.doesNotMatch(unstackConfirmation, /repository link’s base/);
+  assert.match(
     unstackRecovery,
     /original operation stays unfinished and readback-only/,
   );
@@ -43,6 +48,11 @@ test("GitLab Unstack copy retargets only the selected merge request; GitHub copy
   assert.match(gitlab, /restack follows only after the retarget is confirmed/);
   assert.match(gitlab, /Merged layers are unaffected/);
   assert.match(gitlab, /cannot undo merges or automatic adoption/);
+  assert.match(
+    gitlab,
+    /retargets only this merge request to the task’s base branch\./,
+  );
+  assert.doesNotMatch(gitlab, /repository link’s base/);
   assert.equal(unstackRecoveryFor("github"), unstackRecovery);
   assert.match(unstackRecoveryFor("gitlab"), /retarget is not confirmed/);
 });

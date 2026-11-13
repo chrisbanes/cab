@@ -217,9 +217,11 @@ export function repositoryDeliverySettings(
 }
 
 /**
- * The bases a bound change request may be retargeted to: the repository link's base branch. The link
- * names a local rev, so one leading `refs/heads/`, `refs/remotes/origin/` or `origin/` is dropped and a
- * commit id yields none. This is the seam where a code host's stack base is added.
+ * The bases a bound change request may be retargeted to: the one named by the base ref the caller passes,
+ * normally the task's resolved base (`taskRepositoryBase` or `DeliveryCoordinator.repositoryBase`, which
+ * fall back to the repository link's ref). The ref names a local rev, so one leading `refs/heads/`,
+ * `refs/remotes/origin/` or `origin/` is dropped and a commit id yields none. This is the seam where a
+ * code host's stack base is added.
  */
 export function acceptableBaseRefs(
   linkRef: string | null | undefined,
@@ -3107,8 +3109,9 @@ export class DeliveryStore {
       );
   }
   /**
-   * `linkRef` is the repository link's base. A base other than the accepted one is accepted only when it is
-   * an acceptable base and the change request it used to target is merged; otherwise it is held.
+   * `linkRef` is the task's resolved base (`repositoryBase`), else the repository link's ref. A base other
+   * than the accepted one is accepted only when it is an acceptable base and the change request it used to
+   * target is merged; otherwise it is held.
    */
   observePrWithinTransaction(
     taskId: string,
