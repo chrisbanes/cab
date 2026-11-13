@@ -1,8 +1,8 @@
 import type { UnstackReceipt } from "./unstack-contracts.js";
 export const unstackConfirmation =
-  "GitHub removes all removable unmerged members of the captured provider stack, not just this pull request. Only this pull request is retargeted to the repository link’s base. A restack follows only after complete removal and exact retarget are confirmed. Merged layers are unaffected. Cab cannot undo merges or automatic adoption.";
+  "GitHub removes all removable unmerged members of the captured provider stack, not just this pull request. Only this pull request is retargeted to the task’s base branch. A restack follows only after complete removal and exact retarget are confirmed. Merged layers are unaffected. Cab cannot undo merges or automatic adoption.";
 const gitLabUnstackConfirmation =
-  "GitLab Unstack retargets only this merge request to the repository link’s base. Merge requests stacked on it stay on its branch. A restack follows only after the retarget is confirmed. Merged layers are unaffected. Cab cannot undo merges or automatic adoption.";
+  "GitLab Unstack retargets only this merge request to the task’s base branch. Merge requests stacked on it stay on its branch. A restack follows only after the retarget is confirmed. Merged layers are unaffected. Cab cannot undo merges or automatic adoption.";
 /** What confirming Unstack does on the change request's code host. */
 export const unstackConfirmationFor = (codeHost: "github" | "gitlab") =>
   codeHost === "gitlab" ? gitLabUnstackConfirmation : unstackConfirmation;

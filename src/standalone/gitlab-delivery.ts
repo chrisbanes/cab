@@ -1094,7 +1094,7 @@ export class GitLabHttpDeliveryProvider implements CodeHostDeliveryProvider {
         ),
     };
   }
-  /** Unstack on GitLab is one edit: the merge request targets the repository link's base. */
+  /** Unstack on GitLab is one edit: the merge request targets the task's resolved base (`targetBaseRef`). */
   private async retargetForUnstack(
     record: UnstackRecord,
     guard: () => void,
