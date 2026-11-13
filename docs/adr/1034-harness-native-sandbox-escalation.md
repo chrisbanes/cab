@@ -49,7 +49,11 @@ A store migration maps `dangerouslySkipSandbox: true` to `unsandboxed`, everythi
   decide an escalated call before the hook and the classifier. Sandboxed Bash still runs through
   `autoAllowBashIfSandboxed`. A turn whose model lacks auto mode waits with a named reason and is
   never downgraded. An escalate turn whose start reports another permission mode fails, and its
-  hook refuses escalated Bash until the start confirms `auto`.
+  hook refuses escalated Bash until the start confirms `auto`. Claude Code does not start in
+  `auto` with `CLAUDE_CODE_SUBPROCESS_ENV_SCRUB` set, so escalate turns run without the
+  subprocess environment scrub: sandboxed Bash there can read the service's environment, from
+  which cab removes only its own and Claude's credential variables. Strict, draft and read-only
+  turns keep the scrub.
   - **At `escalate-approval`:** the PreToolUse hook holds each Bash call with
     `dangerouslyDisableSandbox` for the Inbox. Its matcher has a 960-second timeout and
     `onFailure: "block"`, so the service's 15-minute expiry answers first, and a hook timeout or
@@ -100,6 +104,10 @@ The Claude probes ([2026-11-11](../evidence/sandbox-escalation-probe-2026-11-11.
 - No per-call classifier signal was observable, so whether the classifier also decides a
   hook-allowed call is a recorded limit.
 - The 15-minute hold and the 60-minute ceiling are inferred from bounded runs.
+
+The [2026-11-13 live record](../evidence/2026-11-13-claude-escalation-live.md) found that, through
+cab's service, Claude Code started escalate turns in `default`, not `auto`, while
+`CLAUDE_CODE_SUBPROCESS_ENV_SCRUB` was set, so escalate turns omit it.
 
 ## Threat model
 
