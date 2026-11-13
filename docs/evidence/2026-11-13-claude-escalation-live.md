@@ -1,6 +1,6 @@
 # Claude escalation live qualification
 
-Recorded 2026-11-13 for [#1682](https://github.com/chrisbanes/cab/issues/1682), slice T4: both Claude escalate levels through the real service. The harness is `test/execution/sandbox-escalation-qualification/live-claude-escalation.mjs` (`npm run claude-escalation:live`), classified by `claude-escalation-outcomes.mjs`. The sanitised outputs of both attempts and the diagnosis between them are in [2026-11-13-claude-escalation-live.json](2026-11-13-claude-escalation-live.json). No credential, token or account data is recorded, and no command output: only each fixture script's own Chromium result string. Claude ran on the service user's native Claude Code login; the harness read no secret.
+Recorded 2026-11-13 for [#1682](https://github.com/chrisbanes/cab/issues/1682), slice T4: both Claude escalate levels through the real service. The harness is `test/execution/sandbox-escalation-qualification/live-claude-escalation.mjs` (`npm run claude-escalation:live`), classified by `claude-escalation-outcomes.mjs`. The sanitised outputs of the three attempts, and the diagnosis after attempt 1, are in [2026-11-13-claude-escalation-live.json](2026-11-13-claude-escalation-live.json). No credential, token or account data is recorded, and no command output: only each fixture script's own Chromium result string. Claude ran on the service user's native Claude Code login; the harness read no secret.
 
 Host: macOS (Darwin 27.0.0), Apple silicon (arm64), Node v26.13.0. Claude Agent SDK 0.3.319; installed `claude` 2.1.322. Model alias `sonnet`.
 
@@ -111,7 +111,7 @@ These are the outcomes under the final classifier. Each attempt is a separate ru
 | classifier approval | untested: not in auto mode | untested: hook decision not recorded | **proved** |
 | undecided call | untested: none elicited (D32) | untested: none elicited (D32) | untested: none elicited (D32) |
 | classifier denial | untested: no denial stimulus (D32) | untested: no denial stimulus (D32) | untested: no denial stimulus (D32) |
-| cancelled ask then post-tool hook (#1715 residual risk) | not observed | not observed | not observed: no ask in either turn |
+| cancelled ask then post-tool hook (#1715 residual risk) | not observed | not observed: no ask in either turn | not observed: no ask in either turn |
 
 ## Limits
 
