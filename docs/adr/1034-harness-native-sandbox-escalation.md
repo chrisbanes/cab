@@ -104,9 +104,10 @@ The Claude probes ([2026-11-11](../evidence/sandbox-escalation-probe-2026-11-11.
 - No per-call classifier signal was observable, so whether the classifier also decides a
   hook-allowed call is a recorded limit.
 - The 15-minute hold and the 60-minute ceiling are inferred from bounded runs.
-- Through cab's service, Claude Code started escalate turns in `default`, not `auto`, while
-  `CLAUDE_CODE_SUBPROCESS_ENV_SCRUB` was set
-  ([2026-11-13](../evidence/2026-11-13-claude-escalation-live.md)), so escalate turns omit it.
+
+The [2026-11-13 live record](../evidence/2026-11-13-claude-escalation-live.md) found that, through
+cab's service, Claude Code started escalate turns in `default`, not `auto`, while
+`CLAUDE_CODE_SUBPROCESS_ENV_SCRUB` was set, so escalate turns omit it.
 
 ## Threat model
 

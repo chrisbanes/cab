@@ -2,7 +2,7 @@
 
 Recorded 2026-11-13 for [#1682](https://github.com/chrisbanes/cab/issues/1682), slice T4: both Claude escalate levels through the real service. The harness is `test/execution/sandbox-escalation-qualification/live-claude-escalation.mjs` (`npm run claude-escalation:live`), classified by `claude-escalation-outcomes.mjs`. The sanitised outputs of both attempts and the diagnosis between them are in [2026-11-13-claude-escalation-live.json](2026-11-13-claude-escalation-live.json). No credential, token or account data is recorded, and no command output: only each fixture script's own Chromium result string. Claude ran on the service user's native Claude Code login; the harness read no secret.
 
-Host: macOS (Darwin 27.0.0), Apple silicon (arm64), Node v26.13.0. Claude Agent SDK 0.3.319; installed `claude` 2.1.322. Model alias `sonnet`, reported as `claude-sonnet-5-5`.
+Host: macOS (Darwin 27.0.0), Apple silicon (arm64), Node v26.13.0. Claude Agent SDK 0.3.319; installed `claude` 2.1.322. Model alias `sonnet`.
 
 ## Run
 
@@ -24,7 +24,7 @@ Both runs exited 1 with `pass: false`. Each stopped the service, released the pe
 
 ### Attempt 1 and the diagnosis
 
-- **What happened.** Both turns were admitted at their levels, but Claude Code's init reported `permissionMode: "default"`. cab's guard failed each turn with "Claude Code reported permission mode default, not auto" before any tool call, and both intents ended `resolved-failed`. Every cell is untested: turn not confirmed in auto mode.
+- **What happened.** Both turns were admitted at their levels, but Claude Code's init reported `permissionMode: "default"`. cab's guard failed each turn before any tool call, and both intents ended `resolved-failed`. Every cell is untested: turn not confirmed in auto mode.
 - **The T1 probe still holds.** It had reported `auto` with an empty config directory, `settingSources: []`, a token login and minimal options.
 - **Bisection.** Eleven model starts, each aborted at init with no tool call, varied one factor at a time from the service's configuration. They isolated cab's turn environment. With everything else unchanged, `CLAUDE_CODE_SUBPROCESS_ENV_SCRUB=1` alone made Claude Code start in `default`. The TodoWrite gates alone did not.
 - **Ruled out:** native login versus token, native versus empty config directory, native versus empty setting sources, cab's turn options and the inherited process environment.
@@ -52,11 +52,11 @@ By maintainer decision, escalate-level turns now omit the scrub. Strict, draft a
 What attempt 2's own records show (`tool_use_id`s are in the JSON):
 
 - **escalate-approval:**
-  - The control's hook ran and its post-tool hook followed, with no permission ask. Chromium failed inside the sandbox: `browserType.launch: Target page, context or browser has been closed`.
+  - The control was unflagged, so it ran sandboxed: its hook ran and its post-tool hook followed, with no permission ask. Chromium failed: `browserType.launch: Target page, context or browser has been closed`.
   - `approved` was flagged. cab recorded the operator's acceptance for that item in that turn, with exit code 0 and a service-measured 1 116 ms. Its post-tool hook followed, and it wrote `chromium: "ok"`.
   - `declined` was flagged. cab recorded the operator's decline with no exit code. Its tool result was an error, no post-tool hook followed, and it wrote no result file.
 - **escalate-auto-review:**
-  - The control failed inside the sandbox, as above.
+  - The control was unflagged and Chromium failed, as above.
   - `reviewed` was flagged and reached no `canUseTool`. Its post-tool hook followed, and it wrote `chromium: "ok"`.
   - cab recorded a reviewer approval for that item: no risk level, no rationale, no overrule, exit code 0, runtime-measured 3 028 ms. The task had no Inbox item.
 
@@ -83,6 +83,6 @@ These are the outcomes under the final classifier. Attempt 1 and attempt 2 are s
 
 ## Limits
 
-- **No live cell is proved.** Attempt 2's records show the intended behaviour at both levels, but without the hook decisions the own-evidence rule leaves every cell untested. No further attempt was authorized.
+- **No live cell is proved.** Attempt 2's records are consistent with the intended behaviour at both levels, but without the hook decisions the own-evidence rule leaves every cell untested. No further attempt was authorized.
 - **The scrub finding** is from model starts aborted at init on Claude Code 2.1.322. Another version may behave differently. cab's guard fails any escalate turn that does not start in `auto`.
 - **Classifier denial, undecided calls and the cancelled-ask risk** were not elicited, under the benign-stimulus rule.

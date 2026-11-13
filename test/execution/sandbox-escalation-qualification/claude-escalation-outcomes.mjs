@@ -82,8 +82,11 @@ export function controlCell(cell, label) {
     asked: of(cell, "ask", call.toolUseId).length > 0,
     chromium: cell.results?.[label] ?? null,
   };
+  // A permission ask contradicts the control whatever the hook decided.
+  if (evidence.asked)
+    return refuted({ ...evidence, reason: "the control was asked about" });
   if (unrecorded(call)) return untested(hookUnrecorded, evidence);
-  if (call.decision !== "pass" || evidence.asked)
+  if (call.decision !== "pass")
     return refuted({
       ...evidence,
       reason: "the control was not left to the sandbox",
@@ -151,8 +154,13 @@ export function approveCell(cell, control) {
     ...turnEvidence(cell),
   };
   if (!record) return untested("no escalation recorded for the call", evidence);
+  if (record.decision === "accept" && !post)
+    return refuted({
+      ...evidence,
+      reason: "an accepted escalation did not run",
+    });
   if (unrecorded(call)) return untested(hookUnrecorded, evidence);
-  if (record.decision === "accept" && (call.decision !== "allow" || !post))
+  if (record.decision === "accept" && call.decision !== "allow")
     return refuted({
       ...evidence,
       reason: "an accepted escalation did not run",
