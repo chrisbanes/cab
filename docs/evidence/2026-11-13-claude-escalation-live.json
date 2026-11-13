@@ -868,6 +868,628 @@
           }
         }
       }
+    },
+    {
+      "startedAt": "2026-11-13T19:03:54Z",
+      "endedAt": "2026-11-13T19:04:31Z",
+      "candidate": "7cde5a722d9f91c42559b227c724723d0d81dc39",
+      "candidateClean": true,
+      "host": {
+        "platform": "darwin",
+        "release": "27.0.0",
+        "arch": "arm64",
+        "node": "v26.13.0"
+      },
+      "claude": {
+        "installed": "2.1.322 (Claude Code)",
+        "sdk": "0.3.319"
+      },
+      "cells": {
+        "approval": {
+          "turnId": "9feef8b8-07a3-4c47-badf-02a6ed9315e9",
+          "admittedLevel": "escalate-approval",
+          "init": {
+            "permissionMode": "auto"
+          },
+          "result": {
+            "subtype": "success",
+            "isError": false
+          },
+          "intentState": "completed",
+          "events": [
+            {
+              "t": 2801,
+              "kind": "system",
+              "subtype": "hook_started"
+            },
+            {
+              "t": 2803,
+              "kind": "system",
+              "subtype": "hook_started"
+            },
+            {
+              "t": 2824,
+              "kind": "system",
+              "subtype": "hook_response"
+            },
+            {
+              "t": 2977,
+              "kind": "system",
+              "subtype": "hook_response"
+            },
+            {
+              "t": 3888,
+              "kind": "system",
+              "subtype": "commands_changed"
+            },
+            {
+              "t": 6183,
+              "kind": "toolUse",
+              "toolUseId": "toolu_01AQ6qtjSgy1x98YLgQfFWnX",
+              "tool": "Bash",
+              "command": "node chromium.mjs control-approval"
+            },
+            {
+              "t": 6188,
+              "kind": "pre",
+              "toolUseId": "toolu_01AQ6qtjSgy1x98YLgQfFWnX",
+              "tool": "Bash",
+              "command": "node chromium.mjs control-approval",
+              "flagged": false,
+              "decision": "pass",
+              "returnedAt": 6190
+            },
+            {
+              "t": 7291,
+              "kind": "post",
+              "event": "PostToolUse",
+              "toolUseId": "toolu_01AQ6qtjSgy1x98YLgQfFWnX"
+            },
+            {
+              "t": 7308,
+              "kind": "toolResult",
+              "toolUseId": "toolu_01AQ6qtjSgy1x98YLgQfFWnX",
+              "isError": false
+            },
+            {
+              "t": 8617,
+              "kind": "toolUse",
+              "toolUseId": "toolu_016bAyCrqg877UqVefmCfEfd",
+              "tool": "Bash",
+              "command": "node chromium.mjs approved"
+            },
+            {
+              "t": 8620,
+              "kind": "pre",
+              "toolUseId": "toolu_016bAyCrqg877UqVefmCfEfd",
+              "tool": "Bash",
+              "command": "node chromium.mjs approved",
+              "flagged": true,
+              "decision": "allow",
+              "returnedAt": 9362
+            },
+            {
+              "t": 12252,
+              "kind": "post",
+              "event": "PostToolUse",
+              "toolUseId": "toolu_016bAyCrqg877UqVefmCfEfd"
+            },
+            {
+              "t": 12259,
+              "kind": "toolResult",
+              "toolUseId": "toolu_016bAyCrqg877UqVefmCfEfd",
+              "isError": false
+            },
+            {
+              "t": 13484,
+              "kind": "toolUse",
+              "toolUseId": "toolu_01CAFWQbTA1Lx36SdTq2bvWx",
+              "tool": "Bash",
+              "command": "node chromium.mjs declined"
+            },
+            {
+              "t": 13487,
+              "kind": "pre",
+              "toolUseId": "toolu_01CAFWQbTA1Lx36SdTq2bvWx",
+              "tool": "Bash",
+              "command": "node chromium.mjs declined",
+              "flagged": true,
+              "decision": "deny",
+              "returnedAt": 14455
+            },
+            {
+              "t": 14463,
+              "kind": "toolResult",
+              "toolUseId": "toolu_01CAFWQbTA1Lx36SdTq2bvWx",
+              "isError": true
+            }
+          ],
+          "results": {
+            "control-approval": "browserType.launch: Target page, context or browser has been closed Browser logs: <launching> ~/Library/Caches/ms-playwright/chromium_headless_shell-1254/chrome-headless-shell-mac-arm64/chrome-headless-shell --disable-field-trial-config --disable-background-networking --disable-background",
+            "approved": "ok"
+          },
+          "escalations": [
+            {
+              "interactionId": "22c58354-da37-4d38-8585-3828c092c850",
+              "turnId": "9feef8b8-07a3-4c47-badf-02a6ed9315e9",
+              "itemId": "toolu_016bAyCrqg877UqVefmCfEfd",
+              "decider": "operator",
+              "decision": "accept",
+              "exitCode": 0,
+              "durationMs": 2894,
+              "durationSource": "service"
+            },
+            {
+              "interactionId": "6da226a6-d5eb-4ee8-a9c7-cb95b76cacd6",
+              "turnId": "9feef8b8-07a3-4c47-badf-02a6ed9315e9",
+              "itemId": "toolu_01CAFWQbTA1Lx36SdTq2bvWx",
+              "decider": "operator",
+              "decision": "decline",
+              "exitCode": null,
+              "durationMs": null,
+              "durationSource": null
+            }
+          ],
+          "reviews": [],
+          "taskRead": {
+            "escalations": 2,
+            "reviews": 0
+          },
+          "unexpected": [],
+          "refusedTurns": 1
+        },
+        "review": {
+          "turnId": "0a14741f-e2e4-4fa7-87a1-be5d435606e9",
+          "admittedLevel": "escalate-auto-review",
+          "init": {
+            "permissionMode": "auto"
+          },
+          "result": {
+            "subtype": "success",
+            "isError": false
+          },
+          "intentState": "completed",
+          "events": [
+            {
+              "t": 21545,
+              "kind": "system",
+              "subtype": "hook_started"
+            },
+            {
+              "t": 21546,
+              "kind": "system",
+              "subtype": "hook_started"
+            },
+            {
+              "t": 21546,
+              "kind": "system",
+              "subtype": "hook_response"
+            },
+            {
+              "t": 21608,
+              "kind": "system",
+              "subtype": "hook_response"
+            },
+            {
+              "t": 22530,
+              "kind": "system",
+              "subtype": "commands_changed"
+            },
+            {
+              "t": 24034,
+              "kind": "toolUse",
+              "toolUseId": "toolu_01NWCq3VdR6ATXBgzuMe1WE7",
+              "tool": "Bash",
+              "command": "node chromium.mjs control-review"
+            },
+            {
+              "t": 24038,
+              "kind": "pre",
+              "toolUseId": "toolu_01NWCq3VdR6ATXBgzuMe1WE7",
+              "tool": "Bash",
+              "command": "node chromium.mjs control-review",
+              "flagged": false,
+              "decision": "pass",
+              "returnedAt": 24040
+            },
+            {
+              "t": 26074,
+              "kind": "post",
+              "event": "PostToolUse",
+              "toolUseId": "toolu_01NWCq3VdR6ATXBgzuMe1WE7"
+            },
+            {
+              "t": 26081,
+              "kind": "toolResult",
+              "toolUseId": "toolu_01NWCq3VdR6ATXBgzuMe1WE7",
+              "isError": false
+            },
+            {
+              "t": 28678,
+              "kind": "toolUse",
+              "toolUseId": "toolu_016YM5sdZA4VgF1s1oPmC3uE",
+              "tool": "Bash",
+              "command": "node chromium.mjs reviewed"
+            },
+            {
+              "t": 28681,
+              "kind": "pre",
+              "toolUseId": "toolu_016YM5sdZA4VgF1s1oPmC3uE",
+              "tool": "Bash",
+              "command": "node chromium.mjs reviewed",
+              "flagged": true,
+              "decision": "pass",
+              "returnedAt": 28682
+            },
+            {
+              "t": 33099,
+              "kind": "post",
+              "event": "PostToolUse",
+              "toolUseId": "toolu_016YM5sdZA4VgF1s1oPmC3uE"
+            },
+            {
+              "t": 33107,
+              "kind": "toolResult",
+              "toolUseId": "toolu_016YM5sdZA4VgF1s1oPmC3uE",
+              "isError": false
+            }
+          ],
+          "results": {
+            "control-review": "browserType.launch: Target page, context or browser has been closed Browser logs: <launching> ~/Library/Caches/ms-playwright/chromium_headless_shell-1254/chrome-headless-shell-mac-arm64/chrome-headless-shell --disable-field-trial-config --disable-background-networking --disable-background",
+            "reviewed": "ok"
+          },
+          "escalations": [],
+          "reviews": [
+            {
+              "reviewId": "toolu_016YM5sdZA4VgF1s1oPmC3uE",
+              "targetItemId": "toolu_016YM5sdZA4VgF1s1oPmC3uE",
+              "turnId": "0a14741f-e2e4-4fa7-87a1-be5d435606e9",
+              "command": "node chromium.mjs reviewed",
+              "decider": "reviewer",
+              "status": "approved",
+              "riskLevel": null,
+              "rationale": null,
+              "overrule": null,
+              "exitCode": 0,
+              "durationMs": 4419,
+              "durationSource": "runtime"
+            }
+          ],
+          "taskRead": {
+            "escalations": 0,
+            "reviews": 1
+          },
+          "unexpected": [],
+          "refusedTurns": 1
+        }
+      },
+      "pass": true,
+      "failure": null,
+      "cleanup": {
+        "serviceStopped": true,
+        "temporaryReleased": true,
+        "fixtureRemoved": true
+      },
+      "outcomesAtRun": {
+        "approvalControl": {
+          "outcome": "proved",
+          "evidence": {
+            "toolUseId": "toolu_01AQ6qtjSgy1x98YLgQfFWnX",
+            "hookAtMs": 6188,
+            "decision": "pass",
+            "postHook": "PostToolUse",
+            "asked": false,
+            "chromium": "browserType.launch: Target page, context or browser has been closed Browser logs: <launching> ~/Library/Caches/ms-playwright/chromium_headless_shell-1254/chrome-headless-shell-mac-arm64/chrome-headless-shell --disable-field-trial-config --disable-background-networking --disable-background"
+          }
+        },
+        "approve": {
+          "outcome": "proved",
+          "evidence": {
+            "toolUseId": "toolu_016bAyCrqg877UqVefmCfEfd",
+            "hookAtMs": 8620,
+            "hookReturnAtMs": 9362,
+            "decision": "allow",
+            "postHook": {
+              "event": "PostToolUse",
+              "atMs": 12252
+            },
+            "record": {
+              "interactionId": "22c58354-da37-4d38-8585-3828c092c850",
+              "turnId": "9feef8b8-07a3-4c47-badf-02a6ed9315e9",
+              "itemId": "toolu_016bAyCrqg877UqVefmCfEfd",
+              "decider": "operator",
+              "decision": "accept",
+              "exitCode": 0,
+              "durationMs": 2894,
+              "durationSource": "service"
+            },
+            "chromium": "ok",
+            "control": {
+              "toolUseId": "toolu_01AQ6qtjSgy1x98YLgQfFWnX",
+              "hookAtMs": 6188,
+              "decision": "pass",
+              "postHook": "PostToolUse",
+              "asked": false,
+              "chromium": "browserType.launch: Target page, context or browser has been closed Browser logs: <launching> ~/Library/Caches/ms-playwright/chromium_headless_shell-1254/chrome-headless-shell-mac-arm64/chrome-headless-shell --disable-field-trial-config --disable-background-networking --disable-background"
+            },
+            "turnId": "9feef8b8-07a3-4c47-badf-02a6ed9315e9",
+            "admittedLevel": "escalate-approval",
+            "permissionMode": "auto",
+            "intentState": "completed",
+            "result": {
+              "subtype": "success",
+              "isError": false
+            },
+            "unexpected": []
+          }
+        },
+        "decline": {
+          "outcome": "proved",
+          "evidence": {
+            "toolUseId": "toolu_01CAFWQbTA1Lx36SdTq2bvWx",
+            "hookAtMs": 13487,
+            "decision": "deny",
+            "postHook": null,
+            "record": {
+              "interactionId": "6da226a6-d5eb-4ee8-a9c7-cb95b76cacd6",
+              "turnId": "9feef8b8-07a3-4c47-badf-02a6ed9315e9",
+              "itemId": "toolu_01CAFWQbTA1Lx36SdTq2bvWx",
+              "decider": "operator",
+              "decision": "decline",
+              "exitCode": null,
+              "durationMs": null,
+              "durationSource": null
+            },
+            "chromium": null,
+            "turnId": "9feef8b8-07a3-4c47-badf-02a6ed9315e9",
+            "admittedLevel": "escalate-approval",
+            "permissionMode": "auto",
+            "intentState": "completed",
+            "result": {
+              "subtype": "success",
+              "isError": false
+            },
+            "unexpected": []
+          }
+        },
+        "reviewControl": {
+          "outcome": "proved",
+          "evidence": {
+            "toolUseId": "toolu_01NWCq3VdR6ATXBgzuMe1WE7",
+            "hookAtMs": 24038,
+            "decision": "pass",
+            "postHook": "PostToolUse",
+            "asked": false,
+            "chromium": "browserType.launch: Target page, context or browser has been closed Browser logs: <launching> ~/Library/Caches/ms-playwright/chromium_headless_shell-1254/chrome-headless-shell-mac-arm64/chrome-headless-shell --disable-field-trial-config --disable-background-networking --disable-background"
+          }
+        },
+        "classifierApproval": {
+          "outcome": "proved",
+          "evidence": {
+            "toolUseId": "toolu_016YM5sdZA4VgF1s1oPmC3uE",
+            "hookAtMs": 28681,
+            "decision": "pass",
+            "asked": false,
+            "postHook": {
+              "event": "PostToolUse",
+              "atMs": 33099
+            },
+            "record": {
+              "reviewId": "toolu_016YM5sdZA4VgF1s1oPmC3uE",
+              "targetItemId": "toolu_016YM5sdZA4VgF1s1oPmC3uE",
+              "turnId": "0a14741f-e2e4-4fa7-87a1-be5d435606e9",
+              "command": "node chromium.mjs reviewed",
+              "decider": "reviewer",
+              "status": "approved",
+              "riskLevel": null,
+              "rationale": null,
+              "overrule": null,
+              "exitCode": 0,
+              "durationMs": 4419,
+              "durationSource": "runtime"
+            },
+            "escalations": 0,
+            "chromium": "ok",
+            "control": {
+              "toolUseId": "toolu_01NWCq3VdR6ATXBgzuMe1WE7",
+              "hookAtMs": 24038,
+              "decision": "pass",
+              "postHook": "PostToolUse",
+              "asked": false,
+              "chromium": "browserType.launch: Target page, context or browser has been closed Browser logs: <launching> ~/Library/Caches/ms-playwright/chromium_headless_shell-1254/chrome-headless-shell-mac-arm64/chrome-headless-shell --disable-field-trial-config --disable-background-networking --disable-background"
+            },
+            "turnId": "0a14741f-e2e4-4fa7-87a1-be5d435606e9",
+            "admittedLevel": "escalate-auto-review",
+            "permissionMode": "auto",
+            "intentState": "completed",
+            "result": {
+              "subtype": "success",
+              "isError": false
+            },
+            "unexpected": []
+          }
+        },
+        "undecided": {
+          "outcome": "untested",
+          "reason": "classifier decided every flagged call; no undecided call elicited (benign stimuli only, D32)"
+        },
+        "classifierDenial": {
+          "outcome": "untested",
+          "reason": "denial not elicited: no denial stimulus used (controller decision D32)"
+        },
+        "cancelledAsk": {
+          "approval": {
+            "cancelledAsks": 0,
+            "observed": false,
+            "ranAfterCancel": []
+          },
+          "review": {
+            "cancelledAsks": 0,
+            "observed": false,
+            "ranAfterCancel": []
+          }
+        }
+      },
+      "outcomes": {
+        "approvalControl": {
+          "outcome": "proved",
+          "evidence": {
+            "toolUseId": "toolu_01AQ6qtjSgy1x98YLgQfFWnX",
+            "hookAtMs": 6188,
+            "decision": "pass",
+            "postHook": "PostToolUse",
+            "asked": false,
+            "chromium": "browserType.launch: Target page, context or browser has been closed Browser logs: <launching> ~/Library/Caches/ms-playwright/chromium_headless_shell-1254/chrome-headless-shell-mac-arm64/chrome-headless-shell --disable-field-trial-config --disable-background-networking --disable-background"
+          }
+        },
+        "approve": {
+          "outcome": "proved",
+          "evidence": {
+            "toolUseId": "toolu_016bAyCrqg877UqVefmCfEfd",
+            "hookAtMs": 8620,
+            "hookReturnAtMs": 9362,
+            "decision": "allow",
+            "postHook": {
+              "event": "PostToolUse",
+              "atMs": 12252
+            },
+            "record": {
+              "interactionId": "22c58354-da37-4d38-8585-3828c092c850",
+              "turnId": "9feef8b8-07a3-4c47-badf-02a6ed9315e9",
+              "itemId": "toolu_016bAyCrqg877UqVefmCfEfd",
+              "decider": "operator",
+              "decision": "accept",
+              "exitCode": 0,
+              "durationMs": 2894,
+              "durationSource": "service"
+            },
+            "chromium": "ok",
+            "control": {
+              "toolUseId": "toolu_01AQ6qtjSgy1x98YLgQfFWnX",
+              "hookAtMs": 6188,
+              "decision": "pass",
+              "postHook": "PostToolUse",
+              "asked": false,
+              "chromium": "browserType.launch: Target page, context or browser has been closed Browser logs: <launching> ~/Library/Caches/ms-playwright/chromium_headless_shell-1254/chrome-headless-shell-mac-arm64/chrome-headless-shell --disable-field-trial-config --disable-background-networking --disable-background"
+            },
+            "turnId": "9feef8b8-07a3-4c47-badf-02a6ed9315e9",
+            "admittedLevel": "escalate-approval",
+            "permissionMode": "auto",
+            "intentState": "completed",
+            "result": {
+              "subtype": "success",
+              "isError": false
+            },
+            "unexpected": []
+          }
+        },
+        "decline": {
+          "outcome": "proved",
+          "evidence": {
+            "toolUseId": "toolu_01CAFWQbTA1Lx36SdTq2bvWx",
+            "hookAtMs": 13487,
+            "decision": "deny",
+            "postHook": null,
+            "record": {
+              "interactionId": "6da226a6-d5eb-4ee8-a9c7-cb95b76cacd6",
+              "turnId": "9feef8b8-07a3-4c47-badf-02a6ed9315e9",
+              "itemId": "toolu_01CAFWQbTA1Lx36SdTq2bvWx",
+              "decider": "operator",
+              "decision": "decline",
+              "exitCode": null,
+              "durationMs": null,
+              "durationSource": null
+            },
+            "chromium": null,
+            "turnId": "9feef8b8-07a3-4c47-badf-02a6ed9315e9",
+            "admittedLevel": "escalate-approval",
+            "permissionMode": "auto",
+            "intentState": "completed",
+            "result": {
+              "subtype": "success",
+              "isError": false
+            },
+            "unexpected": []
+          }
+        },
+        "reviewControl": {
+          "outcome": "proved",
+          "evidence": {
+            "toolUseId": "toolu_01NWCq3VdR6ATXBgzuMe1WE7",
+            "hookAtMs": 24038,
+            "decision": "pass",
+            "postHook": "PostToolUse",
+            "asked": false,
+            "chromium": "browserType.launch: Target page, context or browser has been closed Browser logs: <launching> ~/Library/Caches/ms-playwright/chromium_headless_shell-1254/chrome-headless-shell-mac-arm64/chrome-headless-shell --disable-field-trial-config --disable-background-networking --disable-background"
+          }
+        },
+        "classifierApproval": {
+          "outcome": "proved",
+          "evidence": {
+            "toolUseId": "toolu_016YM5sdZA4VgF1s1oPmC3uE",
+            "hookAtMs": 28681,
+            "decision": "pass",
+            "asked": false,
+            "postHook": {
+              "event": "PostToolUse",
+              "atMs": 33099
+            },
+            "record": {
+              "reviewId": "toolu_016YM5sdZA4VgF1s1oPmC3uE",
+              "targetItemId": "toolu_016YM5sdZA4VgF1s1oPmC3uE",
+              "turnId": "0a14741f-e2e4-4fa7-87a1-be5d435606e9",
+              "command": "node chromium.mjs reviewed",
+              "decider": "reviewer",
+              "status": "approved",
+              "riskLevel": null,
+              "rationale": null,
+              "overrule": null,
+              "exitCode": 0,
+              "durationMs": 4419,
+              "durationSource": "runtime"
+            },
+            "escalations": 0,
+            "chromium": "ok",
+            "control": {
+              "toolUseId": "toolu_01NWCq3VdR6ATXBgzuMe1WE7",
+              "hookAtMs": 24038,
+              "decision": "pass",
+              "postHook": "PostToolUse",
+              "asked": false,
+              "chromium": "browserType.launch: Target page, context or browser has been closed Browser logs: <launching> ~/Library/Caches/ms-playwright/chromium_headless_shell-1254/chrome-headless-shell-mac-arm64/chrome-headless-shell --disable-field-trial-config --disable-background-networking --disable-background"
+            },
+            "turnId": "0a14741f-e2e4-4fa7-87a1-be5d435606e9",
+            "admittedLevel": "escalate-auto-review",
+            "permissionMode": "auto",
+            "intentState": "completed",
+            "result": {
+              "subtype": "success",
+              "isError": false
+            },
+            "unexpected": []
+          }
+        },
+        "undecided": {
+          "outcome": "untested",
+          "reason": "classifier decided every flagged call; no undecided call elicited (benign stimuli only, D32)"
+        },
+        "classifierDenial": {
+          "outcome": "untested",
+          "reason": "denial not elicited: no denial stimulus used (controller decision D32)"
+        },
+        "cancelledAsk": {
+          "approval": {
+            "cancelledAsks": 0,
+            "observed": false,
+            "ranAfterCancel": []
+          },
+          "review": {
+            "cancelledAsks": 0,
+            "observed": false,
+            "ranAfterCancel": []
+          }
+        }
+      }
     }
   ],
   "diagnosis": [

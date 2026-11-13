@@ -19,8 +19,14 @@ All stimuli are benign Chromium launches (controller decision D32). The harness 
 | --- | --- | --- | --- | --- |
 | 1 | `2a64bbe0` | 2026-11-12 18:24:48 | 18:25:01 | failed: both turns started in `default`, not `auto` |
 | 2 | `e84c25f3` | 2026-11-13 18:41:09 | 18:41:48 | failed: harness defect; the hook decisions were not recorded |
+| 3 | `7cde5a72` | 2026-11-13 19:03:54 | 19:04:31 | **passed**: every required cell proved |
 
-Both runs exited 1 with `pass: false`. Each stopped the service, released the per-task temporary bases and removed its fixture. `dist` was rebuilt from the candidate immediately before attempt 2.
+Attempts 1 and 2 exited 1 with `pass: false`; attempt 3 exited 0 with `pass: true`. Each stopped the service, released the per-task temporary bases and removed its fixture. `dist` was rebuilt from the candidate immediately before attempts 2 and 3.
+
+- **Attempt 1** failed on a product defect, fixed before attempt 2.
+- **Attempt 2** qualified that fix but hit a harness defect.
+- **Attempt 3** was the one fresh attempt that controller decision D44 authorized for that diagnosed harness defect.
+- Before attempt 3, an offline test drove the harness's hook observer, which the live run imports. It showed the observer records each hook's decision and return time on the stored record. The same test fails under the old copy-then-mutate order.
 
 ### Attempt 1 and the diagnosis
 
@@ -66,23 +72,50 @@ What attempt 2's own records show (`tool_use_id`s are in the JSON):
 - The final classifier reads it as missing evidence: each required cell is **untested** ("the hook's decision was not recorded"). The JSON keeps the run-time outcomes as `outcomesAtRun`.
 - The harness now records the decision on the stored record.
 
+### Attempt 3
+
+**Both turns started in `auto`**, were admitted at their levels, and ended `completed` with an SDK `success`. No unexpected request was reported in either turn. As in attempt 2, the one-turn budget refused one further turn per task, which the cells do not depend on. Each proof below cites only its own turn's records.
+
+- **escalate-approval control** (`toolu_01AQ6qtjSgy1x98YLgQfFWnX`) is **proved**.
+  - The call was unflagged. The hook passed it on: input at 6 188 ms, returned at 6 190 ms.
+  - No permission ask followed, and its post-tool hook came at 7 291 ms.
+  - Chromium failed inside the sandbox: `browserType.launch: Target page, context or browser has been closed`.
+- **approve** (`toolu_016bAyCrqg877UqVefmCfEfd`) is **proved**.
+  - The call was flagged. The hook held it from 8 620 ms and returned `allow` at 9 362 ms.
+  - cab recorded the operator's acceptance for that item in that turn (interaction `22c58354…`), with exit code 0 and a service-measured 2 894 ms.
+  - Its post-tool hook followed at 12 252 ms, and it wrote `chromium: "ok"`.
+- **decline** (`toolu_01CAFWQbTA1Lx36SdTq2bvWx`) is **proved**.
+  - The call was flagged. The hook held it from 13 487 ms and returned `deny` at 14 455 ms.
+  - cab recorded the operator's decline (interaction `6da226a6…`) with no exit code.
+  - Its tool result was an error, no post-tool hook followed, and it wrote no result file.
+- **escalate-auto-review control** (`toolu_01NWCq3VdR6ATXBgzuMe1WE7`) is **proved**.
+  - The call was unflagged, and the hook passed it on.
+  - No permission ask followed, and its post-tool hook came at 26 074 ms.
+  - Chromium failed inside the sandbox.
+- **classifier approval** (`toolu_016YM5sdZA4VgF1s1oPmC3uE`) is **proved**.
+  - The call was flagged, and the hook passed it on at 28 682 ms.
+  - It reached no `canUseTool`. Its post-tool hook followed at 33 099 ms, and it wrote `chromium: "ok"`.
+  - cab recorded a reviewer approval with that `tool_use_id` as its review id and target, in that turn. It has no risk level, no rationale and no overrule, exit code 0, and a runtime-measured 4 419 ms.
+  - The task had no Inbox item.
+
 ## Outcomes
 
-These are the outcomes under the final classifier. Attempt 1 and attempt 2 are separate runs; no cell is proved in either.
+These are the outcomes under the final classifier. Each attempt is a separate run.
 
-| Cell | Attempt 1 | Attempt 2 |
-| --- | --- | --- |
-| escalate-approval control | untested: not in auto mode | untested: hook decision not recorded |
-| approve | untested: not in auto mode | untested: hook decision not recorded |
-| decline | untested: not in auto mode | untested: hook decision not recorded |
-| escalate-auto-review control | untested: not in auto mode | untested: hook decision not recorded |
-| classifier approval | untested: not in auto mode | untested: hook decision not recorded |
-| undecided call | untested: none elicited (D32) | untested: none elicited (D32) |
-| classifier denial | untested: no denial stimulus (D32) | untested: no denial stimulus (D32) |
-| cancelled ask then post-tool hook (#1715 residual risk) | not observed | not observed: no ask in either turn |
+| Cell | Attempt 1 | Attempt 2 | Attempt 3 |
+| --- | --- | --- | --- |
+| escalate-approval control | untested: not in auto mode | untested: hook decision not recorded | **proved** |
+| approve | untested: not in auto mode | untested: hook decision not recorded | **proved** |
+| decline | untested: not in auto mode | untested: hook decision not recorded | **proved** |
+| escalate-auto-review control | untested: not in auto mode | untested: hook decision not recorded | **proved** |
+| classifier approval | untested: not in auto mode | untested: hook decision not recorded | **proved** |
+| undecided call | untested: none elicited (D32) | untested: none elicited (D32) | untested: none elicited (D32) |
+| classifier denial | untested: no denial stimulus (D32) | untested: no denial stimulus (D32) | untested: no denial stimulus (D32) |
+| cancelled ask then post-tool hook (#1715 residual risk) | not observed | not observed | not observed: no ask in either turn |
 
 ## Limits
 
-- **No live cell is proved.** Attempt 2's records are consistent with the intended behaviour at both levels, but without the hook decisions the own-evidence rule leaves every cell untested. No further attempt was authorized.
+- **Coverage.** Attempt 3 proves the required cells: the operator's approve and decline at escalate-approval, a classifier approval at escalate-auto-review, and each turn's sandboxed control. Attempts 1 and 2 prove nothing.
+- **The classifier approval is inferred.** cab infers it from the call running with no `canUseTool` ask. Claude Code shows no classifier decision directly.
 - **The scrub finding** is from model starts aborted at init on Claude Code 2.1.322. Another version may behave differently. cab's guard fails any escalate turn that does not start in `auto`.
 - **Classifier denial, undecided calls and the cancelled-ask risk** were not elicited, under the benign-stimulus rule.
