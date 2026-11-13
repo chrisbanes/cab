@@ -2735,3 +2735,93 @@ test("the committed Claude escalation live evidence reclassifies with the curren
       attempt.outcomes,
     );
 });
+
+test("the live observer records each hook's decision and return time on the stored record", async () => {
+  const { observeTurn } = await load("claude-escalation-observer.mjs");
+  const { classifyRun } = await load("claude-escalation-outcomes.mjs");
+  type Hook = (
+    input: Event,
+    id: string,
+    context: { signal: AbortSignal },
+  ) => Promise<unknown>;
+  let clock = 0;
+  const now = () => clock;
+  const decisions: Record<string, unknown> = {
+    "control-approval": {},
+    approved: {
+      hookSpecificOutput: {
+        hookEventName: "PreToolUse",
+        permissionDecision: "allow",
+      },
+    },
+  };
+  const original: Hook = async (input) => {
+    // The decision arrives later than the hook input, as an operator answer does.
+    await new Promise((resolve) => setTimeout(resolve, 5));
+    clock += 100;
+    const command = String((input.tool_input as Event).command);
+    return decisions[command.split(" ").at(-1) ?? ""];
+  };
+  const post: Hook = async () => ({});
+  const options = {
+    hooks: {
+      PreToolUse: [{ hooks: [original], timeout: 960, onFailure: "block" }],
+      PostToolUse: [{ hooks: [post] }],
+      PostToolUseFailure: [{ hooks: [post] }],
+    },
+    canUseTool: async () => ({ behavior: "deny", message: "no" }),
+  };
+  const turn = { events: [] as Event[], init: null, result: null };
+  const seen = observeTurn(options, turn, now);
+  const signal = new AbortController().signal;
+  const pre = options.hooks.PreToolUse[0]!.hooks[0]!;
+  const call = (id: string, command: string, flag: boolean) =>
+    pre(
+      {
+        tool_name: "Bash",
+        tool_use_id: id,
+        tool_input: { command, dangerouslyDisableSandbox: flag },
+      },
+      id,
+      { signal },
+    );
+  // The hook's output reaches Claude Code unchanged.
+  assert.deepEqual(
+    await call("a2", "node chromium.mjs approved", true),
+    decisions.approved,
+  );
+  assert.deepEqual(
+    await call("a1", "node chromium.mjs control-approval", false),
+    decisions["control-approval"],
+  );
+  // The matcher's own options are kept.
+  assert.equal(options.hooks.PreToolUse[0]!.timeout, 960);
+  assert.equal(options.hooks.PreToolUse[0]!.onFailure, "block");
+  seen({ type: "system", subtype: "init", permissionMode: "auto" });
+  const stored = turn.events.filter((e) => e.kind === "pre");
+  assert.deepEqual(
+    stored.map((e) => [e.toolUseId, e.flagged, e.decision, e.t, e.returnedAt]),
+    [
+      ["a2", true, "allow", 0, 100],
+      ["a1", false, "pass", 100, 200],
+    ],
+  );
+  // What the classifier reads: a decision recorded, so the missing-decision rule does not fire.
+  const outcomes = classifyRun({
+    cells: {
+      approval: {
+        ...turn,
+        turnId: "turn-a",
+        admittedLevel: "escalate-approval",
+        intentState: "completed",
+        result: { subtype: "success", isError: false },
+        results: { "control-approval": "EPERM" },
+      },
+    },
+  });
+  // The control's own hook decision was read; it is untested only because it never ran.
+  assert.deepEqual(
+    [outcomes.approvalControl.outcome, outcomes.approvalControl.reason],
+    ["untested", "the control did not run"],
+  );
+});
