@@ -1184,8 +1184,9 @@ confirms `auto`, the hook refuses every Bash call that sets `dangerouslyDisableS
 At both escalate levels the turn environment omits `CLAUDE_CODE_SUBPROCESS_ENV_SCRUB`, because
 Claude Code does not start in `auto` with it set
 ([live record](evidence/2026-11-13-claude-escalation-live.md)). Sandboxed Bash in such a turn can
-therefore read the service's environment, with cab's credentials and Claude's API and token
-variables already removed; strict, draft and read-only turns keep the scrub.
+therefore read the service's environment, from which cab removes only its own credentials and
+Claude's API and token variables; what Claude Code itself adds to an unscrubbed subprocess
+environment is untested. Strict, draft and read-only turns keep the scrub.
 Afterwards, cab's PreToolUse hook holds each such call of the exact admitted turn and process as
 the same `sandbox.escalate` approval. Its identity is the call's `tool_use_id`. Its material is
 the command, the hook's working directory and the call's description as the reason. The hook

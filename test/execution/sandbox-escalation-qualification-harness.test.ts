@@ -2243,8 +2243,9 @@ function claudeRun() {
     event: "PostToolUse",
     toolUseId,
   });
-  const turn = (turnId: string) => ({
+  const turn = (turnId: string, admittedLevel: string) => ({
     turnId,
+    admittedLevel,
     init: { permissionMode: "auto" },
     result: { subtype: "success", isError: false },
     intentState: "completed",
@@ -2253,7 +2254,7 @@ function claudeRun() {
   return {
     cells: {
       approval: {
-        ...turn("turn-a"),
+        ...turn("turn-a", "escalate-approval"),
         events: [
           pre(10, "a1", "node chromium.mjs control-approval", false, "pass"),
           post(20, "a1"),
@@ -2288,7 +2289,7 @@ function claudeRun() {
         reviews: [] as Event[],
       },
       review: {
-        ...turn("turn-r"),
+        ...turn("turn-r", "escalate-auto-review"),
         events: [
           pre(10, "r1", "node chromium.mjs control-review", false, "pass"),
           post(20, "r1"),
@@ -2551,6 +2552,101 @@ test("Claude escalation cells prove only from their own turn's events, and the D
   });
   assert.equal(outcome(undecided, "undecided")?.outcome, "proved");
   assert.equal(outcome(undecided, "classifierApproval")?.outcome, "untested");
+  // Every cell needs its own turn's successful end at its own level, and the D32 cells their own
+  // complete evidence.
+  for (const broken of [
+    (x: Run) => (r(x).init = { permissionMode: "default" }),
+    (x: Run) => (r(x).result = null as never),
+    (x: Run) => (r(x).intentState = "resolved-failed"),
+    (x: Run) => (r(x).unexpected = ["claude/canUseTool:Bash"]),
+    (x: Run) => (r(x).admittedLevel = "escalate-approval"),
+  ]) {
+    const run = edited((x) => {
+      broken(x);
+      r(x).events.push(
+        { t: 35, kind: "ask", toolUseId: "r2" },
+        { t: 45, kind: "askResult", toolUseId: "r2", behavior: "allow" },
+        { t: 41, kind: "denied", toolUseId: "r2", reasonType: "classifier" },
+      );
+      r(x).escalations.push({
+        turnId: "turn-r",
+        itemId: "r2",
+        decider: "operator",
+        decision: "accept",
+      } as never);
+    });
+    for (const key of ["reviewControl", "undecided", "classifierDenial"])
+      notProved(key, run, "a failed or mislevelled turn");
+  }
+  notProved(
+    "approvalControl",
+    edited((x) => (a(x).admittedLevel = "strict")),
+    "the wrong level",
+  );
+  const asked = (abort: boolean, decision: string, answer: string) =>
+    edited((x) => {
+      r(x).events.push(
+        { t: 35, kind: "ask", toolUseId: "r2" },
+        { t: 45, kind: "askResult", toolUseId: "r2", behavior: answer },
+      );
+      if (abort)
+        r(x).events.push({ t: 40, kind: "askAborted", toolUseId: "r2" });
+      r(x).reviews.splice(0, 1);
+      r(x).escalations.push({
+        turnId: "turn-r",
+        itemId: "r2",
+        decider: "operator",
+        decision,
+      } as never);
+    });
+  notProved("undecided", asked(true, "accept", "allow"), "a cancelled ask");
+  notProved("undecided", asked(false, "decline", "deny"), "a declined call");
+  notProved(
+    "undecided",
+    edited((x) => {
+      r(x).events.push(
+        { t: 35, kind: "ask", toolUseId: "r2" },
+        { t: 45, kind: "askResult", toolUseId: "r2", behavior: "allow" },
+      );
+      r(x).events.splice(
+        r(x).events.findIndex((e) => e.kind === "post" && e.toolUseId === "r2"),
+        1,
+      );
+      r(x).reviews.splice(0, 1);
+      r(x).escalations.push({
+        turnId: "turn-r",
+        itemId: "r2",
+        decider: "operator",
+        decision: "accept",
+      } as never);
+    }),
+    "a call that never ran",
+  );
+  // A denial names its own passed-on call, and cab's reviewer record of it.
+  const denial = (id: string) =>
+    edited((x) => {
+      r(x).events.push({
+        t: 41,
+        kind: "denied",
+        toolUseId: id,
+        reasonType: "classifier",
+      });
+      // The denied call never ran, so it has no approval record of its own.
+      r(x).reviews.splice(0, 1);
+      r(x).reviews.push({
+        turnId: "turn-r",
+        reviewId: id,
+        targetItemId: id,
+        decider: "reviewer",
+        status: "denied",
+        riskLevel: null,
+        rationale: null,
+        overrule: null,
+      } as never);
+    });
+  notProved("classifierDenial", denial("r9"), "a denial of no passed-on call");
+  assert.equal(outcome(denial("r2"), "classifierDenial")?.outcome, "proved");
+
   // #1715's residual risk: an ask aborted and the call ran anyway is reported, not hidden.
   const cancelled = edited((x) =>
     r(x).events.push(

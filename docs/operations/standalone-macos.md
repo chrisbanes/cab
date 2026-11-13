@@ -1157,8 +1157,8 @@ Claude Code task turns at this level run in Claude Code's auto permission mode:
   level, to continue.
 - Claude Code does not start in auto mode with its subprocess environment scrub on, so turns
   at both escalate levels run without it. Sandboxed commands can then read the service's
-  environment, with cab's and Claude's credentials removed. Keep other secrets out of the
-  service's environment.
+  environment, from which cab removes only its own and Claude's credential variables. Keep
+  other secrets, such as cloud-provider credentials, out of the service's environment.
 - Claude's own classifier can still refuse a command you approved. The command then does not
   run, and its escalation shows no exit code.
 - A Bash command can ask for up to 60 minutes. One that times out keeps running in the

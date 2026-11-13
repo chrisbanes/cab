@@ -22,6 +22,7 @@ import {
 } from "node:fs";
 import { arch, homedir, release, tmpdir } from "node:os";
 import { join } from "node:path";
+import { fileURLToPath } from "node:url";
 
 const args = process.argv.slice(2);
 if (args.length !== 2 || args[0] !== "--live" || args[1] !== "--one-attempt") {
@@ -34,7 +35,10 @@ const refuse = (reason) => {
   process.stderr.write(`Refusing Claude escalation live run: ${reason}.\n`);
   process.exit(2);
 };
-const git = (...argv) => execFileSync("git", argv, { encoding: "utf8" }).trim();
+// The repository this harness belongs to, whatever directory it was started from.
+const repository = fileURLToPath(new URL("../../..", import.meta.url));
+const git = (...argv) =>
+  execFileSync("git", argv, { encoding: "utf8", cwd: repository }).trim();
 // Evidence names its candidate SHA, so it must run from exactly that tree.
 if (git("status", "--porcelain") !== "")
   refuse("the checkout has uncommitted changes");
@@ -151,14 +155,17 @@ function observe(options) {
   options.canUseTool = async (tool, input, context) => {
     const id = context.toolUseID;
     push({ kind: "ask", toolUseId: id, tool, command: short(input?.command) });
-    context.signal?.addEventListener(
-      "abort",
-      () => push({ kind: "askAborted", toolUseId: id }),
-      { once: true },
-    );
-    const answer = await canUseTool(tool, input, context);
-    push({ kind: "askResult", toolUseId: id, behavior: answer.behavior });
-    return answer;
+    // A cancellation counts only while the ask is unanswered.
+    const aborted = () => push({ kind: "askAborted", toolUseId: id });
+    if (context.signal?.aborted) aborted();
+    else context.signal?.addEventListener("abort", aborted, { once: true });
+    try {
+      const answer = await canUseTool(tool, input, context);
+      push({ kind: "askResult", toolUseId: id, behavior: answer.behavior });
+      return answer;
+    } finally {
+      context.signal?.removeEventListener("abort", aborted);
+    }
   };
   return (message) => {
     if (message.type === "system" && message.subtype === "init")

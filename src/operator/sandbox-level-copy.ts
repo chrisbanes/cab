@@ -23,7 +23,7 @@ export const claudeEscalateApprovalLine =
 
 /** Why Claude Code escalate turns run without the subprocess environment scrub (#1682 T4). */
 export const claudeEscalateScrubLine =
-  "At the escalate levels, Claude Code task turns run without the subprocess environment scrub, because Claude Code does not start in auto mode with it set. Sandboxed Bash can then read the service's environment, with cab's and Claude's credentials removed.";
+  "At the escalate levels, Claude Code task turns run without the subprocess environment scrub, because Claude Code does not start in auto mode with it set. Sandboxed Bash can then read the service's environment, from which cab removes only its own and Claude's credential variables.";
 
 /** The Bash timeout ceiling of Claude Code task turns that can leave the sandbox (#1678). */
 export const claudeBashTimeoutLine =

@@ -62,6 +62,8 @@ const reviewsFor = (cell, id) =>
  * no permission ask, and Chromium failed inside the sandbox.
  */
 export function controlCell(cell, label) {
+  const problem = turnProblem(cell);
+  if (problem) return untested(problem, turnEvidence(cell));
   const { call, count } = callFor(cell, label, false);
   if (!call)
     return untested(
@@ -93,6 +95,7 @@ export function controlCell(cell, label) {
 
 const turnEvidence = (cell) => ({
   turnId: cell.turnId ?? null,
+  admittedLevel: cell.admittedLevel ?? null,
   permissionMode: cell.init?.permissionMode ?? null,
   intentState: cell.intentState ?? null,
   result: cell.result ?? null,
@@ -103,6 +106,8 @@ const turnEvidence = (cell) => ({
 function turnProblem(cell) {
   if (typeof cell.turnId !== "string" || cell.turnId === "")
     return "no turn id from cab's startTurn";
+  if (cell.admittedLevel !== cell.level)
+    return "turn not admitted at its sandbox level";
   if (cell.init?.permissionMode !== "auto")
     return "turn not confirmed in auto mode";
   if (!terminal(cell)) return "turn did not end successfully";
@@ -246,40 +251,75 @@ export function classifierApprovalCell(cell, control) {
   return checks ? proved(evidence) : refuted(evidence);
 }
 
-/** An undecided call: the classifier asked canUseTool, and cab sent it to the operator. */
+/**
+ * An undecided call: the classifier asked canUseTool about the flagged `reviewed` call, cab sent
+ * it to the operator, who accepted it, the ask was answered allow without being cancelled, and
+ * the call ran. It is an operator escalation, not a review.
+ */
 export function undecidedCell(cell) {
   const { call } = callFor(cell, "reviewed", true);
   const ask = call && of(cell, "ask", call.toolUseId)[0];
   if (!ask) return untested(noUndecided);
+  const problem = turnProblem(cell);
+  if (problem) return untested(problem, turnEvidence(cell));
   const records = escalationsFor(cell, call.toolUseId);
   const evidence = {
     toolUseId: call.toolUseId,
     askAtMs: ask.t,
     askResult: of(cell, "askResult", call.toolUseId)[0]?.behavior ?? null,
+    askAborted: of(cell, "askAborted", call.toolUseId).length > 0,
+    postHook: of(cell, "post", call.toolUseId)[0]?.event ?? null,
     record: records.length === 1 ? records[0] : null,
     reviews: reviewsFor(cell, call.toolUseId).length,
   };
   return evidence.record?.decider === "operator" &&
-    evidence.askResult !== null &&
+    evidence.record.decision === "accept" &&
+    evidence.askResult === "allow" &&
+    !evidence.askAborted &&
+    evidence.postHook !== null &&
     evidence.reviews === 0
     ? proved(evidence)
     : untested(
-        "the undecided call was not recorded as an operator escalation",
+        "the undecided call was not shown accepted by the operator and run",
         evidence,
       );
 }
 
-/** A classifier denial reported by Claude Code for a flagged call, and cab's record of it. */
+/**
+ * A classifier denial Claude Code reported for a flagged call the hook passed on in this turn,
+ * and cab's reviewer record of it.
+ */
 export function classifierDenialCell(cell) {
   const denials = (cell.events ?? []).filter(
     (e) => e.kind === "denied" && e.reasonType === "classifier",
   );
   if (denials.length === 0) return untested(noDenial);
+  const problem = turnProblem(cell);
+  if (problem) return untested(problem, turnEvidence(cell));
+  const passed = (id) =>
+    (cell.events ?? []).some(
+      (e) =>
+        e.kind === "pre" &&
+        e.toolUseId === id &&
+        e.flagged &&
+        e.decision === "pass",
+    );
   const records = denials.flatMap((d) => reviewsFor(cell, d.toolUseId));
+  const evidence = { denials, records };
+  if (!denials.every((d) => passed(d.toolUseId)))
+    return untested(
+      "a denial names no flagged call the hook passed on",
+      evidence,
+    );
   return records.length === denials.length &&
-    records.every((r) => r.status === "denied" && r.overrule === null)
-    ? proved({ denials, records })
-    : refuted({ denials, records });
+    records.every(
+      (r) =>
+        r.decider === "reviewer" &&
+        r.status === "denied" &&
+        r.overrule === null,
+    )
+    ? proved(evidence)
+    : refuted(evidence);
 }
 
 /**
@@ -307,8 +347,8 @@ export function cancelledAskObservation(cell) {
 
 /** Every cell of a run, from its two turns. */
 export function classifyRun(run) {
-  const approval = run.cells?.approval ?? {};
-  const review = run.cells?.review ?? {};
+  const approval = { ...run.cells?.approval, level: "escalate-approval" };
+  const review = { ...run.cells?.review, level: "escalate-auto-review" };
   const approvalControl = controlCell(approval, "control-approval");
   const reviewControl = controlCell(review, "control-review");
   return {

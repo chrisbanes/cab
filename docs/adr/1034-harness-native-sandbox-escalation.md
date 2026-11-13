@@ -51,8 +51,9 @@ A store migration maps `dangerouslySkipSandbox: true` to `unsandboxed`, everythi
   never downgraded. An escalate turn whose start reports another permission mode fails, and its
   hook refuses escalated Bash until the start confirms `auto`. Claude Code does not start in
   `auto` with `CLAUDE_CODE_SUBPROCESS_ENV_SCRUB` set, so escalate turns run without the
-  subprocess environment scrub: sandboxed Bash there can read the service's credential-filtered
-  environment. Strict, draft and read-only turns keep the scrub.
+  subprocess environment scrub: sandboxed Bash there can read the service's environment, from
+  which cab removes only its own and Claude's credential variables. Strict, draft and read-only
+  turns keep the scrub.
   - **At `escalate-approval`:** the PreToolUse hook holds each Bash call with
     `dangerouslyDisableSandbox` for the Inbox. Its matcher has a 960-second timeout and
     `onFailure: "block"`, so the service's 15-minute expiry answers first, and a hook timeout or

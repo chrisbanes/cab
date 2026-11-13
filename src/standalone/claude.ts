@@ -524,7 +524,7 @@ export const claudePolicyLimits: readonly string[] = [
   "A sandbox that stops working mid-turn shows only as failed commands (exit 126), not a failed turn.",
   "The sandbox self-test proves Seatbelt can start, not the exact profile Claude Code applies.",
   "Untested: inertness of model-written Claude configuration (C0 F5.5), a missing sandbox-exec binary (F6.4), and whether Claude's auto-mode classifier also decides a call the operator approved; it can still refuse one, which then records no exit code.",
-  "The subprocess environment scrub, applied outside the escalate levels, is qualified for sandboxed Bash only (#827): Bash saw neither the token variable nor its value, and could not read its parent's environment with ps. Other ways to read a parent process's environment are untested.",
+  "The subprocess environment scrub, off at the escalate levels, is qualified for sandboxed Bash only (#827): Bash saw neither the token variable nor its value, nor its parent's environment through ps. Other ways to read it, and what Claude Code adds to an unscrubbed environment, are untested.",
   "After a service crash, a running Claude CLI process can outlive the service (#827); verify it has exited before recovering the turn.",
   "Only the Claude Code version the pinned SDK declares was qualified. The installed claude is not version-checked, and another version may enforce the sandbox, tool and permission controls differently.",
   "Native instructions, skills, plugins, MCP servers and hooks are trusted. They can act outside cab tools; shell restrictions do not confine their effects.",
