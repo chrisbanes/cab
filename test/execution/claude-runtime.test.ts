@@ -2270,6 +2270,10 @@ test("an escalate-approval task turn runs in auto mode with Bash held by the hoo
       escalated.hooks?.PreToolUse?.[0] ?? {};
     assert.deepEqual(matcher, { timeout: 960, onFailure: "block" });
     assert.equal(escalated.env?.BASH_MAX_TIMEOUT_MS, "3600000");
+    // Claude Code does not start in auto mode with the subprocess scrub set (#1682 T4).
+    assert.equal(escalated.env?.CLAUDE_CODE_SUBPROCESS_ENV_SCRUB, undefined);
+    for (const options of [strict, readOnly, unsandboxed])
+      assert.equal(options.env?.CLAUDE_CODE_SUBPROCESS_ENV_SCRUB, "1");
     // A read-only turn ignores the escalation and keeps today's exact options.
     for (const options of [strict, readOnly]) {
       assert.equal(options.permissionMode, "dontAsk");
@@ -2512,23 +2516,29 @@ test("an escalate turn whose start reports another permission mode fails with a 
     yield init(sessionOf(session), "default");
     yield result(sessionOf(session));
   };
-  const f = fixture({ scripts: [script] });
+  const f = fixture({ scripts: [script, script] });
   try {
     await f.runtime.start();
     const threadId = await f.runtime.startThread(f.workspace, []);
-    const turnId = await f.turn(
-      threadId,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      "approval",
-    );
-    await assert.rejects(f.runtime.waitForTurn(threadId, turnId));
+    // Whatever makes Claude Code start out of auto mode, both escalate levels fail closed.
+    for (const level of ["approval", "auto-review"] as const) {
+      const turnId = await f.turn(
+        threadId,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        level,
+      );
+      await assert.rejects(f.runtime.waitForTurn(threadId, turnId));
+    }
     assert.deepEqual(
       f.anomalies.map((a) => a.reason),
-      ["Claude Code reported permission mode default, not auto"],
+      [
+        "Claude Code reported permission mode default, not auto",
+        "Claude Code reported permission mode default, not auto",
+      ],
     );
   } finally {
     await f.cleanup();

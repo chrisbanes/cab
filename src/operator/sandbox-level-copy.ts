@@ -21,6 +21,10 @@ export const codexEscalateApprovalLine =
 export const claudeEscalateApprovalLine =
   "A project at the escalate-approval level runs its Claude Code task turns sandboxed in auto permission mode: cab's hook holds each Bash call that asks to leave the sandbox for the operator. Claude's classifier can still refuse an approved call. Draft, read-only and unbound turns stay strict.";
 
+/** Why Claude Code escalate turns run without the subprocess environment scrub (#1682 T4). */
+export const claudeEscalateScrubLine =
+  "At the escalate levels, Claude Code task turns run without the subprocess environment scrub, because Claude Code does not start in auto mode with it set. Sandboxed Bash can then read the service's environment, with cab's and Claude's credentials removed.";
+
 /** The Bash timeout ceiling of Claude Code task turns that can leave the sandbox (#1678). */
 export const claudeBashTimeoutLine =
   "At the escalate and unsandboxed levels, a Claude Code Bash command can ask for up to 60 minutes. A command that times out is moved to the background and keeps running, so the timeout does not bound it.";
@@ -35,6 +39,7 @@ export const escalateApprovalRiskLines = [
 export const escalateApprovalLines = [
   codexEscalateApprovalLine,
   claudeEscalateApprovalLine,
+  claudeEscalateScrubLine,
   claudeBashTimeoutLine,
   ...escalateApprovalRiskLines,
 ];
@@ -67,6 +72,7 @@ export const escalateAutoReviewLines = [
   codexEscalateAutoReviewLine,
   claudeEscalateAutoReviewLine,
   claudeAutoReviewEvidenceLine,
+  claudeEscalateScrubLine,
   claudeBashTimeoutLine,
   ...escalateAutoReviewRiskLines,
 ];

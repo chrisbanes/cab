@@ -1181,6 +1181,11 @@ permission mode with `allowUnsandboxedCommands: true`, and Bash leaves its allow
 the named reason `auto mode is not available for model <model>` and is never started in another
 mode. A turn whose start reports another permission mode fails with that reason. Until its start
 confirms `auto`, the hook refuses every Bash call that sets `dangerouslyDisableSandbox`.
+At both escalate levels the turn environment omits `CLAUDE_CODE_SUBPROCESS_ENV_SCRUB`, because
+Claude Code does not start in `auto` with it set
+([live record](evidence/2026-11-13-claude-escalation-live.md)). Sandboxed Bash in such a turn can
+therefore read the service's environment, with cab's credentials and Claude's API and token
+variables already removed; strict, draft and read-only turns keep the scrub.
 Afterwards, cab's PreToolUse hook holds each such call of the exact admitted turn and process as
 the same `sandbox.escalate` approval. Its identity is the call's `tool_use_id`. Its material is
 the command, the hook's working directory and the call's description as the reason. The hook
@@ -1783,7 +1788,8 @@ Codex's ([ADR-1008](adr/1008-claude-code-execution-harness.md)):
 - Agents ask questions only through `cab_ask_question`.
 
 Each runtime's effective policy lists its disclosed limits. For Claude, the
-subprocess environment scrub is qualified for sandboxed Bash only; inherited hooks
+subprocess environment scrub is qualified for sandboxed Bash only and is not applied at the
+escalate levels; inherited hooks
 and MCP servers may perform external effects beyond cab tools. A Claude CLI process can outlive a crashed service,
 so cab releases the crashed turn only through
 [held-turn release](#execution-and-recovery), normally once it verifies that CLI process

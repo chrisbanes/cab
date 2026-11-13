@@ -20,6 +20,7 @@ import {
   claudeAutoReviewEvidenceLine,
   claudeBashTimeoutLine,
   claudeEscalateApprovalLine,
+  claudeEscalateScrubLine,
   claudeEscalateAutoReviewLine,
   claudeUnsandboxedLine,
   codexEscalateApprovalLine,
@@ -454,9 +455,15 @@ test("both harnesses' disclosures state the unsandboxed grant and risks within t
     /classifier can still refuse an approved call/,
   );
   assert.match(claudeBashTimeoutLine, /60 minutes.*keeps running/);
+  // The escalate levels run without the subprocess scrub, and the disclosure says why.
+  assert.match(
+    claudeEscalateScrubLine,
+    /without the subprocess environment scrub.*auto mode.*Sandboxed Bash can then read/,
+  );
   assert.ok(codex.lines.includes(codexEscalateApprovalLine));
   for (const line of [
     claudeEscalateApprovalLine,
+    claudeEscalateScrubLine,
     claudeBashTimeoutLine,
     ...escalateApprovalRiskLines,
   ])
@@ -467,6 +474,7 @@ test("both harnesses' disclosures state the unsandboxed grant and risks within t
     [
       codexEscalateApprovalLine,
       claudeEscalateApprovalLine,
+      claudeEscalateScrubLine,
       claudeBashTimeoutLine,
       ...escalateApprovalRiskLines,
     ].every((line) => line.length <= 300),
