@@ -2631,7 +2631,12 @@ test("Claude escalation cells prove only from their own turn's events, and the D
         toolUseId: id,
         reasonType: "classifier",
       });
-      // The denied call never ran, so it has no approval record of its own.
+      // The denied call never ran: no post-tool hook, no result and no approval record.
+      r(x).events.splice(
+        r(x).events.findIndex((e) => e.kind === "post" && e.toolUseId === "r2"),
+        1,
+      );
+      delete (r(x).results as Record<string, unknown>).reviewed;
       r(x).reviews.splice(0, 1);
       r(x).reviews.push({
         turnId: "turn-r",
@@ -2646,6 +2651,64 @@ test("Claude escalation cells prove only from their own turn's events, and the D
     });
   notProved("classifierDenial", denial("r9"), "a denial of no passed-on call");
   assert.equal(outcome(denial("r2"), "classifierDenial")?.outcome, "proved");
+  // A denied call that ran anyway contradicts the denial.
+  assert.equal(
+    outcome(
+      edited((x) =>
+        r(x).events.push({
+          t: 41,
+          kind: "denied",
+          toolUseId: "r2",
+          reasonType: "classifier",
+        }),
+      ),
+      "classifierDenial",
+    )?.outcome,
+    "refuted",
+  );
+  // An undecided call needs the hook to have passed it on, and its ask before it ran.
+  const undecidedWith = (edit: (x: Run) => void) =>
+    edited((x) => {
+      r(x).events.push(
+        { t: 35, kind: "ask", toolUseId: "r2" },
+        { t: 45, kind: "askResult", toolUseId: "r2", behavior: "allow" },
+      );
+      r(x).reviews.splice(0, 1);
+      r(x).escalations.push({
+        turnId: "turn-r",
+        itemId: "r2",
+        decider: "operator",
+        decision: "accept",
+      } as never);
+      edit(x);
+    });
+  assert.equal(
+    outcome(
+      undecidedWith(() => {}),
+      "undecided",
+    )?.outcome,
+    "proved",
+  );
+  notProved(
+    "undecided",
+    undecidedWith((x) => (r(x).events[2]!.decision = "deny")),
+    "a hook deny",
+  );
+  notProved(
+    "undecided",
+    undecidedWith((x) => (r(x).events.find((e) => e.kind === "ask")!.t = 60)),
+    "an ask after it ran",
+  );
+  // A hook record without its decision (the 2026-11-13 harness defect) is untested, not refuted.
+  const noDecisions = edited((x) => {
+    for (const e of [...a(x).events, ...r(x).events])
+      if (e.kind === "pre") {
+        delete e.decision;
+        delete e.returnedAt;
+      }
+  });
+  for (const key of requiredCells)
+    assert.equal(outcome(noDecisions, key)?.outcome, "untested", key);
 
   // #1715's residual risk: an ask aborted and the call ran anyway is reported, not hidden.
   const cancelled = edited((x) =>
@@ -2655,4 +2718,20 @@ test("Claude escalation cells prove only from their own turn's events, and the D
     ),
   );
   assert.equal(classifyRun(cancelled).cancelledAsk.review.observed, true);
+});
+
+test("the committed Claude escalation live evidence reclassifies with the current rules", async () => {
+  const { classifyRun } = await load("claude-escalation-outcomes.mjs");
+  const evidence = JSON.parse(
+    readFileSync(
+      resolve("docs/evidence/2026-11-13-claude-escalation-live.json"),
+      "utf8",
+    ),
+  );
+  // Compared as stored: JSON drops fields the classifier leaves undefined.
+  for (const attempt of evidence.attempts)
+    assert.deepEqual(
+      JSON.parse(JSON.stringify(classifyRun(attempt))),
+      attempt.outcomes,
+    );
 });

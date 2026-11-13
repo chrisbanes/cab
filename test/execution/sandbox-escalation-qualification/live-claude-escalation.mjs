@@ -100,6 +100,7 @@ const markers = {
 };
 const blank = () => ({
   turnId: null,
+  admittedLevel: null,
   init: null,
   result: null,
   intentState: null,
@@ -117,20 +118,24 @@ let cell = "approval";
 /** The real turn query, observed: hooks, canUseTool and stream messages by tool_use_id. */
 function observe(options) {
   const label = cell;
-  const push = (event) => cells[label].events.push({ t: now(), ...event });
+  // Returns the stored record, so a later field (a hook's decision) lands on it, not a copy.
+  const push = (event) => {
+    const stored = { t: now(), ...event };
+    cells[label].events.push(stored);
+    return stored;
+  };
   const pre = options.hooks.PreToolUse[0];
   const preHook = pre.hooks[0];
   pre.hooks = [
     async (input, id, context) => {
       const flag = input.tool_input?.dangerouslyDisableSandbox;
-      const event = {
+      const event = push({
         kind: "pre",
         toolUseId: input.tool_use_id,
         tool: input.tool_name,
         command: short(input.tool_input?.command),
         flagged: flag !== undefined && flag !== false,
-      };
-      push(event);
+      });
       const output = await preHook(input, id, context);
       event.decision = output?.hookSpecificOutput?.permissionDecision ?? "pass";
       event.returnedAt = now();

@@ -25,6 +25,11 @@ const untested = (reason, evidence) => ({
 const ran = (result) => result === "ok";
 const blocked = (result) => typeof result === "string" && result !== "ok";
 
+/** A hook record without its decision or return time is missing evidence, not a contradiction. */
+const unrecorded = (call) =>
+  typeof call.decision !== "string" || typeof call.returnedAt !== "number";
+const hookUnrecorded = "the hook's decision was not recorded";
+
 const of = (cell, kind, id) =>
   (cell.events ?? []).filter((e) => e.kind === kind && e.toolUseId === id);
 
@@ -77,6 +82,7 @@ export function controlCell(cell, label) {
     asked: of(cell, "ask", call.toolUseId).length > 0,
     chromium: cell.results?.[label] ?? null,
   };
+  if (unrecorded(call)) return untested(hookUnrecorded, evidence);
   if (call.decision !== "pass" || evidence.asked)
     return refuted({
       ...evidence,
@@ -145,6 +151,7 @@ export function approveCell(cell, control) {
     ...turnEvidence(cell),
   };
   if (!record) return untested("no escalation recorded for the call", evidence);
+  if (unrecorded(call)) return untested(hookUnrecorded, evidence);
   if (record.decision === "accept" && (call.decision !== "allow" || !post))
     return refuted({
       ...evidence,
@@ -190,6 +197,7 @@ export function declineCell(cell) {
   if (evidence.postHook || evidence.chromium !== null)
     return refuted({ ...evidence, reason: "the declined call ran" });
   if (!record) return untested("no escalation recorded for the call", evidence);
+  if (unrecorded(call)) return untested(hookUnrecorded, evidence);
   return record.decider === "operator" &&
     record.decision === "decline" &&
     record.exitCode === null &&
@@ -228,6 +236,7 @@ export function classifierApprovalCell(cell, control) {
     control: control.evidence ?? null,
     ...turnEvidence(cell),
   };
+  if (unrecorded(call)) return untested(hookUnrecorded, evidence);
   if (call.decision !== "pass")
     return refuted({
       ...evidence,
@@ -272,7 +281,11 @@ export function undecidedCell(cell) {
     record: records.length === 1 ? records[0] : null,
     reviews: reviewsFor(cell, call.toolUseId).length,
   };
-  return evidence.record?.decider === "operator" &&
+  const post = of(cell, "post", call.toolUseId)[0];
+  return call.decision === "pass" &&
+    post !== undefined &&
+    post.t > ask.t &&
+    evidence.record?.decider === "operator" &&
     evidence.record.decision === "accept" &&
     evidence.askResult === "allow" &&
     !evidence.askAborted &&
@@ -306,6 +319,18 @@ export function classifierDenialCell(cell) {
     );
   const records = denials.flatMap((d) => reviewsFor(cell, d.toolUseId));
   const evidence = { denials, records };
+  // A denied call never runs, and a denial is not an undecided call routed to the operator.
+  if (
+    denials.some(
+      (d) =>
+        of(cell, "post", d.toolUseId).length > 0 ||
+        of(cell, "ask", d.toolUseId).length > 0,
+    )
+  )
+    return refuted({
+      ...evidence,
+      reason: "a denied call ran or was asked about",
+    });
   if (!denials.every((d) => passed(d.toolUseId)))
     return untested(
       "a denial names no flagged call the hook passed on",
