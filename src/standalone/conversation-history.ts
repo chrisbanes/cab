@@ -454,6 +454,49 @@ export class ConversationHistoryStore {
     });
   }
 
+  /** Content-free retained facts; never materialize summary text for health reads. */
+  hasStoredReasoningSummary(
+    binding: ConversationHistoryBinding,
+    intentId: string,
+  ): boolean {
+    bindingSchema.parse(binding);
+    const row = this.db
+      .prepare(`SELECT s.workId, s.taskId, s.assignmentId,
+      s.assignmentVersion, s.instructionsRevision, s.profileRevision,
+      s.conversationRevision, s.workRevision, s.threadId, s.turnId,
+      s.projectId, s.intentId, s.enabled, s.captureMode, s.generation,
+      s.stored, s.truncated, s.createdAt, s.updatedAt,
+      (s.text IS NOT NULL AND length(s.text) > 0) AS hasText
+      FROM conversation_reasoning_summaries s
+      JOIN execution_intent_reasoning_summaries admission ON admission.intentId = s.intentId
+        AND admission.enabled = s.enabled AND admission.captureMode = s.captureMode
+        AND admission.generation IS s.generation
+      JOIN domain_assignments a ON a.id = s.assignmentId AND a.taskId = s.taskId
+        AND a.projectId = s.projectId
+      JOIN domain_tasks t ON t.id = s.taskId AND t.projectId = s.projectId
+      WHERE s.workId = ? AND s.taskId = ? AND s.assignmentId = ?
+        AND s.assignmentVersion = ? AND s.instructionsRevision = ?
+        AND s.profileRevision = ? AND s.conversationRevision = ?
+        AND s.workRevision = ? AND s.threadId = ? AND s.turnId = ?
+        AND s.intentId = ?`)
+      .get(...this.bindingValues(binding), intentId);
+    const parsed = bindingSchema
+      .extend({
+        projectId: z.string().min(1),
+        intentId: z.string().min(1),
+        enabled: z.literal(1),
+        captureMode: z.literal("enhanced"),
+        generation: z.number().int().nonnegative().safe(),
+        stored: z.literal(1),
+        hasText: z.literal(1),
+        truncated: z.union([z.literal(0), z.literal(1)]),
+        createdAt: z.number().int().nonnegative().safe(),
+        updatedAt: z.number().int().nonnegative().safe(),
+      })
+      .safeParse(row);
+    return parsed.success;
+  }
+
   /** The only text read seam: current exclusions are mandatory, including after erasure. */
   readReasoningSummary(
     binding: ConversationHistoryBinding,

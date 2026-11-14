@@ -325,8 +325,11 @@ cuts, current exclusions, failures, deletion fencing and restart. Exhaustive pro
 deletion fixtures include summary rows and preserve unrelated history and safety
 records. Codex wire requests and reasoning exclusion remain unchanged. CLI parsing
 and the Settings toggle/keyboard deletion confirmation retain their existing coverage.
-These checks do not establish live runtime/release qualification, summary rendering,
-verbose CLI display or new capture-health values.
+Metadata and both execution health projections cover exact binding, retained
+conversations, historical admission, current-setting independence, Codex/no-summary
+unavailability, redaction failure and deletion. CLI tests cover per-execution notes,
+neutral bounded lists, last-successful-page follow notes, verbosity and JSON coverage.
+These checks do not establish live runtime/release qualification or summary rendering.
 
 | Area | Operations requiring evidence | Scenarios |
 | --- | --- | --- |
