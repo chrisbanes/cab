@@ -1674,6 +1674,75 @@ test("reasoning storage caps Unicode after redaction, re-redacts reads, and dura
     buffered.finish();
     assert.equal(read().text, "Ordered [redacted] tail");
     clear();
+    const mixed = capture();
+    mixed.receive(summary("wrong-cap", "x".repeat(131_066), "wrong-turn"));
+    mixed.receive(summary("selected", "PRIVATE_SPLIT_CANARY"));
+    mixed.bind(binding);
+    mixed.finish();
+    assert.equal(read().text, "[redacted]");
+    clear();
+    for (const finish of ["bind", "discard"] as const) {
+      const saturated = capture();
+      saturated.receive(summary("full", "x".repeat(131_072)));
+      for (let i = 0; i < 20_000; i++)
+        saturated.receive(summary(`after-cap-${i}`, "x"));
+      const retained = saturated as unknown as {
+        bufferedSummaryItems: Set<string>;
+        bufferedSummaryBytes: Map<string, number>;
+      };
+      assert.equal(retained.bufferedSummaryItems.size, 1);
+      if (finish === "bind") saturated.bind(binding);
+      else saturated.discard();
+      assert.equal(retained.bufferedSummaryItems.size, 0);
+      assert.equal(retained.bufferedSummaryBytes.size, 0);
+      saturated.discard();
+    }
+    clear();
+    for (const overflow of ["events", "bytes"] as const) {
+      const lostPrefix = capture();
+      lostPrefix.receive(summary("prefix", "PRIVATE_"));
+      if (overflow === "events") {
+        for (let i = 0; i < 8192; i++)
+          lostPrefix.receive({
+            ...turn,
+            itemId: `early-${i}`,
+            kind: "started",
+          });
+      } else
+        lostPrefix.receive({
+          ...turn,
+          itemId: "large-early",
+          kind: "completed",
+          text: "x".repeat(4 * 1024 * 1024),
+        });
+      assert.equal(lostPrefix.bind(binding), true);
+      lostPrefix.receive(summary("suffix", "SPLIT_CANARY"));
+      lostPrefix.receive({
+        ...turn,
+        itemId: `normal-after-${overflow}`,
+        kind: "completed",
+        text: "Normal after overflow",
+      });
+      lostPrefix.finish();
+      assert.equal(read().text, null);
+      assert.equal(
+        db
+          .prepare(
+            "SELECT text FROM conversation_reasoning_summaries WHERE workId=?",
+          )
+          .get(binding.workId)?.text,
+        null,
+      );
+      assert.equal(
+        db
+          .prepare(
+            "SELECT text FROM conversation_history_items WHERE workId=? AND itemId=?",
+          )
+          .get(binding.workId, `normal-after-${overflow}`)?.text,
+        "Normal after overflow",
+      );
+      clear();
+    }
     const unbound = capture();
     unbound.receive(summary("lost", "LOST_BINDING_CANARY"));
     unbound.discard();

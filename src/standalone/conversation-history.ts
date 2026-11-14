@@ -933,7 +933,7 @@ export class ConversationHistoryCapture {
   private binding: ConversationHistoryBinding | undefined;
   private readonly buffered: RuntimeConversationEvent[] = [];
   private bufferedTextBytes = 0;
-  private bufferedSummaryBytes = 0;
+  private readonly bufferedSummaryBytes = new Map<string, number>();
   private readonly bufferedSummaryItems = new Set<string>();
   private summaryText = "";
   private summaryBytes = 0;
@@ -968,21 +968,26 @@ export class ConversationHistoryCapture {
     if (event.kind === "reasoning-summary") {
       const identity = `${event.turnId}\0${event.itemId}`;
       if (this.bufferedSummaryItems.has(identity)) return;
+      const bytes = this.bufferedSummaryBytes.get(event.turnId) ?? 0;
+      if (bytes >= maxSummaryInputBytes) return;
+      if (this.bufferedSummaryItems.size >= maxBufferedEvents) {
+        this.clearBuffered();
+        this.exceededBuffer = true;
+        return;
+      }
       this.bufferedSummaryItems.add(identity);
-      if (this.bufferedSummaryBytes >= maxSummaryInputBytes) return;
-      const remaining = maxSummaryInputBytes - this.bufferedSummaryBytes;
+      const remaining = maxSummaryInputBytes - bytes;
       if (textBytes > remaining) {
         event = { ...event, text: utf8Prefix(event.text, remaining) };
       }
       textBytes = Buffer.byteLength(event.text, "utf8");
-      this.bufferedSummaryBytes += textBytes;
+      this.bufferedSummaryBytes.set(event.turnId, bytes + textBytes);
     }
     if (
       this.buffered.length >= maxBufferedEvents ||
       this.bufferedTextBytes + textBytes > maxBufferedTextBytes
     ) {
-      this.buffered.length = 0;
-      this.bufferedTextBytes = 0;
+      this.clearBuffered();
       this.exceededBuffer = true;
       return;
     }
@@ -1002,6 +1007,7 @@ export class ConversationHistoryCapture {
     }
     this.binding = binding;
     if (this.exceededBuffer) {
+      this.summaryUnavailable = true;
       try {
         this.options.store.recordEarlyBufferLimit(binding);
       } catch {
@@ -1153,6 +1159,8 @@ export class ConversationHistoryCapture {
   private clearBuffered() {
     this.buffered.length = 0;
     this.bufferedTextBytes = 0;
+    this.bufferedSummaryBytes.clear();
+    this.bufferedSummaryItems.clear();
     this.exceededBuffer = false;
   }
 }
