@@ -10,6 +10,7 @@ import {
   outcomeMessages,
   savedOutcome,
 } from "../fixtures/operator-settings.js";
+import { openOverviewCard } from "../fixtures/task-tabs.js";
 import { commandRequest, setupJourney } from "../fixtures/setup-browser.js";
 
 const test = browserSuite("operator-jira-source-browser");
@@ -586,6 +587,7 @@ test("a project is set up on Jira: credential, rejected and previewed JQL, sync,
   assert.match(await chip.innerText(), /ABC-1/);
   const edit = chip;
   assert.equal(await edit.getAttribute("href"), `https://${site}/browse/ABC-1`);
+  await openOverviewCard(page, "brief");
   await page
     .getByText(`${site} · Issue open (To Do)`, { exact: false })
     .first()

@@ -161,6 +161,8 @@ import {
 } from "./task-tabs.js";
 import {
   assignmentRow,
+  resultLabel,
+  criterionRows,
   blockedLeadDelegates,
   briefParts,
   deliveryApplies,
@@ -198,6 +200,7 @@ const sectionIds = [
   "context",
   "changes",
   "local-review",
+  "viewing-reference",
   "reply",
   "execution",
 ];
@@ -214,7 +217,7 @@ const linkedCard = (p: URLSearchParams) =>
   p.has("result") ? "review" : p.has("source") ? "brief" : null;
 const overviewCards = ["brief", "result-evidence", "assignments", "context"];
 /** Overview sections that sit in the inspector's fold. */
-const inspectorSections = ["brief", "assignments", "context"];
+const inspectorSections = ["brief", "assignments"];
 const count = (n: number, noun: string) => `${n} ${noun}${n === 1 ? "" : "s"}`;
 /** One tab's panel: always mounted, hidden unless its tab is open. */
 function TabPanel({
@@ -581,7 +584,7 @@ export function TaskWorkspace({
       // The inspector's fold holds the cards a link can name; a phone opens it closed otherwise.
       if (
         inspectorSections.includes(named) ||
-        ["record", "result", "source"].some((p) => params.has(p))
+        ["result", "source"].some((p) => params.has(p))
       )
         state.inspectorOpen = true;
       if (named === "result-evidence") state.overview.add("evidence");
@@ -616,8 +619,6 @@ export function TaskWorkspace({
     }
   }
   const focusRemembered = useFocusMode();
-  const focus = wide && focusRemembered && !state.focusYielded;
-  const paneVisible = state.changesPane !== null && wide && !focus;
   const selectionQuery = new URLSearchParams();
   if (state.selectedResult)
     selectionQuery.set("resultId", state.selectedResult);
@@ -638,6 +639,16 @@ export function TaskWorkspace({
       loader,
     ),
     data = resource.state.data?.data;
+  const linkedRecord = params.get("record");
+  if (
+    data &&
+    linkedRecord &&
+    !state.recordRevealed &&
+    !data.review?.contexts.some((c) => c.captureId === linkedRecord)
+  )
+    state.focusYielded = true;
+  const focus = wide && focusRemembered && !state.focusYielded;
+  const paneVisible = state.changesPane !== null && wide && !focus;
   const inspectedAssignment = params.get("inspectAssignment");
   // Open an exact row only after the task read confirms it belongs to this task.
   // biome-ignore lint/correctness/useExhaustiveDependencies: each linked row opens once; later disclosure choices belong to the operator.
@@ -759,12 +770,14 @@ export function TaskWorkspace({
   }, [taskId]);
   useEffect(() => {
     if (pending || !focusReplay.current) return;
-    document
-      .querySelector<HTMLElement>(
-        `[data-unconfirmed-control="${focusReplay.current}"]`,
-      )
-      ?.focus();
+    const type = focusReplay.current;
     focusReplay.current = null;
+    reveal(type === "review.view" ? "viewing-reference" : "changes");
+    requestAnimationFrame(() =>
+      document
+        .querySelector<HTMLElement>(`[data-unconfirmed-control="${type}"]`)
+        ?.focus(),
+    );
   });
   const completeSourceObservation =
     !data?.source ||
@@ -1293,11 +1306,12 @@ export function TaskWorkspace({
         )
           pendingLink.current = { kind: "latest" };
       }
-      if (!link && target && state.scrollY === 0) {
+      if (!link && target && state.scrollY === 0 && initialVisit.current) {
         // A Search record can sit in a closed card; only its first arrival opens it, so a
         // Back or Forward keeps the operator's choice.
         if (record && !state.recordRevealed) {
           state.recordRevealed = true;
+          if (target.closest(".task-inspector")) state.focusYielded = true;
           openDisclosures(target);
         }
         // A linked record or section opens on the tab whose panel holds it, unless the link
@@ -2169,12 +2183,12 @@ export function TaskWorkspace({
       changed();
     },
   });
-  const criteriaMore = (key: string) => ({
-    open: state.criteriaOpen.has(key),
+  const materialDisclosure = (key: string) => ({
+    open: state.materialOpen.has(key),
     onToggle: (event: SyntheticEvent<HTMLDetailsElement>) => {
-      if (event.currentTarget.open === state.criteriaOpen.has(key)) return;
-      if (event.currentTarget.open) state.criteriaOpen.add(key);
-      else state.criteriaOpen.delete(key);
+      if (event.currentTarget.open === state.materialOpen.has(key)) return;
+      if (event.currentTarget.open) state.materialOpen.add(key);
+      else state.materialOpen.delete(key);
       changed();
     },
   });
@@ -2199,25 +2213,39 @@ export function TaskWorkspace({
           : []),
       ].join(" · ")
     : "";
+  const askKey = `${selected?.resultId ?? ""}:${state.selectedSource ?? meta?.metadata.sourceId ?? ""}`;
+  const askRows = selected
+    ? criterionRows(data, selected.resultId, meta?.metadata.sourceId)
+    : [];
+  if (
+    state.askTarget &&
+    (state.askTarget.key !== askKey ||
+      !askRows.some((row) => row.criterionId === state.askTarget?.criterionId))
+  ) {
+    state.askTarget = null;
+    state.askTargetNotice =
+      "The selected criterion is no longer current. Ask lead now targets this result.";
+  }
   const blockedDelegates = blockedLeadDelegates(data);
   const assignmentsSummary = data.assignments.length
     ? data.assignments
         .map((a) => {
           const row = assignmentRow(a, data.assignments);
-          return `${row.id} ${row.state}`;
+          return `${row.title} · ${row.state}`;
         })
         .join(" · ")
     : "None yet";
   // An unknown reply outcome stays until it is checked; otherwise the latest message wins.
   // Delivery's outcome shows on Changes, beside its control; the rest stay with the reply.
   const deliveryOutcome = aux?.from === "delivery.refresh" ? aux : null;
+  const viewingOutcome = aux?.from === "review.view" ? aux : null;
   const outcome: ReplyOutcome | null = state.uncertain
     ? (state.notice ?? {
         tone: "warning",
         message: unknownMessage(state.frozen?.type ?? "message"),
         details: [],
       })
-    : deliveryOutcome
+    : deliveryOutcome || viewingOutcome
       ? null
       : (aux ?? state.notice);
   // The check sits beside the control whose response was lost, which stays off meanwhile. A
@@ -3027,10 +3055,7 @@ export function TaskWorkspace({
                   changed();
                   requestAnimationFrame(() => reveal("review"));
                 }}
-                open={
-                  state.inspectorOpen ??
-                  matchMedia("(min-width: 1024px)").matches
-                }
+                open={state.inspectorOpen ?? false}
                 onToggle={(open) => {
                   if (state.inspectorOpen === open) return;
                   state.inspectorOpen = open;
@@ -3051,6 +3076,13 @@ export function TaskWorkspace({
                           data-record-id={selected.resultId}
                           aria-label={`Result R${data.results.indexOf(selected) + 1}`}
                         >
+                          <p className="metadata">
+                            {resultLabel(
+                              { ...selected, summary: null },
+                              data.assignments,
+                              data.results,
+                            )}
+                          </p>
                           <Literal text={selected.summary} />
                           {selectedReview && (
                             <p className="metadata">
@@ -3084,8 +3116,10 @@ export function TaskWorkspace({
                               data={data}
                               resultId={selected.resultId}
                               sourceId={meta.metadata.sourceId}
-                              ask={ask}
-                              more={criteriaMore(
+                              details={(key) =>
+                                materialDisclosure(`details:${key}`)
+                              }
+                              more={materialDisclosure(
                                 `${selected.resultId}:${meta.metadata.sourceId}`,
                               )}
                             />
@@ -3095,9 +3129,73 @@ export function TaskWorkspace({
                               this result.
                             </p>
                           )}
+                          <details
+                            id="result-details"
+                            className="material-details"
+                            aria-label="Selected result details"
+                            {...materialDisclosure(
+                              `result:${selected.resultId}`,
+                            )}
+                          >
+                            <summary>Details</summary>
+                            <p className="metadata muted">
+                              Result {selected.resultId} · reporting assignment{" "}
+                              {selected.assignmentId} · work {selected.workId} ·
+                              work revision {selected.workRevision} · assignment
+                              version {selected.assignmentVersion} · source{" "}
+                              {meta?.metadata.sourceId ?? "Not recorded"} ·
+                              recorded {date(selected.createdAt)}
+                            </p>
+                            <ul className="result-workspace metadata muted">
+                              {resultWorkspaceLines(selected.workspace).map(
+                                (line) => (
+                                  <li key={line}>{line}</li>
+                                ),
+                              )}
+                            </ul>
+                          </details>
+                          <label htmlFor="result-ask-target">
+                            Ask lead about
+                          </label>
+                          <NativeSelect
+                            id="result-ask-target"
+                            value={state.askTarget?.criterionId ?? ""}
+                            onChange={(event) => {
+                              state.askTarget = event.target.value
+                                ? {
+                                    key: askKey,
+                                    criterionId: event.target.value,
+                                  }
+                                : null;
+                              state.askTargetNotice = "";
+                              changed();
+                            }}
+                          >
+                            <option value="">This result</option>
+                            {askRows.map((row) => (
+                              <option
+                                key={row.criterionId}
+                                value={row.criterionId}
+                              >
+                                {row.label} · {row.text}
+                              </option>
+                            ))}
+                          </NativeSelect>
+                          {state.askTargetNotice && (
+                            <p role="status">{state.askTargetNotice}</p>
+                          )}
                           <Button
                             variant="secondary"
-                            onClick={() =>
+                            disabled={Boolean(state.selectedSource && !source)}
+                            onClick={() => {
+                              const row =
+                                state.askTarget?.key === askKey
+                                  ? askRows.find(
+                                      (r) =>
+                                        r.criterionId ===
+                                        state.askTarget?.criterionId,
+                                    )
+                                  : undefined;
                               ask(
                                 {
                                   resultId: selected.resultId,
@@ -3105,75 +3203,43 @@ export function TaskWorkspace({
                                   ...(meta?.metadata.sourceId
                                     ? { sourceId: meta.metadata.sourceId }
                                     : {}),
+                                  ...(row
+                                    ? { criterionId: row.criterionId }
+                                    : {}),
                                 },
-                                `result ${selected.resultId}`,
-                              )
-                            }
+                                row
+                                  ? `criterion ${row.position + 1} in source revision ${row.revision}`
+                                  : `result ${selected.resultId}`,
+                              );
+                            }}
                           >
-                            Ask lead about result
+                            Ask lead
                           </Button>
                         </article>
                       ) : (
                         !state.selectedResult && <p>No result recorded.</p>
                       )}
-                      {/* A viewing reference needs a result to view; a lost response stays checkable. */}
-                      {data.results.length > 0 && (
-                        <>
-                          <p className="metadata muted">{changes}</p>
-                          <Button
-                            variant="secondary"
-                            data-unconfirmed-control="review.view"
-                            onClick={() =>
-                              void command({
-                                type: "review.view",
-                                key: randomUUID(),
-                                taskId,
-                                sourceId: state.selectedSource
-                                  ? (source?.sourceId ?? null)
-                                  : selected
-                                    ? (meta?.metadata.sourceId ?? null)
-                                    : (source?.sourceId ?? null),
-                                resultIds: selected ? [selected.resultId] : [],
-                              })
-                            }
-                            disabled={
-                              projectReadOnly ||
-                              Boolean(state.selectedResult && !selected) ||
-                              Boolean(state.selectedSource && !source) ||
-                              Boolean(unconfirmed)
-                            }
+                      {data.results.length > 1 && (
+                        <label htmlFor="retained-result-revision">
+                          Result revision{" "}
+                          <NativeSelect
+                            id="retained-result-revision"
+                            className="control"
+                            value={state.selectedResult ?? ""}
+                            onChange={(e) => {
+                              state.selectedResult = e.target.value || null;
+                              changed();
+                            }}
                           >
-                            Set viewing reference
-                          </Button>
-                        </>
+                            <option value="">Latest result</option>
+                            {[...data.results].reverse().map((r) => (
+                              <option key={r.resultId} value={r.resultId}>
+                                {resultLabel(r, data.assignments, data.results)}
+                              </option>
+                            ))}
+                          </NativeSelect>
+                        </label>
                       )}
-                      {unconfirmedCheck("review.view")}
-                      {data.results.length > 0 && (
-                        <p>
-                          Viewing records availability only; it does not approve
-                          work or clear holds. Retained records may be
-                          incomplete.
-                        </p>
-                      )}
-                      <label htmlFor="retained-result-revision">
-                        Result revision{" "}
-                        <NativeSelect
-                          id="retained-result-revision"
-                          className="control"
-                          value={state.selectedResult ?? ""}
-                          onChange={(e) => {
-                            state.selectedResult = e.target.value || null;
-                            changed();
-                          }}
-                        >
-                          <option value="">Latest result</option>
-                          {data.results.map((r, i) => (
-                            <option key={r.resultId} value={r.resultId}>
-                              R{i + 1}
-                            </option>
-                          ))}
-                        </NativeSelect>
-                      </label>
                     </section>
                     {selected && (
                       <section id="result-evidence">
@@ -3203,24 +3269,6 @@ export function TaskWorkspace({
                   </>
                 }
               >
-                {selected && (
-                  <section
-                    id="result-details"
-                    aria-label="Selected result details"
-                  >
-                    <p className="metadata muted">
-                      R{data.results.indexOf(selected) + 1} ·{" "}
-                      <ShortId value={selected.resultId} /> · assignment{" "}
-                      <ShortId value={selected.assignmentId} /> · work revision{" "}
-                      {selected.workRevision} · {date(selected.createdAt)}
-                    </p>
-                    <ul className="result-workspace metadata muted">
-                      {resultWorkspaceLines(selected.workspace).map((line) => (
-                        <li key={line}>{line}</li>
-                      ))}
-                    </ul>
-                  </section>
-                )}
                 <section id="brief">
                   <details
                     className="overview-disclosure"
@@ -3263,15 +3311,20 @@ export function TaskWorkspace({
                             ) : (
                               brief.known && <p>None supplied</p>
                             )}
-                            <p className="metadata muted">
-                              {source.kind === "jira"
-                                ? "Jira"
-                                : source.kind === "github"
-                                  ? "GitHub"
-                                  : "Local"}{" "}
-                              source · revision {source.revision} ·{" "}
-                              <ShortId value={source.sourceId} />
-                            </p>
+                            <details
+                              className="material-details"
+                              {...materialDisclosure(
+                                `source:${source.sourceId}`,
+                              )}
+                            >
+                              <summary>Details</summary>
+                              <p className="metadata muted">
+                                {source.kind} source · revision{" "}
+                                {source.revision} · source {source.sourceId} ·
+                                digest {source.digest} · captured{" "}
+                                {date(source.createdAt)}
+                              </p>
+                            </details>
                             <Disclosure
                               id={source.sourceId}
                               title={`${source.title ?? "Brief"} — read supplied text`}
@@ -3298,25 +3351,27 @@ export function TaskWorkspace({
                     {!source && !state.selectedSource && (
                       <Literal text={data.task.outcome} />
                     )}
-                    <label htmlFor="retained-source-revision">
-                      Retained source revision{" "}
-                      <NativeSelect
-                        id="retained-source-revision"
-                        className="control"
-                        value={state.selectedSource ?? ""}
-                        onChange={(e) => {
-                          state.selectedSource = e.target.value || null;
-                          changed();
-                        }}
-                      >
-                        <option value="">Latest</option>
-                        {sources.map((s) => (
-                          <option key={s.sourceId} value={s.sourceId}>
-                            Revision {s.revision}
-                          </option>
-                        ))}
-                      </NativeSelect>
-                    </label>
+                    {sources.length > 1 && (
+                      <label htmlFor="retained-source-revision">
+                        Retained source revision{" "}
+                        <NativeSelect
+                          id="retained-source-revision"
+                          className="control"
+                          value={state.selectedSource ?? ""}
+                          onChange={(e) => {
+                            state.selectedSource = e.target.value || null;
+                            changed();
+                          }}
+                        >
+                          <option value="">Latest</option>
+                          {sources.map((s) => (
+                            <option key={s.sourceId} value={s.sourceId}>
+                              Revision {s.revision}
+                            </option>
+                          ))}
+                        </NativeSelect>
+                      </label>
+                    )}
                   </details>
                 </section>
                 {data.task.issueBrief !== null && (
@@ -3402,64 +3457,6 @@ export function TaskWorkspace({
                     />
                   </details>
                 </section>
-                <section id="context">
-                  <details
-                    className="overview-disclosure"
-                    {...overviewCard("context")}
-                  >
-                    <summary>
-                      <h3 className="section-heading">Captured context</h3>
-                    </summary>
-                    <p>
-                      Captured preparation records distinguish supplied material
-                      from current configuration. Availability is not proof that
-                      an agent read it.
-                    </p>
-                    {!!review?.contextsOmittedCount && (
-                      <p role="status">
-                        Partial captured context coverage:{" "}
-                        {review.contextsOmittedCount} retained preparation
-                        records are not shown.
-                      </p>
-                    )}
-                    {review?.contexts.length ? (
-                      review.contexts.map((c) => (
-                        <div key={c.captureId} data-record-id={c.captureId}>
-                          <p>
-                            Supplier {c.supplier} · assignment {c.assignmentId}{" "}
-                            revision {c.assignmentVersion} ·{" "}
-                            {c.workId ?? "assignment creation"} · captured{" "}
-                            {date(c.createdAt)}
-                          </p>
-                          <p>
-                            Agent revision {c.profileRevision}; instructions
-                            revision {c.instructionsRevision}; source{" "}
-                            {c.sourceId ?? "unavailable"}
-                          </p>
-                          <Disclosure
-                            id={c.captureId}
-                            title="Captured brief"
-                            text={c.brief}
-                            state={state}
-                            changed={changed}
-                          />
-                        </div>
-                      ))
-                    ) : (
-                      <p>
-                        No retained context capture for this legacy task.
-                        Current settings are not reconstructed as history.
-                      </p>
-                    )}
-                    {data.assignments.map((a) => (
-                      <p key={a.assignmentId}>
-                        Current assignment {a.assignmentId}: agent revision{" "}
-                        {a.currentProfileRevision}, instructions revision{" "}
-                        {a.currentInstructionsRevision}
-                      </p>
-                    ))}
-                  </details>
-                </section>
               </TaskInspector>
             )}
           </div>
@@ -3478,6 +3475,54 @@ export function TaskWorkspace({
           {!paneVisible && changesView}
         </TabPanel>
         <TabPanel tab="review" active={state.tab}>
+          <section id="viewing-reference">
+            <h3 className="section-heading">Viewing reference</h3>
+            {!pending && viewingOutcome && !refusedAway && (
+              <ActionOutcome
+                tone={viewingOutcome.tone}
+                message={viewingOutcome.message}
+                details={viewingOutcome.details}
+              />
+            )}
+            {/* A viewing reference needs a result to view; a lost response stays checkable. */}
+            {data.results.length > 0 && (
+              <>
+                <p className="metadata muted">{changes}</p>
+                <Button
+                  variant="secondary"
+                  data-unconfirmed-control="review.view"
+                  onClick={() =>
+                    void command({
+                      type: "review.view",
+                      key: randomUUID(),
+                      taskId,
+                      sourceId: state.selectedSource
+                        ? (source?.sourceId ?? null)
+                        : selected
+                          ? (meta?.metadata.sourceId ?? null)
+                          : (source?.sourceId ?? null),
+                      resultIds: selected ? [selected.resultId] : [],
+                    })
+                  }
+                  disabled={
+                    projectReadOnly ||
+                    Boolean(state.selectedResult && !selected) ||
+                    Boolean(state.selectedSource && !source) ||
+                    Boolean(unconfirmed)
+                  }
+                >
+                  Set viewing reference
+                </Button>
+              </>
+            )}
+            {unconfirmedCheck("review.view")}
+            {data.results.length > 0 && (
+              <p>
+                Viewing records availability only; it does not approve work or
+                clear holds. Retained records may be incomplete.
+              </p>
+            )}
+          </section>
           <LocalReviewPanel />
         </TabPanel>
         <TabPanel tab="execution" active={state.tab}>
@@ -3487,6 +3532,66 @@ export function TaskWorkspace({
             client={client}
             session={session}
             onChanged={refreshAll}
+            capturedContext={
+              <section id="context">
+                <details
+                  className="overview-disclosure"
+                  {...overviewCard("context")}
+                >
+                  <summary>
+                    <h3 className="section-heading">Captured context</h3>
+                  </summary>
+                  <p>
+                    Captured preparation records distinguish supplied material
+                    from current configuration. Availability is not proof that
+                    an agent read it.
+                  </p>
+                  {!!review?.contextsOmittedCount && (
+                    <p role="status">
+                      Partial captured context coverage:{" "}
+                      {review.contextsOmittedCount} retained preparation records
+                      are not shown.
+                    </p>
+                  )}
+                  {review?.contexts.length ? (
+                    review.contexts.map((c) => (
+                      <div key={c.captureId} data-record-id={c.captureId}>
+                        <p>
+                          Supplier {c.supplier} · assignment {c.assignmentId}{" "}
+                          revision {c.assignmentVersion} ·{" "}
+                          {c.workId ?? "assignment creation"} · captured{" "}
+                          {date(c.createdAt)}
+                        </p>
+                        <p>
+                          Agent revision {c.profileRevision}; instructions
+                          revision {c.instructionsRevision}; source{" "}
+                          {c.sourceId ?? "unavailable"}
+                        </p>
+                        <Disclosure
+                          id={c.captureId}
+                          title="Captured brief"
+                          text={c.brief}
+                          state={state}
+                          changed={changed}
+                        />
+                      </div>
+                    ))
+                  ) : (
+                    <p>
+                      No retained context capture for this legacy task. Current
+                      settings are not reconstructed as history.
+                    </p>
+                  )}
+                  {data.assignments.map((a) => (
+                    <p key={a.assignmentId}>
+                      Current assignment {a.assignmentId}: agent revision{" "}
+                      {a.currentProfileRevision}, instructions revision{" "}
+                      {a.currentInstructionsRevision}
+                    </p>
+                  ))}
+                </details>
+              </section>
+            }
           />
         </TabPanel>
       </article>

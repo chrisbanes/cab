@@ -430,7 +430,7 @@ test("contextual feedback and the draft turn stay their own destinations, and as
   await page
     .getByRole("radio", { name: "Message task lead" })
     .waitFor({ state: "detached" });
-  const ask = page.getByRole("button", { name: /^Ask lead about / }).first();
+  const ask = page.getByRole("button", { name: "Ask lead", exact: true });
   await ask.waitFor();
   await ask.click();
   await page.getByText(/^Immutable reference:/).waitFor();

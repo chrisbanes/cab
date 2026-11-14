@@ -690,8 +690,9 @@ expose the behaviour:
 - **Delegation:** parallel assignments, including two using the same agent,
   have distinguishable responsibilities, requesters and result destinations.
   The project lead remains identifiable; known waits and unknown state are clear.
-- **Results and evidence:** show current and earlier results with reporting
-  assignment and relevant revision. Recorded evidence-to-criterion relationships
+- **Results and evidence:** name current and earlier results with redacted reporter
+  names and supplied summaries or recorded time. Local Details retains reporting
+  assignment, exact result/work/source identity and relevant revisions. Recorded evidence-to-criterion relationships
   are visible. Agent claims, recorded verification and missing, stale, unavailable
   or redacted evidence remain distinguishable; absence is never a pass.
 - **Navigation and attention:** List, Board, overview and attention entry points
@@ -717,7 +718,7 @@ them:
   show a receipt; confirmed failures retain input for retry; uncertain outcomes
   reconcile before resending without duplicate messages. No feedback action
   grants approval, changes task state or posts to GitHub.
-- **Viewing reference:** new results, superseded evidence and changed source
+- **Viewing reference:** on Review, new results, superseded evidence and changed source
   requirements are distinguishable from the viewed revision. No baseline,
   unknown comparison and failed refresh are explicit. Viewing alone never
   records approval or clears an independent hold.
@@ -730,7 +731,7 @@ them:
   receipt; a superseded, withdrawn or closed review takes none, and a stale send keeps its
   draft. Routine results raise no review, and neither response approves, merges or
   completes the task.
-- **Assignment context:** captured supplier/brief/instruction/agent/source
+- **Assignment context:** on Execution, captured supplier/brief/instruction/agent/source
   references are distinct from current requirements, with omissions visible.
   Available references are not labelled read without evidence; secrets and
   unavailable runtime history are not exposed.

@@ -32,12 +32,18 @@ export const overviewCard = (page: Page, name: OverviewCardName) =>
     `#${name === "evidence" ? "result-evidence" : name} > details.overview-disclosure`,
   );
 
-/** Opens a collapsed Overview card through its summary, as an operator does; an open one is left alone. */
-export async function openOverviewCard(page: Page, name: OverviewCardName) {
-  // The cards sit in the inspector's fold, which a phone leaves closed.
+/** Opens the task's facts without changing any inner disclosure. */
+export async function openTaskDetails(page: Page) {
   const fold = page.locator("details.inspector-fold");
   if ((await fold.getAttribute("open")) === null)
     await fold.locator("> summary").click();
+}
+
+/** Opens a collapsed Overview card through its summary, as an operator does; an open one is left alone. */
+export async function openOverviewCard(page: Page, name: OverviewCardName) {
+  // The cards sit in the inspector's fold, which a phone leaves closed.
+  await openTaskTab(page, name === "context" ? "Execution" : "Overview");
+  if (name !== "context" && name !== "evidence") await openTaskDetails(page);
   const card = overviewCard(page, name);
   if ((await card.getAttribute("open")) === null)
     await card.locator("> summary").click();
