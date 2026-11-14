@@ -158,6 +158,28 @@ of a suite that starts a service, such as
 the service refuses that data directory, so pass the resolved `/private/var/...`
 path as the runner does.
 
+### Workspace lifetime qualification
+
+Workspace generations and attributable lifecycle clocks are persisted, and the four
+installation limits are loaded, but no automatic maintenance or operator removal
+command runs yet. Task-turn scratch provisioning remains unimplemented. The existing
+workspace setup below still applies until that integration is qualified.
+
+`test/execution/workspace-environment-qualification/runtime-contract.mjs` contains
+the bounded candidate probe for per-thread Codex scratch environment and historical
+resume at a new cwd, plus Claude per-query scratch with its existing managed temporary
+base. Its deterministic tests cover request capture, crossed-path sensitivity,
+production SQLite admission and terminal identity through restart, and retained
+uncertainty without redispatch. These tests do not prove real runtime behavior.
+The live command refuses before runtime/auth initialization unless it receives
+`--live --one-attempt --grant-file FILE` and the separately authorized grant digest
+in `CAB_WORKSPACE_QUALIFICATION_AUTHORIZED_GRANT_SHA256`. A grant names exact binary
+hashes, models, native disposable configuration homes, fixture and evidence roots,
+expiry and the eight-turn/15-minute ceiling. A grant file or its digest is not itself
+permission: the controller must authorize those exact resources separately. No live
+grant is bundled, and an existing checkpoint refuses a new attempt. Unknown execution
+or shutdown settlement retains its identities and fixture data for reconciliation.
+
 ### Running the check in a cab-managed workspace
 
 Agents run the full check in their cab-managed task workspaces. A task's checkout

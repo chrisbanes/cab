@@ -512,7 +512,7 @@ export async function verifyPreparedStackResources(
   const taskIds = [m.resource.lowerTask, m.resource.upperTask];
   if (
     observed.schemaFingerprint !==
-      "64917f9796266e55145f76694c1a4418b1bd73982afcfaeba189d55eabee8c9f" ||
+      "8f2985d84ed16c4b2ef2ec25e030e4f6d346d6b07672d1696e82d3f5659bf81c" ||
     observed.schemaFingerprint !== host.schemaFingerprint ||
     observed.configSha256 !== host.configSha256 ||
     observed.projects.length !== 1 ||

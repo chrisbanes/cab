@@ -350,6 +350,16 @@ A local task's holds the project's repository links; an imported task's holds it
 repository.
 _Avoid_: Conversation when referring to a task's working files
 
+**Workspace trimming**:
+The planned operation that deletes Git-reported ignored worktree files and scratch
+contents, keeping worktrees, tracked and non-ignored work, and other workspace-root files.
+_Avoid_: Archive; Project archive is restorable
+
+**Workspace removal**:
+The planned irreversible deletion of a whole task workspace and its owned Claude
+temporary base. Task branches, change requests, results and conversations remain.
+_Avoid_: Archive; removed files have no restore operation
+
 **Task branch**:
 The one branch cab assigns a task in each repository and pushes its commits
 to; agents cannot choose or push it. A change request for the task uses it as its head.

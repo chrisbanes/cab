@@ -1,3 +1,9 @@
+import { WorkspaceLifecycleStore } from "../core/workspace-lifecycle.js";
+import {
+  resolveWorkspaceMaintenanceSettings,
+  type WorkspaceMaintenanceSettings,
+  type WorkspaceMaintenanceConfiguration,
+} from "../operator/workspace-maintenance-settings.js";
 import { selectAssignmentExecution } from "./operator-runtime.js";
 import { attentionNext } from "../operator/attention.js";
 import { commandReceiptSchema } from "../operator/contracts.js";
@@ -661,6 +667,8 @@ export interface StandaloneServiceOptions {
     fallbackBackoffMs?: number;
     maxFallbackBackoffMs?: number;
   };
+  /** Validated desired limits; automatic maintenance is not yet scheduled. */
+  workspaceMaintenance?: WorkspaceMaintenanceConfiguration;
   /** Execution diagnostic retention; `cli.ts` passes the environment limits. */
   diagnostics?: {
     limits?: Partial<DiagnosticLimits>;
@@ -913,6 +921,8 @@ const sandboxReviewKey = (identity: SandboxReviewIdentity) =>
 
 /** Owns only standalone.sqlite in a marked data directory. No import or attach path exists. */
 export class StandaloneService {
+  /** Desired validated limits; no automatic maintenance is scheduled yet. */
+  readonly workspaceMaintenance: WorkspaceMaintenanceSettings;
   private owner: StandaloneDataDirectory | undefined;
   private db: DatabaseSync | undefined;
   private deletedProjectRedaction: DeletedProjectRedactionStore | undefined;
@@ -1040,6 +1050,9 @@ export class StandaloneService {
     ) => writeFileSync(path, STANDALONE_MARKER_CONTENTS, { flag, mode: 0o600 }),
     private readonly options: StandaloneServiceOptions = {},
   ) {
+    this.workspaceMaintenance = resolveWorkspaceMaintenanceSettings(
+      options.workspaceMaintenance,
+    );
     this.retryNow = options.retry?.now ?? Date.now;
     this.restartClock = options.runtimeRestart?.clock ?? defaultRestartClock;
     this.wallNow = options.runtimeRestart?.wallNow ?? Date.now;
@@ -1177,6 +1190,7 @@ export class StandaloneService {
         },
       );
       domain.migrate();
+      new WorkspaceLifecycleStore(db).recoverInterruptedOperations();
       let diagnostics: ExecutionDiagnosticsStore | undefined;
       try {
         const store = new ExecutionDiagnosticsStore(db, {
@@ -1195,6 +1209,7 @@ export class StandaloneService {
       }
       const githubSources = new GitHubSourceStore(db);
       githubSources.migrate();
+      new WorkspaceLifecycleStore(db).importLegacyFacts();
       const reobservedTaskVersions = githubSources.importedTaskVersions();
       githubSources.invalidateProviderObservations();
       const githubSynchronizer = acquire(
@@ -5531,8 +5546,11 @@ export class StandaloneService {
     const binding = this.started().workspaceBindings.get(taskId);
     return createHash("sha256")
       .update(
-        JSON.stringify(
-          binding
+        JSON.stringify({
+          retained: new WorkspaceLifecycleStore(this.cache!)
+            .forTask(taskId)
+            .map((g) => [g.workspaceId, g.path, g.revision, g.repositories]),
+          current: binding
             ? {
                 workspaceId: binding.workspaceId,
                 path: binding.path,
@@ -5542,7 +5560,7 @@ export class StandaloneService {
                 ]),
               }
             : null,
-        ),
+        }),
       )
       .digest("hex");
   }
@@ -5553,11 +5571,19 @@ export class StandaloneService {
   taskWorkspaceRedactionPaths(taskId: string): string[] {
     this.domain().task(taskId);
     const binding = this.started().workspaceBindings.get(taskId);
-    if (!binding) return [];
+    const retained = new WorkspaceLifecycleStore(this.cache!).forTask(taskId);
     return [
       ...new Set([
-        binding.path,
-        ...binding.repositories.flatMap(repositoryBindingPaths),
+        ...(binding
+          ? [
+              binding.path,
+              ...binding.repositories.flatMap(repositoryBindingPaths),
+            ]
+          : []),
+        ...retained.flatMap((generation) => [
+          generation.path,
+          ...generation.repositories.flatMap(repositoryBindingPaths),
+        ]),
       ]),
     ];
   }

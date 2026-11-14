@@ -72,6 +72,7 @@ const fixtureClaude = "/fixture/bin/claude";
 function fixture(
   options: {
     scripts?: Script[];
+    scratch?: boolean;
     record?: () => boolean;
     environment?: () => ClaudeTurnEnvironment;
     verified?: boolean;
@@ -189,7 +190,13 @@ function fixture(
     sandboxEscalation?: "approval" | "auto-review",
     reasoningSummary?: boolean,
   ) => {
-    const turnSettings = skills ? { ...settings, skills } : settings;
+    const turnSettings = {
+      ...settings,
+      ...(skills ? { skills } : {}),
+      ...(options.scratch
+        ? { scratchDirectory: join(workspace, "scratch") }
+        : {}),
+    };
     assert.equal(
       await settledPreflight(runtime, {
         workspace,
@@ -311,7 +318,7 @@ test("a Claude turn runs one native query, releases its prompt only after the pr
       yield result(sessionOf(session));
     },
   ];
-  const f = fixture({ scripts });
+  const f = fixture({ scripts, scratch: true });
   try {
     writeFileSync(join(f.workspace, "AGENTS.md"), "ROOT-AGENTS-NONCE");
     mkdirSync(join(f.workspace, "repo-1"));
@@ -349,6 +356,7 @@ test("a Claude turn runs one native query, releases its prompt only after the pr
     assert.equal(options.env?.CLAUDE_CONFIG_DIR, "/native/config");
     assert.equal(options.env?.ANTHROPIC_API_KEY, undefined);
     const base = claudeTemporaryBase(f.workspace);
+    assert.equal(options.env?.CAB_SCRATCH_DIR, join(f.workspace, "scratch"));
     assert.equal(options.env?.CLAUDE_CODE_TMPDIR, base);
     assert.ok(Buffer.byteLength(`${base}/claude-4294967294`) <= 44);
     assert.deepEqual(options.tools, [

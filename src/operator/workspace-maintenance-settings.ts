@@ -31,6 +31,12 @@ export type WorkspaceMaintenanceSettings = {
   [K in keyof typeof workspaceMaintenanceSettings]: WorkspaceMaintenanceLimit;
 };
 
+export type WorkspaceMaintenanceConfiguration = {
+  [K in keyof WorkspaceMaintenanceSettings]?:
+    | WorkspaceMaintenanceLimit
+    | undefined;
+};
+
 export function parseWorkspaceMaintenanceLimit(
   raw: unknown,
   definition: (typeof workspaceMaintenanceSettings)[keyof typeof workspaceMaintenanceSettings],
@@ -61,6 +67,36 @@ export function workspaceMaintenanceFromEnv(
     Object.entries(workspaceMaintenanceSettings).map(([key, definition]) => [
       key,
       parseWorkspaceMaintenanceLimit(env[definition.name], definition),
+    ]),
+  ) as WorkspaceMaintenanceSettings;
+}
+
+export function workspaceMaintenanceFromOptions(
+  values: Readonly<Record<string, unknown>>,
+): WorkspaceMaintenanceConfiguration {
+  return Object.fromEntries(
+    Object.entries(workspaceMaintenanceSettings)
+      .filter(([, definition]) => values[definition.option] !== undefined)
+      .map(([key, definition]) => [
+        key,
+        parseWorkspaceMaintenanceLimit(values[definition.option], definition),
+      ]),
+  );
+}
+
+export function resolveWorkspaceMaintenanceSettings(
+  input: WorkspaceMaintenanceConfiguration = {},
+): WorkspaceMaintenanceSettings {
+  for (const key of Object.keys(input))
+    if (!Object.hasOwn(workspaceMaintenanceSettings, key))
+      throw new Error("Unknown workspace maintenance setting");
+  return Object.fromEntries(
+    Object.entries(workspaceMaintenanceSettings).map(([key, definition]) => [
+      key,
+      parseWorkspaceMaintenanceLimit(
+        input[key as keyof WorkspaceMaintenanceSettings],
+        definition,
+      ),
     ]),
   ) as WorkspaceMaintenanceSettings;
 }

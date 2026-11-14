@@ -1720,6 +1720,21 @@ export const projectDeletionInventory = {
     columns: ["workId", "assignmentId", "conversationRevision", "workRevision"],
     ownership: "workId in W",
   },
+  workspace_generations: {
+    columns: ["workspaceId", "taskId", "data"],
+    ownership:
+      "taskId in T; validate data task/workspace and repository identities; private retained paths and clock facts",
+  },
+  workspace_lifecycle_events: {
+    columns: ["workspaceId", "eventId", "data"],
+    ownership:
+      "workspaceId belongs to generation with taskId in T; validate event identity and work owner",
+  },
+  workspace_maintenance_operations: {
+    columns: ["operationId", "workspaceId", "data"],
+    ownership:
+      "workspaceId belongs to generation with taskId in T; validate captured task/workspace/op/repo/effect identities; private reason",
+  },
   task_workspace_bindings: {
     columns: [
       "taskId",

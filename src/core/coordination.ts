@@ -1,3 +1,4 @@
+import { initializedWorkspaceLifecycle } from "./workspace-lifecycle.js";
 import { InboxLifecycle } from "./inbox-lifecycle.js";
 import {
   assertOwnedTaskWritable,
@@ -5035,6 +5036,10 @@ export class CoordinationStore {
         WHERE id = ? AND version = ? AND state = 'open' RETURNING id`)
         .get(request.taskId, request.taskVersion) as Row | undefined;
       if (!completedTask) throw new Error("Task changed during completion");
+      initializedWorkspaceLifecycle(this.db)?.taskStateChanged(
+        request.taskId,
+        "done",
+      );
       const finalizedRow = this.db
         .prepare(`UPDATE coordination_completion_requests
         SET status = 'finalized', rejectionReasons = '[]', revision = revision + 1,

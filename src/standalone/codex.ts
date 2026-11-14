@@ -6,7 +6,7 @@ import {
 } from "../core/structured-questions.js";
 import { createHash, randomUUID } from "node:crypto";
 import { createReadStream } from "node:fs";
-import { isAbsolute } from "node:path";
+import { isAbsolute, join, resolve } from "node:path";
 import { normalizePlan, type NormalizedPlan } from "./agent-plan.js";
 import { resolveOnPath } from "./executable-path.js";
 import {
@@ -200,6 +200,7 @@ interface RuntimeThreadSettings {
 }
 
 interface RuntimeThreadSnapshot {
+  scratchDirectory?: string;
   tools?: readonly RuntimeToolDefinition[];
   settings?: RuntimeThreadSettings;
 }
@@ -748,12 +749,31 @@ export function unexpectedRequest(
 
 /** Model settings of the bound profile revision, passed only when it sets a value. */
 export interface RuntimeTurnSettings {
+  /** Candidate task-scoped binding; supplied only by the qualification harness until T1 passes. */
+  scratchDirectory?: string;
   model: string | null;
   reasoningEffort: string | null;
   /** Historical callers may carry this field; native runtimes ignore it. */
   skills?: {
     plugins: Array<{ path: string; skills: readonly string[]; name?: string }>;
   };
+}
+
+/** Structural boundary only; provisioning owns physical directory identity checks. */
+export function taskScratchEnvironment(
+  workspace: string,
+  scratchDirectory: string,
+): { CAB_SCRATCH_DIR: string; TMPDIR: string } {
+  if (
+    !isAbsolute(workspace) ||
+    workspace.includes("\0") ||
+    resolve(workspace) !== workspace ||
+    scratchDirectory !== join(workspace, "scratch")
+  )
+    throw new Error(
+      "Scratch directory must be the exact task workspace scratch child",
+    );
+  return { CAB_SCRATCH_DIR: scratchDirectory, TMPDIR: scratchDirectory };
 }
 
 /**
@@ -2651,6 +2671,14 @@ export class CodexRuntime implements Runtime {
   ): Promise<string> {
     const definitions = registeredTools(tools);
     const config = {
+      ...(settings?.scratchDirectory !== undefined
+        ? {
+            "shell_environment_policy.set": taskScratchEnvironment(
+              workspace,
+              settings.scratchDirectory,
+            ),
+          }
+        : {}),
       ...(settings?.reasoningEffort
         ? { model_reasoning_effort: settings.reasoningEffort }
         : {}),
@@ -2681,10 +2709,13 @@ export class CodexRuntime implements Runtime {
           } catch {
             throw new Error("Runtime thread safety baseline unavailable");
           }
-          const settings = threadSettingsSchema.safeParse(raw);
-          if (settings.success) {
+          const nativeSettings = threadSettingsSchema.safeParse(raw);
+          if (nativeSettings.success) {
             this.observedThreadSettings.delete(started.thread.id);
-            this.observedThreadSettings.set(started.thread.id, settings.data);
+            this.observedThreadSettings.set(
+              started.thread.id,
+              nativeSettings.data,
+            );
             if (this.observedThreadSettings.size > maxObservedThreads) {
               const oldest = this.observedThreadSettings.keys().next();
               if (!oldest.done)
@@ -2692,9 +2723,12 @@ export class CodexRuntime implements Runtime {
             }
           }
           this.threadSnapshots.set(started.thread.id, {
+            ...(settings?.scratchDirectory !== undefined
+              ? { scratchDirectory: settings.scratchDirectory }
+              : {}),
             tools: definitions,
-            ...(settings.success && this.nativeExecutable
-              ? { settings: settings.data }
+            ...(nativeSettings.success && this.nativeExecutable
+              ? { settings: nativeSettings.data }
               : {}),
           });
           if (!this.threadSnapshots.has(started.thread.id))
@@ -2715,16 +2749,29 @@ export class CodexRuntime implements Runtime {
   resumeThread(
     threadId: string,
     tools?: readonly RuntimeToolDefinition[],
-    _settings?: RuntimeTurnSettings,
-    _workspace?: string,
+    settings?: RuntimeTurnSettings,
+    workspace?: string,
   ): Promise<void> {
-    return this.exclusive(() => this.resumeThreadScoped(threadId, tools));
+    return this.exclusive(() =>
+      this.resumeThreadScoped(threadId, tools, settings, workspace),
+    );
   }
 
   private async resumeThreadScoped(
     threadId: string,
     tools: readonly RuntimeToolDefinition[] | undefined,
+    settings: RuntimeTurnSettings | undefined,
+    workspace: string | undefined,
   ): Promise<void> {
+    const environment =
+      settings?.scratchDirectory !== undefined
+        ? taskScratchEnvironment(workspace ?? "", settings.scratchDirectory)
+        : undefined;
+    if (
+      workspace !== undefined &&
+      (!isAbsolute(workspace) || resolve(workspace) !== workspace)
+    )
+      throw new Error("Invalid resume workspace");
     if (this.startedUnderPreviousHome(threadId))
       throw new PreviousHarnessHomeError();
     let snapshot = this.threadSnapshots.get(threadId);
@@ -2740,11 +2787,22 @@ export class CodexRuntime implements Runtime {
       }
       if (restoredEmptyTools) snapshot = { tools: [] };
     }
+    if (
+      snapshot?.scratchDirectory &&
+      workspace !== undefined &&
+      join(workspace, "scratch") !== snapshot.scratchDirectory &&
+      !environment
+    )
+      throw new Error("Moved workspace requires a new task scratch binding");
     const definitions = registeredTools(tools ?? snapshot?.tools ?? []);
     await this.request(
       "thread/resume",
       {
         threadId,
+        ...(workspace === undefined ? {} : { cwd: workspace }),
+        ...(environment
+          ? { config: { "shell_environment_policy.set": environment } }
+          : {}),
         approvalPolicy: "never",
         sandbox: "workspace-write",
         ...(definitions.length > 0 ? { dynamicTools: definitions } : {}),
@@ -2753,8 +2811,13 @@ export class CodexRuntime implements Runtime {
         const resumed = thread.parse(raw);
         if (resumed.thread.id !== threadId)
           throw new Error("Resumed thread identity mismatch");
-        if (tools !== undefined || restoredEmptyTools) {
+        if (tools !== undefined || restoredEmptyTools || environment) {
           const nextSnapshot: RuntimeThreadSnapshot = {
+            ...(environment
+              ? { scratchDirectory: environment.CAB_SCRATCH_DIR }
+              : snapshot?.scratchDirectory
+                ? { scratchDirectory: snapshot.scratchDirectory }
+                : {}),
             ...(snapshot?.settings ? { settings: snapshot.settings } : {}),
             tools: definitions,
           };
@@ -2777,6 +2840,22 @@ export class CodexRuntime implements Runtime {
     policy?: RuntimeTurnPolicy,
   ): Promise<string> {
     this.threadWorkspace.delete(threadId);
+    const boundScratch = this.threadSnapshots.get(threadId)?.scratchDirectory;
+    if (
+      boundScratch !== undefined &&
+      boundScratch !== join(workspace, "scratch")
+    )
+      throw new Error("Turn workspace differs from its task scratch binding");
+    if (settings?.scratchDirectory !== undefined) {
+      taskScratchEnvironment(workspace, settings.scratchDirectory);
+      if (
+        this.threadSnapshots.get(threadId)?.scratchDirectory !==
+        settings.scratchDirectory
+      )
+        throw new Error(
+          "Task scratch binding was not configured on this thread",
+        );
+    }
     this.threadWorkspace.set(threadId, workspaceRoots(workspace));
     if (this.threadWorkspace.size > maxObservedThreads) {
       const oldest = this.threadWorkspace.keys().next();

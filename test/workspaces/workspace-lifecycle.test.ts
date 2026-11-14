@@ -1,3 +1,6 @@
+import { runtimeSafetyFixture } from "../fixtures/runtime-safety.js";
+import { coordinationFixture } from "../fixtures/coordination.js";
+import { SqliteWorkspaceBindingStore } from "../../src/standalone/workspaces.js";
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import { mkdtempSync, rmSync } from "node:fs";
@@ -185,6 +188,7 @@ test("clock events preserve episode anchors, clamp backward time, and reject cha
     });
     assert.equal(current.terminal?.episodeId, "done-2");
     assert.equal(current.lastTurnEndedAt, 300);
+    assert.equal(current.lastTurnEndedEventId, "turn-2");
   } finally {
     db.close();
   }
@@ -716,5 +720,180 @@ test("trim records and base-only removal records remain distinct and reject corr
     assert.throws(() => store.get(input.workspaceId), /clock identities/);
   } finally {
     db.close();
+  }
+});
+
+test("production domain and cancellation writes retain exact generation episodes without releasing holds", () => {
+  const fixture = coordinationFixture();
+  try {
+    const taskId = "20000000-0000-4000-8000-000000000001";
+    const bindings = new SqliteWorkspaceBindingStore(fixture.db);
+    const workspaceId = randomUUID();
+    bindings.createOrGet(taskId, workspaceId, "/fixture/lifecycle", []);
+    bindings.update(taskId, "ready", null);
+    const lifecycle = new WorkspaceLifecycleStore(fixture.db);
+    assert.equal(lifecycle.get(workspaceId)?.terminal, null);
+    const set = (state: "open" | "done" | "cancelled") =>
+      fixture.domain.execute({
+        type: "task.configure",
+        actor: "operator",
+        key: randomUUID(),
+        projectId: "10000000-0000-4000-8000-000000000001",
+        taskId,
+        expectedVersion: Number(fixture.domain.task(taskId).version),
+        state,
+      });
+    set("done");
+    const done = lifecycle.get(workspaceId)!.terminal!;
+    fixture.domain.execute({
+      type: "task.configure",
+      actor: "operator",
+      key: randomUUID(),
+      projectId: "10000000-0000-4000-8000-000000000001",
+      taskId,
+      expectedVersion: Number(fixture.domain.task(taskId).version),
+      title: "Changed metadata",
+    });
+    assert.deepEqual(lifecycle.get(workspaceId)?.terminal, done);
+    set("open");
+    assert.equal(lifecycle.get(workspaceId)?.terminal, null);
+    fixture.db
+      .prepare(
+        "INSERT OR REPLACE INTO task_writer_ambiguity_holds VALUES (?,?)",
+      )
+      .run(taskId, "unresolved native child");
+    const command = {
+      type: "task.cancel" as const,
+      key: randomUUID(),
+      taskId,
+      expectedVersion: Number(fixture.domain.task(taskId).version),
+    };
+    fixture.state.cancelTask(command, () => {});
+    const cancelled = lifecycle.get(workspaceId)!.terminal;
+    assert.equal(cancelled?.status, "cancelled");
+    assert.ok(
+      fixture.db
+        .prepare("SELECT 1 FROM task_writer_ambiguity_holds WHERE taskId=?")
+        .get(taskId),
+    );
+    fixture.reopen();
+    assert.deepEqual(
+      new WorkspaceLifecycleStore(fixture.db).get(workspaceId)?.terminal,
+      cancelled,
+    );
+  } finally {
+    fixture.close();
+  }
+});
+
+test("startup imports retained binding metadata without inventing terminal age and holds interrupted journals", () => {
+  const f = coordinationFixture();
+  try {
+    const taskId = "20000000-0000-4000-8000-000000000001";
+    const bindings = new SqliteWorkspaceBindingStore(f.db);
+    const workspaceId = randomUUID();
+    bindings.createOrGet(taskId, workspaceId, "/fixture/legacy", []);
+    bindings.update(taskId, "held", "unproved child");
+    const life = new WorkspaceLifecycleStore(f.db);
+    life.importBindings();
+    assert.equal(life.get(workspaceId)?.terminal, null);
+    assert.equal(life.get(workspaceId)?.lastTurnEndedAt, null);
+    const operation = life.beginOperation({ taskId, workspaceId }, removal());
+    life.startEffect(operation, operation.operationId, {
+      effectId: randomUUID(),
+      target: { kind: "root" },
+      startedAt: 110,
+    });
+    f.reopen();
+    const after = new WorkspaceLifecycleStore(f.db);
+    after.recoverInterruptedOperations();
+    const held = after.operation(operation, operation.operationId);
+    assert.equal(held.state, "held");
+    assert.equal(held.effects[0]?.settledAt, null);
+    assert.throws(
+      () => after.beginOperation(operation, removal()),
+      /unfinished/,
+    );
+    assert.equal(
+      new SqliteWorkspaceBindingStore(f.db).get(taskId)?.state,
+      "held",
+    );
+  } finally {
+    f.close();
+  }
+});
+
+test("exact bound turn-end observations preserve their first time through duplicate messages and legacy import", () => {
+  const f = runtimeSafetyFixture();
+  const db = new DatabaseSync(f.storagePath);
+  try {
+    const taskId = "20000000-0000-4000-8000-000000000001",
+      workspaceId = randomUUID();
+    const bindings = new SqliteWorkspaceBindingStore(db);
+    bindings.createOrGet(taskId, workspaceId, "/tmp/work", []);
+    bindings.update(taskId, "ready", null);
+    const workId = f.bindTurn(
+      "lifecycle-thread",
+      "lifecycle-turn",
+      "lifecycle-generation",
+    );
+    const input = {
+      threadId: "lifecycle-thread",
+      turnId: "lifecycle-turn",
+      status: "completed" as const,
+      runtimeGeneration: "lifecycle-generation",
+    };
+    const first = f.safety.recordTerminal(input);
+    const life = new WorkspaceLifecycleStore(db),
+      before = life.get(workspaceId)!;
+    assert.equal(before.lastTurnEndedAt, first.firstObservedAt);
+    assert.ok(before.lastTurnEndedEventId);
+    f.safety.recordTerminal(input);
+    assert.deepEqual(life.get(workspaceId), before);
+    assert.equal(
+      db
+        .prepare("SELECT state FROM execution_intents WHERE workId=?")
+        .get(workId)?.state,
+      "running",
+      "time facts never settle ownership",
+    );
+    db.exec(
+      "DELETE FROM workspace_lifecycle_events; DELETE FROM workspace_generations",
+    );
+    life.importBindings();
+    life.importLegacyFacts();
+    assert.equal(life.get(workspaceId)?.lastTurnEndedAt, first.firstObservedAt);
+    assert.equal(life.get(workspaceId)?.lastPushAt, null);
+  } finally {
+    db.close();
+    f.close();
+  }
+});
+
+test("ready binding and generation identity commit atomically on a rejected generation change", () => {
+  const fixture = coordinationFixture();
+  try {
+    const taskId = "20000000-0000-4000-8000-000000000001";
+    const bindings = new SqliteWorkspaceBindingStore(fixture.db);
+    const workspaceId = randomUUID();
+    const original = bindings.createOrGet(
+      taskId,
+      workspaceId,
+      "/fixture/atomic",
+      [],
+    );
+    const lifecycle = new WorkspaceLifecycleStore(fixture.db);
+    lifecycle.recordBinding({
+      taskId,
+      workspaceId,
+      path: "/fixture/different",
+      repositories: [],
+      createdAt: original.createdAt,
+    });
+    assert.throws(() => bindings.update(taskId, "ready", null));
+    assert.equal(bindings.get(taskId)?.state, "provisioning");
+    assert.equal(lifecycle.get(workspaceId)?.path, "/fixture/different");
+  } finally {
+    fixture.close();
   }
 });

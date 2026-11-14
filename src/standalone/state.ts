@@ -1,3 +1,4 @@
+import { initializedWorkspaceLifecycle } from "../core/workspace-lifecycle.js";
 import { initializeReasoningSummaryStorage } from "../core/reasoning-summary-storage.js";
 import {
   ProjectArchivedError,
@@ -1257,6 +1258,10 @@ export class ExecutionState {
             "UPDATE domain_tasks SET state='cancelled', version=version+1 WHERE id=?",
           )
           .run(command.taskId);
+        initializedWorkspaceLifecycle(this.db)?.taskStateChanged(
+          command.taskId,
+          "cancelled",
+        );
         return {
           ...base,
           kind: "task-cancel" as const,
@@ -2976,6 +2981,29 @@ export class ExecutionState {
           "UPDATE runtime_terminal_evidence SET conflicted = 1 WHERE threadId = ? AND turnId = ?",
         )
         .run(row.threadId, turnId);
+    this.recordWorkspaceTurnEnd(row.threadId, turnId);
+  }
+
+  private recordWorkspaceTurnEnd(threadId: string, turnId: string): void {
+    const raw = this.db
+      .prepare(
+        "SELECT * FROM runtime_terminal_evidence WHERE threadId=? AND turnId=?",
+      )
+      .get(threadId, turnId);
+    if (!raw) return;
+    const evidence = parseRuntimeTerminalEvidence(raw);
+    if (
+      !evidence.conflicted &&
+      evidence.workId &&
+      evidence.firstStatus &&
+      evidence.firstObservedAt !== null
+    )
+      initializedWorkspaceLifecycle(this.db)?.recordTurnEnd(
+        evidence.workId,
+        threadId,
+        turnId,
+        evidence.firstObservedAt,
+      );
   }
 
   /** Bounded failure classification of a work's latest terminal turn when it failed, else null. */
@@ -3252,6 +3280,7 @@ export class ExecutionState {
               WHERE workId = ? AND threadId = ? AND turnId = ?`)
             .run(workId, value.threadId, value.turnId);
       }
+      this.recordWorkspaceTurnEnd(value.threadId, value.turnId);
     });
     const record = this.db
       .prepare(

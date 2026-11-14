@@ -1,3 +1,4 @@
+import { workspaceGenerationSchema } from "./workspace-lifecycle.js";
 import { DeletedProjectRedactionStore } from "./deleted-project-redaction.js";
 import {
   assertOwnedTaskWritable,
@@ -328,6 +329,33 @@ export class TaskReviewStore {
         .all() as Row[];
       if (workspaces.length > cap) throw new RedactionLimitError();
       excluded.push(...workspaces.map((w) => String(w.path)));
+    }
+    if (
+      this.db
+        .prepare(
+          "SELECT 1 FROM sqlite_master WHERE name='workspace_generations'",
+        )
+        .get()
+    ) {
+      const generations = this.db
+        .prepare(`SELECT data FROM workspace_generations LIMIT ${cap + 1}`)
+        .all() as Row[];
+      if (generations.length > cap) throw new RedactionLimitError();
+      for (const raw of generations) {
+        const g = workspaceGenerationSchema.parse(JSON.parse(String(raw.data)));
+        excluded.push(
+          g.path,
+          ...g.repositories.flatMap((r) =>
+            [
+              r.sourcePath,
+              r.workspacePath,
+              r.gitCommonDir,
+              r.sourceGitCommonDir,
+              r.gitDirectory,
+            ].filter((p): p is string => typeof p === "string"),
+          ),
+        );
+      }
     }
     const policies = this.db
       .prepare(`SELECT policyJson FROM delivery_policies LIMIT ${cap + 1}`)

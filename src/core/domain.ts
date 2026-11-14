@@ -1,4 +1,8 @@
 import {
+  WorkspaceLifecycleStore,
+  initializedWorkspaceLifecycle,
+} from "./workspace-lifecycle.js";
+import {
   initializeReasoningSummaryStorage,
   eraseReasoningSummaries,
 } from "./reasoning-summary-storage.js";
@@ -1189,6 +1193,8 @@ export class DomainStore {
         );
       upgradeReadinessConditions(this.db);
       new LeadTextStore(this.db).migrate();
+      new WorkspaceLifecycleStore(this.db).migrate();
+      new WorkspaceLifecycleStore(this.db).importBindings();
     });
   }
 
@@ -3660,6 +3666,11 @@ export class DomainStore {
               : Number(command.ready),
             command.state ?? present(current, "state"),
             command.taskId,
+          );
+        if (command.state !== undefined && command.state !== current.state)
+          initializedWorkspaceLifecycle(this.db)?.taskStateChanged(
+            command.taskId,
+            command.state,
           );
         // A manual state change replaces any provider-closure completion.
         if (command.state !== undefined && command.state !== current.state)

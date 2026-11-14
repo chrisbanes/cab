@@ -1,3 +1,4 @@
+import { workspaceMaintenanceFromOptions } from "../operator/workspace-maintenance-settings.js";
 import { realpathSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { parseArgs } from "node:util";
@@ -14,7 +15,7 @@ import {
 } from "./operations.js";
 
 const USAGE =
-  "Usage: npm run operations -- <backup SOURCE SNAPSHOT | verify SNAPSHOT | restore SNAPSHOT DESTINATION | render-launch-agent LABEL NODE CLI DATA AUTH ORIGIN PORT STDOUT STDERR PLIST [--diagnostic-retention-days N] [--diagnostic-storage-mib N]>\n";
+  "Usage: npm run operations -- <backup SOURCE SNAPSHOT | verify SNAPSHOT | restore SNAPSHOT DESTINATION | render-launch-agent LABEL NODE CLI DATA AUTH ORIGIN PORT STDOUT STDERR PLIST [--diagnostic-retention-days N] [--diagnostic-storage-mib N] [--workspace-idle-hours N|off] [--workspace-delivered-retention-hours N|off] [--workspace-merged-retention-hours N|off] [--workspace-disk-cap-gb N|off]>\n";
 
 function parsePort(value: string): number {
   if (!/^(?:[1-9]\d{0,4})$/.test(value)) throw new Error("invalid port");
@@ -43,6 +44,10 @@ function parseRenderArgs(args: string[]) {
     options: {
       "diagnostic-retention-days": { type: "string" },
       "diagnostic-storage-mib": { type: "string" },
+      "workspace-disk-cap-gb": { type: "string" },
+      "workspace-merged-retention-hours": { type: "string" },
+      "workspace-delivered-retention-hours": { type: "string" },
+      "workspace-idle-hours": { type: "string" },
     },
   });
   const retention = parseBounded(
@@ -55,6 +60,7 @@ function parseRenderArgs(args: string[]) {
   );
   return {
     positionals,
+    workspaceMaintenance: workspaceMaintenanceFromOptions(values),
     ...(retention === undefined ? {} : { diagnosticRetentionDays: retention }),
     ...(storage === undefined ? {} : { diagnosticStorageMib: storage }),
   };

@@ -1115,13 +1115,34 @@ verified exit of its exact process or its 30-minute quiet period, once no indepe
 hold remains. Otherwise a timer, expired lease, quiet interval, empty terminal list,
 acknowledged Stop or operator acknowledgement cannot release them. Conversation replacement and archival
 do not automatically delete
-workspaces. Retain until operator archival by default; automatic cleanup requires
-confirmed delivery and preservation checks for uncommitted work, handoffs and
-reconciliation evidence, and refuses while a result's uncommitted changes are
-neither committed nor delivered (see [Result workspace identity](#result-workspace-identity)). Missing workspaces hold affected execution visibly.
+workspaces. Workspaces are currently retained: manual removal, trimming and the
+automatic maintenance pass are not implemented. Generation metadata and attributable
+terminal, turn-end, confirmed-push and merge observations are stored independently
+of the current binding. Legacy facts without an attributable timestamp stay unknown;
+mutable update times and migration time do not establish age. Duplicate observations
+do not move an episode's anchor. These facts never release execution ownership.
+An interrupted maintenance journal stays held for reconciliation, even if a path is
+absent or its retention has expired.
+
+The accepted maintenance contract derives terminal and settled ownership, repository
+identity, clean tracked/non-ignored state, pending-result settlement and confirmed
+push or provisioned-base preservation before removal. There is no force override.
+The internal cleanup path still refuses while a result's uncommitted changes are
+neither committed nor delivered (see [Result workspace identity](#result-workspace-identity)).
+Missing workspaces hold affected execution visibly.
 A workspace held only because Git could not read its worktree identity is rechecked
 at startup, before admitting a turn and by `task workspace-recheck`, and returns to
 ready once the check passes; every other workspace hold still needs a person.
+
+The service loads four installation-wide workspace maintenance settings: idle hours
+(default 24), delivered retention hours (24), merged retention hours (1) and disk cap
+in decimal GB (10). Each accepts a positive safe whole integer or exact `off`, and
+its conversion to milliseconds or bytes must remain safe. Invalid values refuse
+startup. The supported installation and low-level LaunchAgent render paths preserve
+explicit values, including `off`; an omitted upgrade option keeps its recorded value.
+The loaded limits do not yet schedule effects. The planned policy disables every
+automatic removal when both retentions are off, while cap trimming may still run;
+manual removal remains independent of the limits.
 
 Every Git subprocess the service starts (workspace provisioning, cleanup and
 identity checks, file and comparison reads, setup probes and repository

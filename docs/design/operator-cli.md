@@ -72,6 +72,14 @@ agent's instructions from selected operator feedback). Accepting one is an ordin
 `project` or `profile` configure, which the CLI already prepares and applies, with
 `--restore-revision` to restore earlier wording.
 
+Service install and upgrade accept `--workspace-idle-hours`,
+`--workspace-delivered-retention-hours`, `--workspace-merged-retention-hours` and
+`--workspace-disk-cap-gb`, each with a positive safe whole integer or `off`.
+Omitted upgrade options retain the protected installation's values; output reports
+the desired loaded limits. These options currently configure limits only: workspace
+trimming/removal, `task workspace-remove` and `task show` remain unimplemented.
+See the [maintenance configuration](../operations/standalone-macos.md#workspace-maintenance-configuration).
+
 ## Diagnostic evidence
 
 Add richer bounded capture for future executions: cab-supplied instructions

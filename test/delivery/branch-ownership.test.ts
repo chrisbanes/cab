@@ -1,3 +1,5 @@
+import { WorkspaceLifecycleStore } from "../../src/core/workspace-lifecycle.js";
+import { ExecutionState } from "../../src/standalone/state.js";
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
@@ -763,4 +765,88 @@ test("an allow pr.edit grant needs no approval; an approval grant still does", a
         /approval required/,
       );
   }
+});
+
+test("confirmed new pushes and first merged observation record generation clocks, while uncertain reads and no-op pushes do not", async (t) => {
+  const w = publicationWorld(t),
+    state = new ExecutionState(w.db),
+    life = new WorkspaceLifecycleStore(w.db);
+  assert.ok("workId" in w.caller);
+  const profileId = randomUUID();
+  w.domain.execute({
+    type: "profile.create",
+    actor: "operator",
+    key: randomUUID(),
+    profileId,
+    name: "Clock lead",
+    instructions: "Deliver",
+    capabilities: "code",
+  });
+  w.domain.execute({
+    type: "project.configure",
+    actor: "operator",
+    key: randomUUID(),
+    projectId: w.projectId,
+    expectedVersion: Number(w.domain.project(w.projectId).version),
+    leadProfileId: profileId,
+  });
+  const lead = w.domain.ensureLeadAssignment(w.taskId)!;
+  w.caller.assignmentId = String(lead.id);
+  state.create(w.caller.workId, "fixture", w.workspace);
+  state.bindTask(w.caller.workId, {
+    taskId: w.taskId,
+    assignmentId: w.caller.assignmentId,
+    assignmentVersion: 1,
+    instructionsRevision: 1,
+    profileRevision: 1,
+  });
+  const workspaceId = randomUUID();
+  life.retain({
+    taskId: w.taskId,
+    workspaceId,
+    path: w.workspace,
+    createdAt: null,
+    repositories: [
+      {
+        repositoryId,
+        sourcePath: w.source,
+        workspacePath: w.workspace,
+        ref: "main",
+        gitCommonDir: null,
+        commit: w.base,
+      },
+    ],
+  });
+  const sha = w.commit();
+  w.setPush("applied-but-unread");
+  const pushed = await w.submit("branch.push", sha);
+  assert.equal(pushed.state, "uncertain");
+  assert.equal(life.get(workspaceId)?.lastPushAt, null);
+  w.remote.head = sha;
+  await w.coordinatorFor().reconcile();
+  const confirmed = life.get(workspaceId)!;
+  assert.ok(confirmed.lastPushAt);
+  const time = confirmed.lastPushAt;
+  await w.submit("branch.push", sha);
+  assert.equal(life.get(workspaceId)?.lastPushAt, time);
+  const branch = branchOf(w)!.branch;
+  const observation = w.showPr(sha, branch);
+  w.store.transaction(() =>
+    w.store.registerPrWithinTransaction(
+      w.caller as Parameters<typeof w.store.registerPrWithinTransaction>[0],
+      observation,
+      w.caller.assignmentId,
+    ),
+  );
+  assert.equal(life.get(workspaceId)?.allMergedAt, null);
+  const merged = { ...observation, state: "MERGED" as const, merged: true };
+  w.store.transaction(() =>
+    w.store.observePrWithinTransaction(w.taskId, merged),
+  );
+  const mergedAt = life.get(workspaceId)?.allMergedAt;
+  assert.ok(mergedAt);
+  w.store.transaction(() =>
+    w.store.observePrWithinTransaction(w.taskId, merged),
+  );
+  assert.equal(life.get(workspaceId)?.allMergedAt, mergedAt);
 });

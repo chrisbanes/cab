@@ -858,7 +858,14 @@ function restoreDraftingSchema25(db: DatabaseSync) {
 }
 
 /** Narrow only level 36, preserving the exact level 35 table spelling. */
+function undoWorkspaceLifecycle(db: DatabaseSync) {
+  db.exec(
+    "DROP TABLE IF EXISTS workspace_lifecycle_events; DROP TABLE IF EXISTS workspace_maintenance_operations; DROP TABLE IF EXISTS workspace_generations",
+  );
+}
+
 function undoCompletedRecipient(db: DatabaseSync) {
+  undoWorkspaceLifecycle(db);
   widenCheck(
     db,
     "coordination_undeliverable_inbox_events",
@@ -1017,6 +1024,7 @@ function restoreRequestSchema21(db: DatabaseSync) {
 
 /** The schema digest each migration level created. Append an entry with every level bump. */
 const SCHEMA_PINS: Record<number, string> = {
+  37: "8f2985d84ed16c4b2ef2ec25e030e4f6d346d6b07672d1696e82d3f5659bf81c",
   36: "64917f9796266e55145f76694c1a4418b1bd73982afcfaeba189d55eabee8c9f",
   35: "fb5fc772157781630dec0b40f1f139c30217307c3607de8a37a9d804829aa422",
   // The escalate-auto-review sandbox level and the sandbox review evidence table.
@@ -2195,7 +2203,7 @@ test("completed-recipient migration preserves level 35 rows, foreign keys and ex
     assert.equal(snapshot?.from, 35);
     assert.ok(snapshot?.path);
     assert.equal(schemaDigest(snapshot.path), SCHEMA_PINS[35]);
-    assert.equal(schemaDigest(dirs.data), SCHEMA_PINS[36]);
+    assert.equal(schemaDigest(dirs.data), SCHEMA_PINS[MIGRATION_LEVEL]);
     const after = new DatabaseSync(database);
     try {
       assert.deepEqual(
@@ -2224,7 +2232,7 @@ test("completed-recipient migration preserves level 35 rows, foreign keys and ex
     const settled = schemaState(dirs.data);
     await run(dirs.data);
     assert.equal(schemaState(dirs.data), settled);
-    assert.equal(schemaDigest(dirs.data), SCHEMA_PINS[36]);
+    assert.equal(schemaDigest(dirs.data), SCHEMA_PINS[MIGRATION_LEVEL]);
   } finally {
     dirs.cleanup();
   }
@@ -2251,6 +2259,36 @@ test("completed-recipient migration refuses an unknown CHECK atomically", async 
     } finally {
       db.close();
     }
+  } finally {
+    dirs.cleanup();
+  }
+});
+
+test("workspace lifecycle migration snapshots exact level36 and retains unknown legacy ages", async () => {
+  const dirs = layout();
+  try {
+    await run(dirs.data, 36);
+    const before = new DatabaseSync(join(dirs.data, "standalone.sqlite"));
+    undoWorkspaceLifecycle(before);
+    before.close();
+    assert.equal(schemaDigest(dirs.data), SCHEMA_PINS[36]);
+    await run(dirs.data);
+    const snapshot = readStartupState(dirs.data)?.snapshot;
+    assert.equal(snapshot?.from, 36);
+    assert.ok(snapshot?.path);
+    assert.equal(schemaDigest(snapshot.path), SCHEMA_PINS[36]);
+    assert.equal(schemaDigest(dirs.data), SCHEMA_PINS[37]);
+    const after = new DatabaseSync(join(dirs.data, "standalone.sqlite"));
+    try {
+      assert.deepEqual(after.prepare("PRAGMA foreign_key_check").all(), []);
+      assert.equal(
+        after.prepare("SELECT count(*) n FROM workspace_generations").get()?.n,
+        0,
+      );
+    } finally {
+      after.close();
+    }
+    await assert.rejects(run(dirs.data, 36), refusal("startup-schema-newer"));
   } finally {
     dirs.cleanup();
   }

@@ -1,3 +1,4 @@
+import { initializedWorkspaceLifecycle } from "../core/workspace-lifecycle.js";
 import { assertCapturedWorkspaceAvailable } from "./project-cleanup-reservations.js";
 import {
   capturedFilesystemState,
@@ -575,26 +576,41 @@ export class SqliteWorkspaceBindingStore implements WorkspaceBindingStore {
     });
   }
 
-  /** Moves a repository's recorded starting point forward, as after a restack; no transaction of its own. */
+  /** Advances a proved repository base and its generation in the same transaction. */
   advanceCommit(taskId: string, repositoryId: string, commit: string): void {
-    assertOwnedTaskWritable(this.db, taskId);
-    const binding = this.get(taskId);
-    if (!binding) return;
-    this.db
-      .prepare(
-        `UPDATE ${this.table} SET repositories = ?, updatedAt = ? WHERE taskId = ?`,
-      )
-      .run(
-        JSON.stringify(
-          binding.repositories.map((repository) =>
-            repository.repositoryId === repositoryId
-              ? { ...repository, commit }
-              : repository,
+    const write = () => {
+      assertOwnedTaskWritable(this.db, taskId);
+      const binding = this.get(taskId);
+      if (!binding) return;
+      this.db
+        .prepare(
+          `UPDATE ${this.table} SET repositories = ?, updatedAt = ? WHERE taskId = ?`,
+        )
+        .run(
+          JSON.stringify(
+            binding.repositories.map((repository) =>
+              repository.repositoryId === repositoryId
+                ? { ...repository, commit }
+                : repository,
+            ),
           ),
-        ),
-        new Date().toISOString(),
-        taskId,
-      );
+          new Date().toISOString(),
+          taskId,
+        );
+      if (this.table === "task_workspace_bindings") {
+        const current = this.get(taskId)!;
+        const { workspaceId, path, repositories, createdAt } = current;
+        initializedWorkspaceLifecycle(this.db)?.recordBinding({
+          taskId,
+          workspaceId,
+          path,
+          repositories,
+          createdAt,
+        });
+      }
+    };
+    if (this.db.isTransaction) write();
+    else transaction(this.db, write);
   }
 
   update(
@@ -602,13 +618,27 @@ export class SqliteWorkspaceBindingStore implements WorkspaceBindingStore {
     state: TaskWorkspaceBinding["state"],
     reason: string | null,
   ): TaskWorkspaceBinding {
-    assertOwnedTaskWritable(this.db, taskId);
-    this.db
-      .prepare(
-        `UPDATE ${this.table} SET state = ?, reason = ?, holdReleasable = 0, updatedAt = ? WHERE taskId = ?`,
-      )
-      .run(state, reason, new Date().toISOString(), taskId);
-    return this.get(taskId) ?? this.invalidRow();
+    const write = () => {
+      assertOwnedTaskWritable(this.db, taskId);
+      this.db
+        .prepare(
+          `UPDATE ${this.table} SET state = ?, reason = ?, holdReleasable = 0, updatedAt = ? WHERE taskId = ?`,
+        )
+        .run(state, reason, new Date().toISOString(), taskId);
+      const binding = this.get(taskId) ?? this.invalidRow();
+      if (this.table === "task_workspace_bindings" && state === "ready") {
+        const { taskId, workspaceId, path, repositories, createdAt } = binding;
+        initializedWorkspaceLifecycle(this.db)?.recordBinding({
+          taskId,
+          workspaceId,
+          path,
+          repositories,
+          createdAt,
+        });
+      }
+      return binding;
+    };
+    return this.db.isTransaction ? write() : transaction(this.db, write);
   }
 
   markGitUncertain(taskId: string, reason: string): TaskWorkspaceBinding {

@@ -1,3 +1,9 @@
+import {
+  workspaceMaintenanceFromOptions,
+  resolveWorkspaceMaintenanceSettings,
+  type WorkspaceMaintenanceSettings,
+  type WorkspaceMaintenanceConfiguration,
+} from "../operator/workspace-maintenance-settings.js";
 import { execFile } from "node:child_process";
 import { createHash } from "node:crypto";
 import {
@@ -105,6 +111,10 @@ SERVICE_OPTIONS:
   --label LABEL            default local.cab.service
   --port PORT              loopback port for install, default 8787
   --diagnostic-retention-days N|default  diagnostic retention (1-365, service default 30)
+  --workspace-idle-hours N|off  idle trim limit (default 24 hours)
+  --workspace-delivered-retention-hours N|off  delivered retention (default 24 hours)
+  --workspace-merged-retention-hours N|off  merged retention (default 1 hour)
+  --workspace-disk-cap-gb N|off  disk cap (default 10 decimal GB)
   --diagnostic-storage-mib N|default     diagnostic storage cap (16-1048576, service default 1024)
 
 configure shows desired network settings without contacting the service. Set or clear
@@ -321,6 +331,7 @@ export type ServiceOptions = {
   port: number;
   /** Absent keeps the recorded value, null clears it, a number sets it. */
   diagnostic?: { retentionDays?: number | null; storageMib?: number | null };
+  workspaceMaintenance?: WorkspaceMaintenanceConfiguration;
 };
 
 export type ServiceIo = {
@@ -762,10 +773,14 @@ class Service {
   }
 
   writeRecord(record: InstallRecord) {
+    this.writeRecordText(`${JSON.stringify(record, null, 2)}\n`);
+  }
+
+  private writeRecordText(text: string) {
     const temporary = `${this.recordPath}.${process.pid}.tmp`;
     const file = openSync(temporary, "w", 0o600);
     try {
-      writeFileSync(file, `${JSON.stringify(record, null, 2)}\n`);
+      writeFileSync(file, text);
       fsyncSync(file);
     } finally {
       closeSync(file);
@@ -915,6 +930,7 @@ class Service {
       | "port"
       | "diagnosticRetentionDays"
       | "diagnosticStorageMib"
+      | "workspaceMaintenance"
     >,
     daemon = false,
     /** The bound Node.js of an npm release; a tarball release runs its bundled one. */
@@ -946,6 +962,14 @@ class Service {
         ? {}
         : { diagnosticRetentionDays: retention }),
       ...(storage === undefined ? {} : { diagnosticStorageMib: storage }),
+      ...(base.workspaceMaintenance || this.options.workspaceMaintenance
+        ? {
+            workspaceMaintenance: {
+              ...base.workspaceMaintenance,
+              ...this.options.workspaceMaintenance,
+            },
+          }
+        : {}),
       ...(account ? { userName: account.name, home: account.home } : {}),
     };
     const logs = [configuration.stdoutPath, configuration.stderrPath];
@@ -972,9 +996,25 @@ class Service {
         plistSha256: sha256(staged),
         configuration,
       };
+      const previousRecord = existsSync(this.recordPath)
+        ? readFileSync(this.recordPath, "utf8")
+        : undefined;
       onActivation?.();
-      this.writeRecord(record);
-      this.host.rename(staged, destination);
+      try {
+        this.writeRecord(record);
+        this.host.rename(staged, destination);
+      } catch (error) {
+        if (previousRecord !== undefined) {
+          try {
+            this.writeRecordText(previousRecord);
+          } catch {
+            throw new ServiceFailure(
+              "Activation failed; previous installation record restoration is unconfirmed",
+            );
+          }
+        }
+        throw error;
+      }
       return { record, logs };
     } finally {
       rmSync(staging, { recursive: true, force: true });
@@ -1598,6 +1638,7 @@ async function installServiceLocked(
   let rollbackNetwork: (() => Promise<void>) | undefined;
   let activationAttempted = false;
   try {
+    resolveWorkspaceMaintenanceSettings(options.workspaceMaintenance);
     const network =
       first.lan === undefined
         ? undefined
@@ -1805,6 +1846,9 @@ async function installServiceLocked(
         operation: "install",
         mode: "agent",
         lanOrigins: desiredOrigins,
+        workspaceMaintenance: resolveWorkspaceMaintenanceSettings(
+          record?.configuration.workspaceMaintenance,
+        ),
         label: options.label,
         version,
         origin: service.origin,
@@ -1825,6 +1869,9 @@ async function installServiceLocked(
       operation: "install",
       mode: "agent",
       lanOrigins: desiredOrigins,
+      workspaceMaintenance: resolveWorkspaceMaintenanceSettings(
+        record?.configuration.workspaceMaintenance,
+      ),
       label: options.label,
       version,
       origin: service.origin,
@@ -1928,6 +1975,9 @@ async function finishDaemonInstall(
     operation: "install",
     mode: "daemon",
     lanOrigins: origins,
+    workspaceMaintenance: resolveWorkspaceMaintenanceSettings(
+      record.configuration.workspaceMaintenance,
+    ),
     label: service.options.label,
     version,
     origin: service.origin,
@@ -1975,6 +2025,18 @@ async function verifyDaemon(
   if (service.options.port !== record.configuration.port)
     throw refuse(
       `${record.label} is installed on port ${record.configuration.port}; pass --port ${record.configuration.port}`,
+    );
+  const keptMaintenance = resolveWorkspaceMaintenanceSettings(
+    record.configuration.workspaceMaintenance,
+  );
+  if (
+    Object.entries(service.options.workspaceMaintenance ?? {}).some(
+      ([key, value]) =>
+        keptMaintenance[key as keyof WorkspaceMaintenanceSettings] !== value,
+    )
+  )
+    throw refuse(
+      "Workspace maintenance settings differ from the installed settings; change them through a new installation",
     );
   const job = await service.loadedJob(service.systemTarget);
   const installed = service.installedDaemonHash();
@@ -2298,6 +2360,7 @@ async function upgradeServiceLocked(
   let root = target;
   let startupSnapshot: () => Promise<string | null> = async () => null;
   try {
+    resolveWorkspaceMaintenanceSettings(options.workspaceMaintenance);
     record = service.readRecord();
     if (!record)
       throw refuse(
@@ -2411,6 +2474,9 @@ async function upgradeServiceLocked(
     service.write("stdout", {
       ok: true,
       operation: "upgrade",
+      workspaceMaintenance: resolveWorkspaceMaintenanceSettings(
+        record?.configuration.workspaceMaintenance,
+      ),
       label: options.label,
       version,
       snapshot: await startupSnapshot(),
@@ -2776,6 +2842,10 @@ export const LIFECYCLE_OPTIONS = {
   "no-open": { type: "boolean" },
   "diagnostic-retention-days": { type: "string" },
   "diagnostic-storage-mib": { type: "string" },
+  "workspace-disk-cap-gb": { type: "string" },
+  "workspace-merged-retention-hours": { type: "string" },
+  "workspace-delivered-retention-hours": { type: "string" },
+  "workspace-idle-hours": { type: "string" },
   mode: { type: "string" },
   node: { type: "string" },
   "lan-ip": { type: "string" },
@@ -2808,6 +2878,10 @@ export const VERIFY_OPTIONS: Record<
   node: "irrelevant",
   "diagnostic-retention-days": "irrelevant",
   "diagnostic-storage-mib": "irrelevant",
+  "workspace-disk-cap-gb": "irrelevant",
+  "workspace-merged-retention-hours": "irrelevant",
+  "workspace-delivered-retention-hours": "irrelevant",
+  "workspace-idle-hours": "irrelevant",
   "lan-ip": "irrelevant",
   "lan-origin": "irrelevant",
   "no-lan-ip-origin": "irrelevant",
@@ -2925,7 +2999,16 @@ export function lifecycleOptions(
     Number(port) > 65_535
   )
     return null;
+  let workspaceMaintenance: WorkspaceMaintenanceConfiguration;
+  try {
+    workspaceMaintenance = workspaceMaintenanceFromOptions(values);
+  } catch {
+    return null;
+  }
   const options: ServiceOptions = {
+    ...(Object.keys(workspaceMaintenance).length
+      ? { workspaceMaintenance }
+      : {}),
     stateDir,
     logDir,
     agentsDir,
@@ -3153,7 +3236,9 @@ export async function serviceCommand(
       (parsed.connection !== undefined &&
         command === "install" &&
         !connectionNameSchema.safeParse(parsed.connection).success) ||
-      (command === "uninstall" && parsed.options.diagnostic !== undefined) ||
+      (command === "uninstall" &&
+        (parsed.options.diagnostic !== undefined ||
+          parsed.options.workspaceMaintenance !== undefined)) ||
       (command !== "install" && args.some((arg) => arg.startsWith("--port")))
     )
       return usage(deps, "service");

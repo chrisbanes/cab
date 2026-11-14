@@ -1,3 +1,7 @@
+import {
+  workspaceGenerationSchema,
+  workspaceOperationSchema,
+} from "../core/workspace-lifecycle.js";
 import { unstackPrivateValues, unstackRecordSchema } from "../core/unstack.js";
 import { materialDigest } from "../core/delivery.js";
 import {
@@ -66,6 +70,21 @@ function rowsPrivate(rows: Record<string, readonly Row[]>): string[] {
   const values: string[] = [];
   for (const row of rows.inbox_lifecycle ?? [])
     if (typeof row.note === "string") values.push(row.note);
+  for (const row of rows.workspace_generations ?? []) {
+    if (typeof row.data !== "string")
+      throw new Error("Private lifecycle inputs unavailable");
+    const generation = workspaceGenerationSchema.parse(JSON.parse(row.data));
+    values.push(
+      generation.path,
+      ...repositoryPaths(JSON.stringify(generation.repositories)),
+    );
+  }
+  for (const row of rows.workspace_maintenance_operations ?? []) {
+    if (typeof row.data !== "string")
+      throw new Error("Private maintenance inputs unavailable");
+    const operation = workspaceOperationSchema.parse(JSON.parse(row.data));
+    if (operation.reason) values.push(operation.reason);
+  }
   for (const row of rows.project_instruction_revisions ?? []) {
     if (typeof row.instructions !== "string")
       throw new Error("Private instruction inputs unavailable");
@@ -160,6 +179,11 @@ export async function prepareDeletionPrivateInputs(
       project_repository_links: read(
         db,
         "SELECT links FROM project_repository_links",
+      ),
+      workspace_generations: read(db, "SELECT data FROM workspace_generations"),
+      workspace_maintenance_operations: read(
+        db,
+        "SELECT data FROM workspace_maintenance_operations",
       ),
       task_workspace_bindings: read(
         db,

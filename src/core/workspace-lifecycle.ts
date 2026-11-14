@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { z } from "zod";
 import { DomainConflictError } from "./domain-errors.js";
 import { type Database, transaction } from "./store.js";
@@ -12,7 +13,7 @@ const repositorySchema = z.looseObject({
   workspacePath: path,
   ref: identity,
   gitCommonDir: path.nullable(),
-  commit: commit.nullable(),
+  commit: z.string().min(1).nullable(),
   sourceGitCommonDir: path.nullable().optional(),
   gitDirectory: path.nullable().optional(),
   base: z
@@ -41,6 +42,7 @@ export const workspaceGenerationSchema = generationInputSchema.extend({
   revision: z.number().int().positive().max(Number.MAX_SAFE_INTEGER),
   lastObservedAt: time.nullable(),
   lastTurnEndedAt: time.nullable(),
+  lastTurnEndedEventId: identity.nullable().default(null),
   terminal: z
     .strictObject({
       episodeId: identity,
@@ -56,7 +58,7 @@ export type WorkspaceGeneration = z.infer<typeof workspaceGenerationSchema>;
 export type WorkspaceGenerationInput = z.infer<typeof generationInputSchema>;
 type GenerationIdentity = Pick<WorkspaceGeneration, "taskId" | "workspaceId">;
 
-const eventSchema = z.discriminatedUnion("kind", [
+export const workspaceLifecycleEventSchema = z.discriminatedUnion("kind", [
   z.strictObject({
     kind: z.literal("turn-ended"),
     eventId: identity,
@@ -87,7 +89,7 @@ const eventSchema = z.discriminatedUnion("kind", [
     merged: z.boolean(),
   }),
 ]);
-type LifecycleEvent = z.infer<typeof eventSchema>;
+type LifecycleEvent = z.infer<typeof workspaceLifecycleEventSchema>;
 const removalProofSchema = z.discriminatedUnion("kind", [
   z.strictObject({
     kind: z.literal("pushed"),
@@ -180,6 +182,299 @@ export class WorkspaceLifecycleStore {
     );`);
   }
 
+  recordBinding(input: WorkspaceGenerationInput): WorkspaceGeneration {
+    return this.write(() => {
+      const parsed = generationInputSchema.parse(input);
+      const prior = this.get(parsed.workspaceId);
+      if (!prior) return this.retain(parsed);
+      if (
+        prior.taskId !== parsed.taskId ||
+        prior.path !== parsed.path ||
+        prior.createdAt !== parsed.createdAt ||
+        JSON.stringify(
+          prior.repositories.map((r) => [
+            r.repositoryId,
+            r.sourcePath,
+            r.workspacePath,
+            r.ref,
+          ]),
+        ) !==
+          JSON.stringify(
+            parsed.repositories.map((r) => [
+              r.repositoryId,
+              r.sourcePath,
+              r.workspacePath,
+              r.ref,
+            ]),
+          )
+      )
+        this.conflict("Workspace generation binding identity changed");
+      if (
+        JSON.stringify(prior.repositories) !==
+        JSON.stringify(parsed.repositories)
+      ) {
+        prior.repositories = parsed.repositories;
+        this.saveGeneration(prior);
+      }
+      return prior;
+    });
+  }
+
+  current(taskId: string): WorkspaceGeneration | undefined {
+    if (!this.hasTable("task_workspace_bindings")) return undefined;
+    const row = this.db
+      .prepare("SELECT workspaceId FROM task_workspace_bindings WHERE taskId=?")
+      .get(taskId);
+    if (!row) return undefined;
+    const generation = this.get(
+      z.object({ workspaceId: z.uuid() }).parse(row).workspaceId,
+    );
+    if (generation && generation.taskId !== taskId)
+      this.conflict("Current workspace owner mismatch");
+    return generation;
+  }
+
+  taskStateChanged(
+    taskId: string,
+    status: "open" | "done" | "cancelled",
+    at = Date.now(),
+  ): void {
+    const generation = this.current(taskId);
+    const terminal = status === "open" ? null : status;
+    if (!generation || (generation.terminal?.status ?? null) === terminal)
+      return;
+    const row = z
+      .object({ version: z.number().int().positive() })
+      .parse(
+        this.db
+          .prepare("SELECT version FROM domain_tasks WHERE id=?")
+          .get(taskId),
+      );
+    this.observe(generation, {
+      kind: "terminal",
+      eventId: `task-state:${row.version}`,
+      at,
+      status: terminal,
+    });
+  }
+
+  recordTurnEnd(
+    workId: string,
+    threadId: string,
+    turnId: string,
+    at: number,
+  ): void {
+    const row = this.db
+      .prepare(`SELECT b.taskId,i.workspace FROM task_execution_bindings b
+      JOIN execution_intents i ON i.workId=b.workId
+      WHERE b.workId=? AND i.threadId=? AND i.turnId=?`)
+      .get(workId, threadId, turnId);
+    if (!row) return;
+    const binding = z.object({ taskId: identity, workspace: path }).parse(row);
+    const matches = this.forTask(binding.taskId).filter(
+      (g) => g.path === binding.workspace,
+    );
+    const generation = matches.length === 1 ? matches[0] : undefined;
+    if (!generation) return;
+    const eventId = `turn-ended:${createHash("sha256")
+      .update(JSON.stringify([threadId, turnId]))
+      .digest("hex")}`;
+    if (
+      this.db
+        .prepare(
+          "SELECT 1 FROM workspace_lifecycle_events WHERE workspaceId=? AND eventId=?",
+        )
+        .get(generation.workspaceId, eventId)
+    )
+      return;
+    this.observe(generation, {
+      kind: "turn-ended",
+      eventId,
+      at,
+      workId,
+      turnId,
+    });
+  }
+
+  recordPush(
+    taskId: string,
+    workId: string,
+    repositoryId: string,
+    operationId: string,
+    sha: string,
+    at: number,
+  ): void {
+    const generation = this.forWork(taskId, workId);
+    if (!generation?.repositories.some((r) => r.repositoryId === repositoryId))
+      return;
+    this.observe(generation, {
+      kind: "push",
+      eventId: `push:${operationId}`,
+      at,
+      repositoryId,
+      commit: sha,
+      removalOperationId: null,
+    });
+  }
+
+  recordMerge(
+    taskId: string,
+    workId: string,
+    repositoryId: string,
+    changeRequestId: string,
+    merged: boolean,
+    observationId: string,
+    at: number,
+  ): void {
+    const generation = this.forWork(taskId, workId);
+    if (!generation?.repositories.some((r) => r.repositoryId === repositoryId))
+      return;
+    const eventId = `merge:${observationId}`;
+    if (
+      this.db
+        .prepare(
+          "SELECT 1 FROM workspace_lifecycle_events WHERE workspaceId=? AND eventId=?",
+        )
+        .get(generation.workspaceId, eventId)
+    )
+      return;
+    this.observe(generation, {
+      kind: "merge",
+      eventId,
+      at,
+      repositoryId,
+      changeRequestId,
+      merged,
+    });
+  }
+
+  importBindings(): void {
+    if (!this.hasTable("task_workspace_bindings")) return;
+    this.write(() => {
+      for (const raw of this.db
+        .prepare(
+          "SELECT taskId,workspaceId,path,repositories,createdAt FROM task_workspace_bindings WHERE state<>'provisioning'",
+        )
+        .all()) {
+        const row = z
+          .object({
+            taskId: identity,
+            workspaceId: z.uuid(),
+            path,
+            repositories: z.string(),
+            createdAt: z.iso.datetime(),
+          })
+          .parse(raw);
+        this.recordBinding({
+          ...row,
+          repositories: JSON.parse(row.repositories),
+        });
+      }
+    });
+  }
+
+  importLegacyFacts(): void {
+    this.write(() => {
+      if (
+        this.hasTable("runtime_terminal_evidence") &&
+        this.hasTable("task_execution_bindings")
+      ) {
+        const rows = this.db
+          .prepare(`SELECT e.workId,e.threadId,e.turnId,e.firstObservedAt FROM runtime_terminal_evidence e
+          WHERE e.workId IS NOT NULL AND e.firstStatus IS NOT NULL AND e.conflicted=0
+          ORDER BY e.firstObservedAt,e.threadId,e.turnId`)
+          .all();
+        const schema = z.object({
+          workId: identity,
+          threadId: identity,
+          turnId: identity,
+          firstObservedAt: time,
+        });
+        for (const raw of rows) {
+          const row = schema.safeParse(raw);
+          if (row.success)
+            this.recordTurnEnd(
+              row.data.workId,
+              row.data.threadId,
+              row.data.turnId,
+              row.data.firstObservedAt,
+            );
+        }
+      }
+      if (this.hasTable("source_completions")) {
+        const rows = this.db
+          .prepare(
+            "SELECT c.taskId,c.completedAt FROM source_completions c JOIN domain_tasks t ON t.id=c.taskId WHERE t.state='done'",
+          )
+          .all();
+        for (const raw of rows) {
+          const row = z
+            .object({ taskId: identity, completedAt: z.iso.datetime() })
+            .safeParse(raw);
+          if (!row.success) continue;
+          const generation = this.current(row.data.taskId),
+            at = Date.parse(row.data.completedAt);
+          if (
+            generation &&
+            generation.terminal === null &&
+            Number.isSafeInteger(at) &&
+            at >= 0
+          )
+            this.observe(generation, {
+              kind: "terminal",
+              eventId: `source-terminal:${at}`,
+              at,
+              status: "done",
+            });
+        }
+      }
+      // Legacy delivery updatedAt is mutable, so it cannot backfill a confirmed-push clock.
+    });
+  }
+
+  recoverInterruptedOperations(): void {
+    this.write(() => {
+      for (const raw of this.db
+        .prepare("SELECT operationId FROM workspace_maintenance_operations")
+        .all()) {
+        const { operationId } = z.object({ operationId: z.uuid() }).parse(raw);
+        const operation = this.findOperation(operationId)!;
+        if (operation.state === "active")
+          this.holdOperation(
+            operation,
+            operationId,
+            "Maintenance interrupted; settlement and final ownership require reconciliation",
+          );
+      }
+    });
+  }
+
+  private forWork(
+    taskId: string,
+    workId: string,
+  ): WorkspaceGeneration | undefined {
+    if (
+      !this.hasTable("execution_intents") ||
+      !this.hasTable("task_execution_bindings")
+    )
+      return undefined;
+    const row = this.db
+      .prepare(
+        `SELECT i.workspace FROM execution_intents i JOIN task_execution_bindings b ON b.workId=i.workId WHERE i.workId=? AND b.taskId=?`,
+      )
+      .get(workId, taskId);
+    if (!row) return undefined;
+    const { workspace } = z.object({ workspace: path }).parse(row);
+    const matches = this.forTask(taskId).filter((g) => g.path === workspace);
+    return matches.length === 1 ? matches[0] : undefined;
+  }
+
+  private hasTable(name: string): boolean {
+    return !!this.db
+      .prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name=?")
+      .get(name);
+  }
+
   retain(input: WorkspaceGenerationInput): WorkspaceGeneration {
     const parsed = generationInputSchema.parse(input);
     this.uniqueRepositories(parsed.repositories);
@@ -196,6 +491,7 @@ export class WorkspaceLifecycleStore {
         revision: 1,
         lastObservedAt: null,
         lastTurnEndedAt: null,
+        lastTurnEndedEventId: null,
         terminal: null,
         lastPushAt: null,
         allMergedAt: null,
@@ -259,7 +555,7 @@ export class WorkspaceLifecycleStore {
     owner: GenerationIdentity,
     input: LifecycleEvent,
   ): WorkspaceGeneration {
-    const event = eventSchema.parse(input);
+    const event = workspaceLifecycleEventSchema.parse(input);
     return this.write(() => {
       const generation = this.owned(owner);
       const previous = this.db
@@ -276,8 +572,10 @@ export class WorkspaceLifecycleStore {
         return generation;
       }
       const at = Math.max(event.at, generation.lastObservedAt ?? 0);
-      if (event.kind === "turn-ended") generation.lastTurnEndedAt = at;
-      else if (event.kind === "terminal") {
+      if (event.kind === "turn-ended") {
+        generation.lastTurnEndedAt = at;
+        generation.lastTurnEndedEventId = event.eventId;
+      } else if (event.kind === "terminal") {
         if ((generation.terminal?.status ?? null) !== event.status) {
           generation.terminal =
             event.status === null
@@ -306,7 +604,14 @@ export class WorkspaceLifecycleStore {
             const operation = this.operation(owner, event.removalOperationId);
             if (operation.kind !== "remove" || operation.state !== "active")
               this.conflict("Removal push requires its active operation");
-          } else generation.lastPushAt = at;
+          } else {
+            generation.lastPushAt = at;
+            if (repository.pushedCommit !== event.commit) {
+              repository.changeRequestId = null;
+              repository.merged = null;
+              generation.allMergedAt = null;
+            }
+          }
           repository.pushedCommit = event.commit;
           repository.pushedAt = at;
         } else {
@@ -618,4 +923,17 @@ export class WorkspaceLifecycleStore {
   private conflict(message: string): never {
     throw new DomainConflictError(message);
   }
+}
+
+/** Primitive store fixtures may not install the domain schema; production migration always does. */
+export function initializedWorkspaceLifecycle(
+  db: Database,
+): WorkspaceLifecycleStore | undefined {
+  return db
+    .prepare(
+      "SELECT 1 FROM sqlite_master WHERE type='table' AND name='workspace_generations'",
+    )
+    .get()
+    ? new WorkspaceLifecycleStore(db)
+    : undefined;
 }

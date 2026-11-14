@@ -5006,3 +5006,97 @@ test("a lost runtime ends its unanswered escalation, which can no longer be answ
     await cleanup();
   }
 });
+
+test("task scratch config is thread scoped and moved resume sends cwd without a turn env field", async () => {
+  const runtime = newTestRuntime();
+  const calls: Array<{ method: string; params: Record<string, unknown> }> = [];
+  const internal = runtime as unknown as {
+    request(
+      method: string,
+      params: Record<string, unknown>,
+      beforeResolve?: (raw: unknown) => void,
+    ): Promise<unknown>;
+  };
+  let next = 0;
+  internal.request = async (method, params, beforeResolve) => {
+    calls.push({ method, params });
+    const raw =
+      method === "turn/start"
+        ? { turn: { id: `turn-${++next}` } }
+        : {
+            thread: { id: params.threadId ?? `thread-${++next}` },
+            approvalPolicy: "never",
+            sandbox: { type: "workspaceWrite" },
+            model: "fixture",
+            modelProvider: "fake",
+            reasoningEffort: null,
+            serviceTier: null,
+          };
+    beforeResolve?.(raw);
+    return raw;
+  };
+  const a = {
+    model: "model-a",
+    reasoningEffort: "medium",
+    scratchDirectory: "/task-a/scratch",
+  };
+  const b = {
+    model: "model-b",
+    reasoningEffort: "low",
+    scratchDirectory: "/task-b/scratch",
+  };
+  const threadA = await runtime.startThread("/task-a", [], a);
+  const threadB = await runtime.startThread("/task-b", [], b);
+  await runtime.resumeThread(threadA, [], a, "/task-a");
+  const moved = { ...a, scratchDirectory: "/task-a-new/scratch" };
+  await runtime.resumeThread(threadA, [], moved, "/task-a-new");
+  const requests = calls.filter((call) => call.method !== "turn/start");
+  assert.equal(requests.length, 4);
+  for (const [index, root] of [
+    "/task-a",
+    "/task-b",
+    "/task-a",
+    "/task-a-new",
+  ].entries()) {
+    const params = requests[index]!.params;
+    assert.equal(params.cwd, root);
+    assert.equal(params.approvalPolicy, "never");
+    assert.equal(params.sandbox, "workspace-write");
+    assert.deepEqual(
+      (params.config as Record<string, unknown>)[
+        "shell_environment_policy.set"
+      ],
+      { CAB_SCRATCH_DIR: `${root}/scratch`, TMPDIR: `${root}/scratch` },
+    );
+  }
+  assert.equal(
+    (requests[0]!.params.config as Record<string, unknown>)
+      .model_reasoning_effort,
+    "medium",
+  );
+  const before = calls.length;
+  await assert.rejects(
+    runtime.startThread("/task-a", [], {
+      ...a,
+      scratchDirectory: "/task-b/scratch",
+    }),
+    /exact task/,
+  );
+  await assert.rejects(
+    runtime.resumeThread(
+      threadB,
+      [],
+      { ...b, scratchDirectory: "" },
+      "/task-b",
+    ),
+    /exact task/,
+  );
+  assert.equal(calls.length, before);
+  await runtime.startTurn(threadA, "/task-a-new", "fixture", moved);
+  const turn = calls.find((call) => call.method === "turn/start")!.params;
+  assert.equal("env" in turn, false);
+  assert.equal(turn.cwd, "/task-a-new");
+  assert.equal(turn.model, "model-a");
+  assert.equal(turn.effort, "medium");
+  await runtime.stop();
+});

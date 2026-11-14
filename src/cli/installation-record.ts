@@ -1,3 +1,7 @@
+import {
+  parseWorkspaceMaintenanceLimit,
+  workspaceMaintenanceSettings,
+} from "../operator/workspace-maintenance-settings.js";
 import { lstat } from "node:fs/promises";
 import { homedir } from "node:os";
 import { basename, dirname, isAbsolute, join, resolve } from "node:path";
@@ -24,6 +28,28 @@ export const STATE_DIR = "Library/Application Support/cab";
 const boundedInteger = (bound: Parameters<typeof isInBound>[1]) =>
   z.number().refine((value) => isInBound(value, bound));
 
+const workspaceLimit = (key: keyof typeof workspaceMaintenanceSettings) =>
+  z
+    .union([z.number(), z.literal("off")])
+    .refine((value) => {
+      try {
+        parseWorkspaceMaintenanceLimit(
+          value,
+          workspaceMaintenanceSettings[key],
+        );
+        return true;
+      } catch {
+        return false;
+      }
+    })
+    .optional();
+export const workspaceMaintenanceConfigurationSchema = z.strictObject({
+  idleHours: workspaceLimit("idleHours"),
+  deliveredRetentionHours: workspaceLimit("deliveredRetentionHours"),
+  mergedRetentionHours: workspaceLimit("mergedRetentionHours"),
+  diskCapGb: workspaceLimit("diskCapGb"),
+});
+
 export const configurationSchema = z
   .object({
     label: z.string(),
@@ -37,6 +63,7 @@ export const configurationSchema = z
     stderrPath: z.string(),
     diagnosticRetentionDays: boundedInteger(diagnosticRetentionDays).optional(),
     diagnosticStorageMib: boundedInteger(diagnosticStorageMib).optional(),
+    workspaceMaintenance: workspaceMaintenanceConfigurationSchema.optional(),
     /** LaunchDaemon only. */
     userName: z.string().optional(),
     home: z.string().optional(),

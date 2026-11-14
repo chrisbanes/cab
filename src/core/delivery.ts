@@ -1,3 +1,4 @@
+import { initializedWorkspaceLifecycle } from "./workspace-lifecycle.js";
 import { UnstackStore, type UnstackRecord } from "./unstack.js";
 import { rebaseProofSchema, type RebaseProof } from "./rebase-proof.js";
 import {
@@ -2705,6 +2706,32 @@ export class DeliveryStore {
               "UPDATE delivery_task_branches SET outsideHeadSha=? WHERE taskId=? AND repositoryId=?",
             )
             .run(outside, taskId, repositoryId);
+        const pushBefore = z
+          .object({
+            beforeHead: z
+              .string()
+              .regex(/^[0-9a-f]{40}$/)
+              .nullable(),
+          })
+          .safeParse(record.beforeState);
+        // An already-equal ref confirms delivery but is not a new push clock.
+        if (
+          owned &&
+          pushBefore.success &&
+          pushBefore.data.beforeHead !== observation.receipt?.headSha &&
+          observation.receipt?.headSha &&
+          (action.kind === "branch.push" ||
+            action.kind === "branch.force-push") &&
+          "workId" in record.binding
+        )
+          initializedWorkspaceLifecycle(this.db)?.recordPush(
+            taskId,
+            record.binding.workId,
+            repositoryId,
+            operationId,
+            observation.receipt.headSha,
+            record.updatedAt,
+          );
         if (
           outside ||
           observation.outsideDeleted ||
@@ -2728,6 +2755,20 @@ export class DeliveryStore {
             action.target.repositoryId,
             action.target.headRef,
           );
+      if (
+        action.kind === "pr.update-branch" &&
+        observation.state === "confirmed-success" &&
+        observation.receipt?.headSha &&
+        "workId" in record.binding
+      )
+        initializedWorkspaceLifecycle(this.db)?.recordPush(
+          record.binding.taskId,
+          record.binding.workId,
+          action.target.repositoryId,
+          operationId,
+          observation.receipt.headSha,
+          record.updatedAt,
+        );
       if (
         isServiceDeliveryCaller(record.binding) &&
         observation.state === "confirmed-success" &&
@@ -3057,6 +3098,15 @@ export class DeliveryStore {
         canonicalMaterial(observation),
         Date.now(),
       );
+    initializedWorkspaceLifecycle(this.db)?.recordMerge(
+      binding.taskId,
+      binding.registeredWorkId,
+      observation.repositoryId,
+      observation.nodeId,
+      observation.state === "MERGED",
+      binding.observationDigest,
+      binding.observedAt,
+    );
     return binding;
   }
   /** Operator Unstack's exact readback and selected-edge retirement share the caller's transaction. */
@@ -3201,6 +3251,15 @@ export class DeliveryStore {
     this.db
       .prepare("INSERT OR IGNORE INTO delivery_observations VALUES (?,?,?,?)")
       .run(taskId, digest, canonicalMaterial(observation), Date.now());
+    initializedWorkspaceLifecycle(this.db)?.recordMerge(
+      taskId,
+      binding.registeredWorkId,
+      observation.repositoryId,
+      observation.nodeId,
+      observation.state === "MERGED",
+      digest,
+      binding.observedAt,
+    );
     const outsideHead = this.outsideHeadWithinTransaction(taskId, observation);
     return { binding, changed, firstSeen, outsideHead };
   }
