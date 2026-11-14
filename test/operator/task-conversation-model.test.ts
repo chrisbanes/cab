@@ -80,6 +80,7 @@ function entry(
   const page = taskTimelineSchema.parse({
     data: {
       visibilityRevision: v1,
+      reasoningSummaryRevision: v1,
       olderCursor: null,
       entries: [raw],
       plans: [],
@@ -664,4 +665,114 @@ test("status announcements wait out the gap and the latest turn is per assignmen
     latestAgentTurns(entries),
     new Set([entries[3]?.entryId, streaming.entryId]),
   );
+});
+
+test("a complete summary overlay reconciles exact held anchors at arbitrary depth without inserting rows", () => {
+  const turnKey = "d".repeat(64);
+  const anchor = entry({
+    kind: "assistant",
+    workId: "old",
+    lifecycle: "completed",
+    text: "ordinary",
+    turnKey,
+  });
+  const later = Array.from({ length: 600 }, (_, n) => text(`later ${n}`));
+  const held = window([anchor, ...later]);
+  const newest = page(later.slice(-50), { olderCursor: later[549]!.key });
+  const overlay = {
+    entryId: anchor.entryId,
+    turnKey,
+    reasoningSummary: { text: "terminal summary", truncated: false },
+  };
+  const tokenOnly = mergeTimeline(held, {
+    ...newest,
+    reasoningSummaryAnchors: [{ ...overlay, entryId: "unloaded" }],
+  });
+  assert.equal(tokenOnly.changed, false);
+  assert.equal(tokenOnly.window, held);
+  const updated = mergeTimeline(held, {
+    ...newest,
+    reasoningSummaryAnchors: [overlay, { ...overlay, entryId: "unloaded" }],
+  });
+  assert.equal(updated.reset, false);
+  assert.equal(updated.window.entries.length, held.entries.length);
+  assert.deepEqual(ids(updated.window.entries), ids(held.entries));
+  assert.deepEqual(updated.window.entries[0], {
+    ...anchor,
+    reasoningSummary: overlay.reasoningSummary,
+  });
+  assert.equal(
+    mergeTimeline(updated.window, {
+      ...newest,
+      reasoningSummaryAnchors: [overlay],
+    }).changed,
+    false,
+  );
+  const removed = mergeTimeline(updated.window, {
+    ...newest,
+    reasoningSummaryAnchors: [],
+  });
+  assert.deepEqual(removed.window.entries[0], anchor);
+  const wrongTurn = mergeTimeline(updated.window, {
+    ...newest,
+    reasoningSummaryAnchors: [{ ...overlay, turnKey: "e".repeat(64) }],
+  });
+  assert.deepEqual(wrongTurn.window.entries[0], anchor);
+  const reset = mergeTimeline(updated.window, {
+    ...newest,
+    visibilityRevision: v2,
+    reasoningSummaryAnchors: [overlay],
+  });
+  assert.equal(reset.reset, true);
+  assert.deepEqual(reset.window.entries, newest.entries);
+});
+
+test("mixed older pages retain ordinary progress while withholding new summary content", () => {
+  const turnKey = "d".repeat(64);
+  const existing = entry({
+    kind: "assistant",
+    workId: "existing",
+    lifecycle: "completed",
+    text: "before",
+    turnKey,
+    reasoningSummary: { text: "owned", truncated: false },
+  });
+  const older = entry(
+    {
+      kind: "assistant",
+      workId: "older",
+      lifecycle: "completed",
+      text: "older prose",
+      turnKey: "e".repeat(64),
+      reasoningSummary: { text: "mixed", truncated: false },
+    },
+    { timeMs: 1 },
+  );
+  const incoming = {
+    ...existing,
+    text: "ordinary progresses",
+    reasoningSummary: { text: "mixed replacement", truncated: true },
+  };
+  const joined = prependTimeline(
+    window([existing]),
+    page([older, incoming]),
+    true,
+  )!;
+  assert.equal(
+    joined.entries[0]?.kind === "assistant" && joined.entries[0].text,
+    "older prose",
+  );
+  assert.equal("reasoningSummary" in joined.entries[0]!, false);
+  assert.deepEqual(joined.entries[1], {
+    ...incoming,
+    reasoningSummary:
+      existing.kind === "assistant" ? existing.reasoningSummary : undefined,
+  });
+  const wrongTurn = { ...incoming, turnKey: "f".repeat(64) };
+  const replaced = prependTimeline(
+    window([existing]),
+    page([wrongTurn]),
+    true,
+  )!;
+  assert.equal("reasoningSummary" in replaced.entries[0]!, false);
 });

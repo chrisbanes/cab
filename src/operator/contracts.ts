@@ -2460,6 +2460,26 @@ export const taskTimelineSchema = envelope(
   z
     .object({
       visibilityRevision: hash,
+      reasoningSummaryRevision: hash,
+      reasoningSummaryAnchors: z
+        .array(
+          z
+            .object({
+              entryId: timelineEntryBase.entryId,
+              turnKey: hash,
+              reasoningSummary: reasoningSummarySchema,
+            })
+            .strict(),
+        )
+        .max(128)
+        .refine(
+          (anchors) =>
+            new Set(anchors.map((anchor) => anchor.entryId)).size ===
+              anchors.length &&
+            new Set(anchors.map((anchor) => anchor.turnKey)).size ===
+              anchors.length,
+        )
+        .optional(),
       olderCursor: timelineKey.nullable(),
       entries: z
         .array(
@@ -2641,7 +2661,19 @@ export const taskTimelineSchema = envelope(
         )
         .max(200),
     })
-    .strict(),
+    .strict()
+    .refine(
+      (page) =>
+        !page.reasoningSummaryAnchors?.some((anchor) =>
+          page.entries.some(
+            (entry) =>
+              entry.entryId === anchor.entryId ||
+              (entry.kind === "assistant" &&
+                entry.reasoningSummary !== undefined &&
+                entry.turnKey === anchor.turnKey),
+          ),
+        ),
+    ),
 );
 /** The bounded, redacted output of one completed command in a task's timeline. */
 export const taskToolOutputSchema = envelope(
