@@ -3446,7 +3446,24 @@ export class StandaloneService {
     return this.started().state.byWorkId(workId);
   }
 
-  /** Only the conversation read may materialize an exact historical turn's summary. */
+  /** Metadata only; callers must still validate the diagnostic identity and read fences. */
+  executionReasoningSummaryBinding(workId: string) {
+    try {
+      const state = this.started().state;
+      const intent = state.byWorkId(workId);
+      return intent?.threadId && intent.turnId
+        ? state.conversationHistoryBinding(
+            workId,
+            intent.threadId,
+            intent.turnId,
+          )
+        : undefined;
+    } catch {
+      return undefined;
+    }
+  }
+
+  /** Explicit conversation and opted-in execution reads may materialize an exact historical summary. */
   reasoningSummaryFor(
     binding: ConversationHistoryBinding,
     excluded: readonly string[] | undefined,

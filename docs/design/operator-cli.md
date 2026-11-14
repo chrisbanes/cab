@@ -131,7 +131,8 @@ absence is not evidence that no tool ran; the wider conversation projection is i
 [ADR-1025](../adr/1025-conversation-activity-plans-and-change-notifications.md). Raw
 provider reasoning is never collected. [ADR-1028](../adr/1028-reasoning-summaries.md)
 implements opt-in provider summaries for admitted on/enhanced Claude task turns in
-separate, redacted turn storage. CLI summary display remains pending; ordinary CLI reads do not disclose those summaries.
+separate, redacted turn storage. `logs --verbose` requests and displays retained
+summaries; ordinary CLI reads do not disclose them.
 
 The capture is a fourth dedicated instruction projection:
 `GET /api/operator/executions/WORK_ID/inputs[?compare=current]` returns each
@@ -144,7 +145,7 @@ execution's own agent and project instruction text readable; when no instruction
 labelled `reconstructed` block from retained revisions. `GET
 /api/operator/executions?task|assignment|project=ID`, `GET
 /api/operator/executions/WORK_ID` and `GET
-/api/operator/executions/WORK_ID/events?after&limit&kind&severity&since&until`
+/api/operator/executions/WORK_ID/events?after&limit&kind&severity&since&until&includeReasoningSummaries`
 redact all instruction text. All four are read routes for both credential scopes
 and sessions, gated by the capabilities `execution.read` and, for `logs`,
 `diagnostics.read`. A work id identifies an execution; direct runs and unknown or
@@ -159,7 +160,25 @@ are unavailable. These values describe retained capture, not model activity or c
 CLI detail and logs use the matching reasoning note under `--verbose` and in JSON
 `coverage.notes`. Lists use a neutral per-execution capture note without extra reads.
 Follow prints notes once, using its last successful page, or the neutral note if
-interrupted before any page. JSONL records retain their existing shape.
+interrupted before any page.
+
+The events read accepts optional `includeReasoningSummaries=true|false`; absent or
+false omits text, and other values or duplicate query keys are invalid. Only
+`logs --verbose` sends true, including JSON/JSONL and every follow/resume page.
+A returned `service`/`execution-settled` item can then carry optional
+`reasoningSummary: {text, truncated}` from its exact historical turn, with the same
+redaction as assistant text. Its existing sequence, filters, cursor membership and
+retention determine visibility. The cursor fingerprint is unchanged. A failed
+runtime turn with a recorded settlement is eligible; no event means no summary,
+including crashes, missing capture, execution limits, failed writes or pruning.
+Conversation retention is independent.
+
+Human output places the full multiline retained text beneath its event, headed
+`Reasoning summary`, with `Reasoning summary truncated; only the retained prefix
+is shown.` only when truncated. Existing terminal safety applies. JSON/JSONL keep
+the decoded value through escaped serialization, with no new record kind. Capture
+notes, gaps, end records and quiet-mode envelopes remain unchanged. Omit verbose
+to stop requesting summaries; previously printed terminal text cannot be retracted.
 `GET /api/operator/readiness` (the `doctor` command) is a read route for both
 credential scopes and sessions, gated by `diagnostics.read`; its checks are
 read-only and value-free.
@@ -180,7 +199,8 @@ gaps `evidence-gap`, and baseline or uncaptured executions `evidence-unavailable
 Event cursors are the global item sequence. A cursor beyond any issued sequence
 is a conflict (`cursor-stale`); one below a pruned range returns that range as an
 `expired` or `evicted` gap with counts. Pages stop at 200 items or 1 MiB of
-payload. The CLI's `logs --cursor` realises the representative `--after CURSOR`,
+stored diagnostic payload; an opted-in summary is additional bounded response
+data. The CLI's `logs --cursor` realises the representative `--after CURSOR`,
 because `--after` and `--before` already filter by time. `--follow` polls with a
 fresh authenticated request each interval, and `--output jsonl` writes `item`,
 `gap`, `end` and `error` records.

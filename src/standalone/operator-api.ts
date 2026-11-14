@@ -5434,6 +5434,7 @@ export class OperatorApi {
       "severity",
       "since",
       "until",
+      "includeReasoningSummaries",
     ]);
     const after =
       this.boundedInt(query.get("after"), 0, Number.MAX_SAFE_INTEGER) ?? 0;
@@ -5448,6 +5449,9 @@ export class OperatorApi {
       0,
       Number.MAX_SAFE_INTEGER,
     );
+    const include = query.get("includeReasoningSummaries");
+    if (include !== null && include !== "true" && include !== "false")
+      throw new OperatorApiError(400, "invalid-input");
     const kind = query.get("kind");
     const severity = query.get("severity");
     if (
@@ -5458,7 +5462,6 @@ export class OperatorApi {
       throw new OperatorApiError(400, "invalid-input");
     return this.readWithExclusionFence(async () => {
       const { taskId, projectId, record } = this.requireExecution(workId);
-      const excluded = await this.exclusions(projectId, taskId);
       const store = this.service.executionDiagnostics();
       let page: ReturnType<ExecutionDiagnosticsStore["events"]> | undefined;
       try {
@@ -5477,6 +5480,57 @@ export class OperatorApi {
         throw error;
       }
       const items = (page?.items ?? []).slice(0, limit);
+      const optedIn = include === "true";
+      const settled = items.some(
+        (item) => item.kind === "service" && item.name === "execution-settled",
+      );
+      const bindingFor = () => {
+        const current = this.requireExecution(workId);
+        const binding = this.service.executionReasoningSummaryBinding(workId);
+        const diagnostic = current.record;
+        if (
+          !binding ||
+          !diagnostic ||
+          diagnostic.harness !== "claude" ||
+          current.taskId !== taskId ||
+          current.projectId !== projectId ||
+          binding.taskId !== taskId ||
+          binding.assignmentId !== current.assignmentId ||
+          diagnostic.projectId !== projectId ||
+          [
+            "workId",
+            "taskId",
+            "assignmentId",
+            "assignmentVersion",
+            "instructionsRevision",
+            "profileRevision",
+            "conversationRevision",
+            "threadId",
+            "turnId",
+          ].some(
+            (key) =>
+              diagnostic[key as keyof DiagnosticExecution] !==
+              binding[key as keyof ConversationHistoryBinding],
+          )
+        )
+          return undefined;
+        return binding;
+      };
+      const snapshot = optedIn ? this.workspaceSnapshot([taskId]) : undefined;
+      const binding = optedIn && settled ? bindingFor() : undefined;
+      const excluded = await this.exclusions(
+        projectId,
+        taskId,
+        binding ? [binding] : [],
+      );
+      if (snapshot) this.requireWorkspaceSnapshot(snapshot);
+      const current = optedIn && settled ? bindingFor() : undefined;
+      const summary =
+        binding &&
+        current &&
+        JSON.stringify(binding) === JSON.stringify(current)
+          ? this.service.reasoningSummaryFor(binding, excluded)
+          : undefined;
       return executionEventsSchema.parse({
         data: {
           workId,
@@ -5485,7 +5539,14 @@ export class OperatorApi {
             : record.mode === "baseline"
               ? "baseline"
               : "captured",
-          items: items.map((item) => this.diagnosticItem(item, excluded)),
+          items: items.map((item) => ({
+            ...this.diagnosticItem(item, excluded),
+            ...(summary &&
+            item.kind === "service" &&
+            item.name === "execution-settled"
+              ? { reasoningSummary: summary }
+              : {}),
+          })),
           gaps: (page?.gaps ?? []).map((g) => ({
             code: g.code,
             count: g.count,

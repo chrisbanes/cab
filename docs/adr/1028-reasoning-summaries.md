@@ -9,8 +9,9 @@ choices. The [probes](../evidence/reasoning-summary-probes-2026-11-06.md) found 
 provider-produced summaries from Claude Code but not from Codex. The project setting,
 admission snapshot, Claude requesting, separate turn storage and confirmed erasure
 are implemented, including per-execution capture-health values and plain-text web
-disclosures on exact historical turns. Ordinary assignment-history and CLI reads
-contain no summaries; verbose CLI summary display remains pending.
+disclosures on exact historical turns. `logs --verbose` displays retained summaries
+on the existing execution-settled event; ordinary assignment-history and nonverbose
+CLI reads contain no summary text.
 Deterministic scripted-runtime tests establish code integration, without adding live
 runtime or release qualification.
 
@@ -39,7 +40,18 @@ debugging. They are not a live progress feed or an audit trail.
   - The web task conversation shows a turn's summaries in a collapsed "Reasoning summary"
     disclosure on the agent turn they belong to.
   - The CLI shows them in `logs` only with `--verbose`. The reasoning capture note keeps the
-    existing `--verbose` and `coverage.notes` behaviour.
+    existing `--verbose` and `coverage.notes` behaviour. Each verbose events read,
+    including follow and resume, explicitly sends `includeReasoningSummaries=true`;
+    absent/false omits text. Optional `reasoningSummary: {text, truncated}` belongs
+    only to the returned `service`/`execution-settled` event after capture flush,
+    including failed runtime outcomes. Its filters, sequence, cursor and diagnostic
+    retention apply unchanged. Missing settlement from a crash, no capture,
+    execution limits, failed writes or pruning yields no CLI summary fallback.
+    Human logs preserve the full retained multiline text with the conditional
+    retained-prefix notice; machine output preserves decoded text through existing
+    JSON escaping. Existing terminal safety applies. Follow does not repeat an
+    event, and adding verbose after its cursor does not replay it. List/get and
+    nonverbose modes remain unchanged. Printed text cannot later be retracted.
 - **Capture health.** Each execution's capture health reports `reasoning` as:
   - `not-requested` for an off/baseline admission or no recorded eligible admission;
     historical unknowns do not prove the setting was off;

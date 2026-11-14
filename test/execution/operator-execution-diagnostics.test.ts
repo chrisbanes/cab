@@ -5,12 +5,16 @@ import {
   executionDetailSchema,
   executionEventsSchema,
 } from "../../src/operator/contracts.js";
+import { DeletedProjectRedactionStore } from "../../src/core/deleted-project-redaction.js";
 import { ConversationHistoryStore } from "../../src/standalone/conversation-history.js";
 import { ExecutionDiagnosticsStore } from "../../src/standalone/execution-diagnostics.js";
 import { OperatorApi } from "../../src/standalone/operator-api.js";
 import { operatorRouteAuthority } from "../../src/standalone/operator-credentials.js";
 import { databaseDigest } from "../fixtures/database-digest.js";
-import { seedExecutionDiagnostics } from "../fixtures/execution-diagnostics.js";
+import {
+  seedExecutionDiagnostics,
+  seedExecutionReasoningSummary,
+} from "../fixtures/execution-diagnostics.js";
 import { instructionSecret } from "../fixtures/instruction-history.js";
 import { startCliService } from "../fixtures/operator-cli.js";
 
@@ -458,6 +462,359 @@ test("both execution health projections use admitted capture and retained summar
         intentId,
       ),
       false,
+    ),
+  );
+});
+
+test("summary opt-in enriches only the returned exact settlement and never reads text for quiet or filtered pages", async (t) => {
+  const { s, seed, get } = await setup(t);
+  const first = seedExecutionReasoningSummary(s.f, seed, {
+    text: `FIRST_SUMMARY ${instructionSecret} ${seed.profileOne} token=hunter2 ${s.f.directory}`,
+    state: "failed",
+  });
+  seedExecutionReasoningSummary(s.f, seed, { text: "OTHER_TURN_CANARY" });
+  const base = `/api/operator/executions/${first.workId}/events`;
+  const service = s.f.service,
+    original = service.reasoningSummaryFor.bind(service);
+  let reads = 0;
+  service.reasoningSummaryFor = (...args) => {
+    reads++;
+    return original(...args);
+  };
+  t.after(() => {
+    service.reasoningSummaryFor = original;
+  });
+  const before = databaseDigest(s.f);
+  const quiet = await get(base),
+    off = await get(`${base}?includeReasoningSummaries=false`);
+  assert.deepEqual(off, quiet);
+  assert.equal(reads, 0);
+  const loud = await get(`${base}?includeReasoningSummaries=true`);
+  const summaries = loud.items.filter((i: Json) => i.reasoningSummary);
+  assert.equal(summaries.length, 1);
+  assert.equal(summaries[0].name, "execution-settled");
+  assert.match(summaries[0].reasoningSummary.text, /FIRST_SUMMARY/);
+  for (const canary of [
+    instructionSecret,
+    seed.profileOne,
+    "hunter2",
+    s.f.directory,
+    "OTHER_TURN_CANARY",
+  ])
+    assert.ok(!JSON.stringify(loud).includes(canary), canary);
+  assert.equal(summaries[0].reasoningSummary.truncated, false);
+  assert.deepEqual(
+    {
+      ...loud,
+      items: loud.items.map(({ reasoningSummary: _, ...item }: Json) => item),
+    },
+    quiet,
+  );
+  const settled = summaries[0];
+  for (const query of [
+    "kind=runtime",
+    "severity=warn",
+    `since=${first.at + 1}`,
+    `until=${first.at - 1}`,
+    `after=${settled.sequence}`,
+    "limit=1",
+  ]) {
+    const count: number = reads;
+    const page = await get(`${base}?includeReasoningSummaries=true&${query}`);
+    assert.ok(
+      page.items.every((i: Json) => !i.reasoningSummary),
+      query,
+    );
+    assert.equal(reads, count, query);
+  }
+  for (const query of [
+    "kind=service",
+    "severity=info",
+    `since=${first.at}&until=${first.at}`,
+    "limit=2",
+  ])
+    assert.equal(
+      (
+        await get(`${base}?includeReasoningSummaries=true&${query}`)
+      ).items.filter((i: Json) => i.reasoningSummary).length,
+      1,
+      query,
+    );
+  const pages: Json[] = [];
+  let after = 0;
+  for (;;) {
+    const page = await get(
+      `${base}?includeReasoningSummaries=true&limit=1&after=${after}`,
+    );
+    pages.push(...page.items);
+    after = page.resumeAfter;
+    if (!page.more) break;
+  }
+  assert.deepEqual(pages, loud.items);
+  for (const value of [
+    "",
+    "1",
+    "TRUE",
+    "False",
+    "true&includeReasoningSummaries=false",
+  ])
+    await get(`${base}?includeReasoningSummaries=${value}`, 400);
+  await get(`${base}?includeReasoningSummaries=true&unknown=1`, 400);
+  await get(`${base}?includeReasoningSummaries=true&after=999999`, 409);
+  assert.equal(databaseDigest(s.f), before);
+});
+
+test("execution summary contracts retain Unicode bounds and reject malformed optional values", async (t) => {
+  const { s, seed, get } = await setup(t);
+  const { workId } = seedExecutionReasoningSummary(s.f, seed);
+  const data = await get(`/api/operator/executions/${workId}/events`);
+  const check = (reasoningSummary: unknown) =>
+    executionEventsSchema.safeParse({
+      data: { ...data, items: [{ ...data.items[0], reasoningSummary }] },
+      observedAt: 1,
+    }).success;
+  assert.equal(check(undefined), true);
+  assert.equal(check({ text: "😀".repeat(16000), truncated: false }), true);
+  for (const value of [
+    null,
+    { text: "", truncated: false },
+    { text: "x".repeat(16001), truncated: true },
+    { text: "😀".repeat(16001), truncated: true },
+    { text: "x", truncated: 1 },
+    { text: "x", truncated: false, raw: "secret" },
+  ])
+    assert.equal(check(value), false);
+});
+
+test("summary absence follows actual settlement capture, diagnostic limits, failed writes and awaited retention", async (t) => {
+  const { s, seed, get } = await setup(t);
+  for (const options of [
+    { settled: false },
+    { captured: false },
+    { limits: { executionItems: 1 } },
+    { limits: { executionBytes: 1 } },
+    { failSettlement: true },
+  ]) {
+    const x = seedExecutionReasoningSummary(s.f, seed, options);
+    assert.ok(s.f.service.reasoningSummaryFor(x.binding, [])?.text);
+    const result = await get(
+      `/api/operator/executions/${x.workId}/events?includeReasoningSummaries=true`,
+    );
+    assert.ok(
+      result.items.every((i: Json) => !i.reasoningSummary),
+      JSON.stringify(options),
+    );
+    assert.ok(
+      !result.items.some((i: Json) => i.name === "execution-settled"),
+      JSON.stringify(options),
+    );
+    if (options.limits)
+      assert.ok(
+        result.gaps.some(
+          (g: Json) =>
+            g.code ===
+            (options.limits.executionItems ? "item-limit" : "execution-limit"),
+        ),
+      );
+  }
+  const omitted = seedExecutionReasoningSummary(s.f, seed, {
+    limits: { itemBytes: 1 },
+  });
+  const omittedPage = await get(
+    `/api/operator/executions/${omitted.workId}/events?includeReasoningSummaries=true`,
+  );
+  const retainedEvent = omittedPage.items.find(
+    (i: Json) => i.name === "execution-settled",
+  );
+  assert.equal(retainedEvent.state, "omitted");
+  assert.equal(retainedEvent.reason, "size-limit");
+  assert.equal(retainedEvent.reasoningSummary.text, "Retained summary");
+  const x = seedExecutionReasoningSummary(s.f, seed);
+  await s.f.service.executionDiagnostics()!.prune();
+  // A separate real connection lets the awaited prune use an advanced clock without changing service configuration.
+  const { DatabaseSync } = await import("node:sqlite");
+  const { join } = await import("node:path");
+  const db = new DatabaseSync(join(s.f.directory, "data", "standalone.sqlite"));
+  try {
+    await new ExecutionDiagnosticsStore(db, {
+      now: () => Date.now() + 31 * 24 * 3600 * 1000,
+    }).prune();
+  } finally {
+    db.close();
+  }
+  const pruned = await get(
+    `/api/operator/executions/${x.workId}/events?includeReasoningSummaries=true`,
+  );
+  assert.deepEqual(pruned.items, []);
+  assert.ok(pruned.gaps.some((g: Json) => g.code === "expired"));
+  assert.ok(s.f.service.reasoningSummaryFor(x.binding, [])?.text);
+});
+
+test("execution summary attribution rejects mismatched diagnostic identities without hiding ordinary events", async (t) => {
+  const { s, seed, get } = await setup(t);
+  for (const [field, value] of Object.entries({
+    taskId: randomUUID(),
+    projectId: randomUUID(),
+    assignmentId: randomUUID(),
+    assignmentVersion: 99,
+    instructionsRevision: 99,
+    profileRevision: 99,
+    conversationRevision: 99,
+    harness: "codex",
+    threadId: "wrong-thread",
+    turnId: "wrong-turn",
+  })) {
+    const x = seedExecutionReasoningSummary(s.f, seed);
+    s.f.seedPersistedState((db) => {
+      db.prepare(
+        `UPDATE diagnostic_executions SET ${field}=? WHERE workId=?`,
+      ).run(value, x.workId);
+    });
+    const result = await get(
+      `/api/operator/executions/${x.workId}/events?includeReasoningSummaries=true`,
+    );
+    assert.equal(result.items.length, 3);
+    assert.ok(
+      result.items.every((i: Json) => !i.reasoningSummary),
+      field,
+    );
+  }
+});
+
+test("execution summary reads fence workspace and privacy changes and never revive confirmed erasure", async (t) => {
+  const { s, seed, get } = await setup(t);
+  const x = seedExecutionReasoningSummary(s.f, seed, {
+    text: "PUBLIC_SUMMARY LATE_SECRET",
+  });
+  const api = new OperatorApi(s.f.service);
+  const path = new URLSearchParams({ includeReasoningSummaries: "true" });
+  const mutable = api as unknown as {
+    exclusions: (...args: unknown[]) => Promise<readonly string[] | undefined>;
+  };
+  const original = mutable.exclusions.bind(api);
+  const service = s.f.service;
+  mutable.exclusions = async (...args) => {
+    const result = await original(...args);
+    return [...(result ?? []), "LATE_SECRET"];
+  };
+  assert.ok(
+    !JSON.stringify(await api.readExecutionEvents(x.workId, path)).includes(
+      "LATE_SECRET",
+    ),
+  );
+  mutable.exclusions = async () => undefined;
+  assert.ok(
+    (await api.readExecutionEvents(x.workId, path)).data.items.every(
+      (i) => !i.reasoningSummary,
+    ),
+  );
+  mutable.exclusions = original;
+  const visibility = service.taskWorkspaceVisibility.bind(service);
+  let calls = 0;
+  service.taskWorkspaceVisibility = (id) => `${visibility(id)}:${calls++}`;
+  await assert.rejects(api.readExecutionEvents(x.workId, path), {
+    status: 503,
+  });
+  service.taskWorkspaceVisibility = visibility;
+  const project = service.domain().project(seed.projectA);
+  const deleted = service.domain().execute({
+    type: "project.reasoning.delete",
+    key: randomUUID(),
+    projectId: seed.projectA,
+    expectedVersion: Number(project.version),
+    confirmed: true,
+    actor: "operator",
+  } as never);
+  assert.ok(deleted);
+  const result = await get(
+    `/api/operator/executions/${x.workId}/events?includeReasoningSummaries=true`,
+  );
+  assert.ok(result.items.some((i: Json) => i.name === "execution-settled"));
+  assert.ok(result.items.every((i: Json) => !i.reasoningSummary));
+  assert.equal(service.reasoningSummaryFor(x.binding, []), undefined);
+  await s.restart();
+  assert.ok(
+    (
+      await get(
+        `/api/operator/executions/${x.workId}/events?includeReasoningSummaries=true`,
+      )
+    ).items.every((i: Json) => !i.reasoningSummary),
+  );
+});
+
+test("opted-in execution reads retry changed project exclusions and refuse credential rotation or changed historical identity", async (t) => {
+  const { s, seed } = await setup(t),
+    service = s.f.service;
+  const x = seedExecutionReasoningSummary(s.f, seed, {
+    text: "CURRENT_LATE_CANARY DELETED_LATE_CANARY ROTATED_LATE_CANARY",
+  });
+  s.f.seedPersistedState((db) => {
+    db.exec("BEGIN");
+    new DeletedProjectRedactionStore(db).capture([], ["DELETED_LATE_CANARY"]);
+    db.exec("COMMIT");
+  });
+  const api = new OperatorApi(service),
+    query = new URLSearchParams({ includeReasoningSummaries: "true" });
+  const seam = api as unknown as {
+    exclusions: (...args: unknown[]) => Promise<readonly string[] | undefined>;
+  };
+  const original = seam.exclusions.bind(api);
+  let changed = false;
+  seam.exclusions = async (...args) => {
+    const excluded = await original(...args);
+    if (!changed) {
+      changed = true;
+      service.domain().execute({
+        type: "project.configure",
+        actor: "operator",
+        key: randomUUID(),
+        projectId: seed.projectA,
+        expectedVersion: Number(
+          service.domain().project(seed.projectA).version,
+        ),
+        instructions: "CURRENT_LATE_CANARY",
+      } as never);
+    }
+    return excluded;
+  };
+  const result = await api.readExecutionEvents(x.workId, query);
+  assert.ok(changed);
+  assert.doesNotMatch(
+    JSON.stringify(result),
+    /CURRENT_LATE_CANARY|DELETED_LATE_CANARY/,
+  );
+  assert.match(JSON.stringify(result), /ROTATED_LATE_CANARY/);
+  const env = "CLI2_SYNTHETIC_ROUTING",
+    old = process.env[env];
+  changed = false;
+  seam.exclusions = async (...args) => {
+    const excluded = await original(...args);
+    if (!changed) {
+      changed = true;
+      process.env[env] = "ROTATED_LATE_CANARY";
+    }
+    return excluded;
+  };
+  try {
+    await assert.rejects(api.readExecutionEvents(x.workId, query), {
+      status: 503,
+    });
+  } finally {
+    if (old === undefined) delete process.env[env];
+    else process.env[env] = old;
+  }
+  seam.exclusions = async (...args) => {
+    const excluded = await original(...args);
+    s.f.seedPersistedState((db) => {
+      db.prepare(
+        "UPDATE diagnostic_executions SET turnId='changed' WHERE workId=?",
+      ).run(x.workId);
+    });
+    return excluded;
+  };
+  assert.ok(
+    (await api.readExecutionEvents(x.workId, query)).data.items.every(
+      (i) => !i.reasoningSummary,
     ),
   );
 });

@@ -29,7 +29,10 @@ import {
   nextText,
   remedyFor,
 } from "../../src/cli/remedy.js";
-import { logsCommand } from "../../src/cli/logs-follow.js";
+import {
+  logsCommand,
+  reasoningSummaryLines,
+} from "../../src/cli/logs-follow.js";
 import {
   fakeServer,
   harness,
@@ -989,6 +992,33 @@ test("usage errors exit 2 and help exits 0", async (t) => {
     (await h.run(["connection", "list", "--output", "yaml"])).code,
     2,
   );
+});
+
+test("reasoning summary lines preserve full multiline text, empty lines and Unicode", () => {
+  const longLine = "考察 🧭 café ".repeat(100);
+  assert.ok(longLine.length > 400);
+  assert.deepEqual(
+    reasoningSummaryLines(`\nFirst line\n\n${longLine}\nLast line\n`, false),
+    [
+      "Reasoning summary",
+      "  ",
+      "  First line",
+      "  ",
+      `  ${longLine}`,
+      "  Last line",
+      "  ",
+    ],
+  );
+});
+
+test("reasoning summary lines append the retained-prefix notice only when truncated", () => {
+  const text = "First line\nSecond line";
+  const lines = ["Reasoning summary", "  First line", "  Second line"];
+  assert.deepEqual(reasoningSummaryLines(text, false), lines);
+  assert.deepEqual(reasoningSummaryLines(text, true), [
+    ...lines,
+    "Reasoning summary truncated; only the retained prefix is shown.",
+  ]);
 });
 
 test("streamed logs cannot drive the terminal in human or JSON Lines output", async () => {

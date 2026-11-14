@@ -341,7 +341,14 @@ redaction, credential fences and confirmed erasure. Conversation model and Chrom
 tests cover plain-text disclosures, default/independent keyboard expansion, both
 themes and phone wrapping, retained-window erasure, draft retention and authentication
 purge with a real delayed summary read. These deterministic checks do not establish
-live runtime or release qualification; verbose CLI summary display remains pending.
+live runtime or release qualification. Execution-events tests cover explicit opt-in,
+exact historical attribution, strict optional bounds, filtering/paging, absent or
+size-omitted settlement, execution limits, failed writes, awaited pruning, late
+privacy changes and irreversible erasure through restart. Scripted service tests
+verify capture flush before successful or failed settlement. CLI tests cover full
+multiline text and the conditional notice, request journals, old cursor compatibility,
+follow/retry/interruption/resume, safe terminal output and decoded JSON/JSONL values.
+Quiet-mode records and capture-note timing retain their existing coverage.
 
 | Area | Operations requiring evidence | Scenarios |
 | --- | --- | --- |
