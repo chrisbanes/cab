@@ -59,7 +59,8 @@ export class CaptureObserver {
     if (
       !this.threadId ||
       event.threadId !== this.threadId ||
-      event.kind === "plan"
+      event.kind === "plan" ||
+      event.kind === "reasoning-summary"
     )
       return;
 

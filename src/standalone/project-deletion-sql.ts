@@ -26,6 +26,12 @@ export const projectDeletionStatements = [
     sql: "DELETE FROM conversation_archives WHERE threadId IN (SELECT value FROM json_each(:threads))",
   },
   {
+    table: "conversation_reasoning_summaries",
+    where:
+      "projectId = :projectId OR taskId IN (SELECT value FROM json_each(:tasks)) OR assignmentId IN (SELECT value FROM json_each(:assignments)) OR workId IN (SELECT value FROM json_each(:work))",
+    sql: "DELETE FROM conversation_reasoning_summaries WHERE projectId = :projectId OR taskId IN (SELECT value FROM json_each(:tasks)) OR assignmentId IN (SELECT value FROM json_each(:assignments)) OR workId IN (SELECT value FROM json_each(:work))",
+  },
+  {
     table: "conversation_history_items",
     where:
       "taskId IN (SELECT value FROM json_each(:tasks)) OR assignmentId IN (SELECT value FROM json_each(:assignments)) OR workId IN (SELECT value FROM json_each(:work))",
