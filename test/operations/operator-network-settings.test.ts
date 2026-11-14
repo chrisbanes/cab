@@ -463,3 +463,119 @@ test("rollback of a newly created sidecar refuses to remove a concurrent replace
     await rm(directory, { recursive: true, force: true });
   }
 });
+
+test("origin sets are strict and legacy resolution never expands access", async () => {
+  const { validateNetworkSettings, lanOrigins } = await import(
+    "../../src/operator/network-access.js"
+  );
+  const address = "192.0.2.10";
+  const ip = `http://${address}:8787`;
+  const host = "http://cab.test:8787";
+  const validate = (lan: unknown, port = 8787) =>
+    validateNetworkSettings({ schema: "cab.operator-network/v1", lan }, port)
+      .lan;
+  for (const lan of [
+    { address },
+    { address, origin: host },
+    { address, origins: [host] },
+    { address, origins: [ip, host, "http://other.test.:8787"] },
+  ]) {
+    assert.deepEqual(validate(lan), lan);
+  }
+  assert.deepEqual(lanOrigins(validate({ address }), 8787), [ip]);
+  assert.deepEqual(lanOrigins(validate({ address, origin: host }), 8787), [
+    host,
+  ]);
+  assert.deepEqual(lanOrigins(validate({ address, origins: [host] }), 8787), [
+    host,
+  ]);
+  assert.deepEqual(lanOrigins(validate(null), 8787), []);
+  assert.deepEqual(lanOrigins(validate({ address }, 0), 1234), [
+    `http://${address}:1234`,
+  ]);
+  for (const origins of [
+    [],
+    null,
+    host,
+    [1],
+    [host, host],
+    [""],
+    ["HTTP://cab.test:8787"],
+    ["http://CAB.test:8787"],
+    [host + "/"],
+    [host + "?x"],
+    [host + "#x"],
+    ["http://user:pass@cab.test:8787"],
+    ["https://cab.test:8787"],
+    ["http://[::1]:8787"],
+    ["http://192.0.2.11:8787"],
+    ["http://cab.test:8788"],
+  ]) {
+    assert.throws(
+      () => validate({ address, origins }),
+      JSON.stringify(origins),
+    );
+  }
+  assert.throws(() => validate({ address, origins: [host], origin: host }));
+  assert.throws(() => validate({ address, origins: [host], extra: true }));
+  assert.throws(() => validate({ address, origins: [host] }, 0));
+  assert.throws(() => validate({ address, origins: ["http://cab.test"] }, 80));
+});
+
+test("sets round-trip without rewriting legacy bytes and oversized writes preserve the file", async () => {
+  const { readFile, writeFile } = await import("node:fs/promises");
+  const {
+    readNetworkSettings,
+    writeNetworkSettings,
+    updateNetworkSettingsForInstall,
+    networkSettingsPath,
+  } = await import("../../src/operator/network-access.js");
+  const directory = await mkdtemp(join(tmpdir(), "cab-network-set-"));
+  await chmod(directory, 0o700);
+  const data = join(directory, "data");
+  const path = networkSettingsPath(data);
+  const legacy =
+    '{ "schema": "cab.operator-network/v1", "lan": {"address":"192.0.2.10", "origin":"http://old.test:8787"} }\n';
+  const settings = {
+    schema: "cab.operator-network/v1",
+    lan: {
+      address: "192.0.2.10",
+      origins: ["http://cab.test:8787", "http://other.test:8787"],
+    },
+  };
+  try {
+    await writeFile(path, legacy, { mode: 0o600 });
+    await readNetworkSettings(data, 8787);
+    assert.equal(await readFile(path, "utf8"), legacy);
+    const rollback = await updateNetworkSettingsForInstall(
+      data,
+      8787,
+      settings,
+    );
+    assert.deepEqual(await readNetworkSettings(data, 8787), settings);
+    await rollback();
+    assert.equal(await readFile(path, "utf8"), legacy);
+    const oversized = {
+      ...settings,
+      lan: {
+        ...settings.lan,
+        origins: Array.from(
+          { length: 200 },
+          (_, n) => `http://hostname-${n}.test:8787`,
+        ),
+      },
+    };
+    for (const write of [
+      writeNetworkSettings,
+      updateNetworkSettingsForInstall,
+    ]) {
+      await assert.rejects(write(data, 8787, oversized), /4096/);
+      assert.equal(await readFile(path, "utf8"), legacy);
+    }
+    const refused = await updateNetworkSettingsForInstall(data, 8787, settings);
+    await writeNetworkSettings(data, 8787, { ...settings, lan: null });
+    await assert.rejects(refused(), /rollback refused/);
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+});

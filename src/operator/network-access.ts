@@ -10,7 +10,11 @@ const schema = z
   .object({
     schema: z.literal("cab.operator-network/v1"),
     lan: z
-      .object({ address: z.string(), origin: z.string().optional() })
+      .object({
+        address: z.string(),
+        origin: z.string().optional(),
+        origins: z.array(z.string()).nonempty().optional(),
+      })
       .strict()
       .nullable(),
   })
@@ -31,7 +35,14 @@ export function validateNetworkSettings(
       throw new Error(
         "LAN access does not support port 80; use another service port",
       );
-    const { address, origin } = settings.lan;
+    const { address, origin: singleton, origins } = settings.lan;
+    if (
+      Object.hasOwn(settings.lan, "origin") &&
+      Object.hasOwn(settings.lan, "origins")
+    )
+      throw new Error("Conflicting operator network origins");
+    if (origins && new Set(origins).size !== origins.length)
+      throw new Error("Duplicate operator network origins");
     const parts = address.split(".").map(Number);
     if (
       isIP(address) !== 4 ||
@@ -41,7 +52,8 @@ export function validateNetworkSettings(
       address === "255.255.255.255"
     )
       throw new Error("Invalid operator network address");
-    if (origin !== undefined) {
+    for (const origin of origins ??
+      (singleton === undefined ? [] : [singleton])) {
       let url: URL;
       try {
         url = new URL(origin);
@@ -66,6 +78,21 @@ export function validateNetworkSettings(
     }
   }
   return settings;
+}
+
+/** Resolve validated legacy or explicit settings without expanding their allowlist. */
+export function lanOrigins(
+  lan: OperatorNetworkSettings["lan"] | undefined,
+  port: number,
+): string[] {
+  return lan
+    ? [
+        ...(lan.origins ??
+          (lan.origin === undefined
+            ? [`http://${lan.address}:${port}`]
+            : [lan.origin])),
+      ]
+    : [];
 }
 
 async function existing(path: string) {
@@ -172,6 +199,8 @@ async function replaceSettings(
   bytes: Buffer,
   prior: SafeFile | undefined,
 ): Promise<SafeFile> {
+  if (bytes.length > 4096)
+    throw new Error("Operator network settings exceed 4096 bytes");
   const dir = dirname(path);
   await checkPrivateDirectory(dir, process.getuid?.());
   const initialDirectory = await lstat(dir);

@@ -2161,3 +2161,74 @@ test("failed LAN bind stops the service without announcing startup", async () =>
     rmSync(root, { recursive: true, force: true });
   }
 });
+
+test("operator startup consumes the saved origin set on the real LAN listener", async () => {
+  const { createServer } = await import("node:net");
+  const { request } = await import("node:http");
+  const { writeFile } = await import("node:fs/promises");
+  const { testLanAddress } = await import("../fixtures/operator-network.js");
+  const root = mkdtempSync(join(tmpdir(), "cab-network-start-set-"));
+  chmodSync(root, 0o700);
+  const probe = createServer();
+  await new Promise<void>((resolve) => probe.listen(0, "127.0.0.1", resolve));
+  const bound = probe.address();
+  assert.ok(bound && typeof bound !== "string");
+  const port = bound.port;
+  await new Promise<void>((resolve) => probe.close(() => resolve()));
+  const address = testLanAddress();
+  const origins = [`http://${address}:${port}`, `http://cab.test:${port}`];
+  const authFile = join(root, "auth.json"),
+    data = join(root, "data");
+  const oldAuth = process.env.CAB_OPERATOR_AUTH_FILE,
+    oldOrigin = process.env.CAB_OPERATOR_ORIGIN;
+  process.env.CAB_OPERATOR_AUTH_FILE = authFile;
+  process.env.CAB_OPERATOR_ORIGIN = `http://127.0.0.1:${port}`;
+  let observations: Promise<number[]> | undefined;
+  const log = new ServiceLog((line) => {
+    if (!line.includes('"service-start"')) return;
+    observations = Promise.all(
+      origins.map(
+        (origin) =>
+          new Promise<number>((resolve, reject) => {
+            const req = request(
+              `http://${address}:${port}/api/operator/session`,
+              { headers: { host: new URL(origin).host } },
+              (response) => {
+                response.resume();
+                response.on("end", () => resolve(response.statusCode ?? 0));
+              },
+            );
+            req.on("error", reject);
+            req.end();
+          }),
+      ),
+    ).finally(() => {
+      process.emit("SIGTERM");
+    });
+    void observations.catch(() => undefined);
+  });
+  try {
+    await OperatorAuth.initialize(authFile, "fixture password");
+    await writeFile(
+      `${data}.operator-network.json`,
+      JSON.stringify({
+        schema: "cab.operator-network/v1",
+        lan: { address, origins },
+      }),
+      { mode: 0o600 },
+    );
+    await main(
+      ["operator", data, String(port)],
+      (directory) => makeService(directory, new FixtureRuntime(), []),
+      log,
+    );
+    assert.ok(observations);
+    assert.deepEqual(await observations, [200, 200]);
+  } finally {
+    if (oldAuth === undefined) delete process.env.CAB_OPERATOR_AUTH_FILE;
+    else process.env.CAB_OPERATOR_AUTH_FILE = oldAuth;
+    if (oldOrigin === undefined) delete process.env.CAB_OPERATOR_ORIGIN;
+    else process.env.CAB_OPERATOR_ORIGIN = oldOrigin;
+    rmSync(root, { recursive: true, force: true });
+  }
+});
