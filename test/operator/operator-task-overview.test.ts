@@ -9,6 +9,7 @@ import { optionalSummary } from "../../web/src/composer-summary.js";
 import { emptyInput } from "../../web/src/composer-state.js";
 import {
   assignmentRow,
+  resultLabel,
   blockedLeadDelegates,
   briefParts,
   criterionRows,
@@ -171,6 +172,10 @@ test("criterionRows reports recorded outcomes and never an aggregate", () => {
       ["C4", "Unknown", 2],
     ],
   );
+  assert.deepEqual(
+    rows.map((r) => r.symbol),
+    ["✓", "×", "–", "?"],
+  );
   assert.equal(rows[0]?.stale, false);
   assert.deepEqual(Object.keys(rows).length, 4);
   for (const row of rows)
@@ -183,6 +188,7 @@ test("criterionRows reports recorded outcomes and never an aggregate", () => {
       "revision",
       "stale",
       "status",
+      "symbol",
       "text",
     ]);
   (data.review as unknown as { sources: unknown[] }).sources.push(
@@ -751,4 +757,59 @@ test("projectFieldRows shows field and option names and falls back to node IDs",
     projectFieldRows(source).map((r) => r.text),
     ["Status: Ready", "F2: O2"],
   );
+});
+
+test("result labels use redacted names and supplied summaries or time, never identities", () => {
+  const result = {
+    resultId: "private-result-id",
+    assignmentId: "private-assignment-id",
+    createdAt: 1700000000000,
+    summary: "Keyboard ready\nMore detail",
+  } as Data["results"][number];
+  const assignments = [
+    { assignmentId: result.assignmentId, name: "Churchill" },
+  ] as Data["assignments"];
+  assert.match(
+    resultLabel(result, assignments),
+    /^Churchill · Keyboard ready · /,
+  );
+  assert.match(
+    resultLabel(result, []),
+    /^Agent unavailable · Keyboard ready · /,
+  );
+  assert.match(
+    resultLabel({ ...result, summary: null }, assignments),
+    /^Churchill · /,
+  );
+  assert.ok(
+    !resultLabel({ ...result, summary: null }, assignments).includes(
+      "private-",
+    ),
+  );
+  assert.notEqual(
+    resultLabel(result, assignments),
+    resultLabel({ ...result, summary: "Draft retained" }, assignments),
+  );
+  assert.notEqual(
+    resultLabel(result, assignments),
+    resultLabel(
+      { ...result, createdAt: result.createdAt + 60000 },
+      assignments,
+    ),
+  );
+  assert.match(
+    resultLabel(result, [{ ...assignments[0]!, name: null }]),
+    /^Agent unavailable/,
+  );
+  for (const summary of [null, "Repeated summary", "x".repeat(90)]) {
+    const results = [
+      { ...result, summary },
+      { ...result, resultId: "other-private-result-id", summary },
+    ];
+    const labels = results.map((r) => resultLabel(r, assignments, results));
+    assert.match(labels[0]!, /^Result 1 · Churchill · /);
+    assert.match(labels[1]!, /^Result 2 · Churchill · /);
+    assert.notEqual(labels[0], labels[1]);
+    for (const label of labels) assert.doesNotMatch(label, /private-/);
+  }
 });

@@ -36,11 +36,16 @@ to say to the lead.
    Read Latest result beside the conversation, or below it on a phone: summary, the first three supplied
    criteria with their recorded outcomes (the rest sit behind "N more"), and the
    recorded decisions attributed to who made them.
-2. A criterion without a recorded outcome reads Unverified. Every criterion offers
-   Ask lead about criterion. No verified outcome is inferred.
-3. Changes and Evidence are each one step away. Earlier results are listed beneath
+2. A criterion without a recorded outcome reads Unverified. Symbols and words distinguish
+   supported, failed, unverified, duplicate/unknown and stale outcomes. Each row's Details
+   retains exact attribution, scope and provenance, including duplicate records.
+3. Use the single Ask lead action with This result or a labelled criterion, including
+   criteria beyond N more. It opens an editable reply with the exact reference. A changed
+   result or source resets an obsolete criterion target visibly; an unfinished reply keeps
+   its text and reference.
+4. Changes and Evidence are each one step away. Earlier results are listed beneath
    the latest, not above it.
-4. Message lead sends feedback on the result; completion stays the lead's decision.
+5. Message lead sends feedback on the result; completion stays the lead's decision.
 
 For a requested review, the panel reads in decision order. Only Details and criteria beyond the
 first three ("N more") sit behind a disclosure:
@@ -84,9 +89,21 @@ phone the panel sits below Home's first screen; scrolling is not an interaction.
 An Inbox evidence link lands on the task's conversation in one interaction; it does not
 name a single result.
 
-Latest-result identifiers, work revision and recorded date sit in Task details.
-The summary, criteria and Evidence remain outside that fold. Opening Task details to
+Assignments and results use the redacted agent name with supplied responsibility,
+summary or recorded time. Exact identities stay in local Details on the result, criterion
+and brief; assignment identities stay in Assignment facts. Task details starts closed at
+all widths. An explicit target or a retained disclosure choice wins.
+The summary, criteria and Evidence remain outside that fold. Opening local Details to
 inspect provenance is a separate interaction, outside the evidence-access budget.
+Result and retained-source revision pickers appear only with two or more records;
+an unavailable exact selection stays unavailable and never substitutes the latest.
+
+Review holds the viewing comparison, Set viewing reference, its caveat and any checkable
+unconfirmed or refused write. Viewing records availability only; it neither responds to
+a requested review nor approves work or clears holds. Local review keeps its own drafts.
+Execution holds Captured context, including direct context and captured-record links.
+Legacy `#review` and `?section=review` still open Latest result on Overview;
+`?section=viewing-reference` opens the viewing controls on Review.
 The operator CLI is outside the budget: it has no screens.
 
 ## Recovery

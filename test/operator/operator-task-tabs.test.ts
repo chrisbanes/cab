@@ -25,8 +25,9 @@ test("tabForSection maps every task section to the panel that holds it", () => {
     ["files", "files"],
     ["changes", "changes"],
     ["local-review", "review"],
+    ["viewing-reference", "review"],
     ["execution", "execution"],
-    ["context", "overview"],
+    ["context", "execution"],
     ["history", "overview"],
     ["unknown", "overview"],
   ] as const)
@@ -36,11 +37,14 @@ test("tabForSection maps every task section to the panel that holds it", () => {
 test("tabForLocation chooses the initial tab from the query and fragment", () => {
   for (const [path, tab] of [
     ["/tasks/x?section=history", "overview"],
-    ["/tasks/x?section=context", "overview"],
+    ["/tasks/x?section=context", "execution"],
     ["/tasks/x#history", "overview"],
     ["/tasks/x?section=local-review", "review"],
     ["/tasks/x?section=execution", "execution"],
     ["/tasks/x#execution", "execution"],
+    ["/tasks/x#context", "execution"],
+    ["/tasks/x#review", "overview"],
+    ["/tasks/x?section=viewing-reference", "review"],
     ["/tasks/x?assignment=a#history", "overview"],
     ["/tasks/x?assignment=a", "overview"],
     ["/tasks/x?path=docs/a.md&repository=r", "files"],
@@ -84,13 +88,10 @@ test("linkNamesInspector is true only for links to what the inspector shows", ()
   for (const path of [
     "/t?section=brief",
     "/t?section=assignments",
-    "/t?section=context",
     "/t?section=review",
     "/t?section=result-evidence",
-    "/t#context",
     "/t?result=r",
     "/t?source=s",
-    "/t?record=x",
     "/t?inspectAssignment=a",
   ])
     assert.equal(linkNamesInspector(path), true, path);
@@ -100,6 +101,10 @@ test("linkNamesInspector is true only for links to what the inspector shows", ()
     "/t?section=changes&result=r",
     "/t?section=files",
     "/t?section=execution",
+    "/t?section=context",
+    "/t#context",
+    "/t?record=x",
+    "/t?section=viewing-reference",
     "/t?section=reply",
     "/t?section=conversation",
     "/t#conversation",

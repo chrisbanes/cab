@@ -1,7 +1,7 @@
 import { CircleCheck, Clock, Diamond } from "lucide-react";
 import type { MouseEvent, ReactNode } from "react";
 import type { TaskRead } from "../../src/operator/contracts.js";
-import { isPlainClick, ShortId } from "./components.js";
+import { isPlainClick } from "./components.js";
 import { clockLabel } from "./presentation.js";
 import { commentAvailability } from "../../src/operator/github-reasons.js";
 import { taskAttentionProjection } from "./inbox-presentation.js";
@@ -10,6 +10,7 @@ import {
   pullRequestRepository,
 } from "./delivery-presentation.js";
 import {
+  resultLabel,
   deliveryApplies,
   executionFacts,
   jiraFacts,
@@ -52,7 +53,7 @@ export function TaskInspector({
   deciding: string | null;
   /** Shows one recorded result as the latest-result card, in place. */
   selectResult: (resultId: string) => void;
-  /** The fold's state: open beside the conversation on wide screens, closed above it on a phone. */
+  /** The operator's retained fold choice; closed on a fresh task. */
   open: boolean;
   onToggle: (open: boolean) => void;
   /** The latest result, which stays in view when the rest of the fold is closed. */
@@ -250,16 +251,15 @@ export function TaskInspector({
           data.delivery?.unregisteredPr ? (
             <ul className="inspector-rows">
               {data.results
-                .map((r, i) => ({ r, i }))
+                .slice()
                 .reverse()
-                .map(({ r, i }) => (
+                .map((r) => (
                   <li key={r.resultId}>
                     <a
                       href={`?result=${r.resultId}#review`}
                       onClick={show(r.resultId)}
                     >
-                      R{i + 1} ·{" "}
-                      <ShortId value={r.resultId} focusable={false} />
+                      {resultLabel(r, data.assignments, data.results)}
                     </a>
                   </li>
                 ))}

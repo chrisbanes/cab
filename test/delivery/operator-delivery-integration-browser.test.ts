@@ -11,7 +11,7 @@ import {
 } from "../fixtures/delivery-integration.js";
 import { OperatorApi } from "../../src/standalone/operator-api.js";
 import { taskStripReason } from "../../web/src/task-overview.js";
-import { openTaskTab } from "../fixtures/task-tabs.js";
+import { openTaskDetails, openTaskTab } from "../fixtures/task-tabs.js";
 const test = browserSuite("operator-delivery-integration-browser");
 
 for (const mode of ["reviewable-pr", "through-merge"] as const) {
@@ -508,6 +508,7 @@ test("a pull request in another repository is named by number only, never by the
   await page
     .getByRole("heading", { name: "Release delivery", exact: true })
     .waitFor();
+  await openTaskDetails(page);
   const inspector = page.locator('aside[aria-label="Task context"]');
   await inspector
     .getByText("Reviewable PR · PR #7 · open", { exact: true })

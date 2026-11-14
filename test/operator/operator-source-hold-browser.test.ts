@@ -1,3 +1,4 @@
+import { openTaskDetails } from "../fixtures/task-tabs.js";
 import assert from "node:assert/strict";
 import { chromium, type Browser, type Page } from "playwright";
 import {
@@ -97,6 +98,7 @@ test("a source hold shows its reason and text with only Resume source hold, refu
   ]);
   assert.match(await card.innerText(), /do not confirm runtime admission/);
   // The inspector states the same hold and the Project field values.
+  await openTaskDetails(page);
   const inspector = page.locator('aside[aria-label="Task context"]');
   await inspector.getByText(/Source hold · The issue was closed/).waitFor();
   await inspector.getByText("F1: O1").waitFor();
@@ -128,6 +130,7 @@ test("a source hold shows its reason and text with only Resume source hold, refu
   );
   assert.equal(f.service.githubSources().hold("I-COMMENT")?.active, 0);
   await inspector.getByText(/Source hold ·/).waitFor({ state: "hidden" });
+  await openTaskDetails(page);
   await inspector
     .getByText(/Last source decision · Resumed source hold/)
     .waitFor();
