@@ -152,8 +152,24 @@ to baseline resets it to off atomically. Settings and `project get` expose it;
 `cab project prepare --reasoning-summaries true|false` prepares its configuration.
 Settings also offers **Delete collected reasoning** (`project.reasoning.delete`), with revision checking and
 explicit, irreversible confirmation. Deletion is safe to repeat and leaves the
-setting unchanged. Runtime requesting, storage and display are not implemented:
-cab still collects no reasoning, so deletion currently has nothing to erase.
+setting unchanged. An admitted on/enhanced Claude turn requests provider summaries;
+only completed, explicit lead `thinking` blocks contribute. Codex requests and
+ordinary conversation, CLI and execution-health projections are unchanged.
+
+Summaries are stored separately, bound to the exact task, assignment, conversation
+and turn, with admission and stored-content facts. Each turn retains at most the
+first 16,000 Unicode characters, redacted before persistence with turn-start,
+current and deleted-project exclusions and again on reads. A truncated turn is
+marked. Bounded original context protects values crossing the cut or provider
+block boundaries; unavailable redaction stores no text. Summary failures do not
+change execution ownership or outcome. Retention follows assistant history,
+including replaced conversations, rather than diagnostic pruning. Project deletion
+removes summaries. **Delete collected reasoning** atomically erases stored text
+and advances a durable fence: buffered or late output from earlier admissions
+cannot restore it, including after restart. Later opted-in admissions can collect.
+This erases cab's collected text; it does not securely erase provider history or
+independent backups. Display, verbose CLI summaries and new capture-health values
+remain unimplemented.
 The design defines capture limits, credential lifecycle, command
 semantics and required acceptance evidence.
 

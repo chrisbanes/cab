@@ -118,6 +118,7 @@ const workRoots = [
   ["conversation_history_items", "workId"],
   ["conversation_history_turn_omissions", "workId"],
   ["conversation_plan_updates", "workId"],
+  ["conversation_reasoning_summaries", "workId"],
   ["lead_text_submissions", "workId"],
   ["retained_review_anchor_contexts", "workId"],
   ["coordination_results", "workId"],
@@ -608,6 +609,10 @@ export function captureDeletionOwnership(db: Database, projectId: string) {
       `${inSet("taskId", "tasks")} OR ${inSet("workId", "work")}`,
     ],
     [
+      "conversation_reasoning_summaries",
+      `projectId=:projectId OR ${inSet("taskId", "tasks")} OR ${inSet("workId", "work")}`,
+    ],
+    [
       "conversation_plan_updates",
       `${inSet("taskId", "tasks")} OR ${inSet("workId", "work")}`,
     ],
@@ -650,6 +655,7 @@ export function captureDeletionOwnership(db: Database, projectId: string) {
     "conversation_history_items",
     "conversation_history_turn_omissions",
     "conversation_plan_updates",
+    "conversation_reasoning_summaries",
     "retained_review_anchor_contexts",
     "runtime_terminal_evidence",
     "coordination_receipts",
@@ -674,6 +680,17 @@ export function captureDeletionOwnership(db: Database, projectId: string) {
       .get(String(row.interactionId)) as Row | undefined;
     if (!parent || taskOwner(db, text.parse(parent.taskId)) !== projectId)
       throw new Error("A captured native thread has another owner");
+  }
+  for (const row of all(
+    db,
+    `SELECT s.workId, s.intentId, i.workId AS intentWorkId
+    FROM conversation_reasoning_summaries s JOIN execution_intents i ON i.id = s.intentId
+    WHERE s.projectId = ? OR s.workId IN (SELECT value FROM json_each(?))
+      OR i.workId IN (SELECT value FROM json_each(?))`,
+    [projectId, JSON.stringify([...work]), JSON.stringify([...work])],
+  )) {
+    if (row.workId !== row.intentWorkId)
+      throw new Error("Reasoning summary intent ownership is inconsistent");
   }
   const ids = (
     table: string,

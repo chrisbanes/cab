@@ -40,6 +40,31 @@ export const projectDeletionInventory = {
     columns: ["threadId", "state"],
     ownership: "threadId in H; captured pending archival moves to tombstone",
   },
+  conversation_reasoning_summaries: {
+    columns: [
+      "workId",
+      "taskId",
+      "assignmentId",
+      "assignmentVersion",
+      "instructionsRevision",
+      "profileRevision",
+      "conversationRevision",
+      "workRevision",
+      "threadId",
+      "turnId",
+      "projectId",
+      "intentId",
+      "enabled",
+      "captureMode",
+      "generation",
+      "text",
+      "stored",
+      "truncated",
+      "createdAt",
+      "updatedAt",
+    ],
+    ownership: "projectId=P OR taskId in T OR workId in W OR assignmentId in A",
+  },
   conversation_history_items: {
     columns: [
       "sequence",
@@ -753,7 +778,7 @@ export const projectDeletionInventory = {
     ownership: "intentId in I",
   },
   execution_intent_reasoning_summaries: {
-    columns: ["intentId", "enabled"],
+    columns: ["intentId", "enabled", "captureMode", "generation"],
     ownership: "intentId in I",
   },
   execution_intent_sandbox_level: {
@@ -1149,7 +1174,7 @@ export const projectDeletionInventory = {
     ownership: "projectId=P",
   },
   project_reasoning_summaries: {
-    columns: ["projectId", "enabled"],
+    columns: ["projectId", "enabled", "generation"],
     ownership: "projectId=P",
   },
   project_repository_links: {

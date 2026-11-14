@@ -3335,6 +3335,8 @@ test("diagnostic events carry tool metadata and observed settings only", async (
   chmodSync(executable, 0o700);
   const runtime = newTestRuntime(executable);
   const captured: RuntimeDiagnosticEvent[] = [];
+  const conversation: RuntimeConversationEvent[] = [];
+  runtime.onConversationEvent((e) => conversation.push(e));
   let throwing = true;
   runtime.onDiagnosticEvent?.((event) => {
     captured.push(event);
@@ -3350,7 +3352,13 @@ test("diagnostic events carry tool metadata and observed settings only", async (
       reasoningEffort: null,
       serviceTier: "fast",
     });
-    await bounded(runtime.startTurn("thread-1", root, "go"), 3000);
+    await bounded(
+      runtime.startTurn("thread-1", root, "go", undefined, {
+        networkAccess: false,
+        reasoningSummary: true,
+      }),
+      3000,
+    );
     assert.equal(
       await bounded(runtime.waitForTurn("thread-1", "turn-1"), 3000),
       "completed",
@@ -3403,6 +3411,14 @@ test("diagnostic events carry tool metadata and observed settings only", async (
       itemType: "reasoning",
       status: "completed",
     });
+    assert.doesNotMatch(
+      JSON.stringify(conversation),
+      /SECRET-SUMMARY|SECRET-CONTENT/,
+    );
+    assert.equal(
+      conversation.filter((e) => e.kind === "reasoning-summary").length,
+      0,
+    );
     const serialized = JSON.stringify(captured);
     assert.ok(!serialized.includes("SECRET"));
     assert.ok(!serialized.includes(root));
@@ -3511,7 +3527,13 @@ test("configured settings are read from model/list and sent on thread and turn s
       await bounded(runtime.startThread(root, [], settings), 3000),
       "thread-1",
     );
-    await bounded(runtime.startTurn("thread-1", root, "go", settings), 3000);
+    await bounded(
+      runtime.startTurn("thread-1", root, "go", settings, {
+        networkAccess: false,
+        reasoningSummary: true,
+      }),
+      3000,
+    );
     assert.deepEqual(requests("thread/start"), [
       {
         cwd: root,
@@ -3523,6 +3545,8 @@ test("configured settings are read from model/list and sent on thread and turn s
       },
     ]);
     const [turnStart] = requests("turn/start") as Record<string, unknown>[];
+    assert.equal(turnStart?.summary, undefined);
+    assert.equal(turnStart?.reasoningSummary, undefined);
     assert.equal(turnStart?.model, "m-alt");
     assert.equal(turnStart?.effort, "medium");
     assert.deepEqual(runtime.observedSettings("thread-1"), {

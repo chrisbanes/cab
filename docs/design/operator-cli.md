@@ -121,9 +121,10 @@ labelled as the supplied prompt. Missing tool events, unknown effective settings
 and unavailable old prompts are explicit gaps. Tool activity is diagnostic;
 absence is not evidence that no tool ran; the wider conversation projection is in
 [ADR-1025](../adr/1025-conversation-activity-plans-and-change-notifications.md). Raw
-provider reasoning is never collected, and cab collects no reasoning today.
-[ADR-1028](../adr/1028-reasoning-summaries.md) accepts opt-in provider reasoning
-summaries for `enhanced`-capture projects; they are not yet implemented.
+provider reasoning is never collected. [ADR-1028](../adr/1028-reasoning-summaries.md)
+implements opt-in provider summaries for admitted on/enhanced Claude task turns in
+separate, redacted turn storage. CLI display and new capture-health values remain
+pending; ordinary CLI reads do not disclose those summaries.
 
 The capture is a fourth dedicated instruction projection:
 `GET /api/operator/executions/WORK_ID/inputs[?compare=current]` returns each
