@@ -470,6 +470,78 @@ test("exact-turn summaries anchor once across pages, including summary-only tied
   );
 });
 
+test("summary lookup uses bounded indexed task identities rather than scanning installation history", async (t) => {
+  const ctx = await setup(t);
+  const { binding } = storedSummary(ctx);
+  ctx.s.f.seedPersistedState((db) => {
+    const prepare = db.prepare.bind(db);
+    const queries: string[] = [];
+    db.prepare = (sql) => {
+      if (
+        sql.includes("FROM task_execution_bindings WHERE taskId") ||
+        sql.includes("FROM conversation_reasoning_summaries s")
+      )
+        queries.push(sql);
+      return prepare(sql);
+    };
+    const store = new ConversationHistoryStore(db);
+    assert.equal(store.reasoningSummaryTurns(ctx.seed.taskA).length, 1);
+    assert.equal(queries.length, 2);
+    const plans = queries.flatMap((sql, index) =>
+      prepare(`EXPLAIN QUERY PLAN ${sql}`)
+        .all(
+          ...(index === 0
+            ? [ctx.seed.taskA]
+            : [binding.workId, ctx.seed.taskA]),
+        )
+        .map((row) => String(row.detail)),
+    );
+    assert.equal(
+      plans.some((step) => /SCAN (s|task_execution_bindings)\b/.test(step)),
+      false,
+      plans.join("\n"),
+    );
+    assert.ok(
+      plans.some(
+        (step) =>
+          step.includes("SEARCH") &&
+          step.includes("task_execution_bindings_task"),
+      ),
+    );
+    assert.ok(
+      plans.some(
+        (step) =>
+          step.includes("SEARCH") &&
+          step.includes("sqlite_autoindex_conversation_reasoning_summaries_1"),
+      ),
+    );
+    // More retained work than the existing privacy bound refuses before a summary lookup.
+    for (let index = 0; index < 129; index++) {
+      const workId = randomUUID();
+      prepare(`INSERT INTO execution_intents(id,workId,prompt,workspace,state,threadId,turnId,accountType,sandbox,approval)
+        SELECT ?,?,prompt,workspace,state,NULL,NULL,accountType,sandbox,approval FROM execution_intents WHERE workId=?`).run(
+        randomUUID(),
+        workId,
+        binding.workId,
+      );
+      prepare(`INSERT INTO task_execution_bindings(workId,taskId,assignmentId,assignmentVersion,instructionsRevision,profileRevision,conversationRevision,harness)
+        VALUES (?,?,?,1,1,1,1,'claude')`).run(
+        workId,
+        ctx.seed.taskA,
+        ctx.seed.assignmentA,
+      );
+    }
+    queries.length = 0;
+    assert.deepEqual(store.reasoningSummaryTurns(ctx.seed.taskA), []);
+    assert.equal(
+      queries.some((sql) =>
+        sql.includes("FROM conversation_reasoning_summaries"),
+      ),
+      false,
+    );
+  });
+});
+
 test("summary contracts are optional, strict and bounded by Unicode characters and bytes", async (t) => {
   const ctx = await setup(t);
   storedSummary(ctx, { items: ["plain text"] });
