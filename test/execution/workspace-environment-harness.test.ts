@@ -5,6 +5,7 @@ import {
   writeFileSync,
   rmSync,
   readFileSync,
+  realpathSync,
 } from "node:fs";
 import { createHash } from "node:crypto";
 import { join } from "node:path";
@@ -25,6 +26,10 @@ const contract = () =>
       ),
     ).href
   );
+const fakeRoot = join(
+  realpathSync("/tmp"),
+  "cab-1727-runtime-FAKE-NOT-AUTHORIZED",
+);
 const fakeGrant = () => ({
   schema: "cab.workspace-environment-grant/v1",
   grantId: randomUUID(),
@@ -34,7 +39,7 @@ const fakeGrant = () => ({
   maxTurns: 8,
   deadlineMs: 900_000,
   expiresAt: Date.now() + 900_000,
-  root: "/private/tmp/cab-1727-runtime-FAKE-NOT-AUTHORIZED",
+  root: fakeRoot,
   evidenceDir: resolve(
     ".scratch/issue-1727-evidence/r1/offline-integration/FAKE-NOT-WRITTEN",
   ),
@@ -47,7 +52,7 @@ const fakeGrant = () => ({
         version: "fake",
         model: "fake",
         effort: "low",
-        configHome: `/private/tmp/cab-1727-runtime-FAKE-NOT-AUTHORIZED/${harness}-home`,
+        configHome: join(fakeRoot, `${harness}-home`),
       },
     ]),
   ),
@@ -85,6 +90,66 @@ test("missing, invalid, expired or changed grant refuses before runtime initiali
     },
   ])
     await assert.rejects(runQualification(input, { initialize }));
+  assert.deepEqual(
+    { initialized, authReads, starts },
+    { initialized: 0, authReads: 0, starts: 0 },
+  );
+});
+
+test("grant roots require the canonical OS temporary parent and exact task namespace before initialization", async () => {
+  const { runQualification, validateGrant, grantDigest } = await contract();
+  const parent = realpathSync("/tmp"),
+    valid = fakeGrant();
+  assert.equal(
+    validateGrant({ live: true, oneAttempt: true }, valid, grantDigest(valid)),
+    valid,
+  );
+  let initialized = 0,
+    authReads = 0,
+    starts = 0;
+  const initialize = async () => {
+    initialized++;
+    authReads++;
+    starts++;
+    throw Error("must never initialize");
+  };
+  for (const root of [
+    "cab-1727-runtime-relative",
+    parent,
+    join(parent, "other-runtime-fake"),
+    join(parent, "cab-1727-runtime-"),
+    join(parent, "other", "cab-1727-runtime-fake"),
+    join(parent, "cab-1727-runtime-fake", "child"),
+    `${parent}//cab-1727-runtime-fake`,
+    `${parent}/cab-1727-runtime-fake/../cab-1727-runtime-other`,
+    `${parent}/cab-1727-runtime-fake\0`,
+    parent === "/tmp"
+      ? "/private/tmp/cab-1727-runtime-fake"
+      : "/tmp/cab-1727-runtime-fake",
+  ]) {
+    const grant = {
+      ...valid,
+      root,
+      runtimes: Object.fromEntries(
+        Object.entries(valid.runtimes).map(([harness, runtime]) => [
+          harness,
+          { ...runtime, configHome: join(root, `${harness}-home`) },
+        ]),
+      ),
+    };
+    await assert.rejects(
+      runQualification(
+        {
+          live: true,
+          oneAttempt: true,
+          grant,
+          authorizedDigest: grantDigest(grant),
+        },
+        { initialize },
+      ),
+      root,
+    );
+  }
   assert.deepEqual(
     { initialized, authReads, starts },
     { initialized: 0, authReads: 0, starts: 0 },
@@ -320,7 +385,9 @@ test("failed asynchronous dispatch retains consumed allowance, exact identity an
 test("production qualification bookkeeping persists exact admitted work and terminal identities across offline runtime restart", async () => {
   const { runQualification, grantDigest, initializeProduction } =
     await contract();
-  const root = mkdtempSync("/private/tmp/cab-1727-runtime-offline-");
+  const root = mkdtempSync(
+    join(realpathSync("/tmp"), "cab-1727-runtime-offline-"),
+  );
   const evidenceParent = process.env.CAB_TEST_EVIDENCE_DIR ?? root;
   mkdirSync(evidenceParent, { recursive: true, mode: 0o700 });
   const evidenceDir = join(
@@ -576,4 +643,39 @@ test("a terminal observation cannot release an unfinished cab callback after fai
   assert.equal(result.active.callbacks.active, 1);
   assert.equal(result.remainingTurns, 7);
   assert.equal(stops, 0);
+});
+
+test("deadline reconciliation reserve prevents dispatch without consuming allowance", async () => {
+  const { runQualification, grantDigest } = await contract();
+  const grant = { ...fakeGrant(), expiresAt: Date.now() + 60_000 };
+  let turns = 0,
+    stops = 0;
+  const result = await runQualification(
+    {
+      live: true,
+      oneAttempt: true,
+      grant,
+      authorizedDigest: grantDigest(grant),
+    },
+    {
+      io: { exists: () => false, save: () => {} },
+      initialize: async () => ({
+        turn: async () => {
+          turns++;
+          throw Error("must not dispatch");
+        },
+        stop: async () => {
+          stops++;
+          return "offline fixture stopped";
+        },
+      }),
+    },
+  );
+  assert.equal(result.pass, false);
+  assert.match(result.failure, /dispatch window ended/);
+  assert.equal(result.turnsUsed, 0);
+  assert.equal(result.remainingTurns, 8);
+  assert.equal(result.active, null);
+  assert.equal(turns, 0);
+  assert.equal(stops, 1);
 });

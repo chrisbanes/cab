@@ -9,7 +9,7 @@ import {
   renameSync,
   writeFileSync,
 } from "node:fs";
-import { dirname, isAbsolute, join, resolve } from "node:path";
+import { basename, dirname, isAbsolute, join, resolve } from "node:path";
 import { performance } from "node:perf_hooks";
 import { fileURLToPath } from "node:url";
 
@@ -61,7 +61,10 @@ export function validateGrant(input, grant, authorizedDigest) {
   assert.ok(
     isAbsolute(grant.root) &&
       resolve(grant.root) === grant.root &&
-      grant.root.startsWith("/private/tmp/cab-1727-runtime-"),
+      dirname(grant.root) === realpathSync("/tmp") &&
+      basename(grant.root).startsWith("cab-1727-runtime-") &&
+      basename(grant.root).length > "cab-1727-runtime-".length &&
+      !grant.root.includes("\0"),
   );
   assert.ok(
     isAbsolute(grant.evidenceDir) &&
