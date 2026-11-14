@@ -90,6 +90,16 @@ const itemLine = (i: Page["data"]["items"][number]) =>
       : oneLine(JSON.stringify(i.payload), 400)
   }`;
 
+export function reasoningSummaryLines(text: string, truncated: boolean) {
+  return [
+    "Reasoning summary",
+    ...text.split("\n").map((line) => `  ${line}`),
+    ...(truncated
+      ? ["Reasoning summary truncated; only the retained prefix is shown."]
+      : []),
+  ];
+}
+
 export const logsCommand: BrowseCommand = {
   usage:
     "logs --execution WORK_ID [--kind input|setting|runtime|tool|service] [--severity info|warn|error] [--after T] [--before T] [--limit N] [--cursor TOKEN] [--follow [--interval S] [--max-duration S]] [--output jsonl] [--verbose]",
