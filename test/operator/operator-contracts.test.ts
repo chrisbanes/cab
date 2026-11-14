@@ -1052,6 +1052,7 @@ test("shared task comments have a strict command, receipt, operation scope and t
   const page = (e: unknown) => ({
     data: {
       visibilityRevision: "b".repeat(64),
+      reasoningSummaryRevision: "c".repeat(64),
       olderCursor: null,
       entries: [e],
       plans: [],
@@ -1087,4 +1088,62 @@ test("shared task comments have a strict command, receipt, operation scope and t
     ).success,
     false,
   );
+});
+
+test("conditional timeline overlays retain the accepted strict value and wire bounds", () => {
+  const anchors = Array.from({ length: 128 }, (_, n) => ({
+    entryId: `anchor-${n}`.padEnd(96, "x"),
+    turnKey: n.toString(16).padStart(64, "0"),
+    reasoningSummary: { text: "\ud800".repeat(16000), truncated: false },
+  }));
+  const additional = {
+    reasoningSummaryRevision: "a".repeat(64),
+    reasoningSummaryAnchors: anchors,
+  };
+  const envelope = {
+    data: {
+      visibilityRevision: "b".repeat(64),
+      ...additional,
+      olderCursor: null,
+      entries: [],
+      plans: [],
+    },
+    observedAt: 1,
+  };
+  assert.equal(taskTimelineSchema.safeParse(envelope).success, true);
+  assert.equal(
+    Buffer.byteLength(JSON.stringify(additional), "utf8") - 1,
+    12318458,
+  );
+  assert.equal(
+    Buffer.byteLength(
+      JSON.stringify({
+        reasoningSummaryRevision: additional.reasoningSummaryRevision,
+      }),
+      "utf8",
+    ) - 1,
+    94,
+  );
+  const invalid = [
+    { ...envelope.data, reasoningSummaryRevision: "A".repeat(64) },
+    { ...envelope.data, reasoningSummaryAnchors: [...anchors, anchors[0]] },
+    {
+      ...envelope.data,
+      reasoningSummaryAnchors: [{ ...anchors[0], extra: true }],
+    },
+    {
+      ...envelope.data,
+      reasoningSummaryAnchors: [
+        {
+          ...anchors[0],
+          reasoningSummary: { text: "x", truncated: false, extra: true },
+        },
+      ],
+    },
+  ];
+  for (const data of invalid)
+    assert.equal(
+      taskTimelineSchema.safeParse({ ...envelope, data }).success,
+      false,
+    );
 });

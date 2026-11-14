@@ -340,7 +340,12 @@ pages, stable summary-only keys, strict Unicode bounds, current/deleted-project
 redaction, credential fences and confirmed erasure. Conversation model and Chromium
 tests cover plain-text disclosures, default/independent keyboard expansion, both
 themes and phone wrapping, retained-window erasure, draft retention and authentication
-purge with a real delayed summary read. These deterministic checks do not establish
+purge with a real delayed summary read. Conditional timeline checks cover cold/matching
+omission, complete changed overlays, strict query/value/wire bounds, empty removal and
+indexed refusal. Real-service/fake-runtime Chromium checks cover completed canonical
+anchors beyond six and eleven pages, retained cursor/reading/draft/expansion, ignored
+transport aborts, reversed newest responses and mixed-page reconciliation with Retry.
+These deterministic checks do not establish
 live runtime or release qualification. Execution-events tests cover explicit opt-in,
 exact historical attribution, strict optional bounds, filtering/paging, absent or
 size-omitted settlement, execution limits, failed writes, awaited pruning, late

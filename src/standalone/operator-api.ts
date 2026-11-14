@@ -5715,7 +5715,14 @@ export class OperatorApi {
    * the curated tool projection under one key order; see `task-timeline.ts`.
    */
   async readTaskTimeline(taskId: string, query: URLSearchParams) {
-    this.exactQuery(query, ["before", "limit"]);
+    this.exactQuery(query, ["before", "limit", "reasoningSummaryRevision"]);
+    const knownSummary = query.get("reasoningSummaryRevision");
+    if (
+      knownSummary !== null &&
+      (query.has("before") ||
+        (knownSummary !== "unknown" && !/^[a-f0-9]{64}$/.test(knownSummary)))
+    )
+      throw new OperatorApiError(400, "invalid-input");
     const limit = this.boundedInt(query.get("limit"), 1, 100) ?? 50;
     const cursor = query.get("before");
     const before = cursor === null ? undefined : parseTimelineCursor(cursor);
@@ -5777,6 +5784,40 @@ export class OperatorApi {
           return summary ? [[turnKey(turn), { turn, summary }] as const] : [];
         }),
       );
+      const summaryAnchors = [...summaries]
+        .map(([key, { turn, summary }]) => ({
+          entryId:
+            turn.anchorSequence === null
+              ? `summary-${key}`
+              : `item-${turn.anchorSequence}`,
+          turnKey: key,
+          reasoningSummary: summary,
+        }))
+        .sort((a, b) =>
+          a.entryId < b.entryId
+            ? -1
+            : a.entryId > b.entryId
+              ? 1
+              : a.turnKey < b.turnKey
+                ? -1
+                : a.turnKey > b.turnKey
+                  ? 1
+                  : 0,
+        );
+      const reasoningSummaryRevision = createHash("sha256")
+        .update(
+          JSON.stringify([
+            "task-reasoning-summaries-v1",
+            taskId,
+            summaryAnchors.map(({ entryId, turnKey, reasoningSummary }) => [
+              entryId,
+              turnKey,
+              reasoningSummary.text,
+              reasoningSummary.truncated,
+            ]),
+          ]),
+        )
+        .digest("hex");
       const detail = (workId: string, turnId?: string, itemId?: string) => ({
         workId: this.safe(workId, excluded),
         turnId: turnId === undefined ? null : this.safe(turnId, excluded),
@@ -6131,6 +6172,15 @@ export class OperatorApi {
       );
       return taskTimelineSchema.parse({
         data: {
+          reasoningSummaryRevision,
+          ...(knownSummary !== null && knownSummary !== reasoningSummaryRevision
+            ? {
+                reasoningSummaryAnchors: summaryAnchors.filter(
+                  (anchor) =>
+                    !page.some((entry) => entry.key.id === anchor.entryId),
+                ),
+              }
+            : {}),
           visibilityRevision: createHash("sha256")
             .update(`${visibility}:${task.version}:${workspaceVisibility}`)
             .digest("hex"),

@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { test } from "node:test";
 import { taskTimelineSchema } from "../../src/operator/contracts.js";
 import { normalizePlan } from "../../src/standalone/agent-plan.js";
@@ -473,6 +473,9 @@ test("exact-turn summaries anchor once across pages, including summary-only tied
 test("summary lookup uses bounded indexed task identities rather than scanning installation history", async (t) => {
   const ctx = await setup(t);
   const { binding } = storedSummary(ctx);
+  const before = await ctx.get(
+    `${ctx.base}?limit=1&reasoningSummaryRevision=unknown`,
+  );
   ctx.s.f.seedPersistedState((db) => {
     const prepare = db.prepare.bind(db);
     const queries: string[] = [];
@@ -540,6 +543,14 @@ test("summary lookup uses bounded indexed task identities rather than scanning i
       false,
     );
   });
+  const refused = await ctx.get(
+    `${ctx.base}?limit=1&reasoningSummaryRevision=${before.reasoningSummaryRevision}`,
+  );
+  assert.notEqual(
+    refused.reasoningSummaryRevision,
+    before.reasoningSummaryRevision,
+  );
+  assert.deepEqual(refused.reasoningSummaryAnchors, []);
 });
 
 test("summary contracts are optional, strict and bounded by Unicode characters and bytes", async (t) => {
@@ -689,6 +700,18 @@ test("summary projection re-redacts and confirmed erasure invalidates the retain
     false,
   );
   assert.notEqual(after.data.visibilityRevision, before.visibilityRevision);
+  const removed = await api.readTaskTimeline(
+    ctx.seed.taskA,
+    new URLSearchParams({
+      limit: "1",
+      reasoningSummaryRevision: before.reasoningSummaryRevision,
+    }),
+  );
+  assert.deepEqual(removed.data.reasoningSummaryAnchors, []);
+  assert.notEqual(
+    removed.data.reasoningSummaryRevision,
+    before.reasoningSummaryRevision,
+  );
   assert.ok(
     after.data.entries.some(
       (e) => e.kind === "assistant" && e.text === "ordinary survives",
@@ -1239,4 +1262,170 @@ test("a target is redacted before it is cut, and coordination tools get none", (
   assert.equal(cut, `${"a".repeat(120)}[redacted]tail`.slice(0, 127) + "…");
   assert.equal(target({ tool: "cab_report_result", target: "x" }), null);
   assert.equal(target({ tool: "mcp__cab__x", target: "x" }), null);
+});
+
+test("timeline summary snapshots are content-stable and conditional outside the ordinary page", async (t) => {
+  const ctx = await setup(t);
+  const first = storedSummary(ctx, {
+    text: "snapshot first",
+    items: ["old canonical"],
+    at: t0 - 100000,
+  });
+  storedSummary(ctx, { text: "snapshot only", at: t0 - 90000 });
+  const cold = await ctx.get(`${ctx.base}?limit=1`);
+  assert.match(cold.reasoningSummaryRevision, /^[a-f0-9]{64}$/);
+  assert.equal(cold.reasoningSummaryAnchors, undefined);
+  const conditional = (revision: string) =>
+    ctx.get(`${ctx.base}?limit=1&reasoningSummaryRevision=${revision}`);
+  assert.equal(
+    (await conditional(cold.reasoningSummaryRevision)).reasoningSummaryAnchors,
+    undefined,
+  );
+  const snapshot = await conditional("unknown");
+  assert.equal(
+    snapshot.reasoningSummaryRevision,
+    cold.reasoningSummaryRevision,
+  );
+  assert.equal(snapshot.reasoningSummaryAnchors.length, 2);
+  assert.equal(
+    new Set(snapshot.reasoningSummaryAnchors.map((a: Json) => a.entryId)).size,
+    2,
+  );
+  assert.equal(
+    snapshot.reasoningSummaryAnchors.some((a: Json) =>
+      cold.entries.some((e: Json) => e.entryId === a.entryId),
+    ),
+    false,
+  );
+  let cursor = cold.olderCursor;
+  while (cursor) {
+    const older = await ctx.get(`${ctx.base}?limit=1&before=${cursor}`);
+    assert.equal(older.reasoningSummaryRevision, cold.reasoningSummaryRevision);
+    assert.equal(older.reasoningSummaryAnchors, undefined);
+    cursor = older.olderCursor;
+  }
+  const wide = await ctx.get(
+    `${ctx.base}?limit=100&reasoningSummaryRevision=unknown`,
+  );
+  assert.equal(wide.reasoningSummaryRevision, cold.reasoningSummaryRevision);
+  assert.equal(wide.reasoningSummaryAnchors.length, 0);
+  const union = [
+    ...wide.reasoningSummaryAnchors,
+    ...wide.entries.filter((e: Json) => e.reasoningSummary),
+  ];
+  assert.equal(union.length, 2);
+  const tuples = union
+    .map((entry: Json) => [
+      entry.entryId,
+      entry.turnKey,
+      entry.reasoningSummary.text,
+      entry.reasoningSummary.truncated,
+    ])
+    .sort((a: Json[], b: Json[]) =>
+      a[0]! < b[0]!
+        ? -1
+        : a[0]! > b[0]!
+          ? 1
+          : a[1]! < b[1]!
+            ? -1
+            : a[1]! > b[1]!
+              ? 1
+              : 0,
+    );
+  assert.equal(
+    wide.reasoningSummaryRevision,
+    createHash("sha256")
+      .update(
+        JSON.stringify(["task-reasoning-summaries-v1", ctx.seed.taskA, tuples]),
+      )
+      .digest("hex"),
+  );
+  ctx.s.f.seedPersistedState((db) => {
+    db.prepare(
+      "UPDATE conversation_reasoning_summaries SET updatedAt=updatedAt+12345",
+    ).run();
+  });
+  assert.equal(
+    (await conditional(cold.reasoningSummaryRevision)).reasoningSummaryAnchors,
+    undefined,
+  );
+  for (const [column, value] of [
+    ["text", "snapshot changed"],
+    ["truncated", 1],
+  ] as const) {
+    const prior = await conditional("unknown");
+    ctx.s.f.seedPersistedState((db) =>
+      db
+        .prepare(
+          `UPDATE conversation_reasoning_summaries SET ${column}=? WHERE workId=?`,
+        )
+        .run(value, first.binding.workId),
+    );
+    const changed = await conditional(prior.reasoningSummaryRevision);
+    assert.notEqual(
+      changed.reasoningSummaryRevision,
+      prior.reasoningSummaryRevision,
+    );
+    assert.equal(changed.reasoningSummaryAnchors.length, 2);
+  }
+  const prior = await conditional("unknown");
+  ctx.s.f.seedPersistedState((db) =>
+    db.exec("UPDATE conversation_reasoning_summaries SET stored=0,text=NULL"),
+  );
+  const empty = await conditional(prior.reasoningSummaryRevision);
+  assert.deepEqual(empty.reasoningSummaryAnchors, []);
+  assert.notEqual(
+    empty.reasoningSummaryRevision,
+    prior.reasoningSummaryRevision,
+  );
+  assert.equal(
+    (await conditional(empty.reasoningSummaryRevision)).reasoningSummaryAnchors,
+    undefined,
+  );
+  for (const query of [
+    "reasoningSummaryRevision=",
+    "reasoningSummaryRevision=true",
+    "reasoningSummaryRevision=false",
+    `reasoningSummaryRevision=${"A".repeat(64)}`,
+    "reasoningSummaryRevision=unknown&reasoningSummaryRevision=unknown",
+    `before=${cold.olderCursor}&reasoningSummaryRevision=unknown`,
+    "reasoningSummaryRevision=unknown&extra=1",
+  ])
+    await ctx.get(`${ctx.base}?${query}`, 400);
+  const envelope = { data: snapshot, observedAt: 1 };
+  for (const anchors of [
+    [...snapshot.reasoningSummaryAnchors, snapshot.reasoningSummaryAnchors[0]],
+    [
+      snapshot.reasoningSummaryAnchors[0],
+      {
+        ...snapshot.reasoningSummaryAnchors[1],
+        turnKey: snapshot.reasoningSummaryAnchors[0].turnKey,
+      },
+    ],
+    [{ ...snapshot.reasoningSummaryAnchors[0], extra: true }],
+    [
+      {
+        ...snapshot.reasoningSummaryAnchors[0],
+        reasoningSummary: { text: "x".repeat(16001), truncated: false },
+      },
+    ],
+    Array.from({ length: 129 }, (_, n) => ({
+      ...snapshot.reasoningSummaryAnchors[0],
+      entryId: `anchor-${n}`,
+      turnKey: n.toString(16).padStart(64, "0"),
+    })),
+    [
+      {
+        ...snapshot.reasoningSummaryAnchors[0],
+        entryId: snapshot.entries[0].entryId,
+      },
+    ],
+  ])
+    assert.equal(
+      taskTimelineSchema.safeParse({
+        ...envelope,
+        data: { ...snapshot, reasoningSummaryAnchors: anchors },
+      }).success,
+      false,
+    );
 });

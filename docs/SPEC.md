@@ -2189,6 +2189,18 @@ are removed. A failed read keeps the existing stale/error notice and Retry; it d
 not promise instant retraction of already read browser text. Signing out purges the
 session's retained conversation and rejects late responses.
 
+A completed assistant item can gain its summary when its turn finishes. The timeline
+read exposes a stable `reasoningSummaryRevision` for exact readable canonical IDs,
+turns, text and truncation. Cold reads, matching newest reads and older pages carry
+no out-of-page summary text. A changed or `unknown` newest request carries a complete
+`reasoningSummaryAnchors` overlay, including authoritative absence, for at most 128
+retained turns. It updates only already-loaded exact anchors at any retained depth;
+it does not insert unpaged rows. Older pages from another content revision retain
+ordinary progress and reconcile once before acknowledging the expanded window.
+Privacy resets, session fences, reading position, cursor, draft and expansion choices
+retain their existing semantics. The unchanged response adds 94 JSON bytes; a changed
+complete overlay can add up to 12,318,458 JSON bytes. Genuine changes need not be rare.
+
 The lead's latest plan is pinned above the composer as a collapsible card, labelled as
 the agent's working plan and never as a requirement or the task brief. Its ordered
 steps show a symbol and a word for pending, in progress or done, and the card appears
