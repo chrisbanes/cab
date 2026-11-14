@@ -142,97 +142,212 @@ export function useTaskTimeline({
       loadingEarlier: false,
       error: error instanceof Error ? error.message : "Unavailable",
     });
-  // The newest page, merged into what is held and shown at once. An unfinished entry of a
-  // running assignment older than that page would never see its completion, so the pages down
-  // to it are read after (bounded); finishing it in place is not a new entry.
-  const refresh = async (signal?: AbortSignal) => {
-    try {
-      const { data: page } = await read("", signal);
-      if (signal?.aborted) return;
-      const current = held.current.cache;
-      const merged = mergeTimeline(current?.window ?? null, page);
-      if (merged.changed || held.current.error !== null) {
-        apply.current(!current);
-        commit({
-          error: null,
-          appended:
-            current && merged.changed
-              ? held.current.appended + 1
-              : held.current.appended,
-          cache: {
-            window: merged.window,
-            cursor:
-              !current || merged.reset ? page.olderCursor : current.cursor,
-          },
-        });
-      }
-      const base = held.current.cache;
-      let next = merged.window,
-        floor = page.entries[0],
-        cursor = page.olderCursor;
-      for (let n = 0; n < maxCatchUpPages && floor && cursor; n++) {
-        if (!pendingBelow(next, floor, running.current)) break;
-        const { data: older } = await read(`&before=${cursor}`, signal);
-        if (signal?.aborted) return;
-        const joined = prependTimeline(next, older);
-        if (!joined) break;
-        next = joined;
-        floor = older.entries[0];
-        cursor = older.olderCursor;
-      }
-      if (next === merged.window || !base || held.current.cache !== base)
-        return;
-      apply.current(false);
-      commit({ cache: { window: next, cursor: base.cursor } });
-    } catch (error) {
-      // A read that was superseded or abandoned fails quietly; it is not a stale conversation.
-      if (!signal?.aborted) fail(error);
-    }
-  };
-  // Reads that are not tied to the task read (Load earlier, Retry) end with the task's view.
   const life = useRef(new AbortController());
-  // biome-ignore lint/correctness/useExhaustiveDependencies: a new `read` is a new task or client, which starts a new lifetime.
+  const flight = useRef<Promise<void> | null>(null);
+  const newest = useRef({
+    generation: 0,
+    abort: null as AbortController | null,
+    promise: null as Promise<void> | null,
+  });
+  // Every newest trigger, including Retry and mixed-page reconciliation, has one owner.
+  const refresh = (signal?: AbortSignal, catchUp = true): Promise<void> => {
+    newest.current.abort?.abort();
+    const generation = ++newest.current.generation;
+    const abort = new AbortController();
+    newest.current.abort = abort;
+    const lifetime = life.current;
+    const authentication = client.captureAuthenticationScope();
+    const cancel = () => abort.abort();
+    signal?.addEventListener("abort", cancel, { once: true });
+    if (signal?.aborted) cancel();
+    const owned = () =>
+      life.current === lifetime &&
+      !lifetime.signal.aborted &&
+      !abort.signal.aborted &&
+      authentication() &&
+      newest.current.generation === generation;
+    const known = held.current.cache
+      ? (held.current.cache.reasoningSummaryRevision ?? "unknown")
+      : null;
+    let abandon = () => {};
+    const abandoned = new Promise<void>((resolve) => {
+      abandon = resolve;
+    });
+    abort.signal.addEventListener("abort", abandon, { once: true });
+    if (abort.signal.aborted) abandon();
+    const work = Promise.resolve().then(async () => {
+      try {
+        const { data: page } = await read(
+          known === null ? "" : `&reasoningSummaryRevision=${known}`,
+          abort.signal,
+        );
+        if (!owned()) return;
+        if (
+          (page.reasoningSummaryAnchors !== undefined) !==
+          (known !== null && known !== page.reasoningSummaryRevision)
+        )
+          throw new Error("invalid-response");
+        const current = held.current.cache;
+        const merged = mergeTimeline(current?.window ?? null, page);
+        if (
+          merged.changed ||
+          held.current.error !== null ||
+          current?.reasoningSummaryRevision !== page.reasoningSummaryRevision
+        ) {
+          if (merged.changed || held.current.error !== null)
+            apply.current(!current);
+          commit({
+            error: null,
+            appended:
+              current && merged.changed
+                ? held.current.appended + 1
+                : held.current.appended,
+            cache: {
+              window: merged.window,
+              cursor:
+                !current || merged.reset ? page.olderCursor : current.cursor,
+              reasoningSummaryRevision: page.reasoningSummaryRevision,
+            },
+          });
+        }
+        let floor = page.entries[0],
+          cursor = page.olderCursor;
+        for (
+          let n = 0;
+          catchUp && n < maxCatchUpPages && floor && cursor;
+          n++
+        ) {
+          const base = held.current.cache;
+          if (!base || !pendingBelow(base.window, floor, running.current))
+            break;
+          const { data: older } = await read(`&before=${cursor}`, abort.signal);
+          if (!owned() || held.current.cache !== base) return;
+          if (older.reasoningSummaryAnchors !== undefined)
+            throw new Error("invalid-response");
+          const mixed =
+            older.reasoningSummaryRevision !== base.reasoningSummaryRevision;
+          const joined = prependTimeline(base.window, older, mixed);
+          if (!joined) {
+            apply.current(false);
+            commit({ cache: null });
+            await refresh(lifetime.signal, false);
+            return;
+          }
+          if (joined !== base.window || mixed) {
+            if (joined !== base.window) apply.current(false);
+            commit({
+              cache: {
+                window: joined,
+                cursor: base.cursor,
+                reasoningSummaryRevision: mixed
+                  ? null
+                  : base.reasoningSummaryRevision,
+              },
+            });
+          }
+          if (mixed) {
+            await refresh(lifetime.signal, false);
+            return;
+          }
+          floor = older.entries[0];
+          cursor = older.olderCursor;
+        }
+      } catch (error) {
+        if (owned()) fail(error);
+      }
+    });
+    // Waiting follows ownership, even when an obsolete transport ignores abort forever.
+    const promise = Promise.race([work, abandoned]).finally(() => {
+      signal?.removeEventListener("abort", cancel);
+      abort.signal.removeEventListener("abort", abandon);
+      if (newest.current.generation === generation)
+        newest.current.promise = null;
+    });
+    newest.current.promise = promise;
+    return promise;
+  };
+  const settleNewest = async () => {
+    while (newest.current.promise) await newest.current.promise;
+  };
+  // biome-ignore lint/correctness/useExhaustiveDependencies: read identity owns the task/client lifetime.
   useEffect(() => {
-    life.current = new AbortController();
-    return () => life.current.abort();
+    const lifetime = new AbortController();
+    life.current = lifetime;
+    return () => {
+      lifetime.abort();
+      newest.current.abort?.abort();
+      newest.current.generation++;
+      newest.current.promise = null;
+      flight.current = null;
+    };
   }, [read]);
-  // biome-ignore lint/correctness/useExhaustiveDependencies: the task read and timeline notices are the triggers.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: task reads and timeline notices are newest-read triggers.
   useEffect(() => {
     const abort = new AbortController();
     void refresh(abort.signal);
     return () => abort.abort();
   }, [read, taskRead, changeTick]);
 
-  // One read of the next older page at a time; a second caller waits for it.
-  const flight = useRef<Promise<void> | null>(null);
   const loadEarlier = () => {
-    flight.current ??= readEarlier().finally(() => {
-      flight.current = null;
-    });
+    if (!flight.current) {
+      const pending = readEarlier().finally(() => {
+        if (flight.current === pending) flight.current = null;
+      });
+      flight.current = pending;
+    }
     return flight.current;
   };
   const readEarlier = async () => {
-    const current = held.current.cache,
-      signal = life.current.signal;
-    if (!current?.cursor) return;
+    const lifetime = life.current;
+    const authentication = client.captureAuthenticationScope();
+    const owned = () =>
+      life.current === lifetime && !lifetime.signal.aborted && authentication();
+    // A mixed or legacy window must be reconciled before extending it again.
+    if (held.current.cache && !held.current.cache.reasoningSummaryRevision) {
+      if (!newest.current.promise) void refresh(lifetime.signal, false);
+      await settleNewest();
+      if (
+        !owned() ||
+        held.current.error ||
+        !held.current.cache?.reasoningSummaryRevision
+      )
+        return;
+    }
+    const current = held.current.cache;
+    if (!current?.cursor || !owned()) return;
     commit({ loadingEarlier: true });
     try {
-      const { data: page } = await read(`&before=${current.cursor}`, signal);
-      if (signal.aborted) return;
-      // A newer page merged while this one was in flight: the older page no longer fits beneath it.
-      if (held.current.cache !== current)
-        return commit({ loadingEarlier: false });
-      const joined = prependTimeline(current.window, page);
-      apply.current(false);
+      const { data: page } = await read(
+        `&before=${current.cursor}`,
+        lifetime.signal,
+      );
+      if (!owned() || held.current.cache !== current) return;
+      if (page.reasoningSummaryAnchors !== undefined)
+        throw new Error("invalid-response");
+      const mixed =
+        page.reasoningSummaryRevision !== current.reasoningSummaryRevision;
+      const joined = prependTimeline(current.window, page, mixed);
+      if (joined !== current.window) apply.current(false);
       commit({
-        loadingEarlier: false,
         error: null,
-        cache: joined ? { window: joined, cursor: page.olderCursor } : null,
+        cache: joined
+          ? {
+              window: joined,
+              cursor: page.olderCursor,
+              reasoningSummaryRevision: mixed
+                ? null
+                : current.reasoningSummaryRevision,
+            }
+          : null,
       });
-      // The visibility revision changed under the held pages: start again from the newest.
-      if (!joined) void refresh(signal);
+      if (!joined || mixed) {
+        await refresh(lifetime.signal, false);
+        await settleNewest();
+      }
     } catch (error) {
-      if (!signal.aborted) fail(error);
+      if (owned() && held.current.cache === current) fail(error);
+    } finally {
+      if (owned()) commit({ loadingEarlier: false });
     }
   };
   // Pages older than the window are read, at most `maxFindPages`, until `found` holds for it.

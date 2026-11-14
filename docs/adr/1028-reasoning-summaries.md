@@ -39,6 +39,13 @@ debugging. They are not a live progress feed or an audit trail.
 - **Display.**
   - The web task conversation shows a turn's summaries in a collapsed "Reasoning summary"
     disclosure on the agent turn they belong to.
+    A conditional content revision reconciles summaries added to already-loaded completed
+    anchors at any retained depth, without scanning older pages or resetting reading state.
+    The existing timeline read returns a complete out-of-page overlay only for changed or
+    unknown acknowledgements; cold, matching and older reads omit that extra text. At most
+    128 bounded summaries contribute, allowing up to 12,318,458 additional JSON bytes on a
+    changed read. Mixed older-page revisions invalidate acknowledgement until one owned
+    newest reconciliation succeeds; stale/failed reads retain the existing Retry boundary.
   - The CLI shows them in `logs` only with `--verbose`. The reasoning capture note keeps the
     existing `--verbose` and `coverage.notes` behaviour. Each verbose events read,
     including follow and resume, explicitly sends `includeReasoningSummaries=true`;

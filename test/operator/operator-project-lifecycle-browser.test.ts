@@ -1,3 +1,4 @@
+import type { Request } from "playwright";
 import { until } from "../fixtures/until.js";
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
@@ -75,43 +76,204 @@ for (const engine of ["chromium", "webkit"] as const) {
         }),
         true,
       );
-      await panel
-        .getByRole("button", { name: "Restore project", exact: true })
-        .click();
-      await panel
-        .getByRole("button", { name: "Archive project", exact: true })
-        .waitFor();
-      const restored = f.service.domain().project(f.projectId);
-      assert.equal(restored.paused, 1);
-      assert.equal(restored.archived, 0);
-      const archive = panel.getByRole("button", {
-        name: "Archive project",
-        exact: true,
-      });
-      // Restore's callbacks can be queued after a drained check, so re-read until
-      // the page itself allows archiving.
-      await until(
-        async () => {
-          if (f.service.projectLifecycleStatus(f.projectId).length !== 0)
-            return false;
-          const read = page.waitForResponse(
-            (r) =>
-              new URL(r.url()).pathname ===
-              `/api/operator/projects/${f.projectId}`,
+      const commands: object[] = [],
+        reads: object[] = [],
+        clicks: object[] = [];
+      const pending = new Set<Promise<void>>();
+      let omitted = 0;
+      const token = (value: unknown) =>
+        typeof value === "string" && /^[a-zA-Z0-9-]{1,64}$/.test(value)
+          ? value
+          : null;
+      const version = (value: unknown) =>
+        typeof value === "number" && Number.isSafeInteger(value) ? value : null;
+      const snapshot = () => {
+        try {
+          const project = f.service.domain().project(f.projectId);
+          return {
+            projectId: f.projectId,
+            version: version(project.version),
+            archived: project.archived === 1,
+            paused: project.paused === 1,
+            blockers: f.service
+              .projectLifecycleStatus(f.projectId)
+              .slice(0, 16)
+              .map((b) => token(b.kind)),
+          };
+        } catch {
+          omitted++;
+          return { unavailable: true };
+        }
+      };
+      const selected = (request: Request) => {
+        if (new URL(request.url()).pathname !== "/api/operator/commands")
+          return null;
+        const body = request.postDataJSON();
+        return body.projectId === f.projectId &&
+          (body.type === "project.restore" || body.type === "project.archive")
+          ? {
+              type: body.type,
+              key: token(body.key),
+              projectId: f.projectId,
+              expectedVersion: version(body.expectedVersion),
+            }
+          : null;
+      };
+      const requested = (request: Request) => {
+        try {
+          const command = selected(request);
+          if (command && commands.length < 8)
+            commands.push({ phase: "request", command, live: snapshot() });
+          else if (command) omitted++;
+        } catch {
+          omitted++;
+        }
+      };
+      const finished = (request: Request) => {
+        // Observe completed bodies only; never hold the UI on an in-flight response.
+        if (pending.size >= 8) {
+          omitted++;
+          return;
+        }
+        const observe = async () => {
+          const command = selected(request);
+          const projectRead =
+            request.method() === "GET" &&
+            new URL(request.url()).pathname ===
+              `/api/operator/projects/${f.projectId}`;
+          if (!command && !projectRead) return;
+          const response = await request.response();
+          if (!response) {
+            omitted++;
+            return;
+          }
+          const observed: Record<string, unknown> = {
+            status: response.status(),
+            live: snapshot(),
+            bodyDecoded: false,
+            ...(command ? { phase: "response", command } : {}),
+          };
+          if (command) {
+            if (commands.length === 8) {
+              omitted++;
+              return;
+            }
+            commands.push(observed);
+          } else {
+            if (reads.length === 8) {
+              reads.shift();
+              omitted++;
+            }
+            reads.push(observed);
+          }
+          // A failed body read must not erase the status and snapshot already observed.
+          const body = await response.json();
+          Object.assign(observed, {
+            code: token(body.error?.code),
+            ...(command
+              ? {
+                  receipt:
+                    body.kind === "configuration"
+                      ? {
+                          key: token(body.key),
+                          recorded: body.recorded === true,
+                          commandType:
+                            body.result?.commandType === command.type
+                              ? command.type
+                              : null,
+                          resourceId: token(body.result?.resourceId),
+                          version: version(body.result?.version),
+                          archived: body.result?.archived === true,
+                          paused: body.result?.paused === true,
+                        }
+                      : null,
+                }
+              : {
+                  state: token(body.data?.state),
+                  version: version(body.data?.project?.version),
+                  archived: body.data?.project?.archived === true,
+                  archiveEligible:
+                    body.data?.lifecycle?.archiveEligible === true,
+                  blockers: Array.isArray(body.data?.lifecycle?.blockers)
+                    ? body.data.lifecycle.blockers
+                        .slice(0, 16)
+                        .map((b: { kind?: unknown }) => token(b.kind))
+                    : null,
+                }),
+            bodyDecoded: true,
+          });
+        };
+        const owned = observe().catch(() => {
+          omitted++;
+        });
+        pending.add(owned);
+        void owned.finally(() => pending.delete(owned));
+      };
+      page.on("request", requested);
+      page.on("requestfinished", finished);
+      try {
+        clicks.push({ phase: "restore-click", live: snapshot() });
+        await panel
+          .getByRole("button", { name: "Restore project", exact: true })
+          .click();
+        await panel
+          .getByRole("button", { name: "Archive project", exact: true })
+          .waitFor();
+        const restored = f.service.domain().project(f.projectId);
+        assert.equal(restored.paused, 1);
+        assert.equal(restored.archived, 0);
+        const archive = panel.getByRole("button", {
+          name: "Archive project",
+          exact: true,
+        });
+        // Restore's callbacks can be queued after a drained check, so re-read until
+        // the page itself allows archiving.
+        await until(
+          async () => {
+            if (f.service.projectLifecycleStatus(f.projectId).length !== 0)
+              return false;
+            const read = page.waitForResponse(
+              (r) =>
+                new URL(r.url()).pathname ===
+                `/api/operator/projects/${f.projectId}`,
+            );
+            await page
+              .getByRole("button", { name: "Refresh", exact: true })
+              .click();
+            await read;
+            return archive.isEnabled();
+          },
+          "archiving allowed after the restored project drained",
+          15_000,
+        );
+        clicks.push({ phase: "archive-click", live: snapshot() });
+        await archive.click();
+        await panel
+          .getByRole("button", {
+            name: "Inspect deletion preview",
+            exact: true,
+          })
+          .waitFor();
+      } catch (failure) {
+        try {
+          await journey.capture(page, "archive-failure");
+          const dom = await panel.evaluate((element) =>
+            element.outerHTML.slice(0, 12_000),
           );
-          await page
-            .getByRole("button", { name: "Refresh", exact: true })
-            .click();
-          await read;
-          return archive.isEnabled();
-        },
-        "archiving allowed after the restored project drained",
-        15_000,
-      );
-      await archive.click();
-      await panel
-        .getByRole("button", { name: "Inspect deletion preview", exact: true })
-        .waitFor();
+          t.diagnostic(`project-lifecycle-failure-dom ${JSON.stringify(dom)}`);
+        } catch {
+          omitted++;
+        }
+        throw failure;
+      } finally {
+        page.off("request", requested);
+        page.off("requestfinished", finished);
+        await Promise.allSettled([...pending]);
+        // Node test diagnostics survive in the Actions job log; sanitized markers do not.
+        t.diagnostic(
+          `project-lifecycle-observation ${JSON.stringify({ commands, reads, clicks, omitted })}`,
+        );
+      }
       await panel
         .getByRole("button", { name: "Inspect deletion preview", exact: true })
         .click();

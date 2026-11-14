@@ -14,7 +14,13 @@ import {
 import { normalizePlan } from "../../src/standalone/agent-plan.js";
 import { ConversationHistoryStore } from "../../src/standalone/conversation-history.js";
 import { ExecutionDiagnosticsStore } from "../../src/standalone/execution-diagnostics.js";
-import { createOperatorFixture } from "../fixtures/operator-web.js";
+import {
+  createOperatorFixture,
+  OperatorFixtureRuntime,
+  ClaudeShapedFixtureRuntime,
+} from "../fixtures/operator-web.js";
+import type { RuntimeConversationEvent } from "../../src/standalone/codex.js";
+import { seedReviewTask } from "../fixtures/task-review.js";
 import {
   desktop,
   phone,
@@ -479,7 +485,7 @@ for (const [label, viewport] of [
     await failing.getByText("output of step 2").waitFor();
     assert.equal(outputReads.length, 1);
     // Fetched output is read again when the visibility revision changes, so redaction cannot lag.
-    const timelineUrl = "**/api/operator/tasks/*/timeline?limit=50";
+    const timelineUrl = "**/api/operator/tasks/*/timeline?limit=50*";
     await page.route(timelineUrl, async (route) => {
       const response = await route.fetch();
       const json = await response.json();
@@ -612,7 +618,7 @@ for (const [label, viewport] of [
         .getAttribute("href"),
       `/tasks/${s.taskId}?section=review&result=${s.result.resultId}`,
     );
-    const unresolvedUrl = "**/api/operator/tasks/*/timeline?limit=50";
+    const unresolvedUrl = "**/api/operator/tasks/*/timeline?limit=50*";
     await page.route(unresolvedUrl, async (route) => {
       const response = await route.fetch();
       const json = await response.json();
@@ -1848,9 +1854,21 @@ async function assertReplyUsable(page: Page) {
   }
   const editor = page.getByLabel("Editable reply", { exact: true });
   await editor.fill("Viewport reply");
+  const typingState = await page.evaluate(() => ({
+    documentFocused: document.hasFocus(),
+    activeTag: document.activeElement?.tagName,
+    activeLabel: document.activeElement?.getAttribute("aria-label"),
+    activeId: document.activeElement?.id,
+    resource: document.querySelector(".resource-status")?.textContent ?? null,
+    viewport: { width: innerWidth, height: innerHeight },
+  }));
   await editor.press("End");
   await editor.pressSequentially(" typed with keyboard");
-  assert.equal(await editor.inputValue(), "Viewport reply typed with keyboard");
+  assert.equal(
+    await editor.inputValue(),
+    "Viewport reply typed with keyboard",
+    JSON.stringify(typingState),
+  );
   const send = reply.getByRole("button", { name: "Send comment", exact: true });
   for (
     let i = 0;
@@ -2414,6 +2432,16 @@ test("sign-out fences a real delayed summary response before the next session", 
   const page = await browser.newPage({ viewport: desktop });
   j.observe(page);
   page.setDefaultTimeout(5000);
+  await page.addInitScript(() => {
+    const fetcher = window.fetch.bind(window);
+    window.fetch = (input, init) => {
+      if (typeof input === "string" && input.includes("/timeline?")) {
+        const { signal: _ignored, ...rest } = init ?? {};
+        return fetcher(input, rest);
+      }
+      return fetcher(input, init);
+    };
+  });
   await stubReadiness(page);
   await signIn(page, web, `/tasks/${s.taskId}`);
   await page.getByText("Reasoned first answer", { exact: true }).waitFor();
@@ -2467,12 +2495,19 @@ test("sign-out fences a real delayed summary response before the next session", 
       expectedVersion: Number(f.service.domain().project(s.projectId).version),
       confirmed: true,
     } as never);
-    release();
-    await sent;
-    await page.unroute(timeline);
     await page.getByLabel("Password").fill(web.password);
     await page.getByRole("button", { name: "Sign in", exact: true }).click();
     await page.getByText("Reasoned first answer", { exact: true }).waitFor();
+    // The old transport succeeds after replacement authentication; it still owns no cache.
+    release();
+    await sent;
+    await page.unroute(timeline);
+    await page.evaluate(
+      () =>
+        new Promise<void>((resolve) =>
+          requestAnimationFrame(() => requestAnimationFrame(() => resolve())),
+        ),
+    );
     assert.equal(
       await page.getByRole("button", { name: "Reasoning summary" }).count(),
       0,
@@ -2488,4 +2523,568 @@ test("sign-out fences a real delayed summary response before the next session", 
   } finally {
     release();
   }
+});
+
+class RetainedSummaryRuntime extends ClaudeShapedFixtureRuntime {
+  private conversation: ((event: RuntimeConversationEvent) => void) | undefined;
+  onConversationEvent(listener: (event: RuntimeConversationEvent) => void) {
+    this.conversation = listener;
+  }
+  emit(event: RuntimeConversationEvent) {
+    assert.ok(this.conversation);
+    this.conversation(event);
+  }
+}
+
+for (const laterCount of [325, 575])
+  test(`a terminal summary updates an already held anchor beyond ${Math.floor(laterCount / 50)} pages without scanning history`, async (_t, j) => {
+    let runtime: RetainedSummaryRuntime | undefined;
+    const f = await j.start("fixture.create", () =>
+      createOperatorFixture(
+        null,
+        undefined,
+        undefined,
+        j.fixtureOptions,
+        (_context, harness) => {
+          if (harness !== "claude") return new OperatorFixtureRuntime();
+          runtime = new RetainedSummaryRuntime();
+          return runtime;
+        },
+        { runtimeHarnesses: ["codex", "claude"] },
+      ),
+    );
+    let browser: Browser | undefined;
+    j.cleanup(
+      (primary) => f.close(browser, primary),
+      "fixture.close",
+      () => f.lifecycle.steps,
+    );
+    const a = await seedReviewTask(
+      f,
+      "Retained summaries",
+      "Summary arrives after ordinary text",
+    );
+    const d = f.service.domain();
+    const execute = (body: object) =>
+      d.execute({ actor: "operator", key: randomUUID(), ...body } as never);
+    execute({
+      type: "profile.configure",
+      profileId: a.profileId,
+      expectedVersion: 1,
+      runtime: { harness: "claude", model: null, reasoningEffort: null },
+    });
+    execute({
+      type: "project.configure",
+      projectId: a.projectId,
+      expectedVersion: 1,
+      paused: false,
+      diagnosticCapture: "enhanced",
+      reasoningSummaries: true,
+    });
+    execute({
+      type: "task.configure",
+      projectId: a.projectId,
+      taskId: a.taskId,
+      expectedVersion: 1,
+      ready: true,
+    });
+    await until(() => runtime?.turns === 1);
+    const fake = runtime!;
+    let work = f.service.list().find((w) => w.state === "running");
+    await until(() => {
+      work = f.service.list().find((w) => w.state === "running");
+      return Boolean(work?.turnId);
+    });
+    assert.ok(work?.threadId && work.turnId);
+    const active = work;
+    execute({
+      type: "project.configure",
+      projectId: a.projectId,
+      expectedVersion: Number(d.project(a.projectId).version),
+      paused: true,
+    });
+    seedReasoning(f, a);
+    f.seedPersistedState((db) => {
+      let clock = t0 - 200000;
+      const history = new ConversationHistoryStore(db, () => clock++);
+      const binding = {
+        workId: "older-fixture",
+        taskId: a.taskId,
+        assignmentId: a.assignmentId,
+        assignmentVersion: 1,
+        instructionsRevision: 1,
+        profileRevision: 2,
+        conversationRevision: 1,
+        workRevision: 99,
+        threadId: "older-fixture",
+        turnId: "older-fixture",
+      };
+      for (let n = 0; n < 70; n++)
+        history.record(
+          binding,
+          {
+            kind: "completed",
+            threadId: binding.threadId,
+            turnId: binding.turnId,
+            itemId: `old-${n}`,
+            text: `Before active turn ${n}`,
+          },
+          [],
+        );
+    });
+    const emit = (event: {
+      kind: "completed" | "reasoning-summary";
+      itemId: string;
+      text: string;
+    }) =>
+      fake.emit({
+        ...event,
+        threadId: active.threadId!,
+        turnId: active.turnId!,
+      });
+    emit({
+      kind: "completed",
+      itemId: "canonical",
+      text: "COMPLETED_CANONICAL_RUNNING_TURN",
+    });
+    const web = await j.start("fixture.web", () => f.startWeb());
+    browser = await j.start("browser.launch", () => chromium.launch());
+    const page = await browser.newPage({ viewport: desktop });
+    j.observe(page);
+    page.setDefaultTimeout(10000);
+    await stubReadiness(page);
+    const requests: string[] = [];
+    page.on("request", (request) => {
+      if (new URL(request.url()).pathname.endsWith("/timeline"))
+        requests.push(request.url());
+    });
+    const initialResponse = page
+      .waitForEvent("requestfinished", {
+        predicate: (request) =>
+          new URL(request.url()).pathname.endsWith("/timeline"),
+      })
+      .then(async (request) => {
+        const response = await request.response();
+        assert.equal(response?.status(), 200);
+        return response!.json();
+      });
+    await signIn(page, web, `/tasks/${a.taskId}`);
+    const initial = (await initialResponse).data;
+    assert.equal(
+      new URL(requests[0]!).searchParams.has("reasoningSummaryRevision"),
+      false,
+    );
+    assert.equal(initial.reasoningSummaryAnchors, undefined);
+    const anchor = page.locator("article.conv-agent", {
+      hasText: "COMPLETED_CANONICAL_RUNNING_TURN",
+    });
+    await anchor.waitFor();
+    await anchor.locator("summary").click();
+    await anchor.getByRole("button", { name: /^Raw text of / }).click();
+    await anchor.locator("header details").evaluate((el) => {
+      (el as HTMLDetailsElement).open = false;
+    });
+    const other = page
+      .locator("article.conv-agent", { hasText: "Reasoned first answer" })
+      .getByRole("button", { name: "Reasoning summary", exact: true });
+    await other.click();
+    const draft = page.getByLabel("Editable reply");
+    await draft.fill("Keep retained unsent draft");
+    const frames = () =>
+      page.evaluate(
+        () =>
+          new Promise<void>((resolve) =>
+            requestAnimationFrame(() => requestAnimationFrame(() => resolve())),
+          ),
+      );
+    const reread = async () => {
+      const response = page.waitForResponse(
+        (r) =>
+          new URL(r.url()).pathname.endsWith("/timeline") && r.status() === 200,
+      );
+      await refresh(page);
+      const read = await response;
+      await frames();
+      return (await read.json()).data;
+    };
+    for (let batch = 0; batch < laterCount / 25; batch++) {
+      for (let n = batch * 25; n < (batch + 1) * 25; n++)
+        emit({
+          kind: "completed",
+          itemId: `later-${n}`,
+          text: `LATE_ROW_${n}`,
+        });
+      const unchanged = await reread();
+      assert.equal(unchanged.reasoningSummaryAnchors, undefined);
+      await page
+        .getByText(`LATE_ROW_${batch * 25 + 24}`, { exact: true })
+        .waitFor();
+      assert.equal(await anchor.count(), 1);
+    }
+    const toggle = anchor.getByRole("button", {
+      name: "Reasoning summary",
+      exact: true,
+    });
+    assert.equal(await toggle.count(), 0);
+    await anchor.scrollIntoViewIfNeeded();
+    await frames();
+    const top = (await anchor.boundingBox())!.y;
+    emit({
+      kind: "reasoning-summary",
+      itemId: "summary",
+      text: "TERMINAL_RETAINED_SUMMARY",
+    });
+    fake.complete(1);
+    await until(() =>
+      f.service
+        .list()
+        .some((w) => w.workId === active.workId && w.state === "completed"),
+    );
+    const start = requests.length;
+    const changed = await reread();
+    await toggle.waitFor();
+    assert.ok(
+      changed.reasoningSummaryAnchors.some(
+        (value: { reasoningSummary: { text: string } }) =>
+          value.reasoningSummary.text === "TERMINAL_RETAINED_SUMMARY",
+      ),
+    );
+    assert.equal(
+      requests
+        .slice(start)
+        .some((url) => new URL(url).searchParams.has("before")),
+      false,
+    );
+    assert.ok(Math.abs((await anchor.boundingBox())!.y - top) <= 2);
+    assert.equal(await anchor.locator(".conv-raw").count(), 1);
+    assert.equal(await other.getAttribute("aria-expanded"), "true");
+    assert.equal(await draft.inputValue(), "Keep retained unsent draft");
+    assert.equal(await toggle.getAttribute("aria-expanded"), "false");
+    await toggle.click();
+    await anchor
+      .getByText("TERMINAL_RETAINED_SUMMARY", { exact: true })
+      .waitFor();
+    const matching = await reread();
+    assert.equal(matching.reasoningSummaryAnchors, undefined);
+    assert.equal(await toggle.getAttribute("aria-expanded"), "true");
+    await page
+      .getByRole("tab", { name: "Execution", exact: true })
+      .evaluate((el) => (el as HTMLElement).click());
+    await page.locator('.task-panel[data-tab="execution"]').waitFor();
+    await page
+      .getByRole("tab", { name: "Overview", exact: true })
+      .evaluate((el) => (el as HTMLElement).click());
+    await anchor
+      .getByText("TERMINAL_RETAINED_SUMMARY", { exact: true })
+      .waitFor();
+    assert.equal(await draft.inputValue(), "Keep retained unsent draft");
+    const olderResponse = page.waitForResponse(
+      (r) =>
+        new URL(r.url()).pathname.endsWith("/timeline") &&
+        new URL(r.url()).searchParams.has("before") &&
+        r.status() === 200,
+    );
+    await page
+      .getByRole("button", { name: "Load earlier", exact: true })
+      .evaluate((el) => (el as HTMLElement).click());
+    const older = await olderResponse;
+    assert.equal(
+      new URL(older.url()).searchParams.get("before"),
+      initial.olderCursor,
+    );
+    assert.equal(
+      new URL(older.url()).searchParams.has("reasoningSummaryRevision"),
+      false,
+    );
+    assert.equal((await older.json()).data.reasoningSummaryAnchors, undefined);
+    assert.equal(await toggle.getAttribute("aria-expanded"), "true");
+  });
+
+test("conditional summary reads keep newest ownership through ignored aborts, mixed older pages and Retry", async (_t, j) => {
+  const f = await j.start("fixture.create", () =>
+    createOperatorFixture(null, undefined, undefined, j.fixtureOptions),
+  );
+  let browser: Browser | undefined;
+  j.cleanup(
+    (primary) => f.close(browser, primary),
+    "fixture.close",
+    () => f.lifecycle.steps,
+  );
+  const started = await startOwnWork(f, "Summary response ownership", "Atlas");
+  await finishOwnWork(f, started);
+  seedReasoning(f, started.a);
+  // Older ordinary rows make Load earlier meaningful without another source of summary truth.
+  f.seedPersistedState((db) => {
+    const binding = {
+      workId: "paging-older",
+      taskId: started.a.taskId,
+      assignmentId: started.a.assignmentId,
+      assignmentVersion: 1,
+      instructionsRevision: 1,
+      profileRevision: 1,
+      conversationRevision: 1,
+      workRevision: 90,
+      threadId: "paging-older",
+      turnId: "paging-older",
+    };
+    let clock = t0 - 300000;
+    const history = new ConversationHistoryStore(db, () => clock++);
+    for (let n = 0; n < 170; n++)
+      history.record(
+        binding,
+        {
+          kind: "completed",
+          threadId: binding.threadId,
+          turnId: binding.turnId,
+          itemId: `paging-${n}`,
+          text: `PAGING_OLDER_${n}`,
+        },
+        [],
+      );
+  });
+  const change = (text: string) =>
+    f.seedPersistedState((db) =>
+      db
+        .prepare(
+          "UPDATE conversation_reasoning_summaries SET text=? WHERE workId='summary-fixture-0'",
+        )
+        .run(text),
+    );
+  change("OWNED_INITIAL");
+  const web = await j.start("fixture.web", () => f.startWeb());
+  browser = await j.start("browser.launch", () => chromium.launch());
+  const page = await browser.newPage({ viewport: desktop });
+  j.observe(page);
+  page.setDefaultTimeout(10000);
+  // Deliberately ignore transport aborts; only hook/auth ownership can reject these late results.
+  await page.addInitScript(() => {
+    const fetcher = window.fetch.bind(window);
+    window.fetch = (input, init) => {
+      if (typeof input === "string" && input.includes("/timeline?")) {
+        const { signal: _ignored, ...rest } = init ?? {};
+        return fetcher(input, rest);
+      }
+      return fetcher(input, init);
+    };
+  });
+  await stubReadiness(page);
+  await signIn(page, web, `/tasks/${started.a.taskId}`);
+  const anchor = page.locator("article.conv-agent", {
+    hasText: "Reasoned first answer",
+  });
+  const toggle = anchor.getByRole("button", {
+    name: "Reasoning summary",
+    exact: true,
+  });
+  await toggle.click();
+  await anchor.getByText("OWNED_INITIAL", { exact: true }).waitFor();
+  const draft = page.getByLabel("Editable reply");
+  await draft.fill("OWNED_DRAFT");
+  const url = "**/api/operator/tasks/*/timeline?*";
+  const hold = async (select: (url: URL) => boolean, failure = false) => {
+    let enter!: () => void, release!: () => void;
+    const entered = new Promise<void>((resolve) => {
+      enter = resolve;
+    });
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    let held = false;
+    const handler = async (route: import("playwright").Route) => {
+      const response = await route.fetch();
+      if (!held && select(new URL(route.request().url()))) {
+        held = true;
+        enter();
+        await gate;
+        if (failure)
+          return route.fulfill({
+            status: 503,
+            contentType: "application/json",
+            body: JSON.stringify({ error: { code: "unavailable" } }),
+          });
+      }
+      return route.fulfill({ response });
+    };
+    await page.route(url, handler);
+    j.cleanup(async () => {
+      release();
+      await page.unroute(url, handler);
+    }, "release.held-read");
+    return { entered, release, stop: () => page.unroute(url, handler) };
+  };
+  const frames = () =>
+    page.evaluate(
+      () =>
+        new Promise<void>((resolve) =>
+          requestAnimationFrame(() => requestAnimationFrame(() => resolve())),
+        ),
+    );
+  for (const failure of [false, true]) {
+    const late = await hold(
+      (query) => !query.searchParams.has("before"),
+      failure,
+    );
+    await refresh(page);
+    await late.entered;
+    const expected = failure
+      ? "OWNED_AFTER_LATE_ERROR"
+      : "OWNED_AFTER_LATE_SUCCESS";
+    change(expected);
+    await refresh(page);
+    await anchor.getByText(expected, { exact: true }).waitFor();
+    const lateResponse = page.waitForResponse(
+      (response) =>
+        new URL(response.url()).pathname.endsWith("/timeline") &&
+        (failure ? response.status() === 503 : response.status() === 200),
+    );
+    late.release();
+    await lateResponse;
+    await frames();
+    await late.stop();
+    assert.equal(await anchor.getByText(expected, { exact: true }).count(), 1);
+    assert.equal(
+      await page.getByText(/^The conversation could not be refreshed/).count(),
+      0,
+    );
+    assert.equal(await toggle.getAttribute("aria-expanded"), "true");
+    assert.equal(await draft.inputValue(), "OWNED_DRAFT");
+  }
+  const olderLate = await hold((query) => query.searchParams.has("before"));
+  await page
+    .getByRole("button", { name: "Load earlier", exact: true })
+    .evaluate((el) => (el as HTMLElement).click());
+  await olderLate.entered;
+  change("OWNED_AFTER_OLDER");
+  await refresh(page);
+  await anchor.getByText("OWNED_AFTER_OLDER", { exact: true }).waitFor();
+  const obsoleteOlder = page.waitForResponse(
+    (response) =>
+      new URL(response.url()).searchParams.has("before") &&
+      response.status() === 200,
+  );
+  olderLate.release();
+  await obsoleteOlder;
+  await frames();
+  await olderLate.stop();
+  assert.equal(
+    await page.getByText("PAGING_OLDER_100", { exact: true }).count(),
+    0,
+    "obsolete older page cannot extend the new cache",
+  );
+  assert.equal(
+    await anchor.getByText("OWNED_AFTER_OLDER", { exact: true }).count(),
+    1,
+  );
+  // This older page observes a different summary snapshot. Its ordinary progress is kept,
+  // while one unknown newest read owns reconciliation; a failure cannot acknowledge it.
+  change("OWNED_MIXED_RECONCILED");
+  const unknowns: string[] = [];
+  page.on("request", (request) => {
+    if (
+      new URL(request.url()).searchParams.get("reasoningSummaryRevision") ===
+      "unknown"
+    )
+      unknowns.push(request.url());
+  });
+  const reconcile = await hold(
+    (query) => query.searchParams.get("reasoningSummaryRevision") === "unknown",
+    true,
+  );
+  await page
+    .getByRole("button", { name: "Load earlier", exact: true })
+    .evaluate((el) => (el as HTMLElement).click());
+  await reconcile.entered;
+  await page.getByText("PAGING_OLDER_100", { exact: true }).waitFor();
+  assert.equal(
+    await anchor.getByText("OWNED_AFTER_OLDER", { exact: true }).count(),
+    1,
+  );
+  const failed = page.waitForResponse(
+    (response) =>
+      new URL(response.url()).searchParams.get("reasoningSummaryRevision") ===
+        "unknown" && response.status() === 503,
+  );
+  reconcile.release();
+  await failed;
+  await page.getByText(/^The conversation could not be refreshed/).waitFor();
+  await frames();
+  assert.equal(unknowns.length, 1);
+  await reconcile.stop();
+  const delayedRetry = await hold(
+    (query) => query.searchParams.get("reasoningSummaryRevision") === "unknown",
+  );
+  await page.getByRole("button", { name: "Retry", exact: true }).click();
+  await delayedRetry.entered;
+  change("OWNED_AFTER_RETRY_SUPERSEDED");
+  await refresh(page);
+  await anchor
+    .getByText("OWNED_AFTER_RETRY_SUPERSEDED", { exact: true })
+    .waitFor();
+  const obsoleteRetry = page.waitForResponse(
+    (response) =>
+      new URL(response.url()).searchParams.get("reasoningSummaryRevision") ===
+        "unknown" && response.status() === 200,
+  );
+  delayedRetry.release();
+  await obsoleteRetry;
+  await frames();
+  await delayedRetry.stop();
+  assert.equal(
+    await anchor
+      .getByText("OWNED_AFTER_RETRY_SUPERSEDED", { exact: true })
+      .count(),
+    1,
+  );
+  assert.equal(await toggle.getAttribute("aria-expanded"), "true");
+  assert.equal(await draft.inputValue(), "OWNED_DRAFT");
+  assert.equal(
+    await page.getByText("PAGING_OLDER_100", { exact: true }).count(),
+    1,
+  );
+  change("OWNED_PENDING_RECONCILIATION");
+  const abandoned = await hold(
+    (query) => query.searchParams.get("reasoningSummaryRevision") === "unknown",
+  );
+  await page
+    .getByRole("button", { name: "Load earlier", exact: true })
+    .evaluate((el) => (el as HTMLElement).click());
+  await abandoned.entered;
+  await page
+    .getByRole("button", { name: "Loading earlier…", exact: true })
+    .waitFor();
+  change("OWNED_RECONCILIATION_SUPERSEDED");
+  await refresh(page);
+  await anchor
+    .getByText("OWNED_RECONCILIATION_SUPERSEDED", { exact: true })
+    .waitFor();
+  // The obsolete transport is still held. Only ownership settlement can release this flight.
+  await page
+    .getByRole("button", { name: "Load earlier", exact: true })
+    .waitFor();
+  const nextOlder = page.waitForResponse(
+    (response) =>
+      new URL(response.url()).searchParams.has("before") &&
+      response.status() === 200,
+  );
+  await page
+    .getByRole("button", { name: "Load earlier", exact: true })
+    .evaluate((el) => (el as HTMLElement).click());
+  await nextOlder;
+  await page.getByText("PAGING_OLDER_0", { exact: true }).waitFor();
+  const stale = page.waitForResponse(
+    (response) =>
+      new URL(response.url()).searchParams.get("reasoningSummaryRevision") ===
+        "unknown" && response.status() === 200,
+  );
+  abandoned.release();
+  await stale;
+  await frames();
+  await abandoned.stop();
+  assert.equal(
+    await anchor
+      .getByText("OWNED_RECONCILIATION_SUPERSEDED", { exact: true })
+      .count(),
+    1,
+  );
+  assert.equal(await draft.inputValue(), "OWNED_DRAFT");
 });
