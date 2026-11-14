@@ -138,10 +138,16 @@ export function InstructionProposalsTab(p: TabProps) {
           !journal.matches(runId)
         )
           return;
-        if (read.kind === "instruction" && read.projectId === projectId) {
-          journal.started(runId);
-          setRun(read);
+        if (
+          read.kind !== "instruction" ||
+          read.projectId !== projectId ||
+          read.runId !== runId
+        ) {
+          setReadFailed(true);
+          return;
         }
+        journal.started(runId);
+        setRun(read);
         setReadFailed(false);
       } catch (error) {
         if (
@@ -409,7 +415,13 @@ export function InstructionProposalsTab(p: TabProps) {
     return (
       currentAuthentication() &&
       journal.matches(runId) &&
-      result.state === "recorded"
+      result.state === "recorded" &&
+      result.receipt.kind === "drafting" &&
+      result.receipt.key === close.key &&
+      result.receipt.runId === runId &&
+      result.receipt.operation === disposition &&
+      result.receipt.state ===
+        (disposition === "accept" ? "accepted" : "discarded")
     );
   };
   const stop = async () => {
@@ -741,7 +753,10 @@ function Review(
             `/api/operator/profiles/${receipt.result.resourceId}/instructions`,
             profileInstructionsSchema,
           );
-          if (read.data.summary.version === receipt.result.version)
+          if (
+            read.data.summary.id === receipt.result.resourceId &&
+            read.data.summary.version === receipt.result.version
+          )
             revision = read.data.currentRevision;
         } catch {
           /* The saved configuration is known; its exact instructions revision may be unavailable. */

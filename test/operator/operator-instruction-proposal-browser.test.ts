@@ -527,70 +527,80 @@ test("a redraft refused after leaving the tab restores the reviewed run and edit
 });
 
 for (const committed of [false, true])
-  test(`an unknown redraft across reload ${committed ? "reattaches its committed replacement" : "restores the previous run on exact-key refusal"}`, async (_t, j) => {
-    const ctx = await launch(j, desktop),
-      old = await reviewed(ctx);
-    let blockRead = true;
-    await ctx.page.route("**/api/operator/drafting-runs/*", async (route) => {
-      if (blockRead && !route.request().url().endsWith(old))
-        return route.fulfill({
-          status: 503,
-          json: { error: { code: "unavailable", message: "Read unavailable" } },
-        });
-      await route.continue();
-    });
-    const starts: Record<string, unknown>[] = [];
-    await ctx.page.route("**/api/operator/commands", async (route) => {
-      const c = route.request().postDataJSON();
-      if (c.type !== "instruction.draft.start") return route.continue();
-      starts.push(c);
-      if (starts.length === 1) {
-        if (committed) await route.fetch();
-        return route.abort();
-      }
-      await route.fulfill({
-        status: 409,
-        json: { error: { code: "conflict", message: "Changed" } },
+  for (const readFailure of ["unavailable", "foreign-run"])
+    test(`an unknown redraft with ${readFailure} read across reload ${committed ? "reattaches its committed replacement" : "restores the previous run on exact-key refusal"}`, async (_t, j) => {
+      const ctx = await launch(j, desktop),
+        old = await reviewed(ctx);
+      let blockRead = true;
+      await ctx.page.route("**/api/operator/drafting-runs/*", async (route) => {
+        if (blockRead && !route.request().url().endsWith(old)) {
+          if (readFailure === "foreign-run") {
+            const response = await route.fetch({
+              url: `${ctx.web.origin}/api/operator/drafting-runs/${old}`,
+            });
+            return route.fulfill({ response });
+          }
+          return route.fulfill({
+            status: 503,
+            json: {
+              error: { code: "unavailable", message: "Read unavailable" },
+            },
+          });
+        }
+        await route.continue();
       });
-    });
-    await ctx.page
-      .getByRole("button", { name: "Redraft", exact: true })
-      .click();
-    await ctx.page.getByText(/Couldn.t confirm the request/).waitFor();
-    const stored = await ctx.page.evaluate(
-      (id) =>
-        JSON.parse(sessionStorage.getItem(`cab.instruction-proposal:${id}`)!),
-      ctx.projectId,
-    );
-    assert.equal(stored.previous.runId, old);
-    blockRead = false;
-    await ctx.page.reload();
-    if (committed) {
+      const starts: Record<string, unknown>[] = [];
+      await ctx.page.route("**/api/operator/commands", async (route) => {
+        const c = route.request().postDataJSON();
+        if (c.type !== "instruction.draft.start") return route.continue();
+        starts.push(c);
+        if (starts.length === 1) {
+          if (committed) await route.fetch();
+          return route.abort();
+        }
+        await route.fulfill({
+          status: 409,
+          json: { error: { code: "conflict", message: "Changed" } },
+        });
+      });
       await ctx.page
-        .getByText("The lead is drafting from the selected feedback.")
-        .waitFor();
-      assert.equal(starts.length, 1);
-      assert.equal(
-        await ctx.page.evaluate(
-          (id) =>
-            JSON.parse(
-              sessionStorage.getItem(`cab.instruction-proposal:${id}`)!,
-            ).runId,
-          ctx.projectId,
-        ),
-        starts[0]!.runId,
+        .getByRole("button", { name: "Redraft", exact: true })
+        .click();
+      await ctx.page.getByText(/Couldn.t confirm the request/).waitFor();
+      const stored = await ctx.page.evaluate(
+        (id) =>
+          JSON.parse(sessionStorage.getItem(`cab.instruction-proposal:${id}`)!),
+        ctx.projectId,
       );
-    } else {
-      await ctx.page.locator("#instruction-final").waitFor();
-      assert.equal(
-        await ctx.page.locator("#instruction-final").inputValue(),
-        "Reviewed and edited instructions.",
-      );
-      assert.equal(starts.length, 2);
-      assert.deepEqual(starts[1], starts[0]);
-    }
-    assert.equal(ctx.commands("project.configure").length, 0);
-  });
+      assert.equal(stored.previous.runId, old);
+      blockRead = false;
+      await ctx.page.reload();
+      if (committed) {
+        await ctx.page
+          .getByText("The lead is drafting from the selected feedback.")
+          .waitFor();
+        assert.equal(starts.length, 1);
+        assert.equal(
+          await ctx.page.evaluate(
+            (id) =>
+              JSON.parse(
+                sessionStorage.getItem(`cab.instruction-proposal:${id}`)!,
+              ).runId,
+            ctx.projectId,
+          ),
+          starts[0]!.runId,
+        );
+      } else {
+        await ctx.page.locator("#instruction-final").waitFor();
+        assert.equal(
+          await ctx.page.locator("#instruction-final").inputValue(),
+          "Reviewed and edited instructions.",
+        );
+        assert.equal(starts.length, 2);
+        assert.deepEqual(starts[1], starts[0]);
+      }
+      assert.equal(ctx.commands("project.configure").length, 0);
+    });
 
 for (const target of ["project", "profile"] as const)
   test(`${target}: confirmed instruction save survives reload and failed close without adopting a later writer's revision`, async (_t, j) => {
@@ -957,3 +967,47 @@ for (const invalidation of ["sign-out", "expiry"] as const)
       0,
     );
   });
+
+test("foreign optional revision and close receipts cannot confirm another profile revision or close", async (_t, j) => {
+  const ctx = await launch(j, desktop),
+    runId = await reviewed(ctx, "profile");
+  await ctx.page.route(
+    "**/api/operator/profiles/*/instructions",
+    async (route) => {
+      const response = await route.fetch(),
+        body = await response.json();
+      body.data.summary.id = randomUUID();
+      body.data.currentRevision = 99;
+      await route.fulfill({ json: body });
+    },
+  );
+  await ctx.page.route("**/api/operator/commands", async (route) => {
+    const c = route.request().postDataJSON();
+    if (c.type !== "drafting.settle") return route.continue();
+    await route.fulfill({
+      json: {
+        kind: "drafting",
+        key: c.key,
+        recorded: true,
+        operation: "accept",
+        runId: randomUUID(),
+        state: "accepted",
+      },
+    });
+  });
+  await ctx.page
+    .getByRole("button", { name: "Accept and save", exact: true })
+    .click();
+  await ctx.page
+    .getByText("Saved the instructions.", { exact: true })
+    .waitFor();
+  await ctx.page.getByText(/Saved. The proposal could not be closed/).waitFor();
+  assert.equal(ctx.f.service.readDrafting(runId)?.state, "proposed");
+  assert.equal(ctx.commands("profile.configure").length, 1);
+  await ctx.page.reload();
+  await ctx.page.getByText(/Saved. The proposal could not be closed/).waitFor();
+  assert.equal(ctx.commands("profile.configure").length, 1);
+  const closes = ctx.commands("drafting.settle");
+  assert.ok(closes.length >= 2);
+  for (const close of closes) assert.deepEqual(close, closes[0]);
+});
