@@ -259,7 +259,7 @@ export function TaskInspector({
                       href={`?result=${r.resultId}#review`}
                       onClick={show(r.resultId)}
                     >
-                      {resultLabel(r, data.assignments)}
+                      {resultLabel(r, data.assignments, data.results)}
                     </a>
                   </li>
                 ))}

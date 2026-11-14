@@ -3638,7 +3638,7 @@ test("Task detail keeps exact attribution in local Details and names result link
     "Ship an accessible command menu",
     body,
   );
-  a.delegatedResult("Earlier finished work");
+  const r1 = a.delegatedResult("Earlier finished work");
   const [c1] = a.source.criteria;
   const head = "a".repeat(40);
   const r2 = a.delegatedResult("Keyboard support ready for review", {
@@ -3705,6 +3705,21 @@ test("Task detail keeps exact attribution in local Details and names result link
   assert.equal(
     await page.locator("#retained-result-revision option").count(),
     3,
+  );
+  assert.deepEqual(
+    await page
+      .locator("#retained-result-revision option")
+      .evaluateAll((options) =>
+        options.map((option) => ({
+          value: (option as HTMLOptionElement).value,
+          label: option.textContent,
+        })),
+      ),
+    [
+      { value: "", label: "Latest result" },
+      { value: r2.resultId, label: await links.nth(0).innerText() },
+      { value: r1.resultId, label: await links.nth(1).innerText() },
+    ],
   );
   const rows = page.locator("#review .criterion-row");
   await rows.first().locator("details > summary").click();

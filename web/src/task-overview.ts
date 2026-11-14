@@ -20,10 +20,11 @@ type Data = TaskRead["data"];
 type Source = NonNullable<Data["review"]>["sources"][number];
 type Assignment = Data["assignments"][number];
 
-/** Names use only the redacted task projection; the timestamp distinguishes repeated reports. */
+/** Names use only the redacted projection; retained order distinguishes repeated reports. */
 export function resultLabel(
   result: Data["results"][number],
   assignments: readonly Assignment[],
+  results: readonly Data["results"][number][] = [],
 ) {
   const name =
     assignments.find((a) => a.assignmentId === result.assignmentId)?.name ??
@@ -33,6 +34,9 @@ export function resultLabel(
     result.createdAt < 1e12 ? result.createdAt * 1000 : result.createdAt,
   );
   return [
+    results.length > 1
+      ? `Result ${results.findIndex((r) => r.resultId === result.resultId) + 1}`
+      : null,
     name,
     summary
       ? summary.length > 80

@@ -801,4 +801,15 @@ test("result labels use redacted names and supplied summaries or time, never ide
     resultLabel(result, [{ ...assignments[0]!, name: null }]),
     /^Agent unavailable/,
   );
+  for (const summary of [null, "Repeated summary", "x".repeat(90)]) {
+    const results = [
+      { ...result, summary },
+      { ...result, resultId: "other-private-result-id", summary },
+    ];
+    const labels = results.map((r) => resultLabel(r, assignments, results));
+    assert.match(labels[0]!, /^Result 1 · Churchill · /);
+    assert.match(labels[1]!, /^Result 2 · Churchill · /);
+    assert.notEqual(labels[0], labels[1]);
+    for (const label of labels) assert.doesNotMatch(label, /private-/);
+  }
 });

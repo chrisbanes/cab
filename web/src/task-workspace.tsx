@@ -3080,6 +3080,7 @@ export function TaskWorkspace({
                             {resultLabel(
                               { ...selected, summary: null },
                               data.assignments,
+                              data.results,
                             )}
                           </p>
                           <Literal text={selected.summary} />
@@ -3231,9 +3232,9 @@ export function TaskWorkspace({
                             }}
                           >
                             <option value="">Latest result</option>
-                            {data.results.map((r) => (
+                            {[...data.results].reverse().map((r) => (
                               <option key={r.resultId} value={r.resultId}>
-                                {resultLabel(r, data.assignments)}
+                                {resultLabel(r, data.assignments, data.results)}
                               </option>
                             ))}
                           </NativeSelect>
