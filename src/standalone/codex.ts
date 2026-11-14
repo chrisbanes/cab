@@ -335,6 +335,13 @@ export type RuntimeConversationEvent =
       threadId: string;
       turnId: string;
       itemId: string;
+      kind: "reasoning-summary";
+      text: string;
+    }
+  | {
+      threadId: string;
+      turnId: string;
+      itemId: string;
       kind: "started";
     }
   | {
@@ -754,6 +761,8 @@ export interface RuntimeTurnSettings {
  * only), and `access: "read-only"` for a draft turn, which also forces network off.
  */
 export interface RuntimeTurnPolicy {
+  /** Internal admission snapshot; Codex ignores it and sends no reasoning override. */
+  reasoningSummary?: boolean;
   networkAccess: boolean;
   access?: "read-only";
   /** A task turn's writable Git roots (`taskGitWritableRoots`); a read-only turn ignores them. */

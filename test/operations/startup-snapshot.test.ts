@@ -856,8 +856,17 @@ function restoreDraftingSchema25(db: DatabaseSync) {
     DROP TABLE drafting_runs_new;`);
 }
 
+/** Remove only level 35 additions, preserving the pinned prior DDL and its rows. */
+function undoReasoningStorage(db: DatabaseSync) {
+  db.exec(`DROP TABLE conversation_reasoning_summaries;
+    ALTER TABLE project_reasoning_summaries DROP COLUMN generation;
+    ALTER TABLE execution_intent_reasoning_summaries DROP COLUMN captureMode;
+    ALTER TABLE execution_intent_reasoning_summaries DROP COLUMN generation`);
+}
+
 /** Level 34 widened two CHECKs and added the review table; narrowing restores the prior DDL. */
 function undoAutoReview(db: DatabaseSync) {
+  undoReasoningStorage(db);
   db.exec("DROP TABLE sandbox_reviews");
   for (const table of [
     "project_sandbox_level",
@@ -996,6 +1005,7 @@ function restoreRequestSchema21(db: DatabaseSync) {
 
 /** The schema digest each migration level created. Append an entry with every level bump. */
 const SCHEMA_PINS: Record<number, string> = {
+  35: "fb5fc772157781630dec0b40f1f139c30217307c3607de8a37a9d804829aa422",
   // The escalate-auto-review sandbox level and the sandbox review evidence table.
   34: "bfb71a91662c303a6e67e3df9fd396f29af3ce24193057b8ecacd95f6b374b05",
   // The escalate-approval sandbox level and the sandbox escalation evidence table.
@@ -2035,6 +2045,74 @@ test("withdrawn-state migration refuses an assignment schema it does not recogni
     } finally {
       after.close();
     }
+  } finally {
+    dirs.cleanup();
+  }
+});
+
+test("summary storage upgrades the pinned level 34 without inventing historical admission facts", async () => {
+  const dirs = layout();
+  try {
+    await run(dirs.data, 34);
+    const database = join(dirs.data, "standalone.sqlite");
+    const before = new DatabaseSync(database);
+    const projectId = randomUUID(),
+      intentId = randomUUID();
+    new DomainStore(before).execute({
+      type: "project.create",
+      actor: "operator",
+      key: randomUUID(),
+      projectId,
+      name: "Retained reasoning project",
+      leadProfileId: null,
+    });
+    before
+      .prepare(
+        "INSERT INTO project_reasoning_summaries (projectId,enabled) VALUES (?,1)",
+      )
+      .run(projectId);
+    before
+      .prepare(`INSERT INTO execution_intents
+      (id,workId,prompt,workspace,state,accountType,sandbox,approval)
+      VALUES (?,?,'retained','/tmp/retained','ready','existing-login','workspaceWrite','never')`)
+      .run(intentId, `work:${intentId}`);
+    before
+      .prepare(
+        "INSERT INTO execution_intent_reasoning_summaries (intentId,enabled,captureMode,generation) VALUES (?,1,'enhanced',0)",
+      )
+      .run(intentId);
+    undoReasoningStorage(before);
+    before.close();
+    assert.equal(schemaDigest(dirs.data), SCHEMA_PINS[34]);
+    await run(dirs.data);
+    const snapshot = readStartupState(dirs.data)?.snapshot;
+    assert.equal(snapshot?.from, 34);
+    assert.ok(snapshot?.path);
+    assert.equal(schemaDigest(snapshot.path), SCHEMA_PINS[34]);
+    assert.equal(schemaDigest(dirs.data), SCHEMA_PINS[35]);
+    const after = new DatabaseSync(database);
+    try {
+      assert.deepEqual(
+        {
+          ...after
+            .prepare(
+              "SELECT enabled,captureMode,generation FROM execution_intent_reasoning_summaries WHERE intentId=?",
+            )
+            .get(intentId),
+        },
+        { enabled: 1, captureMode: null, generation: null },
+      );
+      assert.equal(new DomainStore(after).reasoningSummaries(projectId), true);
+      assert.equal(
+        after
+          .prepare("SELECT COUNT(*) AS n FROM conversation_reasoning_summaries")
+          .get()?.n,
+        0,
+      );
+    } finally {
+      after.close();
+    }
+    await assert.rejects(run(dirs.data, 34), refusal("startup-schema-newer"));
   } finally {
     dirs.cleanup();
   }

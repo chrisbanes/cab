@@ -10427,11 +10427,19 @@ export class StandaloneService {
       captureThreadId = threadId;
       if (state.get(intent.id).state !== "submitting")
         throw new Error("Execution admission was held");
+      const summaryAdmission = state.reasoningSummaryAdmission(intent.id);
+      const reasoningSummary =
+        !request.draftTurn &&
+        summaryAdmission?.enabled === 1 &&
+        summaryAdmission.captureMode === "enhanced" &&
+        summaryAdmission.generation !== null;
       conversationCapture = this.beginConversationCapture(
         request,
         workspace,
         runtimeKey(harness, threadId),
         threadId,
+        intent.id,
+        reasoningSummary && harness === "claude",
       );
       diagnostics = this.beginDiagnosticCapture(
         request,
@@ -10465,7 +10473,7 @@ export class StandaloneService {
       // Synchronous and caught: recorded before submission, never delaying it.
       if (diagnostics)
         this.recordDiagnosticInputs(diagnostics, request, promptParts, prompt);
-      // Passed only when network access, local listening, a non-strict level or Git roots apply, so
+      // Passed when summary capture, network access, local listening, a non-strict level or Git roots apply, so
       // otherwise keeps today's call shapes. A draft turn is always read-only, strict, with network
       // and listening off.
       const binding = request.taskId
@@ -10484,12 +10492,14 @@ export class StandaloneService {
       const policy: RuntimeTurnPolicy | undefined = request.draftTurn
         ? { networkAccess: false, access: "read-only" }
         : networkAccess ||
+            reasoningSummary ||
             localListening ||
             skipSandbox ||
             escalate ||
             gitWritableRoots.length > 0
           ? {
               networkAccess,
+              ...(reasoningSummary ? { reasoningSummary: true } : {}),
               ...(localListening ? { localListening: true } : {}),
               ...(skipSandbox ? { skipSandbox: true } : {}),
               ...(escalate
@@ -10902,6 +10912,8 @@ export class StandaloneService {
     workspace: string,
     captureKey: string,
     threadId: string,
+    reasoningIntentId: string,
+    reasoningRequested: boolean,
   ): ConversationHistoryCapture | undefined {
     try {
       const { conversationHistory: history, state } = this.current ?? {};
@@ -10910,6 +10922,8 @@ export class StandaloneService {
       if (!binding || binding.taskId !== request.taskId) return undefined;
       const capture = new ConversationHistoryCapture({
         store: history,
+        reasoningIntentId,
+        reasoningRequested,
         workId: request.workId,
         threadId,
         captureStartExclusions: this.conversationExclusions(

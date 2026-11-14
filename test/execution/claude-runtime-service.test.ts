@@ -451,6 +451,7 @@ interface ClaudeHarnessControls {
   /** The `claude` the runtime finds; `null` is none on the PATH. Defaults to a fixture path. */
   executable?: string | null;
   sandboxEscalationExpiryMs?: number;
+  exclusions?: () => readonly string[];
 }
 
 /** The service with the real ClaudeRuntime over a scripted SDK and a fake Codex. */
@@ -517,6 +518,9 @@ function claudeHarness(
       power: { enabled: false },
       routingClient: null,
       terminationVerifier: verifier,
+      ...(controls.exclusions
+        ? { conversationHistoryExclusions: controls.exclusions }
+        : {}),
       supervisor: { observationMs: 3000 },
       ...(controls.sandboxEscalationExpiryMs === undefined
         ? {}
@@ -1590,4 +1594,193 @@ test("at escalate-auto-review a Claude call the classifier leaves undecided foll
   );
   // An operator escalation is not a classifier decision.
   assert.deepEqual(await run.reviews(), []);
+});
+
+test("admitted Claude summaries keep their snapshot and privacy across erasure, failures and later turns", {
+  skip: slashTmpDenied(),
+}, async (t) => {
+  const gates = Array.from({ length: 8 }, () => {
+    let release!: () => void;
+    return {
+      promise: new Promise<void>((resolve) => {
+        release = resolve;
+      }),
+      release: () => release(),
+    };
+  });
+  let exclusionsAvailable = true;
+  const scripts: Script[] = gates.map(
+    (gate, index) =>
+      async function* (session) {
+        yield init(sessionOf(session));
+        const frame = {
+          type: "assistant",
+          uuid: `summary-${index}`,
+          parent_tool_use_id: null,
+          message: {
+            content: [
+              {
+                type: "thinking",
+                thinking: "a".repeat(15_990) + "PRIVATE_SPL",
+                signature: "SIGNATURE_CANARY",
+              },
+            ],
+          },
+        };
+        yield frame;
+        yield frame;
+        yield {
+          type: "assistant",
+          uuid: `summary-tail-${index}`,
+          parent_tool_use_id: null,
+          message: {
+            content: [
+              {
+                type: "thinking",
+                thinking: "IT_CANARY token=TOKEN_CANARY tail",
+              },
+              { type: "text", text: "Ordinary public answer" },
+            ],
+          },
+        };
+        await gate.promise;
+        const args = { summary: "Summary fixture finished" };
+        await session.hook(
+          "mcp__cab__cab_report_result",
+          args,
+          `toolu_reasoning_${index}`,
+        );
+        await session.callTool("cab_report_result", args);
+        yield result(sessionOf(session));
+      },
+  );
+  const run = await claudeServiceRun(t, scripts, {
+    selfTest: true,
+    verified: true,
+    exclusions: () => {
+      if (!exclusionsAvailable)
+        throw new Error("private exclusion unavailable");
+      return [];
+    },
+  });
+  t.after(() => {
+    for (const gate of gates) gate.release();
+  });
+  const { projectId, worker } = run.setup();
+  const configure = (fields: object) =>
+    run.execute({
+      type: "project.configure",
+      projectId,
+      expectedVersion: Number(run.service.domain().project(projectId).version),
+      ...fields,
+    });
+  configure({ reasoningSummaries: true, instructions: "PRIVATE_SPLIT_CANARY" });
+  const turn = async (index: number, during?: (workId: string) => void) => {
+    const task = await run.claudeTask(projectId, worker);
+    await waitUntil(
+      () =>
+        run.sessions.length > index &&
+        run.intent(task.workId)?.state === "running",
+      run.describe,
+    );
+    const workspace = run.intent(task.workId)?.workspace;
+    t.after(() => releaseTemporaryBase(workspace));
+    during?.(task.workId);
+    gates[index]!.release();
+    await waitUntil(
+      () => run.intent(task.workId)?.state === "completed",
+      run.describe,
+    );
+    return {
+      task,
+      row: run
+        .db()
+        .prepare(
+          "SELECT * FROM conversation_reasoning_summaries WHERE workId=?",
+        )
+        .get(task.workId),
+    };
+  };
+  const first = await turn(0, () => configure({ reasoningSummaries: false }));
+  assert.deepEqual(run.sessions[0]?.options.thinking, {
+    type: "adaptive",
+    display: "summarized",
+  });
+  assert.equal(first.row?.enabled, 1);
+  assert.equal(first.row?.captureMode, "enhanced");
+  assert.equal(first.row?.stored, 1);
+  assert.equal(first.row?.truncated, 1);
+  assert.equal(first.row?.text, "a".repeat(15_990) + "[redacted]");
+  const off = await turn(1);
+  assert.equal(run.sessions[1]?.options.thinking, undefined);
+  assert.equal(off.row?.enabled, 0);
+  assert.equal(off.row?.text, null);
+  configure({ diagnosticCapture: "baseline" });
+  const baseline = await turn(2);
+  assert.equal(run.sessions[2]?.options.thinking, undefined);
+  assert.equal(baseline.row?.captureMode, "baseline");
+  assert.equal(baseline.row?.text, null);
+  configure({ diagnosticCapture: "enhanced", reasoningSummaries: true });
+  const erased = await turn(3, () =>
+    run.execute({
+      type: "project.reasoning.delete",
+      projectId,
+      expectedVersion: Number(run.service.domain().project(projectId).version),
+      confirmed: true,
+    }),
+  );
+  assert.equal(erased.row?.text, null);
+  assert.equal(erased.row?.stored, 0);
+  assert.equal(run.service.domain().reasoningSummaries(projectId), true);
+  const later = await turn(4);
+  assert.equal(later.row?.generation, 1);
+  assert.equal(later.row?.stored, 1);
+  const failed = await turn(5, () =>
+    run
+      .db()
+      .exec(`CREATE TRIGGER fail_summary BEFORE INSERT ON conversation_reasoning_summaries
+    BEGIN SELECT RAISE(ABORT,'PRIVATE_FAILURE_CANARY'); END`),
+  );
+  assert.equal(failed.row, undefined);
+  run.db().exec("DROP TRIGGER fail_summary");
+  assert.equal(
+    run
+      .db()
+      .prepare(
+        "SELECT text FROM conversation_history_items WHERE workId=? AND lifecycle='completed'",
+      )
+      .get(failed.task.workId)?.text,
+    "Ordinary public answer",
+  );
+  exclusionsAvailable = false;
+  const unavailable = await turn(6);
+  assert.equal(unavailable.row?.text, null);
+  exclusionsAvailable = true;
+  const last = await turn(7);
+  assert.equal(last.row?.stored, 1);
+  for (const table of ["conversation_history_items", "diagnostic_items"]) {
+    const text = JSON.stringify(
+      run.db().prepare(`SELECT * FROM ${table}`).all(),
+    );
+    assert.equal(
+      /TOKEN_CANARY|SIGNATURE_CANARY|PRIVATE_FAILURE_CANARY|a{20}/.test(text),
+      false,
+      `${table} excludes summary content`,
+    );
+    if (table === "conversation_history_items")
+      assert.equal(text.includes("PRIVATE_SPLIT_CANARY"), false);
+  }
+  assert.doesNotMatch(
+    JSON.stringify(
+      run.db().prepare("SELECT * FROM conversation_reasoning_summaries").all(),
+    ),
+    /PRIVATE_SPLIT_CANARY|TOKEN_CANARY|SIGNATURE_CANARY/,
+  );
+  const rows = run
+    .db()
+    .prepare(
+      "SELECT workId,threadId,turnId FROM conversation_reasoning_summaries WHERE assignmentId IN (SELECT id FROM domain_assignments WHERE profileId=?)",
+    )
+    .all(worker);
+  assert.equal(new Set(rows.map((row) => row.workId)).size, 7);
 });

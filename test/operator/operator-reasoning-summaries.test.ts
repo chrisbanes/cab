@@ -3,6 +3,7 @@ import { randomUUID } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { test } from "node:test";
+import type { DatabaseSync } from "node:sqlite";
 import { coordinationTools } from "../../src/standalone/coordination-tools.js";
 import { harness } from "../fixtures/cli-harness.js";
 import { startCliService } from "../fixtures/operator-cli.js";
@@ -70,6 +71,42 @@ test("reasoning opt-in validates resulting capture and deletion is confirmed, ve
     200,
   );
 
+  const db = (s.f.service as unknown as { db: DatabaseSync }).db;
+  const otherProject = randomUUID();
+  d.execute({
+    type: "project.create",
+    actor: "operator",
+    key: randomUUID(),
+    projectId: otherProject,
+    name: "Other reasoning",
+    leadProfileId: null,
+  });
+  const seed = (projectId: string) =>
+    db
+      .prepare(`INSERT INTO conversation_reasoning_summaries
+    (workId,taskId,assignmentId,assignmentVersion,instructionsRevision,profileRevision,
+      conversationRevision,workRevision,threadId,turnId,projectId,intentId,enabled,captureMode,
+      generation,text,stored,truncated,createdAt,updatedAt)
+    VALUES (?,?,?,1,1,1,1,1,?,?,?,?,1,'enhanced',0,?,1,0,1,1)`)
+      .run(
+        randomUUID(),
+        randomUUID(),
+        randomUUID(),
+        randomUUID(),
+        randomUUID(),
+        projectId,
+        randomUUID(),
+        `private summary ${projectId}`,
+      );
+  seed(s.projectId);
+  seed(otherProject);
+  const stored = (projectId: string) =>
+    db
+      .prepare(
+        "SELECT text,stored FROM conversation_reasoning_summaries WHERE projectId=?",
+      )
+      .get(projectId);
+  const original = stored(s.projectId);
   const deletion = {
     type: "project.reasoning.delete",
     key: randomUUID(),
@@ -86,8 +123,11 @@ test("reasoning opt-in validates resulting capture and deletion is confirmed, ve
     409,
   );
   assert.equal(version(), deletion.expectedVersion);
+  assert.deepEqual(stored(s.projectId), original);
   const first = await post(deletion);
   assert.equal(first.status, 200);
+  assert.deepEqual({ ...stored(s.projectId) }, { text: null, stored: 0 });
+  assert.match(String(stored(otherProject)?.text), /private summary/);
   const receipt = await first.json();
   assert.equal(version(), deletion.expectedVersion + 1);
   const replay = await post(deletion);
@@ -100,6 +140,14 @@ test("reasoning opt-in validates resulting capture and deletion is confirmed, ve
     200,
   );
   assert.equal(d.reasoningSummaries(s.projectId), true);
+  assert.equal(
+    db
+      .prepare(
+        "SELECT generation FROM project_reasoning_summaries WHERE projectId=?",
+      )
+      .get(s.projectId)?.generation,
+    2,
+  );
   const lookup = await s.bearer(
     ro.token,
     `/api/operator/operations?scope=project:${s.projectId}&key=${deletion.key}&type=project.reasoning.delete`,

@@ -1,3 +1,4 @@
+import { initializeReasoningSummaryStorage } from "../core/reasoning-summary-storage.js";
 import { taskAcceptsWrites } from "../core/project-lifecycle.js";
 import { z } from "zod";
 import {
@@ -41,11 +42,24 @@ export interface ConversationHistoryAssignmentRead {
 }
 
 const maxHistoryTextBytes = 64 * 1024;
+const maxSummaryInputBytes = 128 * 1024;
 const maxBufferedEvents = 8192;
 const maxBufferedTextBytes = 4 * 1024 * 1024;
 const deltaFlushMs = 1000;
 // Matches the per-turn pending item bound in codex.ts.
 const maxPendingDeltaItems = 64;
+
+/** Keep enough original context for a 64 KiB exclusion crossing the 16,000-character cut. */
+function utf8Prefix(text: string, maxBytes: number): string {
+  let bytes = 0,
+    end = 0;
+  for (const char of text) {
+    bytes += Buffer.byteLength(char, "utf8");
+    if (bytes > maxBytes) break;
+    end += char.length;
+  }
+  return text.slice(0, end);
+}
 
 function validDeltaBytes(bytes: number): boolean {
   return (
@@ -54,17 +68,19 @@ function validDeltaBytes(bytes: number): boolean {
 }
 
 const sensitiveAssignment =
-  /((?:"?(?:password|passwd|token|api[_-]?key|secret)[\w-]*"?)\s*[:=]\s*)(?:"(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*'|([^\s,;]+))/gi;
+  /((?:"?(?:password|passwd|token|api[_-]?key|secret)[\w-]*"?)\s*[:=]\s*)(?:"(?:\\.|[^"\\])*(?:"|\\?$)|'(?:\\.|[^'\\])*(?:'|\\?$)|([^\s,;]+))/gi;
 const authorizationHeader = /\b(authorization\s*:\s*)[^\r\n]+/gi;
 const bearerToken = /\b(bearer\s+)[^\s,;]+/gi;
-const urlCredentials = /\b([a-z][a-z0-9+.-]*:\/\/)[^/?#\s]+@/gi;
+// Long unfinished authorities can contain credentials beyond the bounded lookahead.
+const urlCredentials =
+  /\b([a-z][a-z0-9+.-]*:\/\/)(?:[^/?#\s]+(?=@)|[^/?#\s]{16000,}$)/gi;
 /** Patterns redact what follows their first group; `kept` trailing characters stay. */
 const patterns: readonly (readonly [RegExp, number])[] = [
   [authorizationHeader, 0],
   [bearerToken, 0],
   [/cab_local_[a-f0-9]{64}/g, 0],
   [sensitiveAssignment, 0],
-  [urlCredentials, 1],
+  [urlCredentials, 0],
 ];
 const bindingSchema = z.object({
   workId: z.string().min(1),
@@ -166,7 +182,16 @@ export function sanitizeConversationText(
   text: string,
   excludedValues: readonly string[],
 ): string | undefined {
-  if (Buffer.byteLength(text, "utf8") > maxHistoryTextBytes) return undefined;
+  return sanitizeText(text, excludedValues, maxHistoryTextBytes);
+}
+
+function sanitizeText(
+  text: string,
+  excludedValues: readonly string[],
+  maxBytes: number,
+  maxCharacters = Number.POSITIVE_INFINITY,
+): string | undefined {
+  if (Buffer.byteLength(text, "utf8") > maxBytes) return undefined;
   const values = preparedExclusions.has(excludedValues)
     ? preparedExclusions.get(excludedValues)
     : validExclusions(excludedValues);
@@ -175,9 +200,13 @@ export function sanitizeConversationText(
   // Spans are found on the original text and merged, so neither an exact value nor
   // a pattern can rewrite the other's anchor (an instruction holding `token=…`).
   const spans = redactionSpans(text, values);
+  const cut = Number.isFinite(maxCharacters)
+    ? Array.from(text).slice(0, maxCharacters).join("").length
+    : text.length;
   let result = "";
   let end = 0;
   for (const [start, stop] of spans) {
+    if (start >= cut) break;
     if (start < end) {
       if (stop > end) end = stop;
       continue;
@@ -185,7 +214,7 @@ export function sanitizeConversationText(
     result += `${text.slice(end, start)}[redacted]`;
     end = stop;
   }
-  return result + text.slice(end);
+  return result + text.slice(end, cut);
 }
 
 /**
@@ -265,6 +294,7 @@ export class ConversationHistoryStore {
     private readonly db: Database,
     private readonly now: () => number = Date.now,
   ) {
+    initializeReasoningSummaryStorage(this.db);
     this.db.exec(`CREATE TABLE IF NOT EXISTS conversation_history_items (
       sequence INTEGER PRIMARY KEY AUTOINCREMENT,
       workId TEXT NOT NULL,
@@ -334,9 +364,156 @@ export class ConversationHistoryStore {
       ON conversation_plan_updates(taskId, sequence)`);
   }
 
+  /** Redact the turn prefix with bounded original lookahead before the Unicode cap. */
+  recordReasoningSummary(
+    binding: ConversationHistoryBinding,
+    intentId: string,
+    input: string | undefined,
+    exclusions: readonly string[] | undefined,
+  ): void {
+    bindingSchema.parse(binding);
+    transaction(this.db, () => {
+      if (!taskAcceptsWrites(this.db, binding.taskId)) return;
+      const facts = this.db
+        .prepare(`SELECT a.projectId, admission.enabled,
+      admission.captureMode, admission.generation, b.harness,
+      COALESCE(p.generation, 0) AS currentGeneration
+      FROM task_execution_bindings b
+      JOIN execution_intents i ON i.workId = b.workId
+      JOIN task_work_revisions r ON r.workId = b.workId
+      JOIN domain_assignments a ON a.id = b.assignmentId AND a.taskId = b.taskId
+      JOIN domain_tasks t ON t.id = b.taskId AND t.projectId = a.projectId
+      JOIN execution_intent_reasoning_summaries admission ON admission.intentId = i.id
+      LEFT JOIN project_reasoning_summaries p ON p.projectId = a.projectId
+      WHERE i.id = ? AND b.workId = ? AND b.taskId = ? AND b.assignmentId = ?
+        AND b.assignmentVersion = ? AND b.instructionsRevision = ?
+        AND b.profileRevision = ? AND b.conversationRevision = ?
+        AND r.workRevision = ? AND i.threadId = ? AND i.turnId = ?
+        AND (SELECT COUNT(*) FROM execution_intents other
+          WHERE other.threadId = i.threadId AND other.turnId = i.turnId) = 1`)
+        .get(intentId, ...this.bindingValues(binding));
+      const parsed = z
+        .object({
+          projectId: z.string().min(1),
+          enabled: z.union([z.literal(0), z.literal(1)]),
+          captureMode: z.enum(["enhanced", "baseline"]).nullable(),
+          generation: z.number().int().nonnegative().safe().nullable(),
+          currentGeneration: z.number().int().nonnegative().safe(),
+          harness: z.string(),
+        })
+        .safeParse(facts);
+      if (!parsed.success) return;
+      const f = parsed.data;
+      const eligible =
+        f.enabled === 1 &&
+        f.captureMode === "enhanced" &&
+        f.generation !== null &&
+        f.generation === f.currentGeneration &&
+        f.harness === "claude";
+      let text: string | null = null;
+      let truncated = false;
+      if (eligible && input && exclusions) {
+        const sanitized = sanitizeText(
+          input,
+          exclusions,
+          maxSummaryInputBytes,
+          16_000,
+        );
+        if (sanitized !== undefined) {
+          const characters = Array.from(sanitized);
+          truncated = Array.from(input).length > 16_000;
+          const bounded = characters.slice(0, 16_000).join("");
+          if (
+            Buffer.byteLength(bounded, "utf8") <= maxHistoryTextBytes &&
+            bounded.length
+          )
+            text = bounded;
+        }
+      }
+      const now = this.checkedNow();
+      this.db
+        .prepare(`INSERT INTO conversation_reasoning_summaries
+      (workId, taskId, assignmentId, assignmentVersion, instructionsRevision,
+        profileRevision, conversationRevision, workRevision, threadId, turnId,
+        projectId, intentId, enabled, captureMode, generation, text, stored, truncated, createdAt, updatedAt)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ON CONFLICT(workId, threadId, turnId) DO NOTHING`)
+        .run(
+          ...this.bindingValues(binding),
+          f.projectId,
+          intentId,
+          f.enabled,
+          f.captureMode,
+          f.generation,
+          text,
+          Number(text !== null),
+          Number(truncated),
+          now,
+          now,
+        );
+    });
+  }
+
+  /** The only text read seam: current exclusions are mandatory, including after erasure. */
+  readReasoningSummary(
+    binding: ConversationHistoryBinding,
+    currentExclusions: () => readonly string[] | undefined,
+  ) {
+    bindingSchema.parse(binding);
+    const row = this.db
+      .prepare(`SELECT * FROM conversation_reasoning_summaries
+      WHERE workId = ? AND threadId = ? AND turnId = ?`)
+      .get(binding.workId, binding.threadId, binding.turnId);
+    const parsed = bindingSchema
+      .extend({
+        projectId: z.string().min(1),
+        intentId: z.string().min(1),
+        enabled: z.union([z.literal(0), z.literal(1)]),
+        captureMode: z.enum(["enhanced", "baseline"]).nullable(),
+        generation: z.number().int().nonnegative().safe().nullable(),
+        text: z
+          .string()
+          .min(1)
+          .max(32_000)
+          .refine(
+            (value) =>
+              Array.from(value).length <= 16_000 &&
+              Buffer.byteLength(value, "utf8") <= maxHistoryTextBytes,
+          )
+          .nullable(),
+        stored: z.union([z.literal(0), z.literal(1)]),
+        truncated: z.union([z.literal(0), z.literal(1)]),
+        createdAt: z.number().int().nonnegative().safe(),
+        updatedAt: z.number().int().nonnegative().safe(),
+      })
+      .refine((row) => (row.stored === 1) === (row.text !== null))
+      .safeParse(row);
+    if (
+      !parsed.success ||
+      Object.entries(binding).some(
+        ([key, value]) =>
+          parsed.data[key as keyof typeof parsed.data] !== value,
+      )
+    )
+      return undefined;
+    let text: string | null = null;
+    try {
+      const exclusions = currentExclusions();
+      if (parsed.data.stored === 1 && parsed.data.text && exclusions)
+        text = sanitizeConversationText(parsed.data.text, exclusions) ?? null;
+      if (text !== null) text = Array.from(text).slice(0, 16_000).join("");
+    } catch {
+      /* Missing privacy context suppresses text. */
+    }
+    return { ...parsed.data, text };
+  }
+
   record(
     binding: ConversationHistoryBinding,
-    event: Exclude<RuntimeConversationEvent, { kind: "plan" }>,
+    event: Exclude<
+      RuntimeConversationEvent,
+      { kind: "plan" | "reasoning-summary" }
+    >,
     exclusions: readonly string[],
   ): void {
     if (!taskAcceptsWrites(this.db, binding.taskId)) return;
@@ -743,6 +920,8 @@ export class ConversationHistoryStore {
 
 interface ConversationHistoryCaptureOptions {
   store: ConversationHistoryStore;
+  reasoningIntentId?: string;
+  reasoningRequested?: boolean;
   workId: string;
   threadId: string;
   captureStartExclusions: readonly string[] | undefined;
@@ -754,6 +933,12 @@ export class ConversationHistoryCapture {
   private binding: ConversationHistoryBinding | undefined;
   private readonly buffered: RuntimeConversationEvent[] = [];
   private bufferedTextBytes = 0;
+  private bufferedSummaryBytes = 0;
+  private readonly bufferedSummaryItems = new Set<string>();
+  private summaryText = "";
+  private summaryBytes = 0;
+  private summaryUnavailable = false;
+  private readonly summaryItems = new Set<string>();
   private exceededBuffer = false;
   private closed = false;
   private readonly pendingDeltas = new Map<string, number>();
@@ -762,6 +947,8 @@ export class ConversationHistoryCapture {
   constructor(private readonly options: ConversationHistoryCaptureOptions) {}
 
   receive(event: RuntimeConversationEvent): void {
+    if (event.kind === "reasoning-summary" && !this.options.reasoningRequested)
+      return;
     if (this.closed || event.threadId !== this.options.threadId) return;
     const binding = this.binding;
     if (binding) {
@@ -769,8 +956,8 @@ export class ConversationHistoryCapture {
       return;
     }
     if (this.exceededBuffer) return;
-    const textBytes =
-      event.kind === "completed"
+    let textBytes =
+      event.kind === "completed" || event.kind === "reasoning-summary"
         ? Buffer.byteLength(event.text, "utf8")
         : event.kind === "plan"
           ? event.plan.steps.reduce(
@@ -778,6 +965,18 @@ export class ConversationHistoryCapture {
               0,
             )
           : 0;
+    if (event.kind === "reasoning-summary") {
+      const identity = `${event.turnId}\0${event.itemId}`;
+      if (this.bufferedSummaryItems.has(identity)) return;
+      this.bufferedSummaryItems.add(identity);
+      if (this.bufferedSummaryBytes >= maxSummaryInputBytes) return;
+      const remaining = maxSummaryInputBytes - this.bufferedSummaryBytes;
+      if (textBytes > remaining) {
+        event = { ...event, text: utf8Prefix(event.text, remaining) };
+      }
+      textBytes = Buffer.byteLength(event.text, "utf8");
+      this.bufferedSummaryBytes += textBytes;
+    }
     if (
       this.buffered.length >= maxBufferedEvents ||
       this.bufferedTextBytes + textBytes > maxBufferedTextBytes
@@ -821,6 +1020,27 @@ export class ConversationHistoryCapture {
     if (this.binding && !this.closed) {
       // Before omitIncomplete: it settles the rows that guard the counts.
       this.flush();
+      if (this.options.reasoningIntentId) {
+        try {
+          const start = this.options.captureStartExclusions;
+          let current: readonly string[] | undefined;
+          try {
+            current = this.summaryText
+              ? this.options.currentExclusions()
+              : undefined;
+          } catch {
+            current = undefined;
+          }
+          this.options.store.recordReasoningSummary(
+            this.binding,
+            this.options.reasoningIntentId,
+            this.summaryUnavailable ? undefined : this.summaryText,
+            start && current ? [...start, ...current] : undefined,
+          );
+        } catch {
+          // Failed capture must never alter execution or ordinary history.
+        }
+      }
       try {
         this.options.store.omitIncomplete(this.binding);
       } catch {
@@ -834,12 +1054,35 @@ export class ConversationHistoryCapture {
     this.flush();
     this.closed = true;
     this.clearBuffered();
+    this.summaryText = "";
+    this.summaryBytes = 0;
+    this.summaryItems.clear();
   }
 
   private persist(
     event: RuntimeConversationEvent,
     binding: ConversationHistoryBinding,
   ) {
+    if (event.kind === "reasoning-summary") {
+      if (this.summaryUnavailable || this.summaryItems.has(event.itemId))
+        return;
+      const bytes = Buffer.byteLength(event.text, "utf8");
+      if (this.summaryBytes >= maxSummaryInputBytes) return;
+      if (this.summaryItems.size >= maxBufferedEvents) {
+        this.summaryUnavailable = true;
+        this.summaryText = "";
+        this.summaryItems.clear();
+        return;
+      }
+      this.summaryItems.add(event.itemId);
+      const prefix =
+        bytes > maxSummaryInputBytes - this.summaryBytes
+          ? utf8Prefix(event.text, maxSummaryInputBytes - this.summaryBytes)
+          : event.text;
+      this.summaryText += prefix;
+      this.summaryBytes += Buffer.byteLength(prefix, "utf8");
+      return;
+    }
     if (event.kind === "delta") {
       this.addDelta(event.itemId, event.bytes);
       return;

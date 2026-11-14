@@ -1,3 +1,4 @@
+import { initializeReasoningSummaryStorage } from "../core/reasoning-summary-storage.js";
 import {
   ProjectArchivedError,
   assertTaskProjectWritable,
@@ -660,6 +661,9 @@ export class ExecutionState {
       intentId TEXT PRIMARY KEY REFERENCES execution_intents(id),
       enabled INTEGER NOT NULL CHECK(enabled IN (0, 1))
     );
+    CREATE TABLE IF NOT EXISTS project_diagnostic_capture (
+      projectId TEXT PRIMARY KEY, mode TEXT NOT NULL CHECK(mode IN ('enhanced', 'baseline'))
+    );
     CREATE TABLE IF NOT EXISTS project_reasoning_summaries (
       projectId TEXT PRIMARY KEY, enabled INTEGER NOT NULL CHECK(enabled IN (0, 1))
     );
@@ -1008,6 +1012,7 @@ export class ExecutionState {
       FROM execution_intents e
       JOIN task_writer_admissions admitted ON admitted.workId = e.workId
       WHERE e.state IN ('held','submitting','running')`);
+    initializeReasoningSummaryStorage(this.db);
     this.hasTurnRequests =
       this.db
         .prepare(
@@ -2105,6 +2110,26 @@ export class ExecutionState {
       )
       .get(intentId) as { enabled: number } | undefined;
     return row ? row.enabled === 1 : null;
+  }
+
+  reasoningSummaryAdmission(intentId: string) {
+    try {
+      const row = this.db
+        .prepare(`SELECT enabled, captureMode, generation
+      FROM execution_intent_reasoning_summaries WHERE intentId = ?`)
+        .get(intentId);
+      const parsed = z
+        .object({
+          enabled: z.union([z.literal(0), z.literal(1)]),
+          captureMode: z.enum(["enhanced", "baseline"]).nullable(),
+          generation: z.number().int().nonnegative().safe().nullable(),
+        })
+        .nullable()
+        .safeParse(row ?? null);
+      return parsed.success ? parsed.data : null;
+    } catch {
+      return null;
+    }
   }
 
   /** Sandbox level the turn was admitted with; null when no admission recorded it. */
@@ -5880,15 +5905,20 @@ export class ExecutionState {
               ...(this.hasTurnRequests ? [workId] : []),
             );
         this.db
-          .prepare(`INSERT OR REPLACE INTO execution_intent_reasoning_summaries (intentId, enabled)
+          .prepare(`INSERT OR REPLACE INTO execution_intent_reasoning_summaries
+            (intentId, enabled, captureMode, generation)
           SELECT ?, EXISTS (
             SELECT 1 FROM project_reasoning_summaries p
             JOIN task_execution_bindings b ON b.workId = ?
-            WHERE p.projectId = ? AND p.enabled = 1)
+            WHERE p.projectId = ? AND p.enabled = 1),
+            COALESCE((SELECT mode FROM project_diagnostic_capture WHERE projectId = ?), 'enhanced'),
+            COALESCE((SELECT generation FROM project_reasoning_summaries WHERE projectId = ?), 0)
           ${this.hasTurnRequests ? "AND NOT EXISTS (SELECT 1 FROM turn_requests r WHERE r.workId = ? AND r.draftTurn = 1)" : ""}`)
           .run(
             id,
             workId,
+            options.projectId,
+            options.projectId,
             options.projectId,
             ...(this.hasTurnRequests ? [workId] : []),
           );

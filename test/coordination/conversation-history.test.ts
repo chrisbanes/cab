@@ -1517,3 +1517,250 @@ test("normalizePlan maps both runtimes' statuses and rejects invalid or oversize
   assert.equal(normalizePlan([{ text: 1, status: "pending" }]), undefined);
   assert.equal(normalizePlan([{ text: "a", status: "done" }]), undefined);
 });
+
+test("reasoning storage caps Unicode after redaction, re-redacts reads, and durably fences erasure", async () => {
+  const runtime = new HistoryRuntime();
+  const f = await fixture(runtime);
+  runtime.plan({ id: "reasoning-storage-turn" });
+  try {
+    f.activate();
+    const turn = await runtime.waitForTurnStart();
+    await waitForExecutionState(f.service, f.workId, "running");
+    const db = serviceDatabase(f.service);
+    const intent = f.service.list().find((i) => i.workId === f.workId)!;
+    const row = db
+      .prepare(`SELECT b.*, r.workRevision FROM task_execution_bindings b
+      JOIN task_work_revisions r USING(workId) WHERE b.workId = ?`)
+      .get(f.workId)!;
+    const binding = {
+      workId: f.workId,
+      taskId: f.taskId,
+      assignmentId: f.assignmentId,
+      assignmentVersion: Number(row.assignmentVersion),
+      instructionsRevision: Number(row.instructionsRevision),
+      profileRevision: Number(row.profileRevision),
+      conversationRevision: Number(row.conversationRevision),
+      workRevision: Number(row.workRevision),
+      ...turn,
+    };
+    db.prepare(
+      "UPDATE task_execution_bindings SET harness = 'claude' WHERE workId = ?",
+    ).run(f.workId);
+    db.prepare(`UPDATE execution_intent_reasoning_summaries SET enabled = 1,
+      captureMode = 'enhanced', generation = 0 WHERE intentId = ?`).run(
+      intent.id,
+    );
+    const history = f.service.conversationHistoryStore()!;
+    const clear = () => db.exec("DELETE FROM conversation_reasoning_summaries");
+    const record = (
+      text: string | undefined,
+      exclusions: readonly string[] | undefined = [],
+    ) => history.recordReasoningSummary(binding, intent.id, text, exclusions);
+    const read = (exclusions: readonly string[] = []) =>
+      history.readReasoningSummary(binding, () => exclusions)!;
+    for (const char of ["a", "😀"]) {
+      for (const count of [16_000, 16_001]) {
+        clear();
+        record(char.repeat(count));
+        assert.equal(read().text, char.repeat(16_000));
+        assert.equal(read().truncated, Number(count > 16_000));
+        assert.equal(read().stored, 1);
+      }
+    }
+    for (const [text, exclusions, forbidden] of [
+      [
+        "a".repeat(15_990) + "PRIVATE_INSTRUCTION_CANARY tail",
+        ["PRIVATE_INSTRUCTION_CANARY"],
+        "PRIVATE",
+      ],
+      [
+        "a".repeat(15_990) + " token=TOKEN_VALUE_CANARY tail",
+        [],
+        "TOKEN_VALUE",
+      ],
+      [
+        "a".repeat(15_985) + " Bearer BEARER_VALUE_CANARY tail",
+        [],
+        "BEARER_VALUE",
+      ],
+      [
+        "a".repeat(15_990) + "/workspace/private/path tail",
+        ["/workspace/private/path"],
+        "/workspace",
+      ],
+    ] as const) {
+      clear();
+      record(text, exclusions);
+      const raw = String(
+        db.prepare("SELECT text FROM conversation_reasoning_summaries").get()
+          ?.text,
+      );
+      assert.ok(!raw.includes(forbidden));
+      // Slicing first would leave a fragment that the exact-value redactor cannot see.
+      if (exclusions.length)
+        assert.ok(
+          sanitizeConversationText(text.slice(0, 16_000), exclusions)?.includes(
+            forbidden,
+          ),
+        );
+    }
+    clear();
+    record("public NEW_PRIVATE_VALUE tail");
+    assert.equal(read(["NEW_PRIVATE_VALUE"]).text, "public [redacted] tail");
+    assert.equal(
+      history.readReasoningSummary(binding, () => {
+        throw new Error("unavailable");
+      })?.text,
+      null,
+    );
+    for (const exclusions of [undefined, [42] as unknown as string[]]) {
+      clear();
+      record("UNSAFE_CANARY", exclusions);
+      // An explicitly missing context must fail closed (no default at the production seam).
+      if (exclusions !== undefined) assert.equal(read().text, null);
+    }
+    clear();
+    history.recordReasoningSummary(
+      binding,
+      intent.id,
+      "UNSAFE_CANARY",
+      undefined,
+    );
+    assert.equal(read().text, null);
+    for (const [enabled, mode] of [
+      [0, "enhanced"],
+      [1, "baseline"],
+      [1, null],
+    ] as const) {
+      clear();
+      db.prepare(
+        "UPDATE execution_intent_reasoning_summaries SET enabled=?, captureMode=? WHERE intentId=?",
+      ).run(enabled, mode, intent.id);
+      record("UNSOLICITED_CANARY");
+      assert.equal(read().text, null);
+    }
+    clear();
+    db.prepare(
+      "UPDATE execution_intent_reasoning_summaries SET enabled=1,captureMode='enhanced' WHERE intentId=?",
+    ).run(intent.id);
+    const capture = (requested = true) =>
+      new ConversationHistoryCapture({
+        store: history,
+        workId: binding.workId,
+        threadId: binding.threadId,
+        reasoningIntentId: intent.id,
+        reasoningRequested: requested,
+        captureStartExclusions: ["PRIVATE_SPLIT_CANARY"],
+        currentExclusions: () => ["PRIVATE_SPLIT_CANARY"],
+      });
+    const summary = (
+      itemId: string,
+      text: string,
+      turnId = binding.turnId,
+    ) => ({
+      threadId: binding.threadId,
+      turnId,
+      itemId,
+      kind: "reasoning-summary" as const,
+      text,
+    });
+    clear();
+    const buffered = capture();
+    buffered.receive(summary("wrong", "WRONG_TURN_CANARY", "wrong-turn"));
+    buffered.receive(summary("first", "Ordered PRIVATE_SPL"));
+    buffered.receive(summary("first", "Ordered PRIVATE_SPL"));
+    buffered.receive(summary("second", "IT_CANARY tail"));
+    assert.equal(buffered.bind(binding), true);
+    buffered.finish();
+    assert.equal(read().text, "Ordered [redacted] tail");
+    clear();
+    const unbound = capture();
+    unbound.receive(summary("lost", "LOST_BINDING_CANARY"));
+    unbound.discard();
+    unbound.finish();
+    assert.equal(read(), undefined);
+    const disabled = capture(false);
+    disabled.bind(binding);
+    disabled.receive(summary("off", "UNSOLICITED_CANARY"));
+    disabled.finish();
+    assert.equal(read().text, null);
+    for (const input of [
+      "b".repeat(5 * 1024 * 1024),
+      "https://user:" + "URLPASS_".repeat(30_000) + "@example.org",
+      "😀".repeat(40_000),
+      "a".repeat(15_990) + ' token="' + "secret words ".repeat(15_000),
+    ]) {
+      clear();
+      const bounded = capture();
+      bounded.bind(binding);
+      bounded.receive(summary("large", input));
+      bounded.finish();
+      assert.equal(read().truncated, 1);
+      assert.ok(read().text);
+      assert.doesNotMatch(read().text!, /secret|URLPASS_/);
+      assert.ok(Array.from(read().text!).length <= 16_000);
+    }
+    clear();
+    record("ERASE_CANARY");
+    assert.equal(read().stored, 1);
+    const deletion = {
+      type: "project.reasoning.delete",
+      projectId: f.projectId,
+      expectedVersion: Number(f.service.domain().project(f.projectId).version),
+      confirmed: true,
+      key: randomUUID(),
+      actor: "operator",
+    };
+    const beforeDelete = capture();
+    beforeDelete.receive(summary("buffered-delete", "PREDELETE_BUFFER_CANARY"));
+    f.service.domain().execute(deletion as never);
+    beforeDelete.bind(binding);
+    beforeDelete.finish();
+    assert.equal(read().text, null);
+    assert.equal(read().stored, 0);
+    assert.equal(
+      db
+        .prepare(
+          "SELECT generation FROM project_reasoning_summaries WHERE projectId=?",
+        )
+        .get(f.projectId)?.generation,
+      1,
+    );
+    f.service.domain().execute(deletion as never);
+    assert.equal(
+      db
+        .prepare(
+          "SELECT generation FROM project_reasoning_summaries WHERE projectId=?",
+        )
+        .get(f.projectId)?.generation,
+      1,
+    );
+    clear();
+    record("LATE_CANARY");
+    assert.equal(read().text, null);
+    const reopened = new DatabaseSync(
+      join(f.root, "data", "standalone.sqlite"),
+    );
+    try {
+      reopened.exec("DELETE FROM conversation_reasoning_summaries");
+      const afterRestart = new ConversationHistoryStore(reopened);
+      afterRestart.recordReasoningSummary(
+        binding,
+        intent.id,
+        "RESTART_CANARY",
+        [],
+      );
+      assert.equal(
+        afterRestart.readReasoningSummary(binding, () => [])?.text,
+        null,
+      );
+    } finally {
+      reopened.close();
+    }
+    runtime.complete(turn.turnId);
+    await waitForExecutionState(f.service, f.workId, "completed");
+  } finally {
+    await f.service.stop().catch(() => {});
+    rmSync(f.root, { recursive: true, force: true });
+  }
+});
