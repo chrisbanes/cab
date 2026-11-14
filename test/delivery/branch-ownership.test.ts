@@ -1,3 +1,7 @@
+import { backup, DatabaseSync } from "node:sqlite";
+import { DomainStore } from "../../src/core/domain.js";
+import { DeliveryStore } from "../../src/core/delivery.js";
+import { SqliteWorkspaceBindingStore } from "../../src/standalone/workspaces.js";
 import { WorkspaceLifecycleStore } from "../../src/core/workspace-lifecycle.js";
 import { ExecutionState } from "../../src/standalone/state.js";
 import assert from "node:assert/strict";
@@ -801,22 +805,18 @@ test("confirmed new pushes and first merged observation record generation clocks
     profileRevision: 1,
   });
   const workspaceId = randomUUID();
-  life.retain({
-    taskId: w.taskId,
-    workspaceId,
-    path: w.workspace,
-    createdAt: null,
-    repositories: [
-      {
-        repositoryId,
-        sourcePath: w.source,
-        workspacePath: w.workspace,
-        ref: "main",
-        gitCommonDir: null,
-        commit: w.base,
-      },
-    ],
-  });
+  const bindings = new SqliteWorkspaceBindingStore(w.db);
+  bindings.createOrGet(w.taskId, workspaceId, w.workspace, [
+    {
+      repositoryId,
+      sourcePath: w.source,
+      workspacePath: w.workspace,
+      ref: "main",
+      gitCommonDir: null,
+      commit: w.base,
+    },
+  ]);
+  bindings.update(w.taskId, "ready", null);
   const sha = w.commit();
   w.setPush("applied-but-unread");
   const pushed = await w.submit("branch.push", sha);
@@ -849,4 +849,47 @@ test("confirmed new pushes and first merged observation record generation clocks
     w.store.observePrWithinTransaction(w.taskId, merged),
   );
   assert.equal(life.get(workspaceId)?.allMergedAt, mergedAt);
+  const transition = (domain: DomainStore, next: "done" | "open") =>
+    domain.execute({
+      type: "task.configure",
+      actor: "operator",
+      key: randomUUID(),
+      projectId: w.projectId,
+      taskId: w.taskId,
+      expectedVersion: Number(domain.task(w.taskId).version),
+      state: next,
+    });
+  transition(w.domain, "done");
+  transition(w.domain, "open");
+  assert.equal(life.get(workspaceId)?.allMergedAt, null);
+  const file = join(w.root, "reopened.sqlite");
+  await backup(w.db, file);
+  let reopened = new DatabaseSync(file);
+  try {
+    const delivery = new DeliveryStore(reopened),
+      restarted = new WorkspaceLifecycleStore(reopened);
+    delivery.transaction(() =>
+      delivery.observePrWithinTransaction(w.taskId, merged),
+    );
+    const renewed = restarted.get(workspaceId)?.allMergedAt;
+    assert.ok(
+      renewed,
+      "unchanged merged observation establishes the reopened episode",
+    );
+    assert.ok(renewed >= mergedAt);
+    transition(new DomainStore(reopened), "done");
+    assert.equal(restarted.get(workspaceId)?.allMergedAt, renewed);
+    reopened.close();
+    reopened = new DatabaseSync(file);
+    const afterRestart = new DeliveryStore(reopened);
+    afterRestart.transaction(() =>
+      afterRestart.observePrWithinTransaction(w.taskId, merged),
+    );
+    assert.equal(
+      new WorkspaceLifecycleStore(reopened).get(workspaceId)?.allMergedAt,
+      renewed,
+    );
+  } finally {
+    reopened.close();
+  }
 });

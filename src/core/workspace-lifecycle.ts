@@ -52,6 +52,7 @@ export const workspaceGenerationSchema = generationInputSchema.extend({
     .nullable(),
   lastPushAt: time.nullable(),
   allMergedAt: time.nullable(),
+  mergeEpoch: identity.nullable().default(null),
   repositoryClocks: z.array(repositoryClockSchema),
 });
 export type WorkspaceGeneration = z.infer<typeof workspaceGenerationSchema>;
@@ -329,7 +330,19 @@ export class WorkspaceLifecycleStore {
     const generation = this.forWork(taskId, workId);
     if (!generation?.repositories.some((r) => r.repositoryId === repositoryId))
       return;
-    const eventId = `merge:${observationId}`;
+    const current = generation.repositoryClocks.find(
+      (r) => r.repositoryId === repositoryId,
+    );
+    if (
+      current?.changeRequestId === changeRequestId &&
+      current.merged === merged
+    )
+      return;
+    const eventId = `merge:${createHash("sha256")
+      .update(
+        JSON.stringify([generation.mergeEpoch, repositoryId, observationId]),
+      )
+      .digest("hex")}`;
     if (
       this.db
         .prepare(
@@ -586,6 +599,7 @@ export class WorkspaceLifecycleStore {
                   at,
                 };
           if (event.status === null) {
+            generation.mergeEpoch = event.eventId;
             generation.allMergedAt = null;
             for (const repository of generation.repositoryClocks) {
               repository.changeRequestId = null;
@@ -607,6 +621,7 @@ export class WorkspaceLifecycleStore {
           } else {
             generation.lastPushAt = at;
             if (repository.pushedCommit !== event.commit) {
+              generation.mergeEpoch = event.eventId;
               repository.changeRequestId = null;
               repository.merged = null;
               generation.allMergedAt = null;
@@ -615,6 +630,12 @@ export class WorkspaceLifecycleStore {
           repository.pushedCommit = event.commit;
           repository.pushedAt = at;
         } else {
+          if (
+            repository.merged === true &&
+            (repository.changeRequestId !== event.changeRequestId ||
+              !event.merged)
+          )
+            generation.mergeEpoch = event.eventId;
           if (
             repository.changeRequestId !== event.changeRequestId ||
             !event.merged
