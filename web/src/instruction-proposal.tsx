@@ -1,14 +1,21 @@
 import { randomUUID } from "./browser-crypto.js";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { z } from "zod";
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  useSyncExternalStore,
+} from "react";
 import {
   draftingRunReadSchema,
+  operatorCommandSchema,
   projectConfigurationSchema,
   type OperatorFeedbackItem,
   operatorFeedbackPageSchema,
   profileInstructionsSchema,
-  projectInstructionsSchema,
 } from "../../src/operator/contracts.js";
+import { isDefiniteRefusal } from "./command-lifecycle.js";
 import { ClientError } from "./api.js";
 import { Button, StatusBadge } from "./components.js";
 import { lineDiff } from "./issue-improve-model.js";
@@ -23,55 +30,14 @@ import {
   runStateLabel,
   savedLine,
   selectionSummary,
+  proposalJournal,
+  type StoredProposal as Stored,
 } from "./instruction-proposal-model.js";
 import type { TabProps } from "./project-config.js";
 import { DraftOutcome, Panel, submitDraft, useDraft } from "./settings.js";
 import { NativeSelect } from "./ui/native-select.js";
 import { Textarea } from "./ui/textarea.js";
 import "./instruction-proposal.css";
-
-/** What survives a reload: the run being reviewed, its start, and the selection it was asked from. */
-const storedSchema = z.object({
-  runId: z.string().uuid().optional(),
-  /** The start's key and project version, so an unconfirmed start is resent unchanged. */
-  startKey: z.string().uuid().optional(),
-  expectedProjectVersion: z.number().int().positive().optional(),
-  refs: z.array(
-    z.object({
-      kind: z.enum(["message", "follow-up", "comment"]),
-      id: z.string().uuid(),
-      text: z.string(),
-    }),
-  ),
-  target: z.discriminatedUnion("kind", [
-    z.object({ kind: z.literal("project") }),
-    z.object({ kind: z.literal("profile"), profileId: z.string().uuid() }),
-  ]),
-  note: z.string(),
-});
-type Parsed = z.infer<typeof storedSchema>;
-type Stored = Pick<Parsed, "refs" | "target" | "note"> & {
-  runId?: string | undefined;
-  startKey?: string | undefined;
-  expectedProjectVersion?: number | undefined;
-};
-
-const storageKey = (projectId: string) =>
-  `cab.instruction-proposal:${projectId}`;
-// Reaching sessionStorage throws when site data is blocked; the tab then keeps its state in memory.
-function readStored(projectId: string): Stored {
-  try {
-    const raw = sessionStorage.getItem(storageKey(projectId));
-    const parsed = raw ? storedSchema.safeParse(JSON.parse(raw)) : null;
-    if (parsed?.success) return parsed.data;
-  } catch {}
-  return { refs: [], target: { kind: "project" }, note: "" };
-}
-function writeStored(projectId: string, stored: Stored) {
-  try {
-    sessionStorage.setItem(storageKey(projectId), JSON.stringify(stored));
-  } catch {}
-}
 
 const unsettled = (state: InstructionRun["state"]) =>
   state === "queued" || state === "running" || state === "stopping";
@@ -84,15 +50,11 @@ const when = (at: number) => new Date(at).toLocaleString("en-GB");
 
 export function InstructionProposalsTab(p: TabProps) {
   const { projectId, data, client, session } = p;
-  const [stored, setStored] = useState<Stored>(() => readStored(projectId));
+  const journal = useMemo(() => proposalJournal(projectId), [projectId]);
+  const stored = useSyncExternalStore(journal.subscribe, journal.snapshot);
   const change = useCallback(
-    (patch: Partial<Stored>) =>
-      setStored((current) => {
-        const next = { ...current, ...patch };
-        writeStored(projectId, next);
-        return next;
-      }),
-    [projectId],
+    (patch: Partial<Stored>) => journal.change(patch),
+    [journal],
   );
   const [items, setItems] = useState<OperatorFeedbackItem[]>([]);
   const [cursor, setCursor] = useState<string | null>(null);
@@ -110,6 +72,8 @@ export function InstructionProposalsTab(p: TabProps) {
 
   const loadPage = useCallback(
     async (after: string | null, signal?: AbortSignal) => {
+      const currentAuthentication = client.captureAuthenticationScope();
+      const selectionAtStart = journal.snapshot();
       try {
         const query = new URLSearchParams({ limit: "50" });
         if (after) query.set("cursor", after);
@@ -118,6 +82,7 @@ export function InstructionProposalsTab(p: TabProps) {
           operatorFeedbackPageSchema,
           signal,
         );
+        if (signal?.aborted || !currentAuthentication()) return;
         setItems((current) =>
           after ? [...current, ...page.items] : page.items,
         );
@@ -125,14 +90,12 @@ export function InstructionProposalsTab(p: TabProps) {
         const withheld = new Set(
           page.items.filter((item) => !item.available).map((item) => item.id),
         );
-        if (latest.current.refs.some((r) => withheld.has(r.id))) {
-          setStored((current) => {
-            const next = {
-              ...current,
-              refs: current.refs.filter((r) => !withheld.has(r.id)),
-            };
-            writeStored(projectId, next);
-            return next;
+        if (
+          journal.snapshot() === selectionAtStart &&
+          latest.current.refs.some((r) => withheld.has(r.id))
+        ) {
+          change({
+            refs: journal.snapshot().refs.filter((r) => !withheld.has(r.id)),
           });
           setMessage(
             "Selected feedback that is now withheld was removed from the selection.",
@@ -144,7 +107,7 @@ export function InstructionProposalsTab(p: TabProps) {
         if (!signal?.aborted) setListError(true);
       }
     },
-    [client, projectId],
+    [client, projectId, journal, change],
   );
   useEffect(() => {
     const abort = new AbortController();
@@ -162,15 +125,31 @@ export function InstructionProposalsTab(p: TabProps) {
   const readRun = useCallback(
     async (signal?: AbortSignal) => {
       if (!runId) return;
+      const currentAuthentication = client.captureAuthenticationScope();
       try {
         const { data: read } = await client.read(
           `/api/operator/drafting-runs/${runId}`,
           draftingRunReadSchema,
           signal,
         );
-        if (read.kind === "instruction") setRun(read);
+        if (
+          signal?.aborted ||
+          !currentAuthentication() ||
+          !journal.matches(runId)
+        )
+          return;
+        if (read.kind === "instruction" && read.projectId === projectId) {
+          journal.started(runId);
+          setRun(read);
+        }
         setReadFailed(false);
       } catch (error) {
+        if (
+          signal?.aborted ||
+          !currentAuthentication() ||
+          !journal.matches(runId)
+        )
+          return;
         if (!(error instanceof ClientError && error.code === "not-found")) {
           if (!signal?.aborted) setReadFailed(true);
           return;
@@ -186,23 +165,29 @@ export function InstructionProposalsTab(p: TabProps) {
           !resent.current.has(runId)
         ) {
           resent.current.add(runId);
-          await sendStartRef.current({
-            ...latest.current,
-            runId,
-            startKey,
-            expectedProjectVersion,
-          });
+          await sendStartRef.current(
+            {
+              ...latest.current,
+              runId,
+              startKey,
+              expectedProjectVersion,
+            },
+            true,
+          );
           return;
         }
-        change({
-          runId: undefined,
-          startKey: undefined,
-          expectedProjectVersion: undefined,
-        });
+        if (
+          (latest.current.pendingStart && !readOnlyRef.current) ||
+          latest.current.previous
+        ) {
+          setMessage("Couldn’t confirm the request. Try checking it again.");
+          return;
+        }
+        journal.clear();
         setMessage("The proposal is no longer available.");
       }
     },
-    [client, runId, change],
+    [client, projectId, runId, journal],
   );
   const reviewing = run?.state === "proposed";
   // A proposal is read again too, so a target changed elsewhere shows as changed.
@@ -259,6 +244,8 @@ export function InstructionProposalsTab(p: TabProps) {
   /** A request from the selection; a redraft keeps the reviewed run if it cannot start. */
   const start = async (from: Stored, redraft = false) => {
     if (readOnly) return;
+    const currentAuthentication = client.captureAuthenticationScope();
+    const original = journal.snapshot();
     let version = data.project.version;
     if (busy) return;
     if (redraft) {
@@ -277,23 +264,50 @@ export function InstructionProposalsTab(p: TabProps) {
         return setMessage("Couldn’t read the project. Try again.");
       }
     }
+    if (!currentAuthentication() || journal.snapshot() !== original) {
+      setBusy(false);
+      return;
+    }
     const next = {
       ...from,
       runId: randomUUID(),
       startKey: randomUUID(),
       expectedProjectVersion: version,
     };
-    const previous = redraft
-      ? {
-          runId: from.runId,
-          startKey: from.startKey,
-          expectedProjectVersion: from.expectedProjectVersion,
-        }
-      : undefined;
+    const {
+      drafts: _drafts,
+      pendingStart: _pending,
+      previous: _previous,
+      close: _close,
+      ...selection
+    } = from;
+    const command = {
+      type: "instruction.draft.start" as const,
+      key: next.startKey,
+      runId: next.runId,
+      projectId,
+      expectedProjectVersion: version,
+      target: next.target,
+      feedback: next.refs.map(({ kind, id }) => ({ kind, id })),
+      note: next.note,
+    };
+    if (
+      !operatorCommandSchema.safeParse(command).success ||
+      new TextEncoder().encode(JSON.stringify(command)).length > 65536
+    ) {
+      setBusy(false);
+      setMessage(
+        "Couldn’t request a proposal: the request is too large or invalid. Your reviewed proposal is still here.",
+      );
+      return;
+    }
+    next.pendingStart = command;
+    next.previous = redraft ? selection : undefined;
+    next.close = undefined;
     setRun(null);
     setSaved(null);
     change(next);
-    await sendStart(next, previous);
+    await sendStart(next);
   };
   sendStartRef.current = sendStart;
   async function sendStart(
@@ -302,16 +316,20 @@ export function InstructionProposalsTab(p: TabProps) {
       startKey: string;
       expectedProjectVersion: number;
     },
-    /** The run to go back to when a redraft is refused. */
-    previous?: Pick<Stored, "runId" | "startKey" | "expectedProjectVersion">,
+    reconciling = false,
   ) {
+    const currentAuthentication = client.captureAuthenticationScope();
+    const current = () =>
+      currentAuthentication() &&
+      journal.matches(next.runId) &&
+      journal.snapshot().startKey === next.startKey;
     setBusy(true);
     setMessage("");
     setReadFailed(false);
     startingId.current = next.runId;
     const result = await client
       .command(
-        {
+        next.pendingStart ?? {
           type: "instruction.draft.start",
           key: next.startKey,
           runId: next.runId,
@@ -324,21 +342,31 @@ export function InstructionProposalsTab(p: TabProps) {
         session.csrfToken,
       )
       .finally(() => {
-        startingId.current = null;
-        setBusy(false);
+        if (currentAuthentication() && journal.matches(next.runId)) {
+          startingId.current = null;
+          setBusy(false);
+        }
       });
-    if (result.state === "recorded") return;
-    if (result.state === "unknown")
+    if (!current()) return;
+    if (
+      result.state === "recorded" &&
+      result.receipt.kind === "drafting" &&
+      result.receipt.key === next.startKey &&
+      result.receipt.runId === next.runId &&
+      result.receipt.operation === "start"
+    ) {
+      journal.started(next.runId);
+      return;
+    }
+    if (
+      result.state === "unknown" ||
+      result.state === "recorded" ||
+      (reconciling && !isDefiniteRefusal(result))
+    )
       return setMessage(
         "Couldn’t confirm the request. It is checked again when the page reads it.",
       );
-    change(
-      previous ?? {
-        runId: undefined,
-        startKey: undefined,
-        expectedProjectVersion: undefined,
-      },
-    );
+    journal.refused(next.runId);
     const fields = result.state === "rejected" ? (result.fieldPaths ?? []) : [];
     setMessage(
       result.state === "conflict"
@@ -361,29 +389,51 @@ export function InstructionProposalsTab(p: TabProps) {
   }
   const settle = async (disposition: "accept" | "discard") => {
     if (!runId) return false;
+    const currentAuthentication = client.captureAuthenticationScope();
+    const close = journal.snapshot().close ?? {
+      runId,
+      key: randomUUID(),
+      disposition,
+    };
+    if (
+      !journal.matches(runId) ||
+      close.runId !== runId ||
+      close.disposition !== disposition
+    )
+      return false;
+    journal.change({ close });
     const result = await client.command(
-      { type: "drafting.settle", key: randomUUID(), runId, disposition },
+      { type: "drafting.settle", ...close },
       session.csrfToken,
     );
-    return result.state === "recorded";
+    return (
+      currentAuthentication() &&
+      journal.matches(runId) &&
+      result.state === "recorded"
+    );
   };
   const stop = async () => {
     if (!runId) return;
+    const currentAuthentication = client.captureAuthenticationScope();
     setBusy(true);
     setMessage("");
     const result = await client.command(
       { type: "drafting.stop", key: randomUUID(), runId },
       session.csrfToken,
     );
+    if (!currentAuthentication() || !journal.matches(runId)) return;
     setBusy(false);
     if (result.state !== "recorded")
       setMessage("Couldn’t stop the proposal. Try again.");
     await readRun();
   };
   const reject = async () => {
+    if (!runId) return;
+    const currentAuthentication = client.captureAuthenticationScope();
     setBusy(true);
     setMessage("");
     const done = await settle("discard");
+    if (!currentAuthentication() || !journal.matches(runId)) return;
     setBusy(false);
     if (done) {
       setMessage("Rejected the proposal. The instructions are unchanged.");
@@ -393,12 +443,10 @@ export function InstructionProposalsTab(p: TabProps) {
   const clear = () => {
     setMessage("");
     setReadFailed(false);
-    change({
-      runId: undefined,
-      startKey: undefined,
-      expectedProjectVersion: undefined,
-    });
+    setBusy(false);
+    journal.clear();
     setRun(null);
+    setSaved(null);
   };
 
   return (
@@ -416,6 +464,14 @@ export function InstructionProposalsTab(p: TabProps) {
                   type="button"
                   variant="secondary"
                   disabled={busy}
+                  onClick={() => void readRun()}
+                >
+                  Try again
+                </Button>
+                <Button
+                  type="button"
+                  variant="secondary"
+                  disabled={busy}
                   onClick={clear}
                 >
                   New selection
@@ -426,18 +482,28 @@ export function InstructionProposalsTab(p: TabProps) {
         ) : run?.runId === runId && run ? (
           <Review
             {...p}
+            key={run.runId}
+            journal={journal}
             run={run}
             busy={busy}
             saved={saved}
             onSaved={async (revision) => {
+              const currentAuthentication = client.captureAuthenticationScope();
+              if (!journal.matches(run.runId)) return;
               setSaved(savedLine(revision));
               p.refreshConfiguration();
               // The target has changed now, so Accept is not offered again even if this fails.
-              if (!(await settle("accept")))
+              if (
+                !readOnly &&
+                !(await settle("accept")) &&
+                currentAuthentication() &&
+                journal.matches(run.runId)
+              )
                 setMessage(
                   "Saved. The proposal could not be closed; it expires on its own. Choose New selection to continue.",
                 );
-              await readRun();
+              if (currentAuthentication() && journal.matches(run.runId))
+                await readRun();
             }}
             reread={() => void readRun()}
             stop={stop}
@@ -588,6 +654,12 @@ export function InstructionProposalsTab(p: TabProps) {
             </form>
           </Panel>
         )}
+        {!journal.available && (
+          <p className="body" role="status">
+            Reload recovery is unavailable because this tab cannot save browser
+            data. Your changes remain available on this page.
+          </p>
+        )}
         {message && (
           <p className="body" role="status">
             {message}
@@ -601,6 +673,7 @@ export function InstructionProposalsTab(p: TabProps) {
 function Review(
   p: TabProps & {
     run: InstructionRun;
+    journal: ReturnType<typeof proposalJournal>;
     busy: boolean;
     saved: string | null;
     onSaved: (revision: number | null) => Promise<void>;
@@ -618,7 +691,15 @@ function Review(
   const current = target?.observedInstructions ?? "";
   // The edited text lives in the run's draft, so it survives leaving the tab.
   const readOnly = Boolean(p.readOnly);
-  const d = useDraft(p.drafts, `instruction-proposal:${run.runId}`, readOnly);
+  const d = useDraft(
+    p.drafts,
+    `instruction-proposal:${run.runId}`,
+    readOnly,
+    p.journal.recovery(run),
+  );
+  useEffect(() => {
+    void d.verifyRecovery(client);
+  }, [d, client]);
   const finalText =
     typeof d.values.instructions === "string"
       ? d.values.instructions
@@ -644,27 +725,32 @@ function Review(
     if (d.phase !== "recorded" || reported.current) return;
     reported.current = true;
     void (async () => {
-      // The outcome names the revision the save created.
-      let revision: number | null = null;
-      try {
-        revision =
-          target?.kind === "profile" && target.profileId
-            ? (
-                await client.read(
-                  `/api/operator/profiles/${target.profileId}/instructions`,
-                  profileInstructionsSchema,
-                )
-              ).data.currentRevision
-            : (
-                await client.read(
-                  `/api/operator/projects/${run.projectId}/instructions`,
-                  projectInstructionsSchema,
-                )
-              ).data.currentRevision;
-      } catch {}
+      const currentAuthentication = client.captureAuthenticationScope();
+      const receipt = d.receipt;
+      let revision: number | null =
+        receipt?.kind === "configuration" &&
+        receipt.result.commandType === "project.configure"
+          ? receipt.result.instructionsRevision
+          : null;
+      if (
+        receipt?.kind === "configuration" &&
+        receipt.result.commandType === "profile.configure"
+      ) {
+        try {
+          const read = await client.read(
+            `/api/operator/profiles/${receipt.result.resourceId}/instructions`,
+            profileInstructionsSchema,
+          );
+          if (read.data.summary.version === receipt.result.version)
+            revision = read.data.currentRevision;
+        } catch {
+          /* The saved configuration is known; its exact instructions revision may be unavailable. */
+        }
+      }
+      if (!currentAuthentication() || !p.journal.matches(run.runId)) return;
       await p.onSaved(revision);
     })();
-  }, [d.phase, client, p, run.projectId, target]);
+  }, [d.phase, d.receipt, client, p, run.runId]);
   const command = () =>
     target?.kind === "profile"
       ? {
@@ -863,6 +949,16 @@ function Review(
               d.phase === "rejected") && (
               <p className="body" role="status">
                 {block}
+              </p>
+            )}
+          {d.phase === "recorded" &&
+            d.receipt?.kind === "configuration" &&
+            "version" in d.receipt.result &&
+            run.targetCurrent &&
+            run.targetCurrent.version !== d.receipt.result.version && (
+              <p className="body" role="status">
+                Instructions changed again after this save. This confirmation
+                describes your earlier save.
               </p>
             )}
           <DraftOutcome

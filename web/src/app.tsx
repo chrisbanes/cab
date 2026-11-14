@@ -1,3 +1,4 @@
+import { purgeProposalRecovery } from "./instruction-proposal-model.js";
 import { randomUUID } from "./browser-crypto.js";
 import { ProjectDeliveryWarning } from "./project-delivery-warning.js";
 import { visibleProjects } from "./project-lifecycle-model.js";
@@ -595,6 +596,7 @@ export function App() {
     clientRef.current?.invalidateAuthentication();
     acceptedIdentity.current = null;
     setLogoutPending(false);
+    purgeProposalRecovery();
     drafts.current.purge();
     taskStates.current.purge();
     questionStates.current.purge();
@@ -622,6 +624,7 @@ export function App() {
           clearPrivateNavigation();
         }
         client.invalidateAuthentication();
+        if (acceptedIdentity.current) purgeProposalRecovery();
         drafts.current.purge();
         taskStates.current.purge();
         questionStates.current.purge();
@@ -1041,6 +1044,7 @@ export function App() {
     client.invalidateAuthentication();
     acceptedIdentity.current = null;
     const isCurrentScope = client.captureAuthenticationScope();
+    purgeProposalRecovery();
     drafts.current.purge();
     taskStates.current.purge();
     questionStates.current.purge();

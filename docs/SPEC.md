@@ -2019,12 +2019,30 @@ keeps its meaning ([ADR-1013](adr/1013-project-owned-drafting-runs.md)).
     `project.configure` or `profile.configure` with the reviewed text, offered only while
     the target is unchanged since the run started (the same instructions revision for a
     project, the same text for an agent) and the final text differs; an unknown outcome
-    is checked by resending the same key and body. It creates the target's next
+    freezes the original key and body and offers Check outcome. Reload recovery first
+    reads that exact operation by scope, command type and key; browser-stored commands
+    and receipts alone never establish a save. Only an explicit check may resend the
+    frozen command under current write gates. It creates the target's next
     revision; new assignments use it and existing assignments keep their captured
     revision until Apply current instructions. Earlier wording is restored with the
     existing restore-revision workflow. After a confirmed save the run is settled as
-    accepted; Reject discards it and Redraft starts a new run from the same selection.
-    A changed target makes Accept unavailable and offers Redraft.
+    accepted; a failed or unconfirmed close remains distinct from the confirmed save
+    and retains its close key across reload. Confirmation names only the verified
+    save's revision, or says the instructions were saved when that exact revision is
+    unavailable. A later independent edit is shown separately.
+    Reject discards it and Redraft starts a new run from the same selection. The tab
+    retains the previous reviewed run and its edited draft until the replacement is
+    confirmed: a definite refusal restores it; an unknown start keeps both identities
+    and checks the original request. Run-read failure alone is not a refusal.
+    Recovery uses bounded per-tab session storage for the current and previous run,
+    only opting proposal drafts into configuration persistence. Storage failure keeps
+    current-page edits and discloses the reload limit. New selection prunes run recovery;
+    sign-out, expiry and replacement of an accepted authentication identity purge it
+    and fence late callbacks. Initial session acceptance after reload permits recovery.
+    A changed target makes Accept unavailable and offers Redraft. Loading or failed
+    project lifecycle reads show their resource status and Retry, never archived
+    truth; mutation tabs need usable direct-ID project data. A failed refresh retains
+    a mounted draft while the last usable lifecycle remains available.
 - **Operator CLI.** The CLI does not offer drafting, Improve with lead or instruction
   proposals; see [Operator CLI](design/operator-cli.md).
 
