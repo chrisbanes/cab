@@ -154,7 +154,12 @@ Settings also offers **Delete collected reasoning** (`project.reasoning.delete`)
 explicit, irreversible confirmation. Deletion is safe to repeat and leaves the
 setting unchanged. An admitted on/enhanced Claude turn requests provider summaries;
 only completed, explicit lead `thinking` blocks contribute. Codex requests and
-ordinary conversation, CLI and execution-health projections are unchanged.
+ordinary conversation and CLI reads contain no summary text. Execution detail and
+events report `collected` for valid retained exact-bound summaries with current
+redaction available, `unavailable` for an admitted on/enhanced turn without them,
+and `not-requested` for off/baseline or no recorded eligible admission. Unknown
+historical metadata cannot prove the setting was off. Current settings and diagnostic
+pruning do not rewrite these facts; confirmed erasure changes collected to unavailable.
 
 Summaries are stored separately, bound to the exact task, assignment, conversation
 and turn, with admission and stored-content facts. Each turn retains at most the

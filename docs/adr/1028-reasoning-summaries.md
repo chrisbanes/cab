@@ -8,10 +8,10 @@ Operators reviewing or debugging an agent's work need usable explanations of its
 choices. The [probes](../evidence/reasoning-summary-probes-2026-11-06.md) found usable
 provider-produced summaries from Claude Code but not from Codex. The project setting,
 admission snapshot, Claude requesting, separate turn storage and confirmed erasure
-are implemented. Web/CLI display and capture-health values remain pending; current
-execution reads still report `reasoning: "not-collected"` and ordinary conversation
-reads contain no summaries. Deterministic scripted-runtime tests establish code
-integration, without adding live runtime or release qualification.
+are implemented, including per-execution capture-health values. Web/CLI summary
+display remains pending; ordinary conversation reads contain no summaries.
+Deterministic scripted-runtime tests establish code integration, without adding live
+runtime or release qualification.
 
 ## Decision
 
@@ -40,10 +40,14 @@ debugging. They are not a live progress feed or an audit trail.
   - The CLI shows them in `logs` only with `--verbose`. The reasoning capture note keeps the
     existing `--verbose` and `coverage.notes` behaviour.
 - **Capture health.** Each execution's capture health reports `reasoning` as:
-  - `not-requested` when the setting was off or capture was `baseline` for the turn;
-  - `collected` when at least one summary was stored;
-  - `unavailable` otherwise: summaries were requested but none arrived, the runtime or model
-    does not support them, or redaction was unavailable.
+  - `not-requested` for an off/baseline admission or no recorded eligible admission;
+    historical unknowns do not prove the setting was off;
+  - `collected` for a known on/enhanced admission with a valid exact-bound retained
+    stored summary and available current redaction;
+  - `unavailable` for a known on/enhanced admission without that fact, including
+    opted-in Codex, Claude without summaries, confirmed erasure or unavailable redaction.
+  Current settings and diagnostic pruning do not rewrite past admission or independent
+  retained summary facts. Health is neither a completeness claim nor proof of model activity.
 - **Opt-out.** Switching the setting off stops collection for new turns immediately. Existing
   summaries stay until normal retention unless the operator uses **Delete collected
   reasoning**, a confirmed, irreversible service command on the same setting that erases the

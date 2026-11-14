@@ -1,4 +1,9 @@
-import { validateNetworkSettings } from "../operator/network-access.js";
+import {
+  lanOrigins,
+  validateNetworkSettings,
+  type OperatorNetworkSettings,
+} from "../operator/network-access.js";
+import { createHash } from "node:crypto";
 import type { LocalAccess } from "../operator/local-access.js";
 import { cabFaviconSvg } from "../operator/brand.js";
 import {
@@ -45,7 +50,7 @@ import { containsControlCharacters, decodeSegment } from "./operator-routes.js";
 
 type OperatorHttpOptions = {
   web: OperatorWebBoundary;
-  lan?: { address: string; origin?: string | undefined };
+  lan?: NonNullable<OperatorNetworkSettings["lan"]>;
   credentials?: OperatorCredentialStore;
   localAccess?: LocalAccess | undefined;
   /** Opt-in browser push; absent, notification routes answer 404. */
@@ -306,9 +311,7 @@ function writeText(
 export class LocalOperatorHttp {
   private server: Server | undefined;
   private lanServer: Server | undefined;
-  private readonly lan:
-    | { address: string; origin?: string | undefined }
-    | undefined;
+  private readonly lan: OperatorHttpOptions["lan"];
   private readonly browserContext: Readonly<{
     origin: string;
     secureCookie: boolean;
@@ -327,7 +330,14 @@ export class LocalOperatorHttp {
     if (!options?.web)
       throw new Error("operator web UI not built; run npm run build:web");
     this.web = options.web;
-    this.lan = options.lan ? Object.freeze({ ...options.lan }) : undefined;
+    const lan = options.lan
+      ? {
+          ...options.lan,
+          ...(options.lan.origins ? { origins: [...options.lan.origins] } : {}),
+        }
+      : undefined;
+    if (lan?.origins) Object.freeze(lan.origins);
+    this.lan = lan && Object.freeze(lan);
     this.localAccess = options.localAccess;
     this.credentials = options.credentials;
     this.push = options.push;
@@ -348,6 +358,7 @@ export class LocalOperatorHttp {
         { schema: "cab.operator-network/v1", lan: this.lan },
         port,
       );
+    let lanContexts = new Map<string, string>();
     const makeServer = (lan: boolean) => {
       const server = createServer(async (request, response) => {
         let session: OperatorSession | undefined;
@@ -359,12 +370,9 @@ export class LocalOperatorHttp {
               : "";
           const loopbackHost = localOrigin.slice("http://".length);
           const expectedHost = new URL(this.auth.origin).host;
-          const lanOrigin =
-            this.lan &&
-            (this.lan.origin ??
-              `http://${this.lan.address}:${address && typeof address !== "string" ? address.port : port}`);
+          const lanOrigin = lanContexts.get(request.headers.host ?? "");
           const allowed = lan
-            ? !!lanOrigin && request.headers.host === new URL(lanOrigin).host
+            ? lanOrigin !== undefined
             : request.headers.host === loopbackHost ||
               ((!this.lan || this.browserContext.secureCookie) &&
                 request.headers.host === expectedHost);
@@ -382,7 +390,7 @@ export class LocalOperatorHttp {
             origin,
             secureCookie: new URL(origin).protocol === "https:",
             cookieName: this.lan
-              ? `${SESSION_COOKIE}_${lan ? "lan" : origin === localOrigin ? "loopback" : "proxy"}`
+              ? `${SESSION_COOKIE}_${lan ? `lan_${createHash("sha256").update(origin).digest("hex")}` : origin === localOrigin ? "loopback" : "proxy"}`
               : SESSION_COOKIE,
             loopback: !lan && request.socket.remoteAddress === "127.0.0.1",
           });
@@ -505,6 +513,12 @@ export class LocalOperatorHttp {
           throw new Error(
             "Use a distinct HTTPS proxy Host or disable LAN access",
           );
+        lanContexts = new Map(
+          lanOrigins(this.lan, address.port).map((origin) => [
+            new URL(origin).host,
+            origin,
+          ]),
+        );
         const lanServer = makeServer(true);
         this.lanServer = lanServer;
         try {

@@ -14,7 +14,7 @@ import {
 } from "./browse.js";
 import {
   CAPTURE_GAP_COVERAGE,
-  CAPTURE_NOTES,
+  captureNotes,
   captureCoverage,
   workIdArg,
 } from "./browse-execution.js";
@@ -142,7 +142,7 @@ export const logsCommand: BrowseCommand = {
       return browseOutput(ctx, {
         data: { ...d, resumeCursor: resume(d.resumeAfter) },
         observedAt: read.observedAt,
-        notes: CAPTURE_NOTES,
+        notes: captureNotes(d.health.reasoning),
         verboseNotes: true,
         gaps: captureCoverage(d.capture, d.gaps, d.items, d.health.eventSource),
         page: {
@@ -185,6 +185,7 @@ export const logsCommand: BrowseCommand = {
     const signal = ctx.deps.signal;
     const deadline = ctx.deps.now() + maxDuration * 1000;
     const shown = new Map<string, number>();
+    let lastReasoning: Page["data"]["health"]["reasoning"] | undefined;
     let failures = 0;
     let reason: string;
     for (;;) {
@@ -215,6 +216,7 @@ export const logsCommand: BrowseCommand = {
         throw error;
       }
       const d = page.data;
+      lastReasoning = d.health.reasoning;
       for (const item of d.items)
         if (jsonl) emit("item", { workId: d.workId, item });
         else out(itemLine(item));
@@ -248,7 +250,9 @@ export const logsCommand: BrowseCommand = {
       out(
         [
           `End: ${reason}`,
-          ...(v.verbose ? CAPTURE_NOTES.map((n) => `Note: ${n}`) : []),
+          ...(v.verbose
+            ? captureNotes(lastReasoning).map((n) => `Note: ${n}`)
+            : []),
           `Resume: ${nextCommand(ctx, resumeCursor)}`,
         ].join("\n"),
       );

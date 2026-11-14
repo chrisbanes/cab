@@ -123,8 +123,7 @@ absence is not evidence that no tool ran; the wider conversation projection is i
 [ADR-1025](../adr/1025-conversation-activity-plans-and-change-notifications.md). Raw
 provider reasoning is never collected. [ADR-1028](../adr/1028-reasoning-summaries.md)
 implements opt-in provider summaries for admitted on/enhanced Claude task turns in
-separate, redacted turn storage. CLI display and new capture-health values remain
-pending; ordinary CLI reads do not disclose those summaries.
+separate, redacted turn storage. CLI summary display remains pending; ordinary CLI reads do not disclose those summaries.
 
 The capture is a fourth dedicated instruction projection:
 `GET /api/operator/executions/WORK_ID/inputs[?compare=current]` returns each
@@ -141,10 +140,18 @@ labelled `reconstructed` block from retained revisions. `GET
 redact all instruction text. All four are read routes for both credential scopes
 and sessions, gated by the capabilities `execution.read` and, for `logs`,
 `diagnostics.read`. A work id identifies an execution; direct runs and unknown or
-invisible work read as not found. Every read reports capture health:
-`toolObservation: "incomplete"` and `reasoning: "not-collected"`. Once implemented,
-ADR-1028 replaces that reasoning value with `collected`, `not-requested` or
-`unavailable` per execution.
+invisible work read as not found. Detail and event reads report capture health with `toolObservation: "incomplete"`.
+Reasoning is `collected` when an admitted on/enhanced turn retains a valid,
+exact-bound stored summary and current redaction is available; otherwise that
+request is `unavailable`. Off, baseline or no recorded eligible admission reports
+`not-requested`; unknown historical metadata does not prove the setting was off.
+Current settings do not rewrite past admission. Confirmed erasure changes a formerly
+collected turn to unavailable. Opted-in Codex and Claude turns without summaries
+are unavailable. These values describe retained capture, not model activity or completeness.
+CLI detail and logs use the matching reasoning note under `--verbose` and in JSON
+`coverage.notes`. Lists use a neutral per-execution capture note without extra reads.
+Follow prints notes once, using its last successful page, or the neutral note if
+interrupted before any page. JSONL records retain their existing shape.
 `GET /api/operator/readiness` (the `doctor` command) is a read route for both
 credential scopes and sessions, gated by `diagnostics.read`; its checks are
 read-only and value-free.

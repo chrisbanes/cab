@@ -33,11 +33,13 @@ There is one operator password, not account or role administration.
 ## HTTP boundary
 
 The server binds to `127.0.0.1` by default. An explicitly configured IPv4
-address adds a listener on the same port. That listener accepts only its configured
-HTTP Host; loopback accepts its numeric Host and an existing HTTPS proxy Host.
+address adds a listener on the same port. That listener maps each exact configured HTTP Host to its canonical origin; loopback accepts its numeric Host and an existing HTTPS proxy Host.
 A proxy Host that equals the loopback Host is ambiguous: use a distinct HTTPS
 proxy Host or disable LAN access. LAN-enabled contexts use distinct cookie names
-so browsers can retain sessions on the same hostname across ports. It does not trust
+so browsers can retain sessions on the same hostname across ports. Each LAN
+cookie name includes the full SHA-256 of its selected canonical origin; the
+host-only cookie attributes and authentication origin fence remain enforced.
+A POST Origin must equal the selected origin, not another member of the set. It does not trust
 `X-Forwarded-Host`, `X-Forwarded-Proto`
 or other forwarded headers. Remote TLS termination and private routing are
 provided by a separately managed transport such as a narrowly configured

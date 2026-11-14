@@ -407,3 +407,102 @@ for (const engine of ["chromium", "webkit"] as const) {
     },
   );
 }
+
+test("one browser signs in independently through IP and a resolved LAN hostname", async (_t, journey) => {
+  const { createHash } = await import("node:crypto");
+  const { signOutFromSidebar } = await import(
+    "../fixtures/operator-account.js"
+  );
+  const f = await journey.start("fixture.create", () =>
+    createOperatorFixture(null, undefined, undefined, journey.fixtureOptions),
+  );
+  let browser: Browser | undefined;
+  journey.cleanup(
+    (primary) => f.close(browser, primary),
+    "fixture.close",
+    () => f.lifecycle.steps,
+  );
+  const probe = await f.startWeb();
+  const port = Number(new URL(probe.origin).port);
+  await probe.close();
+  const address = testLanAddress(),
+    ip = `http://${address}:${port}`,
+    alias = `http://cab-lan.test:${port}`;
+  const web = await f.startWeb(undefined, undefined, undefined, undefined, {
+    address,
+    port,
+    origins: [ip, alias],
+  });
+  const observed: { url: string; host: string | undefined }[] = [];
+  (
+    web.http as unknown as { lanServer: import("node:http").Server }
+  ).lanServer.on("request", (req) => {
+    observed.push({ url: req.url ?? "", host: req.headers.host });
+  });
+  browser = await journey.start("browser.launch", () =>
+    chromium.launch({
+      args: [`--host-resolver-rules=MAP cab-lan.test ${address}`],
+    }),
+  );
+  const context = await browser.newContext();
+  const ipPage = await context.newPage(),
+    aliasPage = await context.newPage();
+  const errors: string[] = [];
+  for (const page of [ipPage, aliasPage]) {
+    journey.observe(page);
+    page.on("pageerror", (error) => errors.push(error.message));
+    page.setDefaultTimeout(5000);
+  }
+  const calibration = await aliasPage.goto(`${alias}/api/operator/session`);
+  assert.ok(calibration);
+  assert.equal(calibration.status(), 200);
+  assert.equal(calibration.url(), `${alias}/api/operator/session`);
+  assert.equal((await calibration.json()).authenticated, false);
+  assert.ok(
+    observed.some(
+      (request) =>
+        request.url === "/api/operator/session" &&
+        request.host === `cab-lan.test:${port}`,
+    ),
+  );
+  const login = async (page: import("playwright").Page, origin: string) => {
+    await page.goto(`${origin}/`);
+    await page.getByLabel("Password", { exact: true }).fill(web.password);
+    await page.getByRole("button", { name: "Sign in", exact: true }).click();
+    await page
+      .getByLabel("Password", { exact: true })
+      .waitFor({ state: "hidden" });
+    assert.equal(new URL(page.url()).origin, origin);
+  };
+  const authenticated = async (page: import("playwright").Page) =>
+    page.evaluate(
+      async () =>
+        (await (await fetch("/api/operator/session")).json())
+          .authenticated as boolean,
+    );
+  await login(ipPage, ip);
+  await aliasPage.goto(`${alias}/`);
+  await aliasPage.getByLabel("Password", { exact: true }).waitFor();
+  assert.equal(await authenticated(aliasPage), false);
+  await login(aliasPage, alias);
+  for (const page of [ipPage, aliasPage]) {
+    await page.reload();
+    assert.equal(await authenticated(page), true);
+  }
+  const cookies = await context.cookies();
+  for (const origin of [ip, alias]) {
+    const name = `cab_operator_session_lan_${createHash("sha256").update(origin).digest("hex")}`;
+    const cookie = cookies.find((cookie) => cookie.name === name);
+    assert.ok(cookie);
+    assert.equal(cookie.httpOnly, true);
+    assert.equal(cookie.sameSite, "Strict");
+    assert.equal(cookie.secure, false);
+  }
+  await signOutFromSidebar(ipPage);
+  await ipPage.getByLabel("Password", { exact: true }).waitFor();
+  await aliasPage.reload();
+  assert.equal(await authenticated(aliasPage), true);
+  await login(ipPage, ip);
+  assert.equal(new URL(aliasPage.url()).origin, alias);
+  assert.deepEqual(errors, []);
+});

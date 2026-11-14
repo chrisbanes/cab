@@ -190,12 +190,18 @@ release or cutover gates. Preserve the task workspace behaviour. Recorded eviden
 ### LAN operator access acceptance
 
 A disposable service with an explicitly configured non-loopback IPv4 address
-binds it and numeric loopback on one port. Browser sessions are origin-bound;
+binds it and numeric loopback on one port. A protected nonempty origin set maps
+exact Hosts to canonical HTTP origins; legacy singleton files retain their exact
+allowlist and bytes. Configure/install cover repeated origins, explicit IP removal,
+reset/off, complete desired-origin output and protected atomic rollback. Browser
+sessions use origin-specific SHA-256 cookie namespaces and remain origin-bound;
 scoped tokens retain their permissions and the local OS-account capability is
 rejected on LAN. A failed second bind releases the loopback listener and publishes
 no ready endpoint. Chromium and WebKit journeys exercise LAN sign-in, a comment,
 keyboard interaction, notification availability, independent sessions and restart;
-a same-host TLS proxy checks the shared-host cookie boundary. Offline host
+a same-host TLS proxy checks the shared-host cookie boundary. A Chromium journey
+signs in independently at IP and a locally resolved hostname on the same listener;
+renamed-cookie HTTP tests independently enforce session/CSRF/review ownership. Offline host
 configuration has separate lifecycle coverage. These tests do not establish
 second-device routing.
 
@@ -325,8 +331,11 @@ cuts, current exclusions, failures, deletion fencing and restart. Exhaustive pro
 deletion fixtures include summary rows and preserve unrelated history and safety
 records. Codex wire requests and reasoning exclusion remain unchanged. CLI parsing
 and the Settings toggle/keyboard deletion confirmation retain their existing coverage.
-These checks do not establish live runtime/release qualification, summary rendering,
-verbose CLI display or new capture-health values.
+Metadata and both execution health projections cover exact binding, retained
+conversations, historical admission, current-setting independence, Codex/no-summary
+unavailability, redaction failure and deletion. CLI tests cover per-execution notes,
+neutral bounded lists, last-successful-page follow notes, verbosity and JSON coverage.
+These checks do not establish live runtime/release qualification or summary rendering.
 
 | Area | Operations requiring evidence | Scenarios |
 | --- | --- | --- |

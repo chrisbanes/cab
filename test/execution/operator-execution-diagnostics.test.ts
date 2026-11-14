@@ -1,6 +1,11 @@
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import { test } from "node:test";
+import {
+  executionDetailSchema,
+  executionEventsSchema,
+} from "../../src/operator/contracts.js";
+import { ConversationHistoryStore } from "../../src/standalone/conversation-history.js";
 import { ExecutionDiagnosticsStore } from "../../src/standalone/execution-diagnostics.js";
 import { OperatorApi } from "../../src/standalone/operator-api.js";
 import { operatorRouteAuthority } from "../../src/standalone/operator-credentials.js";
@@ -118,7 +123,7 @@ test("execution list and detail report identity, settings and capture coverage",
     ],
   );
   assert.equal(detail.health.toolObservation, "incomplete");
-  assert.equal(detail.health.reasoning, "not-collected");
+  assert.equal(detail.health.reasoning, "not-requested");
   assert.equal(detail.counts.items, 9);
   const absent = await get(`/api/operator/executions/${enc(seed.absent)}`);
   assert.equal(absent.execution.capture, "not-captured");
@@ -277,4 +282,182 @@ test("execution reads are read-only for tokens and sessions", async (t) => {
     assert.equal((await fetch(`${s.origin}${path}`)).status, 401, path);
   }
   assert.equal(databaseDigest(s.f), before);
+});
+
+test("both execution health projections use admitted capture and retained summaries behind privacy fences", async (t) => {
+  const { s, seed, get } = await setup(t);
+  const intentId = randomUUID();
+  const binding = {
+    workId: seed.captured,
+    taskId: seed.taskA,
+    assignmentId: seed.assignmentA,
+    assignmentVersion: 1,
+    instructionsRevision: 1,
+    profileRevision: 1,
+    conversationRevision: 1,
+    workRevision: 1,
+    threadId: "thread-seeded",
+    turnId: "turn-seeded",
+  };
+  const write = s.f.seedPersistedState;
+  write((db) => {
+    db.prepare(`INSERT INTO execution_intents(id,workId,prompt,workspace,state,threadId,turnId,accountType,sandbox,approval)
+      VALUES (?,?,'test',?,'completed',?,?,'chatgpt','workspaceWrite','never')`).run(
+      intentId,
+      seed.captured,
+      s.f.directory,
+      binding.threadId,
+      binding.turnId,
+    );
+    db.prepare(`INSERT INTO task_execution_bindings(workId,taskId,assignmentId,assignmentVersion,instructionsRevision,profileRevision,conversationRevision,harness)
+      VALUES (?,?,?,1,1,1,1,'claude')`).run(
+      seed.captured,
+      seed.taskA,
+      seed.assignmentA,
+    );
+    db.prepare(
+      "INSERT INTO task_work_revisions(workId,assignmentId,conversationRevision,workRevision) VALUES (?,?,1,1)",
+    ).run(seed.captured, seed.assignmentA);
+  });
+  const check = async (expected: string) => {
+    const before = databaseDigest(s.f);
+    const detail = await get(`/api/operator/executions/${enc(seed.captured)}`);
+    const events = await get(
+      `/api/operator/executions/${enc(seed.captured)}/events`,
+    );
+    assert.equal(detail.health.reasoning, expected);
+    assert.equal(events.health.reasoning, expected);
+    for (const [schema, data] of [
+      [executionDetailSchema, detail],
+      [executionEventsSchema, events],
+    ] as const) {
+      assert.ok(schema.safeParse({ data, observedAt: Date.now() }).success);
+      for (const reasoning of ["not-collected", "arbitrary"])
+        assert.equal(
+          schema.safeParse({
+            data: { ...data, health: { ...data.health, reasoning } },
+            observedAt: Date.now(),
+          }).success,
+          false,
+        );
+    }
+    assert.doesNotMatch(
+      JSON.stringify([detail, events]),
+      /SUMMARY_HEALTH_CANARY|SUMMARY_ERROR_CANARY/,
+    );
+    assert.equal(detail.health.toolObservation, "incomplete");
+    assert.equal(databaseDigest(s.f), before);
+  };
+  await check("not-requested");
+  write((db) => {
+    db.prepare(
+      "INSERT INTO project_reasoning_summaries(projectId,enabled,generation) VALUES (?,1,0) ON CONFLICT(projectId) DO UPDATE SET enabled=1",
+    ).run(seed.projectA);
+    db.prepare(
+      "INSERT INTO execution_intent_reasoning_summaries(intentId,enabled,captureMode,generation) VALUES (?,1,NULL,0)",
+    ).run(intentId);
+  });
+  await check("not-requested");
+  for (const [enabled, mode, expected] of [
+    [0, "enhanced", "not-requested"],
+    [1, "baseline", "not-requested"],
+    [1, "enhanced", "unavailable"],
+  ] as const) {
+    write((db) =>
+      db
+        .prepare(
+          "UPDATE execution_intent_reasoning_summaries SET enabled=?,captureMode=? WHERE intentId=?",
+        )
+        .run(enabled, mode, intentId),
+    );
+    await check(expected);
+  }
+  write((db) =>
+    db
+      .prepare(
+        "UPDATE task_execution_bindings SET harness='codex' WHERE workId=?",
+      )
+      .run(seed.captured),
+  );
+  await check("unavailable");
+  write((db) => {
+    db.prepare(
+      "UPDATE task_execution_bindings SET harness='claude' WHERE workId=?",
+    ).run(seed.captured);
+    new ConversationHistoryStore(db).recordReasoningSummary(
+      binding,
+      intentId,
+      undefined,
+      [],
+    );
+  });
+  await check("unavailable");
+  write((db) => {
+    db.prepare(
+      "DELETE FROM conversation_reasoning_summaries WHERE workId=?",
+    ).run(seed.captured);
+    new ConversationHistoryStore(db).recordReasoningSummary(
+      binding,
+      intentId,
+      "SUMMARY_HEALTH_CANARY",
+      [],
+    );
+    db.prepare(
+      "UPDATE project_reasoning_summaries SET enabled=0 WHERE projectId=?",
+    ).run(seed.projectA);
+  });
+  await check("collected");
+  const history = s.f.service.conversationHistoryStore()!;
+  const originalRead = history.hasStoredReasoningSummary;
+  history.hasStoredReasoningSummary = () => {
+    throw new Error("SUMMARY_ERROR_CANARY");
+  };
+  try {
+    await check("unavailable");
+  } finally {
+    history.hasStoredReasoningSummary = originalRead;
+  }
+  const api = new OperatorApi(s.f.service, [s.f.directory]);
+  (api as unknown as { exclusions: () => Promise<undefined> }).exclusions =
+    async () => undefined;
+  assert.equal(
+    (await api.readExecution(seed.captured)).data.health.reasoning,
+    "unavailable",
+  );
+  assert.equal(
+    (await api.readExecutionEvents(seed.captured, new URLSearchParams())).data
+      .health.reasoning,
+    "unavailable",
+  );
+  write((db) => {
+    db.prepare("DELETE FROM diagnostic_items WHERE workId=?").run(
+      seed.captured,
+    );
+    db.prepare("DELETE FROM diagnostic_executions WHERE workId=?").run(
+      seed.captured,
+    );
+  });
+  await check("collected");
+  const deletion = {
+    type: "project.reasoning.delete",
+    projectId: seed.projectA,
+    expectedVersion: Number(
+      s.f.service.domain().project(seed.projectA).version,
+    ),
+    confirmed: true,
+    key: randomUUID(),
+    actor: "operator",
+  };
+  s.f.service.domain().execute(deletion as never);
+  await check("unavailable");
+  // A separate SQLite connection observes the erased facts, as after reopening.
+  write((db) =>
+    assert.equal(
+      new ConversationHistoryStore(db).hasStoredReasoningSummary(
+        binding,
+        intentId,
+      ),
+      false,
+    ),
+  );
 });
