@@ -682,7 +682,7 @@ test("trim records and base-only removal records remain distinct and reject corr
     const baseOnly = {
       ...input,
       workspaceId: randomUUID(),
-      repositories: [input.repositories[0]!],
+      repositories: [{ ...input.repositories[0]!, ref: "main" }],
     };
     store.retain(baseOnly);
     const remove = store.beginOperation(baseOnly, removal());
@@ -702,6 +702,8 @@ test("trim records and base-only removal records remain distinct and reject corr
       ],
     );
     assert.equal(completed.repositories?.[0]?.kind, "base");
+    assert.equal(completed.repositories?.[0]?.branch, "task/one");
+    assert.equal(store.get(baseOnly.workspaceId)?.repositories[0]?.ref, "main");
     assert.deepEqual(store.operations(input), [trimmed]);
     db.prepare(
       "UPDATE workspace_maintenance_operations SET data=? WHERE operationId=?",

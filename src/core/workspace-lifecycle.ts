@@ -838,9 +838,7 @@ export class WorkspaceLifecycleStore {
           proofs.some(
             (proof) =>
               !generation.repositories.some(
-                (r) =>
-                  r.repositoryId === proof.repositoryId &&
-                  r.ref === proof.branch,
+                (r) => r.repositoryId === proof.repositoryId,
               ),
           )
         )
