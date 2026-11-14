@@ -251,6 +251,7 @@ export async function runQualification(input, dependencies = {}) {
         const settled = await bounded(
           backend.reconcile(checkpoint.active, {
             deadline,
+            remaining,
             maxReads: 12,
             onRead: (observation) => {
               checkpoint.active.reconciliationReads ??= [];
@@ -635,23 +636,22 @@ export async function initializeProduction(grant, overrides = {}) {
         db = new DatabaseSync(database);
         openStores();
       },
-      async reconcile(record, { deadline, maxReads, onRead }) {
+      async reconcile(
+        record,
+        { deadline, remaining = () => deadline - Date.now(), maxReads, onRead },
+      ) {
         if (!record.threadId || !record.turnId || !record.runtimeGeneration)
           return false;
         const runtime = runtimes.get(record.harness);
         try {
           await bounded(
             runtime.interruptTurn(record.threadId, record.turnId),
-            Math.min(30_000, deadline - Date.now()),
+            Math.min(30_000, remaining()),
           );
         } catch {
           /* Preserve uncertainty until exact evidence says otherwise. */
         }
-        for (
-          let reads = 0;
-          reads < maxReads && Date.now() < deadline;
-          reads++
-        ) {
+        for (let reads = 0; reads < maxReads && remaining() > 0; reads++) {
           const evidence = state.runtimeTerminal(
             record.threadId,
             record.turnId,
