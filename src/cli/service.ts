@@ -776,7 +776,7 @@ class Service {
     this.writeRecordText(`${JSON.stringify(record, null, 2)}\n`);
   }
 
-  private writeRecordText(text: string) {
+  private writeRecordText(text: string | Uint8Array) {
     const temporary = `${this.recordPath}.${process.pid}.tmp`;
     const file = openSync(temporary, "w", 0o600);
     try {
@@ -997,7 +997,7 @@ class Service {
         configuration,
       };
       const previousRecord = existsSync(this.recordPath)
-        ? readFileSync(this.recordPath, "utf8")
+        ? readFileSync(this.recordPath)
         : undefined;
       onActivation?.();
       try {
