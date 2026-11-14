@@ -27,6 +27,8 @@ import {
   mergeTimeline,
   pendingBelow,
   prependTimeline,
+  reasoningSummaryLabel,
+  reasoningSummaryTruncationCopy,
   type ConversationItem,
   type AgentPlan,
   type ToolEntry,
@@ -486,6 +488,15 @@ test("hasDelegation finds an assignment's place at any depth, and none when noth
 test("every gap reason has copy", () => {
   for (const reason of timelineGapReasons)
     assert.ok(gapCopy(reason).length > 10, reason);
+});
+
+test("reasoning summary copy labels the disclosure and only reports a truncated retained prefix", () => {
+  assert.equal(reasoningSummaryLabel, "Reasoning summary");
+  assert.equal(
+    reasoningSummaryTruncationCopy(true),
+    "Reasoning summary truncated; only the retained prefix is shown.",
+  );
+  assert.equal(reasoningSummaryTruncationCopy(false), null);
 });
 
 test("the newest page's plans replace the window's, and older pages keep them", () => {
