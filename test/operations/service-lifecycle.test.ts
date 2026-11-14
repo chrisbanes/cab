@@ -4474,14 +4474,15 @@ test("offline configure shows, changes and disables saved settings without conta
     `http://cab.example.test:${f.options.port}`,
   );
   assert.equal(r.code, 0, r.stderr);
-  assert.equal(
-    JSON.parse(r.stdout).settings.lan.origin,
+  assert.deepEqual(JSON.parse(r.stdout).lanOrigins, [
+    `http://192.0.2.10:${f.options.port}`,
     `http://cab.example.test:${f.options.port}`,
-  );
+  ]);
   r = await run("--lan-ip", "192.0.2.11");
   assert.equal(r.code, 0, r.stderr);
   assert.deepEqual(JSON.parse(r.stdout).settings.lan, {
     address: "192.0.2.11",
+    origins: [`http://192.0.2.11:${f.options.port}`],
   });
   const before = readFileSync(file, "utf8");
   for (const args of [
@@ -4499,6 +4500,43 @@ test("offline configure shows, changes and disables saved settings without conta
     assert.notEqual((await run(...args)).code, 0, args.join(" "));
     assert.equal(readFileSync(file, "utf8"), before);
   }
+  const ip = `http://192.0.2.10:${f.options.port}`,
+    a = `http://cab.test:${f.options.port}`,
+    b = `http://other.test:${f.options.port}`;
+  for (const [options, expected] of [
+    [
+      ["--lan-origin", a, "--lan-origin", b],
+      [ip, a, b],
+    ],
+    [
+      ["--lan-origin", ip, "--lan-origin", a],
+      [ip, a],
+    ],
+    [
+      ["--lan-origin", a, "--lan-origin", b, "--no-lan-ip-origin"],
+      [a, b],
+    ],
+  ] as const) {
+    r = await run("--lan-ip", "192.0.2.10", ...options);
+    assert.equal(r.code, 0, r.stderr);
+    assert.deepEqual(JSON.parse(r.stdout).lanOrigins, expected);
+    assert.deepEqual(JSON.parse(r.stdout).settings.lan.origins, expected);
+  }
+  const kept = readFileSync(file);
+  for (const options of [
+    ["--lan-ip", "192.0.2.11"],
+    ["--lan-origin", a, "--lan-origin", a],
+    ["--no-lan-ip-origin"],
+    ["--lan-origin", ip, "--no-lan-ip-origin"],
+    ["--lan-origin", ""],
+    ["--lan-origin", a, "--no-lan-ip-origin", "--no-lan-ip-origin"],
+  ]) {
+    assert.notEqual((await run("--lan-ip", "192.0.2.10", ...options)).code, 0);
+    assert.deepEqual(readFileSync(file), kept);
+  }
+  assert.equal((await run("--no-lan-ip-origin")).code, 2);
+  assert.equal((await run("--lan-ip", "off", "--no-lan-ip-origin")).code, 2);
+  assert.deepEqual(JSON.parse((await run()).stdout).lanOrigins, [a, b]);
   writeFileSync(file, "{broken");
   assert.equal((await run()).code, 1);
   writeFileSync(file, "{}");
@@ -4718,6 +4756,8 @@ test("install CLI accepts LAN options and retains settings when reinstall omits 
       "192.0.2.10",
       "--lan-origin",
       `http://cab.example.test:${f.options.port}`,
+      "--lan-origin",
+      `http://other.test:${f.options.port}`,
     ),
     0,
     out.stderr,
@@ -4726,13 +4766,43 @@ test("install CLI accepts LAN options and retains settings when reinstall omits 
   const saved = readFileSync(path);
   assert.equal(JSON.parse(saved.toString()).lan.address, "192.0.2.10");
   assert.equal(
-    JSON.parse(saved.toString()).lan.origin,
+    JSON.parse(saved.toString()).lan.origins[1],
     `http://cab.example.test:${f.options.port}`,
   );
   assert.equal((await f.uninstall()).code, 0);
   assert.deepEqual(readFileSync(path), saved);
+  assert.deepEqual(JSON.parse(out.stdout).lanOrigins, [
+    `http://192.0.2.10:${f.options.port}`,
+    `http://cab.example.test:${f.options.port}`,
+    `http://other.test:${f.options.port}`,
+  ]);
+  out.stdout = "";
   assert.equal(await run(), 0, out.stderr);
   assert.deepEqual(readFileSync(path), saved);
+  assert.deepEqual(JSON.parse(out.stdout).lanOrigins, [
+    `http://192.0.2.10:${f.options.port}`,
+    `http://cab.example.test:${f.options.port}`,
+    `http://other.test:${f.options.port}`,
+  ]);
+  assert.equal((await f.uninstall()).code, 0);
+  out.stdout = "";
+  assert.equal(
+    await run(
+      "--lan-ip",
+      "192.0.2.10",
+      "--lan-origin",
+      `http://cab.example.test:${f.options.port}`,
+      "--lan-origin",
+      `http://other.test:${f.options.port}`,
+      "--no-lan-ip-origin",
+    ),
+    0,
+    out.stderr,
+  );
+  assert.deepEqual(JSON.parse(out.stdout).lanOrigins, [
+    `http://cab.example.test:${f.options.port}`,
+    `http://other.test:${f.options.port}`,
+  ]);
 });
 
 test("bundled and npm upgrades retain network settings outside the version and snapshot trees", async (t) => {
@@ -4876,17 +4946,28 @@ test("LAN install options are rejected by init-auth", async () => {
     ...io,
     stdin: { isTTY: false },
   } as unknown as CliDeps;
-  const code = await serviceCommand(
+  for (const args of [
     ["init-auth", "--lan-ip", "192.0.2.10"],
-    deps,
-    () => {
-      throw new Error("unexpected connection");
-    },
-    () => {
-      throw new Error("unexpected host");
-    },
-  );
-  assert.equal(code, 2, out.stderr);
+    ...[
+      "init-auth",
+      "serve",
+      "operator",
+      "run",
+      "list",
+      "upgrade",
+      "uninstall",
+    ].map((command) => [command, "--no-lan-ip-origin"]),
+  ]) {
+    const code = await serviceCommand(
+      args,
+      deps,
+      () => {
+        throw new Error("unexpected connection");
+      },
+      () => ({ daemonsDir: () => "/tmp", isRoot: () => false }) as ServiceHost,
+    );
+    assert.equal(code, 2, out.stderr);
+  }
 });
 
 test("invalid install LAN settings do not create a state directory", async (t) => {
@@ -4904,4 +4985,125 @@ test("invalid install LAN settings do not create a state directory", async (t) =
   assert.match(out.stderr, /Invalid operator network address/);
   assert.equal(existsSync(f.stateDir), false);
   assert.deepEqual(f.launchd.calls, []);
+});
+
+test("install reports every desired origin in local, token, staged and verified branches", async (t) => {
+  for (const access of ["local", "token"] as const) {
+    const f = await tarballSetup(t);
+    chmodSync(f.stateDir, 0o700);
+    const origins = [
+      `http://cab.test:${f.options.port}`,
+      `http://other.test:${f.options.port}`,
+    ];
+    const result = await f.run(
+      { access, lan: { address: "192.0.2.10", origins } },
+      new FakeCli(),
+    );
+    assert.equal(result.code, 0, result.stderr);
+    assert.deepEqual(JSON.parse(result.stdout).lanOrigins, origins);
+  }
+  const f = await setup(t);
+  chmodSync(f.stateDir, 0o700);
+  const origins = [
+    `http://cab.test:${f.options.port}`,
+    `http://other.test:${f.options.port}`,
+  ];
+  const first = { lan: { address: "192.0.2.10", origins } };
+  const staged = await f.installDaemon(first);
+  assert.equal(staged.code, 0, staged.stderr);
+  assert.deepEqual(JSON.parse(staged.stdout).lanOrigins, origins);
+  const path = `${join(f.stateDir, "data")}.operator-network.json`,
+    bytes = readFileSync(path);
+  const reordered = await f.installDaemon({
+    lan: { address: "192.0.2.10", origins: [...origins].reverse() },
+  });
+  assert.equal(reordered.code, 0, reordered.stderr);
+  assert.deepEqual(readFileSync(path), bytes);
+  const unequal = await f.installDaemon({ lan: { address: "192.0.2.10" } });
+  assert.equal(unequal.code, 1);
+  assert.match(unequal.stderr, /LAN settings differ/);
+  assert.deepEqual(readFileSync(path), bytes);
+  runSudoSteps(f);
+  const verified = await f.installDaemon();
+  assert.equal(verified.code, 0, verified.stderr);
+  assert.equal(JSON.parse(verified.stdout).started, true);
+  assert.deepEqual(JSON.parse(verified.stdout).lanOrigins, origins);
+  assert.deepEqual(readFileSync(path), bytes);
+});
+
+test("daemon verification compares legacy and set allowlists without expanding a named-only file", async (t) => {
+  const f = await setup(t);
+  chmodSync(f.stateDir, 0o700);
+  const origin = `http://cab.test:${f.options.port}`;
+  assert.equal(
+    (await f.installDaemon({ lan: { address: "192.0.2.10", origin } })).code,
+    0,
+  );
+  const path = `${join(f.stateDir, "data")}.operator-network.json`,
+    bytes = readFileSync(path);
+  const same = await f.installDaemon({
+    lan: { address: "192.0.2.10", origins: [origin] },
+  });
+  assert.equal(same.code, 0, same.stderr);
+  assert.deepEqual(JSON.parse(same.stdout).lanOrigins, [origin]);
+  assert.deepEqual(readFileSync(path), bytes);
+  const omitted = await f.installDaemon();
+  assert.equal(omitted.code, 0, omitted.stderr);
+  assert.deepEqual(JSON.parse(omitted.stdout).lanOrigins, [origin]);
+  assert.deepEqual(readFileSync(path), bytes);
+});
+
+test("install CLI rejects duplicate and contradictory LAN options before mutation", async (t) => {
+  const f = await tarballSetup(t);
+  chmodSync(f.stateDir, 0o700);
+  const a = `http://cab.test:${f.options.port}`;
+  const { io, out } = capture();
+  const deps = { env: { HOME: f.home }, ...io } as unknown as CliDeps;
+  for (const options of [
+    ["--lan-ip", "192.0.2.11"],
+    ["--lan-origin", a, "--lan-origin", a],
+    ["--no-lan-ip-origin"],
+    [
+      "--lan-origin",
+      `http://192.0.2.10:${f.options.port}`,
+      "--no-lan-ip-origin",
+    ],
+    ["--lan-origin", ""],
+    ["--lan-origin", a, "--no-lan-ip-origin", "--no-lan-ip-origin"],
+  ]) {
+    const result = await serviceCommand(
+      [
+        "install",
+        f.tarball,
+        "--state-dir",
+        f.stateDir,
+        "--lan-ip",
+        "192.0.2.10",
+        ...options,
+      ],
+      deps,
+      () => {
+        throw Error("unexpected connection");
+      },
+      () => f.launchd.host(),
+    );
+    assert.equal(result, 2, out.stderr);
+    assert.equal(
+      existsSync(`${join(f.stateDir, "data")}.operator-network.json`),
+      false,
+    );
+    assert.deepEqual(f.launchd.mutations(), []);
+  }
+});
+
+test("omitted install LAN options refuse a malformed saved sidecar before activation", async (t) => {
+  const f = await setup(t);
+  chmodSync(f.stateDir, 0o700);
+  const path = `${join(f.stateDir, "data")}.operator-network.json`;
+  writeFileSync(path, "{malformed", { mode: 0o600 });
+  const result = await f.install();
+  assert.equal(result.code, 1);
+  assert.match(result.stderr, /malformed.*--lan-ip off/);
+  assert.deepEqual(f.launchd.mutations(), []);
+  assert.equal(readFileSync(path, "utf8"), "{malformed");
 });

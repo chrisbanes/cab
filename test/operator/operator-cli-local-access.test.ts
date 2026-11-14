@@ -480,3 +480,82 @@ test("LAN transport accepts scoped tokens but never local capability", async (t)
     403,
   );
 });
+
+test("local capability stays on its socket for every configured LAN Host including localhost", async (t) => {
+  const { createOperatorFixture } = await import("../fixtures/operator-web.js");
+  const { LocalOperatorHttp } = await import(
+    "../../src/standalone/operator.js"
+  );
+  const { OperatorWebBoundary, OperatorWebBundle } = await import(
+    "../../src/standalone/operator-web.js"
+  );
+  const { OperatorApi } = await import("../../src/standalone/operator-api.js");
+  const { request } = await import("node:http");
+  const { testLanAddress } = await import("../fixtures/operator-network.js");
+  const f = await createOperatorFixture();
+  t.after(() => f.close());
+  const probe = await f.startWeb();
+  const port = Number(new URL(probe.origin).port);
+  await probe.close();
+  const address = testLanAddress();
+  const origins = [
+    `http://${address}:${port}`,
+    `http://localhost:${port}`,
+    `http://cab.test:${port}`,
+  ];
+  const fresh = await f.startWeb();
+  const lan = { address, origins: [...origins] };
+  const live = new LocalOperatorHttp(fresh.auth, {
+    web: new OperatorWebBoundary(
+      await OperatorWebBundle.open(join(import.meta.dirname, "../../operator")),
+      new OperatorApi(f.service, []),
+    ),
+    localAccess: f.service.localAccess(),
+    credentials: f.service.operatorCredentials(),
+    lan,
+  });
+  lan.origins.push(`http://evil.test:${port}`);
+  await live.start(port);
+  t.after(() => live.stop());
+  const local = await readLocalAccess(join(f.directory, "data"));
+  const call = (destination: string, host: string) =>
+    new Promise<{ status: number; cookie: unknown }>((resolve, reject) => {
+      const req = request(
+        `${destination}/api/operator/cli`,
+        {
+          headers: {
+            host,
+            authorization: `Bearer ${local.secret}`,
+            "x-forwarded-for": "127.0.0.1",
+          },
+        },
+        (res) => {
+          res.resume();
+          res.on("end", () =>
+            resolve({
+              status: res.statusCode ?? 0,
+              cookie: res.headers["set-cookie"],
+            }),
+          );
+        },
+      );
+      req.on("error", reject);
+      req.end();
+    });
+  assert.equal(
+    (await call(`http://127.0.0.1:${port}`, `127.0.0.1:${port}`)).status,
+    200,
+  );
+  assert.equal(
+    (await call(`http://${address}:${port}`, `evil.test:${port}`)).status,
+    403,
+  );
+  for (const origin of origins) {
+    const denied = await call(
+      `http://${address}:${port}`,
+      new URL(origin).host,
+    );
+    assert.equal(denied.status, 401);
+    assert.equal(denied.cookie, undefined);
+  }
+});

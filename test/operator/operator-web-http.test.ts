@@ -1311,3 +1311,245 @@ test("explicit LAN listener shares the port and isolates browser sessions", asyn
   );
   assert.equal(namedLogin.status, 200);
 });
+
+test("LAN Host selects one origin and rejects renamed foreign session cookies", async (t) => {
+  const { createHash } = await import("node:crypto");
+  const f = await createOperatorFixture();
+  t.after(() => f.close());
+  const task = await seedReviewTask(f, "LAN private review");
+  const probe = await f.startWeb();
+  let port = Number(new URL(probe.origin).port);
+  await probe.close();
+  const address = testLanAddress();
+  const origins = [
+    `http://${address}:${port}`,
+    `http://cab.test:${port}`,
+    `http://localhost:${port}`,
+  ];
+  const web = await f.startWeb(undefined, undefined, undefined, undefined, {
+    address,
+    origins,
+    port,
+  });
+  const cookieName = (origin: string) =>
+    `cab_operator_session_lan_${createHash("sha256").update(origin).digest("hex")}`;
+  const call = (
+    origin: string,
+    path: string,
+    headers: Record<string, string> = {},
+    body?: unknown,
+  ) =>
+    new Promise<{
+      status: number;
+      body: string;
+      cookie: string;
+      setCookie: string;
+    }>((resolve, reject) => {
+      const req = httpRequest(
+        `http://${address}:${port}${path}`,
+        {
+          method: body === undefined ? "GET" : "POST",
+          setHost: false,
+          headers: { host: new URL(origin).host, ...headers },
+        },
+        (res) => {
+          let text = "";
+          res.setEncoding("utf8");
+          res.on("data", (chunk) => {
+            text += chunk;
+          });
+          res.on("end", () =>
+            resolve({
+              status: res.statusCode ?? 0,
+              body: text,
+              cookie: res.headers["set-cookie"]?.[0]?.split(";")[0] ?? "",
+              setCookie: res.headers["set-cookie"]?.[0] ?? "",
+            }),
+          );
+        },
+      );
+      req.on("error", reject);
+      req.end(body === undefined ? undefined : JSON.stringify(body));
+    });
+  for (const origin of origins) {
+    assert.equal((await call(origin, "/")).status, 200);
+    const session = await call(origin, "/api/operator/session", {
+      "x-forwarded-host": "evil.test",
+      "x-forwarded-proto": "https",
+    });
+    assert.equal(session.status, 200);
+    assert.equal(session.cookie.split("=")[0], cookieName(origin));
+    assert.match(session.setCookie, /Path=\/; HttpOnly; SameSite=Strict/);
+    assert.doesNotMatch(session.setCookie, /Domain=|Secure/);
+  }
+  for (const host of [
+    "evil.test",
+    `cab.test:${port + 1}`,
+    `suffix.cab.test:${port}`,
+    "",
+  ]) {
+    const denied = await call(origins[0]!, "/api/operator/session", {
+      host,
+      "x-forwarded-host": new URL(origins[0]!).host,
+    });
+    assert.equal(denied.status, 403);
+    assert.equal(denied.cookie, "");
+  }
+  const login = async (origin: string) => {
+    const anonymous = await call(origin, "/api/operator/session");
+    const response = await call(
+      origin,
+      "/api/operator/login",
+      {
+        cookie: anonymous.cookie,
+        origin,
+        "x-csrf-token": JSON.parse(anonymous.body).csrfToken,
+        "content-type": "application/json",
+      },
+      { password: web.password },
+    );
+    assert.equal(response.status, 200);
+    assert.notEqual(response.cookie, anonymous.cookie);
+    return {
+      cookie: response.cookie,
+      session: JSON.parse(response.body) as { csrfToken: string },
+    };
+  };
+  const a = origins[0]!,
+    b = origins[1]!;
+  const signedA = await login(a),
+    signedB = await login(b);
+  const id = signedA.cookie.slice(signedA.cookie.indexOf("=") + 1);
+  const ownerKey = web.auth.reviewOwnerKey(id, a);
+  assert.ok(ownerKey);
+  const owner = {
+    ownerKey,
+    current: () => web.auth.reviewOwnerKey(id, a) === ownerKey,
+  };
+  const api = new OperatorApi(f.service, []);
+  await api.execute(
+    {
+      type: "review.draft.save",
+      key: randomUUID(),
+      taskId: task.taskId,
+      expectedDraftVersion: 0,
+      draft: { summary: "Private LAN draft", comments: [] },
+    },
+    owner,
+  );
+  const crossedCookie = `${cookieName(b)}=${id}`;
+  for (const path of [
+    "/api/operator/workspace",
+    `/api/operator/tasks/${task.taskId}/review-draft`,
+  ]) {
+    const crossed = await call(b, path, { cookie: crossedCookie });
+    assert.equal(crossed.status, 401);
+    assert.doesNotMatch(crossed.body, /Private LAN draft/);
+  }
+  const headers = (cookie: string, origin: string, csrf: string) => ({
+    cookie,
+    origin,
+    "x-csrf-token": csrf,
+    "content-type": "application/json",
+  });
+  assert.equal(
+    (
+      await call(
+        b,
+        "/api/operator/logout",
+        headers(crossedCookie, b, signedA.session.csrfToken),
+        {},
+      )
+    ).status,
+    401,
+  );
+  const anonymousB = await call(b, "/api/operator/session", {
+    cookie: crossedCookie,
+  });
+  assert.equal(JSON.parse(anonymousB.body).authenticated, false);
+  assert.equal(
+    (
+      await call(
+        b,
+        "/api/operator/logout",
+        headers(signedB.cookie, a, signedB.session.csrfToken),
+        {},
+      )
+    ).status,
+    403,
+  );
+  for (const [origin, signed] of [
+    [a, signedA],
+    [b, signedB],
+  ] as const)
+    assert.equal(
+      JSON.parse(
+        (await call(origin, "/api/operator/session", { cookie: signed.cookie }))
+          .body,
+      ).authenticated,
+      true,
+    );
+  assert.equal(
+    (await api.readLocalReviewDraft(task.taskId, owner)).data.draft.summary,
+    "Private LAN draft",
+  );
+  assert.equal(
+    (
+      await call(
+        b,
+        "/api/operator/logout",
+        headers(signedB.cookie, b, signedB.session.csrfToken),
+        {},
+      )
+    ).status,
+    200,
+  );
+  await web.close();
+  const hostnameOnly = [b, origins[2]!];
+  const restarted = await f.startWeb(
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    { address, origins: hostnameOnly, port },
+  );
+  // Caller mutation cannot change the trusted Host map, including after construction.
+  hostnameOnly.push(a);
+  assert.equal((await call(a, "/api/operator/session")).status, 403);
+  assert.equal(
+    (await call(b, "/api/operator/session")).cookie.split("=")[0],
+    cookieName(b),
+  );
+  await restarted.close();
+  const reordered = await f.startWeb(
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    { address, origins: [...origins].reverse(), port },
+  );
+  assert.equal(
+    (await call(b, "/api/operator/session")).cookie.split("=")[0],
+    cookieName(b),
+  );
+  const secondProbe = await f.startWeb();
+  const secondPort = Number(new URL(secondProbe.origin).port);
+  assert.notEqual(secondPort, port);
+  await secondProbe.close();
+  await reordered.close();
+  port = secondPort;
+  const otherPortOrigin = `http://cab.test:${port}`;
+  const otherPort = await f.startWeb(
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    { address, origins: [otherPortOrigin], port },
+  );
+  const otherCookieName = (
+    await call(otherPortOrigin, "/api/operator/session")
+  ).cookie.split("=")[0];
+  assert.equal(otherCookieName, cookieName(otherPortOrigin));
+  assert.notEqual(otherCookieName, cookieName(b));
+  await otherPort.close();
+});

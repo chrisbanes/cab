@@ -52,6 +52,7 @@ import {
 import {
   readNetworkSettings,
   validateNetworkSettings,
+  lanOrigins,
   writeNetworkSettings,
   updateNetworkSettingsForInstall,
   type OperatorNetworkSettings,
@@ -85,8 +86,8 @@ import type { CliDeps } from "./types.js";
 
 // Service modules load on demand so the operator CLI never loads service state or SQLite.
 
-const SERVICE_COMMANDS = `  service install [TARBALL] [--mode agent|daemon] [--node PATH] [--connection NAME] [--access local|token] [--token-file PATH] [--no-open] [--lan-ip IPV4|off] [--lan-origin ORIGIN] [SERVICE_OPTIONS]
-  service configure [--lan-ip IPV4|off] [--lan-origin ORIGIN] [--state-dir DIR] [--label LABEL]
+const SERVICE_COMMANDS = `  service install [TARBALL] [--mode agent|daemon] [--node PATH] [--connection NAME] [--access local|token] [--token-file PATH] [--no-open] [--lan-ip IPV4|off] [--lan-origin ORIGIN]... [--no-lan-ip-origin] [SERVICE_OPTIONS]
+  service configure [--lan-ip IPV4|off] [--lan-origin ORIGIN]... [--no-lan-ip-origin] [--state-dir DIR] [--label LABEL]
   service upgrade [VERSION_DIR] [--node PATH] [--connection NAME] [SERVICE_OPTIONS]
   service uninstall [SERVICE_OPTIONS]
   service init-auth [AUTH_FILE] [--state-dir DIR]
@@ -107,8 +108,12 @@ SERVICE_OPTIONS:
   --diagnostic-storage-mib N|default     diagnostic storage cap (16-1048576, service default 1024)
 
 configure shows desired network settings without contacting the service. Set or clear
-LAN access with --lan-ip IPV4 or --lan-ip off; --lan-origin requires an enabled IP.
-Changes require a service restart. LAN HTTP sends passwords, cookies and tokens
+LAN access with --lan-ip IPV4 or --lan-ip off. Repeat --lan-origin for names; the IP
+origin is included unless --no-lan-ip-origin removes it. Origin options require an
+explicit enabled IP. Changing IP replaces the complete set; omission on install
+preserves saved settings. Output lanOrigins describes desired settings; restart
+the exact job to apply changes.
+LAN HTTP sends passwords, cookies and tokens
 without TLS; port 80 is not supported. See the macOS operations guide for restart
 and recovery. install accepts the same LAN options and retains settings when omitted.
 
@@ -1600,6 +1605,17 @@ async function installServiceLocked(
             { schema: "cab.operator-network/v1", lan: first.lan },
             options.port,
           );
+    let desiredOrigins = lanOrigins(network?.lan, options.port);
+    if (network === undefined) {
+      try {
+        desiredOrigins = lanOrigins(
+          (await readNetworkSettings(service.dataDir, options.port)).lan,
+          options.port,
+        );
+      } catch (error) {
+        throw refuse(networkError(error));
+      }
+    }
     let root = releaseRoot;
     const found = tarball ? undefined : service.source(root);
     let version = found?.version;
@@ -1655,7 +1671,12 @@ async function installServiceLocked(
           installed.dataDirectory,
           Number(new URL(installed.origin).port),
         );
-        if (JSON.stringify(current) !== JSON.stringify(network))
+        const currentOrigins = lanOrigins(current.lan, options.port);
+        if (
+          current.lan?.address !== network.lan?.address ||
+          currentOrigins.length !== desiredOrigins.length ||
+          !currentOrigins.every((origin) => desiredOrigins.includes(origin))
+        )
           throw refuse(
             "LAN settings differ from the installed settings; use service configure and restart",
           );
@@ -1665,9 +1686,15 @@ async function installServiceLocked(
           `${options.label} is already installed as a daemon; verify it with the install command and no TARBALL, or run \`cab service uninstall\` before installing another release`,
         );
       stage = "verify";
-      return await verifyDaemon(service, first, version as string, (next) => {
-        stage = next;
-      });
+      return await verifyDaemon(
+        service,
+        first,
+        version as string,
+        desiredOrigins,
+        (next) => {
+          stage = next;
+        },
+      );
     }
     if (await service.loadedJob(daemon ? service.systemTarget : undefined))
       throw refuse(`The ${options.label} job is already loaded`);
@@ -1760,6 +1787,7 @@ async function installServiceLocked(
         false,
         false,
         first,
+        desiredOrigins,
       );
       return 0;
     }
@@ -1776,6 +1804,7 @@ async function installServiceLocked(
         ok: true,
         operation: "install",
         mode: "agent",
+        lanOrigins: desiredOrigins,
         label: options.label,
         version,
         origin: service.origin,
@@ -1795,6 +1824,7 @@ async function installServiceLocked(
       ok: true,
       operation: "install",
       mode: "agent",
+      lanOrigins: desiredOrigins,
       label: options.label,
       version,
       origin: service.origin,
@@ -1889,6 +1919,7 @@ async function finishDaemonInstall(
   started: boolean,
   alreadyInstalled: boolean,
   first: FirstRun,
+  origins: string[],
 ) {
   const { version } = record;
   const steps = started ? [] : service.installSteps(alreadyInstalled);
@@ -1896,6 +1927,7 @@ async function finishDaemonInstall(
     ok: true,
     operation: "install",
     mode: "daemon",
+    lanOrigins: origins,
     label: service.options.label,
     version,
     origin: service.origin,
@@ -1932,6 +1964,7 @@ async function verifyDaemon(
   service: Service,
   first: FirstRun,
   version: string,
+  origins: string[],
   setStage: (stage: string) => void,
 ): Promise<number> {
   const record = service.readRecord() as InstallRecord;
@@ -1995,7 +2028,15 @@ async function verifyDaemon(
         ),
       );
     }
-    await finishDaemonInstall(service, record, logs, true, true, first);
+    await finishDaemonInstall(
+      service,
+      record,
+      logs,
+      true,
+      true,
+      first,
+      origins,
+    );
     return 0;
   }
   // Present and matching, not loaded: only loading remains, so the staged copy is not needed.
@@ -2010,6 +2051,7 @@ async function verifyDaemon(
     false,
     installed !== null,
     first,
+    origins,
   );
   return 0;
 }
@@ -2737,7 +2779,8 @@ export const LIFECYCLE_OPTIONS = {
   mode: { type: "string" },
   node: { type: "string" },
   "lan-ip": { type: "string" },
-  "lan-origin": { type: "string" },
+  "lan-origin": { type: "string", multiple: true },
+  "no-lan-ip-origin": { type: "boolean", multiple: true },
 } as const;
 
 /**
@@ -2767,6 +2810,7 @@ export const VERIFY_OPTIONS: Record<
   "diagnostic-storage-mib": "irrelevant",
   "lan-ip": "irrelevant",
   "lan-origin": "irrelevant",
+  "no-lan-ip-origin": "irrelevant",
 };
 
 /**
@@ -2807,12 +2851,18 @@ export function daemonVerifyCommand(
 
 function parseLifecycleArgs(args: string[]) {
   try {
-    return parseArgs({
+    const parsed = parseArgs({
       args,
       allowPositionals: true,
       strict: true,
+      tokens: true,
       options: LIFECYCLE_OPTIONS,
     });
+    return parsed.tokens.filter(
+      (token) => token.kind === "option" && token.name === "lan-ip",
+    ).length > 1
+      ? null
+      : parsed;
   } catch {
     return null;
   }
@@ -2903,12 +2953,45 @@ export function lifecycleOptions(
     modeGiven: values.mode !== undefined,
     lanIp: values["lan-ip"],
     lanOrigin: values["lan-origin"],
+    noLanIpOrigin: values["no-lan-ip-origin"],
   };
 }
 
 /** dist/src/cli/service.js → the root of the release or package it belongs to. */
 const releaseRoot = () =>
   resolve(fileURLToPath(new URL("../../..", import.meta.url)));
+
+function invalidLanOptions(
+  ip: string | undefined,
+  origins: string[] | undefined,
+  noIp: boolean[] | undefined,
+): boolean {
+  return (
+    ((origins !== undefined || noIp !== undefined) &&
+      (ip === undefined || ip === "off")) ||
+    !!origins?.some((origin) => origin === "") ||
+    (origins !== undefined && new Set(origins).size !== origins.length) ||
+    (noIp !== undefined &&
+      (noIp.length !== 1 ||
+        !origins?.length ||
+        origins.some((origin) => origin.startsWith(`http://${ip}:`))))
+  );
+}
+
+function configuredLan(
+  address: string,
+  origins: string[] | undefined,
+  noIp: boolean[] | undefined,
+  port: number,
+): NonNullable<OperatorNetworkSettings["lan"]> {
+  const ipOrigin = `http://${address}:${port}`;
+  return {
+    address,
+    origins: noIp
+      ? (origins ?? [])
+      : [ipOrigin, ...(origins ?? []).filter((origin) => origin !== ipOrigin)],
+  };
+}
 
 async function configureService(
   args: string[],
@@ -2919,20 +3002,29 @@ async function configureService(
     "state-dir"?: string;
     label?: string;
     "lan-ip"?: string;
-    "lan-origin"?: string;
+    "lan-origin"?: string[];
+    "no-lan-ip-origin"?: boolean[];
   };
   try {
     const parsed = parseArgs({
       args,
       allowPositionals: false,
       strict: true,
+      tokens: true,
       options: {
         "state-dir": { type: "string" },
         label: { type: "string" },
         "lan-ip": { type: "string" },
-        "lan-origin": { type: "string" },
+        "lan-origin": { type: "string", multiple: true },
+        "no-lan-ip-origin": { type: "boolean", multiple: true },
       },
     });
+    if (
+      parsed.tokens.filter(
+        (token) => token.kind === "option" && token.name === "lan-ip",
+      ).length > 1
+    )
+      return usage(deps, "service");
     values = parsed.values;
   } catch {
     return usage(deps, "service");
@@ -2946,13 +3038,13 @@ async function configureService(
   const label = values.label ?? "local.cab.service";
   const ip = values["lan-ip"];
   const origin = values["lan-origin"];
+  const noIp = values["no-lan-ip-origin"];
   if (
     !stateDir ||
     values["state-dir"] === "" ||
     !LABEL.test(label) ||
     ip === "" ||
-    origin === "" ||
-    (origin !== undefined && (ip === undefined || ip === "off"))
+    invalidLanOptions(ip, origin, noIp)
   )
     return usage(deps, "service");
   const recordPath = installationRecordPath(stateDir, label);
@@ -2971,13 +3063,7 @@ async function configureService(
         : validateNetworkSettings(
             {
               schema: "cab.operator-network/v1",
-              lan:
-                ip === "off"
-                  ? null
-                  : {
-                      address: ip,
-                      ...(origin === undefined ? {} : { origin }),
-                    },
+              lan: ip === "off" ? null : configuredLan(ip, origin, noIp, port),
             },
             port,
           );
@@ -3005,7 +3091,7 @@ async function configureService(
             ? await readNetworkSettings(current.dataDirectory, port)
             : await writeNetworkSettings(current.dataDirectory, port, settings);
         deps.stdout.write(
-          `${JSON.stringify({ ok: true, operation: "configure", settings: saved, restartRequired: true })}\n`,
+          `${JSON.stringify({ ok: true, operation: "configure", settings: saved, lanOrigins: lanOrigins(saved.lan, port), restartRequired: true })}\n`,
         );
         return 0;
       } catch (error) {
@@ -3053,11 +3139,10 @@ export async function serviceCommand(
           parsed.noOpen ||
           parsed.modeGiven)) ||
       (command !== "install" &&
-        (parsed.lanIp !== undefined || parsed.lanOrigin !== undefined)) ||
-      (parsed.lanOrigin !== undefined &&
-        (parsed.lanIp === undefined ||
-          parsed.lanIp === "off" ||
-          parsed.lanOrigin === "")) ||
+        (parsed.lanIp !== undefined ||
+          parsed.lanOrigin !== undefined ||
+          parsed.noLanIpOrigin !== undefined)) ||
+      invalidLanOptions(parsed.lanIp, parsed.lanOrigin, parsed.noLanIpOrigin) ||
       parsed.lanIp === "" ||
       (parsed.access !== undefined &&
         parsed.access !== "local" &&
@@ -3096,12 +3181,12 @@ export async function serviceCommand(
               lan:
                 parsed.lanIp === "off"
                   ? null
-                  : {
-                      address: parsed.lanIp,
-                      ...(parsed.lanOrigin === undefined
-                        ? {}
-                        : { origin: parsed.lanOrigin }),
-                    },
+                  : configuredLan(
+                      parsed.lanIp,
+                      parsed.lanOrigin,
+                      parsed.noLanIpOrigin,
+                      options.port,
+                    ),
             }),
       });
     if (command === "uninstall")
@@ -3125,6 +3210,12 @@ export async function serviceCommand(
     command === "run" ||
     command === "list"
   ) {
+    if (
+      args.some((arg) =>
+        /^--(?:lan-ip|lan-origin|no-lan-ip-origin)(?:=|$)/.test(arg),
+      )
+    )
+      return usage(deps, "service");
     // The service never runs as root, whatever started it.
     if (host().isRoot()) {
       const { ROOT_REFUSAL } = await import("../standalone/launchd.js");
@@ -3154,7 +3245,8 @@ async function initAuth(
     parsed.positionals.length > 1 ||
     parsed.values.mode ||
     parsed.values["lan-ip"] !== undefined ||
-    parsed.values["lan-origin"] !== undefined
+    parsed.values["lan-origin"] !== undefined ||
+    parsed.values["no-lan-ip-origin"] !== undefined
   )
     return usage(deps, "service");
   const home = deps.env.HOME;
