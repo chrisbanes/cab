@@ -618,13 +618,17 @@ export function App() {
   const acceptSession = useCallback(
     (next: Session) => {
       const identity = next.authenticated ? next.csrfToken : null;
+      if (
+        !identity ||
+        (acceptedIdentity.current && identity !== acceptedIdentity.current)
+      )
+        purgeProposalRecovery();
       if (identity !== acceptedIdentity.current) {
         if (!identity && acceptedIdentity.current) {
           navigationScope.current = randomUUID();
           clearPrivateNavigation();
         }
         client.invalidateAuthentication();
-        if (acceptedIdentity.current) purgeProposalRecovery();
         drafts.current.purge();
         taskStates.current.purge();
         questionStates.current.purge();

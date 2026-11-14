@@ -904,6 +904,35 @@ test("a forged local saved receipt is only an unknown candidate when its service
   assert.equal(ctx.commands("drafting.settle").length, 0);
 });
 
+test("expiry before reload purges proposal recovery on unauthenticated bootstrap and sign-in", async (_t, j) => {
+  const ctx = await launch(j, desktop);
+  await reviewed(ctx);
+  const recoveryKeys = () =>
+    ctx.page.evaluate(() =>
+      Object.keys(sessionStorage).filter((key) =>
+        key.startsWith("cab.instruction-proposal:"),
+      ),
+    );
+  assert.ok((await recoveryKeys()).length > 0);
+  ctx.f.advanceClock(61_000);
+  const bootstrap = ctx.page.waitForResponse(
+    (response) => new URL(response.url()).pathname === "/api/operator/session",
+  );
+  await ctx.page.reload();
+  const response = await bootstrap;
+  assert.equal(response.status(), 200);
+  assert.equal((await response.json()).authenticated, false);
+  await ctx.page.getByLabel("Password").waitFor();
+  assert.deepEqual(await recoveryKeys(), []);
+  await ctx.page.getByLabel("Password").fill(ctx.web.password);
+  await ctx.page.getByRole("button", { name: "Sign in", exact: true }).click();
+  await ctx.page.getByRole("button", { name: "Request proposal" }).waitFor();
+  assert.equal(await ctx.page.locator("#instruction-final").count(), 0);
+  assert.deepEqual(await recoveryKeys(), []);
+  assert.equal(ctx.commands("project.configure").length, 0);
+  assert.equal(ctx.commands("drafting.settle").length, 0);
+});
+
 for (const invalidation of ["sign-out", "expiry"] as const)
   test(`${invalidation}: a late configure completion cannot repopulate proposal recovery`, async (_t, j) => {
     const ctx = await launch(j, desktop);
