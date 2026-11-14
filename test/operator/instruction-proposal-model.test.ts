@@ -139,13 +139,11 @@ test("proposal journal keeps a reviewed run and its edit until the exact replace
     runId: oldId,
     instructionTarget: run.instructionTarget,
   };
-  journal
-    .recovery(oldRun)
-    .write({
-      values: { key: randomUUID(), instructions: "Edited old proposal" },
-      command: null,
-      receipt: null,
-    });
+  journal.recovery(oldRun).write({
+    values: { key: randomUUID(), instructions: "Edited old proposal" },
+    command: null,
+    receipt: null,
+  });
   const previous = { ...journal.snapshot() };
   const pendingStart = {
     type: "instruction.draft.start" as const,
