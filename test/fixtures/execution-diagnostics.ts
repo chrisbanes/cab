@@ -1,3 +1,5 @@
+import { randomUUID } from "node:crypto";
+import { ConversationHistoryStore } from "../../src/standalone/conversation-history.js";
 import type { DatabaseSync } from "node:sqlite";
 import { ExecutionDiagnosticsStore } from "../../src/standalone/execution-diagnostics.js";
 import {
@@ -191,4 +193,127 @@ export async function seedExecutionDiagnostics(
     store.finish(captured);
   });
   return { ...seeded, captured, absent, direct, unchanged, profileOne, leak };
+}
+
+/** A real retained Claude turn with an independently retained diagnostic settlement. */
+export function seedExecutionReasoningSummary(
+  f: Fixture,
+  seed: Awaited<ReturnType<typeof seedExecutionDiagnostics>>,
+  options: {
+    text?: string;
+    settled?: boolean;
+    state?: "completed" | "failed";
+    limits?: Partial<
+      import("../../src/standalone/execution-diagnostics.js").DiagnosticLimits
+    >;
+    failSettlement?: boolean;
+    captured?: boolean;
+  } = {},
+) {
+  const workId = randomUUID(),
+    intentId = randomUUID();
+  const binding = {
+    workId,
+    taskId: seed.taskA,
+    assignmentId: seed.assignmentA,
+    assignmentVersion: 1,
+    instructionsRevision: 1,
+    profileRevision: 1,
+    conversationRevision: 1,
+    workRevision: 1,
+    threadId: randomUUID(),
+    turnId: randomUUID(),
+  };
+  const at = Date.now();
+  f.seedPersistedState((db) => {
+    request(db, workId, {
+      taskId: seed.taskA,
+      projectId: seed.projectA,
+      assignmentId: seed.assignmentA,
+      state: options.state === "failed" ? "held" : "completed",
+    });
+    db.prepare(`INSERT INTO execution_intents(id,workId,prompt,workspace,state,threadId,turnId,accountType,sandbox,approval)
+      VALUES (?,?,'fixture',?,?,?,?,'chatgpt','workspaceWrite','never')`).run(
+      intentId,
+      workId,
+      f.directory,
+      options.state === "failed" ? "held" : "completed",
+      binding.threadId,
+      binding.turnId,
+    );
+    db.prepare(`INSERT INTO task_execution_bindings(workId,taskId,assignmentId,assignmentVersion,instructionsRevision,profileRevision,conversationRevision,harness)
+      VALUES (?,?,?,1,1,1,1,'claude')`).run(
+      workId,
+      seed.taskA,
+      seed.assignmentA,
+    );
+    binding.workRevision = Number(
+      db
+        .prepare(
+          `SELECT COALESCE(MAX(workRevision),0)+1 AS revision FROM task_work_revisions WHERE assignmentId=? AND conversationRevision=1`,
+        )
+        .get(seed.assignmentA)!.revision,
+    );
+    db.prepare(
+      `INSERT INTO task_work_revisions(workId,assignmentId,conversationRevision,workRevision) VALUES (?,?,1,?)`,
+    ).run(workId, seed.assignmentA, binding.workRevision);
+    db.prepare(
+      `INSERT INTO execution_intent_reasoning_summaries(intentId,enabled,captureMode,generation) VALUES (?,1,'enhanced',0)`,
+    ).run(intentId);
+    new ConversationHistoryStore(db).recordReasoningSummary(
+      binding,
+      intentId,
+      options.text ?? "Retained summary",
+      [],
+    );
+    if (options.captured === false) return;
+    const store = new ExecutionDiagnosticsStore(db, {
+      now: () => at,
+      ...(options.limits ? { limits: options.limits } : {}),
+    });
+    store.begin({
+      ...binding,
+      projectId: seed.projectA,
+      harness: "claude",
+      mode: "enhanced",
+      eventSource: "supported",
+    });
+    store.bindThread(workId, binding.threadId);
+    store.bindTurn(workId, binding.turnId);
+    store.record(
+      workId,
+      "runtime",
+      "before-settlement",
+      "info",
+      undefined,
+      { text: "before" },
+      [],
+    );
+    if (options.failSettlement)
+      db.exec(
+        `CREATE TRIGGER fail_summary_settlement BEFORE INSERT ON diagnostic_items WHEN NEW.name='execution-settled' BEGIN SELECT RAISE(FAIL,'fixture settlement failure'); END`,
+      );
+    if (options.settled !== false)
+      store.record(
+        workId,
+        "service",
+        "execution-settled",
+        "info",
+        undefined,
+        { outcome: options.state ?? "completed" },
+        [],
+      );
+    if (options.failSettlement) db.exec("DROP TRIGGER fail_summary_settlement");
+    store.record(
+      workId,
+      "tool",
+      "after-settlement",
+      "warn",
+      undefined,
+      { text: "after" },
+      [],
+    );
+    store.finish(workId);
+  });
+  return { workId, binding, intentId, at };
 }

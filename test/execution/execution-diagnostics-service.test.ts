@@ -98,6 +98,7 @@ async function fixture(
   runtime: BareRuntime,
   options: {
     dataDir?: string;
+    claudeSummary?: boolean;
     brief?: string;
     diagnostics?: ConstructorParameters<typeof StandaloneService>[3];
   } = {},
@@ -106,6 +107,9 @@ async function fixture(
   const dataDir = options.dataDir ?? join(root, "data");
   const service = new StandaloneService(dataDir, () => runtime, undefined, {
     power: { enabled: false },
+    ...(options.claudeSummary
+      ? { runtimeHarnesses: ["codex", "claude"] as const }
+      : {}),
     conversationHistoryExclusions: () => ["FIXTURE_SECRET_CANARY"],
     ...options.diagnostics,
   });
@@ -121,6 +125,15 @@ async function fixture(
     instructions:
       "PROFILE_INSTRUCTION_TEXT keeps FIXTURE_SECRET_CANARY private",
     capabilities: "test",
+    ...(options.claudeSummary
+      ? {
+          runtime: {
+            harness: "claude",
+            model: "default",
+            reasoningEffort: "medium",
+          },
+        }
+      : {}),
   });
   run({
     type: "project.create",
@@ -134,6 +147,7 @@ async function fixture(
     expectedVersion: 1,
     paused: false,
     instructions: "PROJECT_INSTRUCTION_TEXT token=abc123",
+    ...(options.claudeSummary ? { reasoningSummaries: true } : {}),
   });
   run({
     type: "task.create",
@@ -658,5 +672,43 @@ test("an unexpected request is recorded while its hold is unchanged", async () =
     runtime.complete("turn-1");
   } finally {
     await f.close();
+  }
+});
+
+test("summary capture flushes before the real settlement for completed and failed runtime turns", async () => {
+  for (const outcome of ["completed", "failed"] as const) {
+    const runtime = new DiagnosticsRuntime();
+    const f = await fixture(runtime, { claudeSummary: true });
+    try {
+      f.activate();
+      await until(() => runtime.turnCount === 1, "Claude summary turn start");
+      runtime.conversation?.({
+        kind: "reasoning-summary",
+        threadId: "thread-1",
+        turnId: "turn-1",
+        itemId: "summary",
+        text: "Retained decision FIXTURE_SECRET_CANARY",
+      });
+      const api = new OperatorApi(f.service),
+        query = new URLSearchParams({ includeReasoningSummaries: "true" });
+      const before = await api.readExecutionEvents(f.workId, query);
+      assert.ok(!before.data.items.some((i) => i.name === "execution-settled"));
+      assert.ok(before.data.items.every((i) => !i.reasoningSummary));
+      await finishTurn(f, runtime, "turn-1", outcome);
+      const after = await api.readExecutionEvents(f.workId, query);
+      const settled = after.data.items.filter((i) => i.reasoningSummary);
+      assert.equal(settled.length, 1);
+      assert.equal(settled[0]?.name, "execution-settled");
+      assert.equal(
+        settled[0]?.reasoningSummary?.text,
+        "Retained decision [redacted]",
+      );
+      assert.equal(
+        settled[0]?.severity,
+        outcome === "completed" ? "info" : "warn",
+      );
+    } finally {
+      await f.close();
+    }
   }
 });

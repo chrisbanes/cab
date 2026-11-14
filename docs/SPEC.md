@@ -154,7 +154,7 @@ Settings also offers **Delete collected reasoning** (`project.reasoning.delete`)
 explicit, irreversible confirmation. Deletion is safe to repeat and leaves the
 setting unchanged. An admitted on/enhanced Claude turn requests provider summaries;
 only completed, explicit lead `thinking` blocks contribute. Codex requests and
-ordinary assignment-history and CLI reads contain no summary text. The task timeline
+ordinary assignment-history and nonverbose CLI reads contain no summary text. The task timeline
 exposes a bounded, re-redacted summary only on its exact historical turn. Execution
 detail and events report `collected` for valid retained exact-bound summaries with current
 redaction available, `unavailable` for an admitted on/enhanced turn without them,
@@ -174,7 +174,22 @@ removes summaries. **Delete collected reasoning** atomically erases stored text
 and advances a durable fence: buffered or late output from earlier admissions
 cannot restore it, including after restart. Later opted-in admissions can collect.
 This erases cab's collected text; it does not securely erase provider history or
-independent backups. Verbose CLI summary display remains unimplemented.
+independent backups. `logs --verbose` requests the optional exact-turn summary via
+`includeReasoningSummaries=true` on the existing execution-events read, under the
+same capabilities and assistant-text redaction. Absent/false omits it; invalid or
+duplicate query values are refused. A summary is attached only to a returned
+`service`/`execution-settled` event, after conversation capture flush, including
+failed runtime turns. Its sequence, kind/severity/time filters, cursor and diagnostic
+retention govern display. Missing settlement because of a crash, absent capture,
+execution item/byte limits, failed writes or pruning has no summary fallback.
+
+Verbose human logs show the full retained multiline text below that event, with a
+retained-prefix notice only when truncated. Verbose JSON/JSONL carry the optional
+`reasoningSummary: {text, truncated}` on the event. Follow prints it once; resuming
+past it never replays it. Terminal safety and valid JSON escaping apply without
+another truncation. Cursor fingerprints, quiet-mode reads/output, capture notes,
+coverage and list/get behavior stay unchanged. Turning verbose off stops these
+reads; already printed output cannot be retracted.
 The design defines capture limits, credential lifecycle, command
 semantics and required acceptance evidence.
 

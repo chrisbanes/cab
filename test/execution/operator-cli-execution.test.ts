@@ -1,11 +1,16 @@
 import assert from "node:assert/strict";
+import { existsSync, readFileSync } from "node:fs";
+import { join } from "node:path";
 import { randomUUID } from "node:crypto";
 import { test } from "node:test";
 import { COVERAGE_GAPS } from "../../src/cli/browse.js";
 import { CAPTURE_GAP_COVERAGE } from "../../src/cli/browse-execution.js";
 import { fakeServer, harness } from "../fixtures/cli-harness.js";
 import { databaseDigest } from "../fixtures/database-digest.js";
-import { seedExecutionDiagnostics } from "../fixtures/execution-diagnostics.js";
+import {
+  seedExecutionDiagnostics,
+  seedExecutionReasoningSummary,
+} from "../fixtures/execution-diagnostics.js";
 import { instructionSecret } from "../fixtures/instruction-history.js";
 import { startCliService } from "../fixtures/operator-cli.js";
 
@@ -537,4 +542,341 @@ test("follow notes use only the last successful page, with a neutral pre-page in
     interrupted.out,
     /Note: Reasoning summary capture is reported per execution\./,
   );
+});
+
+test("verbose logs alone opt in and preserve full retained text, safe human output and machine round trips", async (t) => {
+  const { s, seed, h, api, ok } = await setup(t);
+  const prefix = `First line\n\n${"考察 🧭 café ".repeat(100)}\nESC \u001b]52;c;cGF3bmVk\u0007 C1 \u009b\nLast line\n`;
+  const x = seedExecutionReasoningSummary(s.f, seed, {
+    text: prefix + "x".repeat(16001),
+  });
+  const base = `/api/operator/executions/${x.workId}/events`,
+    quiet = await api(base),
+    loud = await api(`${base}?includeReasoningSummaries=true`);
+  const summary = loud.items.find(
+    (i: Json) => i.reasoningSummary,
+  ).reasoningSummary;
+  assert.ok(summary.text.startsWith(prefix));
+  assert.equal(summary.truncated, true);
+  const before = databaseDigest(s.f),
+    journal = join(h.configDir, "requests.jsonl");
+  const journalBefore = existsSync(journal)
+    ? readFileSync(journal, "utf8")
+    : null;
+  for (const args of [
+    ["execution", "list", "--task", seed.taskA, "--verbose"],
+    ["execution", "get", x.workId, "--verbose"],
+    ["logs", "--execution", x.workId],
+  ]) {
+    const start = h.fetches.length,
+      r = await h.run(args);
+    assert.equal(r.code, 0, r.err);
+    assert.ok(
+      h.fetches
+        .slice(start)
+        .every((url) => !url.includes("includeReasoningSummaries")),
+    );
+    assert.ok(!r.out.includes("First line"));
+  }
+  const json = await ok(["logs", "--execution", x.workId]);
+  const { resumeCursor, ...quietData } = json.data;
+  assert.deepEqual(quietData, quiet);
+  for (const output of [undefined, "json", "jsonl"]) {
+    const args = [
+      "logs",
+      "--execution",
+      x.workId,
+      "--verbose",
+      ...(output ? ["--output", output] : []),
+    ];
+    const start = h.fetches.length,
+      r = await h.run(args);
+    assert.equal(r.code, 0, r.err);
+    const urls = h.fetches
+      .slice(start)
+      .filter((url) => url.includes("/events?"));
+    assert.deepEqual(
+      urls.map((url) => new URL(url).pathname + new URL(url).search),
+      [`${base}?after=0&limit=50&includeReasoningSummaries=true`],
+    );
+    assert.ok(!r.out.includes("\u001b"));
+    assert.ok(!r.out.includes("\u0007"));
+    assert.ok(!r.out.includes("\u009b"));
+    if (!output) {
+      assert.match(
+        r.out,
+        /execution-settled[^\n]*\n +Reasoning summary\n +First line\n\n/,
+      );
+      assert.ok(r.out.includes("考察 🧭 café ".repeat(100).trimEnd()));
+      assert.match(
+        r.out,
+        /Reasoning summary truncated; only the retained prefix is shown\./,
+      );
+      assert.equal(
+        (r.out.match(/Reasoning summary truncated;/g) ?? []).length,
+        1,
+      );
+    } else if (output === "json") {
+      assert.deepEqual(r.json().data.items, loud.items);
+      assert.deepEqual(r.json().coverage.notes, json.coverage.notes);
+    } else {
+      const records = r.out
+        .trimEnd()
+        .split("\n")
+        .map((line) => JSON.parse(line) as Json);
+      assert.deepEqual(
+        records.filter((r) => r.type === "item").map((r) => r.item),
+        loud.items,
+      );
+      assert.deepEqual(records.at(-1), {
+        schema: "cab.cli/v1",
+        type: "end",
+        reason: "drained",
+        resumeCursor,
+      });
+    }
+  }
+  const quietLines = await h.run([
+    "logs",
+    "--execution",
+    x.workId,
+    "--output",
+    "jsonl",
+  ]);
+  assert.deepEqual(
+    quietLines.out
+      .trimEnd()
+      .split("\n")
+      .map((line) => JSON.parse(line)),
+    [
+      ...quiet.items.map((item: Json) => ({
+        schema: "cab.cli/v1",
+        type: "item",
+        workId: x.workId,
+        item,
+      })),
+      { schema: "cab.cli/v1", type: "end", reason: "drained", resumeCursor },
+    ],
+  );
+  const first = await ok(["logs", "--execution", x.workId, "--limit", "1"]);
+  const next = await ok([
+    "logs",
+    "--execution",
+    x.workId,
+    "--cursor",
+    first.pagination.nextCursor,
+    "--verbose",
+    "--limit",
+    "1",
+  ]);
+  assert.equal(next.data.items[0].reasoningSummary.text, summary.text);
+  const passed = await ok([
+    "logs",
+    "--execution",
+    x.workId,
+    "--cursor",
+    next.pagination.nextCursor,
+    "--verbose",
+    "--limit",
+    "1",
+  ]);
+  assert.ok(passed.data.items.every((i: Json) => !i.reasoningSummary));
+  const filtered = await h.run([
+    "logs",
+    "--execution",
+    x.workId,
+    "--verbose",
+    "--kind",
+    "runtime",
+  ]);
+  assert.ok(!filtered.out.includes("First line"));
+  const start = h.fetches.length;
+  const time = await h.run([
+    "logs",
+    "--execution",
+    x.workId,
+    "--verbose",
+    "--after",
+    new Date(x.at).toISOString(),
+    "--before",
+    new Date(x.at).toISOString(),
+    "--limit",
+    "1",
+  ]);
+  assert.equal(time.code, 0, time.err);
+  assert.match(
+    time.out,
+    /More: cab logs .*--after .*--before .*--verbose .*--cursor/,
+  );
+  const timeUrl = new URL(
+    h.fetches.slice(start).find((url) => url.includes("/events?"))!,
+  );
+  assert.equal(timeUrl.searchParams.get("since"), String(x.at));
+  assert.equal(timeUrl.searchParams.get("until"), String(x.at));
+  assert.equal(databaseDigest(s.f), before);
+  assert.equal(
+    existsSync(journal) ? readFileSync(journal, "utf8") : null,
+    journalBefore,
+  );
+});
+
+test("verbose follow emits one settlement summary across unavailable retry, more boundary, interruption and cursor resume", async (t) => {
+  const { s, seed, h, api } = await setup(t),
+    x = seedExecutionReasoningSummary(s.f, seed, {
+      text: "Follow summary\n\nUnicode 🧭 \u001b]52;c;cGF3bmVk\u0007 \u009b",
+    });
+  const data = await api(
+    `/api/operator/executions/${x.workId}/events?includeReasoningSummaries=true`,
+  );
+  const first = data.items[0],
+    settled = data.items[1];
+  for (const output of [undefined, "jsonl"]) {
+    let poll = 0;
+    const urls: string[] = [];
+    const r = await h.run(
+      [
+        "logs",
+        "--execution",
+        x.workId,
+        "--verbose",
+        "--follow",
+        ...(output ? ["--output", output] : []),
+      ],
+      {
+        sleep: async () => {},
+        fetch: async (input, init) => {
+          if (!String(input).includes("/events?")) return fetch(input, init);
+          const url = new URL(String(input));
+          urls.push(url.toString());
+          poll++;
+          if (poll === 2) throw new TypeError("fixture unavailable");
+          const items = poll === 1 ? [first] : poll === 3 ? [settled] : [];
+          return Response.json({
+            observedAt: 1,
+            data: {
+              ...data,
+              items,
+              resumeAfter: items.at(-1)?.sequence ?? settled.sequence,
+              more: poll === 3,
+              finished: poll === 4,
+              health: {
+                ...data.health,
+                reasoning: poll === 1 ? "unavailable" : "collected",
+              },
+            },
+          });
+        },
+      },
+    );
+    assert.equal(r.code, 0, r.err);
+    assert.equal(poll, 4);
+    for (const control of ["\u001b", "\u0007", "\u009b"])
+      assert.ok(!r.out.includes(control));
+    assert.doesNotMatch(r.out, /Reasoning summary truncated;/);
+    assert.ok(
+      urls.every(
+        (url) =>
+          new URL(url).searchParams.get("includeReasoningSummaries") === "true",
+      ),
+    );
+    assert.deepEqual(
+      urls.map((url) => new URL(url).searchParams.get("after")),
+      [
+        "0",
+        String(first.sequence),
+        String(first.sequence),
+        String(settled.sequence),
+      ],
+    );
+    if (output) {
+      const records = r.out
+        .trimEnd()
+        .split("\n")
+        .map((line) => JSON.parse(line) as Json);
+      assert.equal(records.filter((r) => r.item?.reasoningSummary).length, 1);
+      assert.deepEqual(
+        records.find((r) => r.item?.reasoningSummary)?.item.reasoningSummary,
+        settled.reasoningSummary,
+      );
+      assert.equal(records.at(-1)?.reason, "execution-finished");
+    } else {
+      assert.equal((r.out.match(/Follow summary/g) ?? []).length, 1);
+      assert.match(
+        r.out,
+        /execution-settled[^\n]*\nReasoning summary\n {2}Follow summary\n {2}\n {2}Unicode 🧭/,
+      );
+      assert.match(
+        r.out,
+        /End: execution-finished\nNote: Tool observation is incomplete\.\nNote: Reasoning summaries were collected for this execution\.\nResume: cab logs .*--verbose/,
+      );
+    }
+  }
+  for (const duration of [false, true]) {
+    const controller = new AbortController();
+    let clock = 0;
+    const firstPage = await h.run(
+      [
+        "logs",
+        "--execution",
+        x.workId,
+        "--follow",
+        "--verbose",
+        "--max-duration",
+        "3",
+        "--interval",
+        "1",
+      ],
+      {
+        signal: controller.signal,
+        now: () => clock,
+        sleep: async () => {},
+        fetch: async (input, init) => {
+          if (!String(input).includes("/events?")) return fetch(input, init);
+          if (duration) clock = 3000;
+          else controller.abort();
+          return Response.json({
+            observedAt: 1,
+            data: {
+              ...data,
+              items: [first],
+              resumeAfter: first.sequence,
+              more: false,
+              finished: false,
+            },
+          });
+        },
+      },
+    );
+    assert.equal(firstPage.code, 0, firstPage.err);
+    assert.ok(!firstPage.out.includes("Follow summary"));
+    assert.match(
+      firstPage.out,
+      new RegExp(`End: ${duration ? "max-duration" : "interrupted"}`),
+    );
+    const cursor = firstPage.out.match(/Resume: .*--cursor (\S+)/)?.[1];
+    assert.ok(cursor);
+    const resumed = await h.run([
+      "logs",
+      "--execution",
+      x.workId,
+      "--verbose",
+      "--cursor",
+      cursor,
+      "--follow",
+    ]);
+    assert.equal(resumed.code, 0, resumed.err);
+    assert.equal((resumed.out.match(/Follow summary/g) ?? []).length, 1);
+    const finalCursor = resumed.out.match(/Resume: .*--cursor (\S+)/)?.[1];
+    assert.ok(finalCursor);
+    const past = await h.run([
+      "logs",
+      "--execution",
+      x.workId,
+      "--verbose",
+      "--cursor",
+      finalCursor,
+    ]);
+    assert.equal(past.code, 0, past.err);
+    assert.ok(!past.out.includes("Follow summary"));
+  }
 });

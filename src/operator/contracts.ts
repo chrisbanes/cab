@@ -161,6 +161,20 @@ const text = z.string().max(textMaxLength);
 /** Whether `value` fits a text field, by the same check the service applies. */
 export const fitsTextField = (value: string) => text.safeParse(value).success;
 const safeText = text.nullable();
+const reasoningSummarySchema = z
+  .object({
+    text: z
+      .string()
+      .min(1)
+      .max(32_000)
+      .refine(
+        (text) =>
+          Array.from(text).length <= 16_000 &&
+          new TextEncoder().encode(text).length <= 64 * 1024,
+      ),
+    truncated: z.boolean(),
+  })
+  .strict();
 const draftingStateSchema = z.enum([
   "queued",
   "running",
@@ -2459,21 +2473,7 @@ export const taskTimelineSchema = envelope(
                 // Captured text is bounded at 64 KiB, as in the assignment history.
                 text: z.string().nullable(),
                 turnKey: hash.optional(),
-                reasoningSummary: z
-                  .object({
-                    text: z
-                      .string()
-                      .min(1)
-                      .max(32_000)
-                      .refine(
-                        (text) =>
-                          Array.from(text).length <= 16_000 &&
-                          new TextEncoder().encode(text).length <= 64 * 1024,
-                      ),
-                    truncated: z.boolean(),
-                  })
-                  .strict()
-                  .optional(),
+                reasoningSummary: reasoningSummarySchema.optional(),
               })
               .strict(),
             z
@@ -6014,6 +6014,7 @@ export const executionInputsSchema = envelope(
 );
 const diagnosticItemSchema = z
   .object({
+    reasoningSummary: reasoningSummarySchema.optional(),
     sequence: z.number().int().positive().safe(),
     kind: z.enum(["input", "setting", "runtime", "tool", "service"]),
     name: z.string().max(256),

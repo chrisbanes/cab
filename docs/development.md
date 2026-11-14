@@ -613,8 +613,27 @@ name, version and preview digest. The service rechecks every confirmation atomic
    admission reports `not-requested`; historical unknowns do not establish that
    the setting was off. Today's opt-in/out and diagnostic pruning do not rewrite
    these facts. List notes stay neutral; follow uses its last successful page (or
-   a neutral note before any page), once at the end. JSONL is unchanged.
-   `logs --verbose` summary display remains pending.
+   a neutral note before any page), once at the end.
+
+   `logs --verbose` additionally requests retained summaries with
+   `includeReasoningSummaries=true` on every events page, including follow polls
+   and cursor resume. Human output shows a **Reasoning summary** block beneath
+   the matching `execution-settled` service event, preserving the full retained
+   multiline text. A truncated value adds `Reasoning summary truncated; only the
+   retained prefix is shown.` JSON and JSONL carry optional
+   `reasoningSummary: {text, truncated}` on that same event; no extra record is
+   emitted. Human output uses the existing terminal-control protection; machine
+   output escapes controls while preserving the decoded text.
+
+   Only the returned settlement event can carry a summary. Kind, severity,
+   inclusive `--after`/`--before` times and cursor paging apply to that event;
+   follow prints it once after capture flush and settlement, even if the runtime
+   failed. A cursor that already passed it does not replay it when verbose is
+   added. Missing capture, a crash without settlement, execution item/byte limits,
+   a failed settlement write or diagnostic pruning means no CLI summary, even if
+   conversation storage still retains one. There is no fallback lookup or second
+   truncation. Without `--verbose`, requests and human/JSON/JSONL output remain
+   unchanged. Execution list/get still disclose only capture notes and metadata.
 
    Payloads are redacted before storage and again with current exclusions on every
    read; when exclusions are unavailable an item reads as
