@@ -67,12 +67,15 @@ export const workspaceLifecycleEventSchema = z.discriminatedUnion("kind", [
     workId: identity,
     turnId: identity,
   }),
-  z.strictObject({
-    kind: z.literal("terminal"),
-    eventId: identity,
-    at: time,
-    status: z.enum(["done", "cancelled"]).nullable(),
-  }),
+  z
+    .strictObject({
+      kind: z.literal("terminal"),
+      eventId: identity,
+      at: time,
+      status: z.enum(["done", "cancelled"]).nullable(),
+      reopened: z.literal(true).optional(),
+    })
+    .refine((event) => event.reopened === undefined || event.status === null),
   z.strictObject({
     kind: z.literal("push"),
     eventId: identity,
@@ -242,7 +245,10 @@ export class WorkspaceLifecycleStore {
   ): void {
     const generation = this.current(taskId);
     const terminal = status === "open" ? null : status;
-    if (!generation || (generation.terminal?.status ?? null) === terminal)
+    if (
+      !generation ||
+      (terminal !== null && generation.terminal?.status === terminal)
+    )
       return;
     const row = z
       .object({ version: z.number().int().positive() })
@@ -251,11 +257,21 @@ export class WorkspaceLifecycleStore {
           .prepare("SELECT version FROM domain_tasks WHERE id=?")
           .get(taskId),
       );
+    const eventId = `task-state:${row.version}`;
+    if (
+      this.db
+        .prepare(
+          "SELECT 1 FROM workspace_lifecycle_events WHERE workspaceId=? AND eventId=?",
+        )
+        .get(generation.workspaceId, eventId)
+    )
+      return;
     this.observe(generation, {
       kind: "terminal",
-      eventId: `task-state:${row.version}`,
+      eventId,
       at,
       status: terminal,
+      ...(terminal === null ? { reopened: true as const } : {}),
     });
   }
 
@@ -589,7 +605,10 @@ export class WorkspaceLifecycleStore {
         generation.lastTurnEndedAt = at;
         generation.lastTurnEndedEventId = event.eventId;
       } else if (event.kind === "terminal") {
-        if ((generation.terminal?.status ?? null) !== event.status) {
+        if (
+          (generation.terminal?.status ?? null) !== event.status ||
+          event.reopened
+        ) {
           generation.terminal =
             event.status === null
               ? null

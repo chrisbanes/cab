@@ -899,3 +899,65 @@ test("ready binding and generation identity commit atomically on a rejected gene
     fixture.close();
   }
 });
+
+test("true reopen clears legacy merge facts without inventing an unknown historical terminal time", () => {
+  const f = coordinationFixture();
+  try {
+    const taskId = "20000000-0000-4000-8000-000000000001",
+      projectId = "10000000-0000-4000-8000-000000000001",
+      workspaceId = randomUUID();
+    f.db.prepare("UPDATE domain_tasks SET state='done' WHERE id=?").run(taskId);
+    const bindings = new SqliteWorkspaceBindingStore(f.db);
+    bindings.createOrGet(taskId, workspaceId, "/fixture/legacy-reopen", [
+      {
+        repositoryId: "repo",
+        sourcePath: "/fixture/source",
+        workspacePath: "/fixture/workspace",
+        ref: "main",
+        gitCommonDir: null,
+        commit: null,
+      },
+    ]);
+    bindings.update(taskId, "ready", null);
+    const life = new WorkspaceLifecycleStore(f.db);
+    life.observe(
+      { taskId, workspaceId },
+      {
+        kind: "merge",
+        eventId: "observed-merged",
+        at: 100,
+        repositoryId: "repo",
+        changeRequestId: "pr",
+        merged: true,
+      },
+    );
+    assert.equal(life.get(workspaceId)?.terminal, null);
+    f.domain.execute({
+      type: "task.configure",
+      actor: "operator",
+      key: randomUUID(),
+      projectId,
+      taskId,
+      expectedVersion: Number(f.domain.task(taskId).version),
+      state: "open",
+    });
+    const reopened = life.get(workspaceId)!;
+    assert.equal(reopened.terminal, null);
+    assert.equal(reopened.allMergedAt, null);
+    assert.equal(reopened.repositoryClocks[0]?.merged, null);
+    assert.match(reopened.mergeEpoch!, /^task-state:/);
+    life.taskStateChanged(taskId, "open", reopened.lastObservedAt! + 1);
+    assert.deepEqual(life.get(workspaceId), reopened);
+    assert.throws(() =>
+      life.observe(reopened, {
+        kind: "terminal",
+        eventId: "invalid-reopen",
+        at: 100,
+        status: "done",
+        reopened: true,
+      }),
+    );
+  } finally {
+    f.close();
+  }
+});
