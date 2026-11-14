@@ -1,3 +1,4 @@
+import type { z } from "zod";
 import {
   executionDetailSchema,
   executionInputsSchema,
@@ -21,10 +22,24 @@ const API = "/api/operator";
 const SUPPLIED =
   "Captured submission of cab-supplied inputs; not the runtime's effective prompt.";
 const ABSENT = "No captured submission for this execution.";
-export const CAPTURE_NOTES = [
-  "Tool observation is incomplete.",
-  "Reasoning is not collected.",
-];
+export function captureNotes(
+  reasoning?: z.infer<
+    typeof executionDetailSchema
+  >["data"]["health"]["reasoning"],
+): string[] {
+  return [
+    "Tool observation is incomplete.",
+    reasoning === undefined
+      ? "Reasoning summary capture is reported per execution."
+      : {
+          "not-requested":
+            "No recorded request for reasoning summaries for this execution.",
+          collected: "Reasoning summaries were collected for this execution.",
+          unavailable:
+            "Reasoning summaries are unavailable for this execution.",
+        }[reasoning],
+  ];
+}
 
 /** Capture gap codes mapped onto the closed CLI coverage set; no new codes. */
 export const CAPTURE_GAP_COVERAGE: Record<string, CoverageGap> = {
@@ -131,7 +146,7 @@ const executionList: BrowseCommand = {
     return browseOutput(ctx, {
       data: read.data,
       observedAt: read.observedAt,
-      notes: CAPTURE_NOTES,
+      notes: captureNotes(),
       verboseNotes: true,
       gaps: executions.some((e) => e.capture !== "captured")
         ? ["evidence-unavailable"]
@@ -176,7 +191,7 @@ const executionGet: BrowseCommand = {
     return browseOutput(ctx, {
       data: d,
       observedAt: read.observedAt,
-      notes: CAPTURE_NOTES,
+      notes: captureNotes(d.health.reasoning),
       verboseNotes: true,
       gaps: [
         ...captureCoverage(e.capture, d.health.gaps, [], d.health.eventSource),

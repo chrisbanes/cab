@@ -23,10 +23,14 @@ unproved.
 
 The operator reads `${resolve(dataDir)}.operator-network.json` before starting the
 service. Missing settings disable LAN access. A private `cab.operator-network/v1`
-sidecar can specify one explicit IPv4 address and an optional canonical HTTP origin;
+sidecar can specify one explicit IPv4 address and a nonempty canonical HTTP `origins` set;
 the listener binds that address on the loopback port. LAN settings reject port 80,
 which the existing local-access origin contract does not support. Binding failure
-aborts startup.
+aborts startup. Legacy address-only settings resolve to the IP origin; a legacy
+`origin` resolves to exactly that origin. Reads preserve the saved shape and bytes.
+The mutually exclusive `origin`/`origins` properties reject duplicates and invalid
+entries. An explicit set never gains the IP implicitly. Serialized settings must
+fit within 4096 bytes before replacement. No database migration is involved.
 The sidecar is outside database snapshots and version trees. `cab service configure`
 reads and changes desired settings offline; install accepts the same LAN options and
 preserves settings when they are omitted. The lifecycle lock serializes cab writers;

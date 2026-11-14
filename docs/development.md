@@ -578,7 +578,8 @@ name, version and preview digest. The service rechecks every confirmation atomic
      report. `--output json` returns the unmodified service `data`.
 
    `execution list`, `execution get` and `logs` print their two capture notes (tool
-   observation is incomplete; reasoning is not collected) only with `--verbose`, once
+   observation is incomplete; reasoning summaries are collected, unavailable or have no
+   recorded request for that execution) only with `--verbose`, once
    each, and a `More:` or `Resume:` line keeps the flag. `coverage.notes` in JSON
    carries them either way. Only those three commands take `--verbose`; any other refuses it.
 
@@ -605,8 +606,15 @@ name, version and preview digest. The service rechecks every confirmation atomic
    fail-closed turn-start/current/deleted-project redaction. The project setting
    applies at admission. Confirmed erasure fences old admissions durably and leaves
    the opt-in unchanged; retention follows conversation history, including replaced
-   conversations. `logs --verbose` summary display and new reasoning capture-health
-   values remain pending. The existing verbose note still describes that projection.
+   conversations. Detail and event health reports `collected` only for valid retained
+   exact-bound summary metadata with available current redaction. An on/enhanced
+   admission without it reports `unavailable`, including opted-in Codex, Claude with
+   no summaries, and confirmed deletion. Off/baseline or no recorded eligible
+   admission reports `not-requested`; historical unknowns do not establish that
+   the setting was off. Today's opt-in/out and diagnostic pruning do not rewrite
+   these facts. List notes stay neutral; follow uses its last successful page (or
+   a neutral note before any page), once at the end. JSONL is unchanged.
+   `logs --verbose` summary display remains pending.
 
    Payloads are redacted before storage and again with current exclusions on every
    read; when exclusions are unavailable an item reads as

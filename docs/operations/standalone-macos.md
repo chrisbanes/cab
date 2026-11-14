@@ -57,19 +57,26 @@ unavailable at this insecure origin. Port 80 is not supported.
 
 ```sh
 cab service configure --lan-ip 192.168.1.20
-cab service configure --lan-ip 192.168.1.20 --lan-origin http://cab.example.test:8787
+cab service configure --lan-ip 192.168.1.20 --lan-origin http://cab.example.test:8787 --lan-origin http://mac.local:8787
+cab service configure --lan-ip 192.168.1.20 --lan-origin http://cab.example.test:8787 --no-lan-ip-origin
 cab service configure
 cab service configure --lan-ip off
 ```
 
 Replace the example IP and hostname with the address actually assigned to this Mac
-and the desired hostname. `--lan-origin` is optional, must use HTTP and the installed
-port, and requires an explicit enabled IP. Without it, the IP and port form the
-origin. Changing the IP without an origin resets the previous hostname. Install also
-accepts these options; omitting them keeps saved settings. `--state-dir` and `--label`
-select a non-default installation. Configure reads the protected installation record
+and the desired hostnames. Repeat `--lan-origin` for each canonical HTTP origin on
+the installed port. New explicit configurations include the IP origin unless
+`--no-lan-ip-origin` removes it; removal requires at least one hostname origin and
+refuses an explicitly supplied IP origin. Duplicate options/origins and origin
+options without an explicit enabled IP are refused. Changing the IP replaces the
+entire set; `off` clears it. Install accepts the same options; omitting them keeps
+saved bytes. Legacy address-only files still allow only the IP, and legacy explicit
+`origin` files still allow exactly that origin, without adding the IP. New files use
+a nonempty `origins` array, mutually exclusive with `origin`. An older binary
+refuses this new shape; disable LAN with the current binary before downgrading.
+`--state-dir` and `--label` select a non-default installation. Configure reads the protected installation record
 and settings without contacting the service, credentials, Keychain or launchd. Its
-output reports saved desired settings and `restartRequired: true`; it does not report
+output lists all desired `lanOrigins` and `restartRequired: true`; it does not report
 what the running job has applied.
 
 Settings are in `STATE/data.operator-network.json`, beside the data directory, in a

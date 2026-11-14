@@ -5890,7 +5890,7 @@ const captureHealthSchema = z
     mode: z.enum(["enhanced", "baseline"]).nullable(),
     eventSource: z.enum(["supported", "unsupported"]).nullable(),
     toolObservation: z.literal("incomplete"),
-    reasoning: z.literal("not-collected"),
+    reasoning: z.enum(["not-requested", "collected", "unavailable"]),
     gaps: z.array(diagnosticGapSchema),
     unrecorded: z.number().int().nonnegative().safe(),
   })

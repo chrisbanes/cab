@@ -3428,6 +3428,46 @@ export class StandaloneService {
     return this.started().state.byWorkId(workId);
   }
 
+  /** Admission is historical; retained summary facts are independent of diagnostic retention. */
+  reasoningSummaryCaptureFor(workId: string): {
+    requested: boolean;
+    stored: boolean;
+  } {
+    const state = this.started().state;
+    const intent = state.byWorkId(workId);
+    const admission = intent
+      ? state.reasoningSummaryAdmission(intent.id)
+      : null;
+    const requested =
+      admission?.enabled === 1 && admission.captureMode === "enhanced";
+    if (!requested || !intent) return { requested, stored: false };
+    try {
+      const task = state.taskBinding(workId);
+      const binding =
+        intent.threadId && intent.turnId
+          ? state.conversationHistoryBinding(
+              workId,
+              intent.threadId,
+              intent.turnId,
+            )
+          : undefined;
+      return {
+        requested,
+        stored:
+          task?.harness === "claude" &&
+          binding !== undefined &&
+          (this.conversationHistoryStore()?.hasStoredReasoningSummary(
+            binding,
+            intent.id,
+          ) ??
+            false),
+      };
+    } catch {
+      // Summary metadata failures never change execution or ordinary history reads.
+      return { requested, stored: false };
+    }
+  }
+
   /** Command network access a work's turn was admitted with; null when no admission recorded it. */
   commandNetworkAccessFor(workId: string): boolean | null {
     const intent = this.executionForWork(workId);

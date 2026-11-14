@@ -1,3 +1,7 @@
+import {
+  lanOrigins,
+  type OperatorNetworkSettings,
+} from "../../src/operator/network-access.js";
 import type { ReadinessResult } from "../../src/operator/readiness.js";
 import { randomUUID } from "node:crypto";
 import { mkdtemp, rm } from "node:fs/promises";
@@ -157,15 +161,14 @@ export interface OperatorFixture<R extends Runtime> {
     setup?: OperatorSetupSeams,
     push?: FixturePushOptions,
     readReadiness?: () => Promise<ReadinessResult>,
-    lan?: {
-      address: string;
-      origin?: string;
+    lan?: NonNullable<OperatorNetworkSettings["lan"]> & {
       port?: number;
       authOrigin?: string;
     },
   ): Promise<{
     origin: string;
     lanOrigin?: string;
+    lanOrigins?: string[];
     password: string;
     auth: OperatorAuth;
     http: LocalOperatorHttp;
@@ -431,9 +434,7 @@ export async function createOperatorFixture<
       setup?: OperatorSetupSeams,
       pushOptions?: FixturePushOptions,
       readReadiness?: () => Promise<ReadinessResult>,
-      lan?: {
-        address: string;
-        origin?: string;
+      lan?: NonNullable<OperatorNetworkSettings["lan"]> & {
         port?: number;
         authOrigin?: string;
       },
@@ -537,6 +538,9 @@ export async function createOperatorFixture<
                 lan: {
                   address: lan.address,
                   ...(lan.origin === undefined ? {} : { origin: lan.origin }),
+                  ...(lan.origins === undefined
+                    ? {}
+                    : { origins: lan.origins }),
                 },
               }
             : {}),
@@ -563,7 +567,10 @@ export async function createOperatorFixture<
         return {
           origin,
           ...(lan
-            ? { lanOrigin: lan.origin ?? `http://${lan.address}:${port}` }
+            ? {
+                lanOrigin: lanOrigins(lan, port)[0]!,
+                lanOrigins: lanOrigins(lan, port),
+              }
             : {}),
           password,
           auth,

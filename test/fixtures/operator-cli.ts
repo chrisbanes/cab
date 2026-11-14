@@ -1,3 +1,4 @@
+import type { OperatorNetworkSettings } from "../../src/operator/network-access.js";
 import { randomUUID } from "node:crypto";
 import { writeFileSync } from "node:fs";
 import { mkdir, writeFile } from "node:fs/promises";
@@ -22,7 +23,7 @@ type After = { after(fn: () => unknown): void };
 
 type ServeOptions = {
   authOrigin?: string;
-  lan?: { address: string; origin?: string };
+  lan?: NonNullable<OperatorNetworkSettings["lan"]>;
   controlPaths?: string[];
   previewReader?: ConstructorParameters<typeof OperatorApi>[3];
   /** Setup seams, such as the home folder the setup routes read. */
