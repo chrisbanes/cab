@@ -61,6 +61,7 @@ type Query = {
   since: number | undefined;
   until: number | undefined;
   limit: number;
+  includeReasoningSummaries: boolean;
 };
 async function readPage(
   client: Awaited<ReturnType<BrowseContext["connect"]>>,
@@ -70,6 +71,9 @@ async function readPage(
   const params = new URLSearchParams({
     after: String(after),
     limit: String(q.limit),
+    ...(q.includeReasoningSummaries
+      ? { includeReasoningSummaries: "true" }
+      : {}),
     ...(q.kind ? { kind: q.kind } : {}),
     ...(q.severity ? { severity: q.severity } : {}),
     ...(q.since === undefined ? {} : { since: String(q.since) }),
@@ -89,6 +93,16 @@ const itemLine = (i: Page["data"]["items"][number]) =>
       ? `[omitted: ${i.reason}]`
       : oneLine(JSON.stringify(i.payload), 400)
   }`;
+
+export function reasoningSummaryLines(text: string, truncated: boolean) {
+  return [
+    "Reasoning summary",
+    ...text.split("\n").map((line) => `  ${line}`),
+    ...(truncated
+      ? ["Reasoning summary truncated; only the retained prefix is shown."]
+      : []),
+  ];
+}
 
 export const logsCommand: BrowseCommand = {
   usage:
@@ -110,6 +124,7 @@ export const logsCommand: BrowseCommand = {
       since: timeArg(v.after, "--after"),
       until: timeArg(v.before, "--before"),
       limit: limit.limit,
+      includeReasoningSummaries: Boolean(v.verbose),
     };
     const interval = secondsArg(v.interval, "--interval", 30, 2);
     const maxDuration = secondsArg(
@@ -156,15 +171,23 @@ export const logsCommand: BrowseCommand = {
           d.items.length
             ? table(
                 ["Sequence", "Time", "Severity", "Kind", "Name", "Detail"],
-                d.items.map((i) => [
-                  String(i.sequence),
-                  isoTime(i.createdAt),
-                  i.severity,
-                  i.kind,
-                  i.name,
-                  i.state === "omitted"
-                    ? `[omitted: ${i.reason}]`
-                    : oneLine(JSON.stringify(i.payload), 120),
+                d.items.flatMap((i) => [
+                  [
+                    String(i.sequence),
+                    isoTime(i.createdAt),
+                    i.severity,
+                    i.kind,
+                    i.name,
+                    i.state === "omitted"
+                      ? `[omitted: ${i.reason}]`
+                      : oneLine(JSON.stringify(i.payload), 120),
+                  ],
+                  ...(v.verbose && i.reasoningSummary
+                    ? reasoningSummaryLines(
+                        i.reasoningSummary.text,
+                        i.reasoningSummary.truncated,
+                      ).map((line) => ["", "", "", "", "", line])
+                    : []),
                 ]),
               )
             : "No diagnostic items.",
@@ -219,7 +242,15 @@ export const logsCommand: BrowseCommand = {
       lastReasoning = d.health.reasoning;
       for (const item of d.items)
         if (jsonl) emit("item", { workId: d.workId, item });
-        else out(itemLine(item));
+        else {
+          out(itemLine(item));
+          if (v.verbose && item.reasoningSummary)
+            for (const line of reasoningSummaryLines(
+              item.reasoningSummary.text,
+              item.reasoningSummary.truncated,
+            ))
+              out(line);
+        }
       for (const gap of d.gaps) {
         const key = `${gap.code}:${gap.maxPrunedSequence}`;
         if (shown.get(key) === gap.count) continue;
