@@ -1062,6 +1062,19 @@ a.task-source-chip:hover {
   overflow-x: auto;
 }
 
+.conv-reasoning {
+  margin-top: var(--space-8);
+}
+
+.conv-reasoning-content {
+  margin-top: var(--space-8);
+  padding: var(--space-12);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+  background: var(--raised);
+  color: var(--fg);
+}
+
 .conv-tools {
   display: flex;
   flex-wrap: wrap;

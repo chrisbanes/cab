@@ -15,12 +15,18 @@ import { normalizePlan } from "../../src/standalone/agent-plan.js";
 import { ConversationHistoryStore } from "../../src/standalone/conversation-history.js";
 import { ExecutionDiagnosticsStore } from "../../src/standalone/execution-diagnostics.js";
 import { createOperatorFixture } from "../fixtures/operator-web.js";
-import { desktop, phone, signIn } from "../fixtures/operator-settings.js";
+import {
+  desktop,
+  phone,
+  signIn,
+  noPageOverflow,
+} from "../fixtures/operator-settings.js";
 import { choiceForm } from "../fixtures/question-data.js";
 import { finishOwnWork, startOwnWork, until } from "../fixtures/questions.js";
 import { markLeadStarted } from "../fixtures/task-review.js";
 import { stubReadiness } from "../fixtures/setup-browser.js";
 import { openTaskTab } from "../fixtures/task-tabs.js";
+import { signOutFromSidebar } from "../fixtures/operator-account.js";
 
 const test = browserSuite("task-conversation");
 
@@ -2000,3 +2006,486 @@ for (const mode of ["running", "ready"] as const)
       await page.close();
     }
   });
+
+const summaryLiteral =
+  "<script>window.summaryExecuted = true</script>\n**literal Markdown** [literal link](https://example.com/summary)\n日本語 😀 " +
+  "longword".repeat(90);
+
+/** Real admitted bindings and the production summary writer, confined to this fixture. */
+function seedReasoning(
+  f: Fixture,
+  s: Pick<Awaited<ReturnType<typeof seed>>, "taskId" | "assignmentId">,
+) {
+  f.seedPersistedState((db) => {
+    for (const [index, texts, summary, at] of [
+      [
+        0,
+        ["Reasoned first answer", "Second item of the same turn"],
+        summaryLiteral,
+        t0 + 1000,
+      ],
+      [
+        1,
+        ["Reasoned second answer"],
+        "Retained prefix.\n" + "x".repeat(16_000),
+        t0 + 1100,
+      ],
+      [2, [], "Summary without assistant prose", t0 + 1200],
+      [3, ["Older reasoning answer"], "OLDER_LOADED_CANARY", t0 - 100_000],
+      [4, ["Answer without summary"], undefined, t0 + 1300],
+    ] as const) {
+      const workId = `summary-fixture-${index}`;
+      const intentId = randomUUID();
+      const binding = {
+        workId,
+        taskId: s.taskId,
+        assignmentId: s.assignmentId,
+        assignmentVersion: 1,
+        instructionsRevision: 1,
+        profileRevision: 1,
+        conversationRevision: 1,
+        workRevision: index + 20,
+        threadId: "summary-fixture-thread",
+        turnId: `summary-fixture-turn-${index}`,
+      };
+      db.prepare(`INSERT INTO execution_intents(id,workId,prompt,workspace,state,threadId,turnId,accountType,sandbox,approval)
+        VALUES (?,?,'fixture',?,'completed',?,?,'chatgpt','workspaceWrite','never')`).run(
+        intentId,
+        workId,
+        f.directory,
+        binding.threadId,
+        binding.turnId,
+      );
+      db.prepare(`INSERT INTO task_execution_bindings(workId,taskId,assignmentId,assignmentVersion,instructionsRevision,profileRevision,conversationRevision,harness)
+        VALUES (?,?,?,1,1,1,1,'claude')`).run(workId, s.taskId, s.assignmentId);
+      db.prepare(
+        `INSERT INTO task_work_revisions(workId,assignmentId,conversationRevision,workRevision) VALUES (?,?,1,?)`,
+      ).run(workId, s.assignmentId, binding.workRevision);
+      db.prepare(
+        `INSERT INTO execution_intent_reasoning_summaries(intentId,enabled,captureMode,generation) VALUES (?,1,'enhanced',0)`,
+      ).run(intentId);
+      const history = new ConversationHistoryStore(db, () => at);
+      for (const [i, text] of texts.entries())
+        history.record(
+          binding,
+          {
+            kind: "completed",
+            threadId: binding.threadId,
+            turnId: binding.turnId,
+            itemId: `text-${i}`,
+            text,
+          },
+          [],
+        );
+      history.recordReasoningSummary(binding, intentId, summary, []);
+    }
+  });
+}
+
+// Same sRGB contrast calculation used by the existing operator theme tests.
+async function summaryContrast(target: Locator) {
+  return target.evaluate((element) => {
+    const style = getComputedStyle(element);
+    let ancestor: Element | null = element;
+    let background = "rgba(0, 0, 0, 0)";
+    while (ancestor) {
+      background = getComputedStyle(ancestor).backgroundColor;
+      if (background !== "rgba(0, 0, 0, 0)") break;
+      ancestor = ancestor.parentElement;
+    }
+    const canvas = document.createElement("canvas").getContext("2d")!;
+    const luminance = (color: string) => {
+      canvas.fillStyle = color;
+      canvas.fillRect(0, 0, 1, 1);
+      const [r = 0, g = 0, b = 0] = [...canvas.getImageData(0, 0, 1, 1).data]
+        .slice(0, 3)
+        .map((c) => {
+          const v = c / 255;
+          return v <= 0.04045 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4;
+        });
+      return r * 0.2126 + g * 0.7152 + b * 0.0722;
+    };
+    const ratio = (color: string) => {
+      const a = luminance(color),
+        b = luminance(background);
+      return (Math.max(a, b) + 0.05) / (Math.min(a, b) + 0.05);
+    };
+    return {
+      text: ratio(style.color),
+      focus: ratio(style.getPropertyValue("--focus")),
+      ring: style.boxShadow,
+      focusVisible: element.matches(":focus-visible"),
+    };
+  });
+}
+
+for (const colorScheme of ["light", "dark"] as const)
+  for (const [size, viewport] of [
+    ["desktop", { width: 1366, height: 850 }],
+    ["phone", phone],
+  ] as const)
+    test(`reasoning summaries stay plain, independently controlled and readable (${colorScheme}, ${size})`, async (_t, j) => {
+      const f = await j.start("fixture.create", () =>
+        createOperatorFixture(null, undefined, undefined, j.fixtureOptions),
+      );
+      let browser: Browser | undefined;
+      j.cleanup(
+        (primary) => f.close(browser, primary),
+        "fixture.close",
+        () => f.lifecycle.steps,
+      );
+      const started = await startOwnWork(f, "Reasoning summaries", "Atlas");
+      await finishOwnWork(f, started);
+      const s = started.a;
+      seedReasoning(f, s);
+      const web = await j.start("fixture.web", () => f.startWeb());
+      browser = await j.start("browser.launch", () => chromium.launch());
+      const page = await browser.newPage({ viewport, colorScheme });
+      j.observe(page);
+      page.setDefaultTimeout(5000);
+      await stubReadiness(page);
+      await signIn(page, web, `/tasks/${s.taskId}`);
+      const first = page.locator("article.conv-agent", {
+        hasText: "Reasoned first answer",
+      });
+      const second = page.locator("article.conv-agent", {
+        hasText: "Reasoned second answer",
+      });
+      const toggle = first.getByRole("button", {
+        name: "Reasoning summary",
+        exact: true,
+      });
+      await toggle.waitFor();
+      const all = page.getByRole("button", {
+        name: "Reasoning summary",
+        exact: true,
+      });
+      assert.equal(await all.count(), 4);
+      assert.deepEqual(
+        await all.evaluateAll((buttons) =>
+          buttons.map((b) => b.getAttribute("aria-expanded")),
+        ),
+        ["false", "false", "false", "false"],
+      );
+      assert.equal(await page.locator(".conv-reasoning-content").count(), 0);
+      assert.equal(
+        await page
+          .locator("article.conv-agent", {
+            hasText: "Second item of the same turn",
+          })
+          .getByRole("button", { name: "Reasoning summary" })
+          .count(),
+        0,
+      );
+      assert.equal(
+        await page
+          .locator("article.conv-agent", { hasText: "Answer without summary" })
+          .getByRole("button", { name: "Reasoning summary" })
+          .count(),
+        0,
+      );
+      await first.locator(".conv-reasoning").evaluate((el) => {
+        el.setAttribute("tabindex", "-1");
+        (el as HTMLElement).focus();
+      });
+      await page.keyboard.press("Tab");
+      assert.equal(
+        await toggle.evaluate((el) => el === document.activeElement),
+        true,
+      );
+      const focus = await summaryContrast(toggle);
+      assert.equal(focus.focusVisible, true);
+      assert.notEqual(focus.ring, "none");
+      assert.ok(focus.focus >= 3, JSON.stringify(focus));
+      await page.keyboard.press("Enter");
+      assert.equal(await toggle.getAttribute("aria-expanded"), "true");
+      const prose = first.locator(".conv-reasoning-content .conv-text");
+      assert.equal(await prose.textContent(), summaryLiteral);
+      assert.equal(await prose.locator("script,a,strong").count(), 0);
+      assert.equal(
+        await page.evaluate(
+          () =>
+            (window as unknown as { summaryExecuted?: boolean })
+              .summaryExecuted,
+        ),
+        undefined,
+      );
+      assert.equal(
+        await second
+          .getByRole("button", { name: "Reasoning summary" })
+          .getAttribute("aria-expanded"),
+        "false",
+      );
+      assert.equal(
+        await first
+          .getByText(
+            "Reasoning summary truncated; only the retained prefix is shown.",
+          )
+          .count(),
+        0,
+      );
+      assert.ok((await summaryContrast(prose)).text >= 4.5);
+      await page.keyboard.press("Space");
+      assert.equal(await toggle.getAttribute("aria-expanded"), "false");
+      assert.equal(
+        await toggle.evaluate((el) => el === document.activeElement),
+        true,
+      );
+      await second.getByRole("button", { name: "Reasoning summary" }).click();
+      await second
+        .getByText(
+          "Reasoning summary truncated; only the retained prefix is shown.",
+          { exact: true },
+        )
+        .waitFor();
+      assert.equal(
+        (
+          await second
+            .locator(".conv-reasoning-content .conv-text")
+            .textContent()
+        )?.length,
+        16_000,
+      );
+      await second.getByRole("button", { name: "Reasoning summary" }).click();
+      await toggle.click();
+      const draft = page.getByLabel("Editable reply");
+      await draft.fill("Keep this unsent draft");
+      await toggle.scrollIntoViewIfNeeded();
+      const readingTop = (await toggle.boundingBox())!.y;
+      const response = page.waitForResponse(
+        (r) => r.url().includes("/timeline?limit=50") && r.status() === 200,
+      );
+      await refresh(page);
+      await response;
+      assert.equal(await toggle.getAttribute("aria-expanded"), "true");
+      await page.evaluate(
+        () =>
+          new Promise<void>((resolve) =>
+            requestAnimationFrame(() => requestAnimationFrame(() => resolve())),
+          ),
+      );
+      assert.ok(
+        Math.abs((await toggle.boundingBox())!.y - readingTop) <= 2,
+        "refresh keeps the reading anchor",
+      );
+      // Avoid Playwright scrolling the tab bar into view before the switch captures scroll.
+      await page
+        .getByRole("tab", { name: "Execution", exact: true })
+        .evaluate((el) => (el as HTMLElement).click());
+      await page.locator('.task-panel[data-tab="execution"]').waitFor();
+      await page
+        .getByRole("tab", { name: "Overview", exact: true })
+        .evaluate((el) => (el as HTMLElement).click());
+      await prose.waitFor();
+      await page.evaluate(
+        () =>
+          new Promise<void>((resolve) =>
+            requestAnimationFrame(() => requestAnimationFrame(() => resolve())),
+          ),
+      );
+      assert.ok(
+        Math.abs((await toggle.boundingBox())!.y - readingTop) <= 2,
+        "return keeps the reading anchor",
+      );
+      assert.equal(await toggle.getAttribute("aria-expanded"), "true");
+      assert.equal(
+        await second
+          .getByRole("button", { name: "Reasoning summary" })
+          .getAttribute("aria-expanded"),
+        "false",
+      );
+      assert.equal(await draft.inputValue(), "Keep this unsent draft");
+      await noPageOverflow(page);
+      await prose.scrollIntoViewIfNeeded();
+      // Scroll the final text line clear of the docked composer, as an operator can.
+      await prose.evaluate((element) => {
+        const range = document.createRange();
+        range.selectNodeContents(element);
+        const last = [...range.getClientRects()].at(-1);
+        const reply = document.getElementById("reply")!.getBoundingClientRect();
+        if (last && last.bottom > reply.top - 16)
+          scrollBy(0, last.bottom - reply.top + 16);
+      });
+      const readable = await prose.evaluate((element) => {
+        const range = document.createRange();
+        range.selectNodeContents(element);
+        const last = [...range.getClientRects()].at(-1)!;
+        return (
+          last.top >= 0 &&
+          last.bottom <=
+            document.getElementById("reply")!.getBoundingClientRect().top
+        );
+      });
+      assert.equal(
+        readable,
+        true,
+        "the final summary line can be read above the docked composer",
+      );
+      await j.capture(page, `reasoning-${colorScheme}-${size}-open`, false);
+      // A summary-only real turn remains attributed and keeps the ordinary missing-text context.
+      const only = page
+        .locator("article.conv-agent", {
+          hasText: "No text captured for this item.",
+        })
+        .filter({
+          has: page.getByRole("button", { name: "Reasoning summary" }),
+        });
+      await only.getByRole("button", { name: "Reasoning summary" }).click();
+      await only
+        .getByText("Summary without assistant prose", { exact: true })
+        .waitFor();
+    });
+
+test("successful privacy reads erase older loaded summaries after a stale read", async (_t, j) => {
+  const f = await j.start("fixture.create", () =>
+    createOperatorFixture(null, undefined, undefined, j.fixtureOptions),
+  );
+  let browser: Browser | undefined;
+  j.cleanup(
+    (primary) => f.close(browser, primary),
+    "fixture.close",
+    () => f.lifecycle.steps,
+  );
+  const s = await seed(f);
+  seedReasoning(f, s);
+  const web = await j.start("fixture.web", () => f.startWeb());
+  browser = await j.start("browser.launch", () => chromium.launch());
+  const page = await browser.newPage({ viewport: desktop });
+  j.observe(page);
+  page.setDefaultTimeout(5000);
+  await stubReadiness(page);
+  await signIn(page, web, `/tasks/${s.taskId}`);
+  await page.getByText("Reasoned first answer", { exact: true }).waitFor();
+  await page.getByRole("button", { name: "Load earlier", exact: true }).click();
+  const older = page.locator("article.conv-agent", {
+    hasText: "Older reasoning answer",
+  });
+  await older.getByRole("button", { name: "Reasoning summary" }).click();
+  await older.getByText("OLDER_LOADED_CANARY", { exact: true }).waitFor();
+  const draft = page.getByLabel("Editable reply");
+  await draft.fill("Draft survives summary deletion");
+  const timeline = "**/api/operator/tasks/*/timeline?*";
+  await page.route(timeline, (route) => route.abort());
+  await refresh(page);
+  await page
+    .getByText(
+      "The conversation could not be refreshed, so this view may be out of date.",
+      { exact: false },
+    )
+    .waitFor();
+  assert.equal(
+    await older.getByText("OLDER_LOADED_CANARY").count(),
+    1,
+    "failed read remains truthfully stale",
+  );
+  await page.unroute(timeline);
+  f.service.domain().execute({
+    type: "project.reasoning.delete",
+    actor: "operator",
+    key: randomUUID(),
+    projectId: s.projectId,
+    expectedVersion: Number(f.service.domain().project(s.projectId).version),
+    confirmed: true,
+  } as never);
+  await page.getByRole("button", { name: "Retry", exact: true }).click();
+  await page.waitForFunction(
+    () => document.querySelectorAll(".conv-reasoning").length === 0,
+  );
+  assert.equal(await page.getByText("OLDER_LOADED_CANARY").count(), 0);
+  assert.equal(await draft.inputValue(), "Draft survives summary deletion");
+  await page.getByText("Reasoned first answer", { exact: true }).waitFor();
+  await j.capture(page, "reasoning-erased-retained-window", false);
+});
+
+test("sign-out fences a real delayed summary response before the next session", async (_t, j) => {
+  const f = await j.start("fixture.create", () =>
+    createOperatorFixture(null, undefined, undefined, j.fixtureOptions),
+  );
+  let browser: Browser | undefined;
+  j.cleanup(
+    (primary) => f.close(browser, primary),
+    "fixture.close",
+    () => f.lifecycle.steps,
+  );
+  const s = await seed(f, 2);
+  seedReasoning(f, s);
+  const web = await j.start("fixture.web", () => f.startWeb());
+  browser = await j.start("browser.launch", () => chromium.launch());
+  const page = await browser.newPage({ viewport: desktop });
+  j.observe(page);
+  page.setDefaultTimeout(5000);
+  await stubReadiness(page);
+  await signIn(page, web, `/tasks/${s.taskId}`);
+  await page.getByText("Reasoned first answer", { exact: true }).waitFor();
+  let release = () => {};
+  let fetched = () => {};
+  let delivered = () => {};
+  const held = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  const ready = new Promise<void>((resolve) => {
+    fetched = resolve;
+  });
+  const sent = new Promise<void>((resolve) => {
+    delivered = resolve;
+  });
+  const timeline = "**/api/operator/tasks/*/timeline?*";
+  let heldOnce = false;
+  await page.route(timeline, async (route) => {
+    if (heldOnce) return route.continue();
+    heldOnce = true;
+    const response = await route.fetch();
+    assert.equal(
+      response.status(),
+      200,
+      "the held summary read succeeded before sign-out",
+    );
+    const json = await response.json();
+    assert.ok(
+      json.data.entries.some(
+        (e: { reasoningSummary?: unknown }) => e.reasoningSummary,
+      ),
+    );
+    fetched();
+    await held;
+    try {
+      await route.fulfill({ response, json });
+    } finally {
+      delivered();
+    }
+  });
+  try {
+    await refresh(page);
+    await ready;
+    await signOutFromSidebar(page);
+    await page.getByLabel("Password", { exact: true }).waitFor();
+    f.service.domain().execute({
+      type: "project.reasoning.delete",
+      actor: "operator",
+      key: randomUUID(),
+      projectId: s.projectId,
+      expectedVersion: Number(f.service.domain().project(s.projectId).version),
+      confirmed: true,
+    } as never);
+    release();
+    await sent;
+    await page.unroute(timeline);
+    await page.getByLabel("Password").fill(web.password);
+    await page.getByRole("button", { name: "Sign in", exact: true }).click();
+    await page.getByText("Reasoned first answer", { exact: true }).waitFor();
+    assert.equal(
+      await page.getByRole("button", { name: "Reasoning summary" }).count(),
+      0,
+    );
+    assert.doesNotMatch(
+      (await page.locator("body").textContent()) ?? "",
+      /literal Markdown|OLDER_LOADED_CANARY/,
+    );
+    assert.doesNotMatch(
+      await page.evaluate(() => JSON.stringify([localStorage, sessionStorage])),
+      /CANARY|literal Markdown/,
+    );
+  } finally {
+    release();
+  }
+});

@@ -27,6 +27,8 @@ import {
   mergeTimeline,
   pendingBelow,
   prependTimeline,
+  reasoningSummaryLabel,
+  reasoningSummaryTruncationCopy,
   type ConversationItem,
   type AgentPlan,
   type ToolEntry,
@@ -186,6 +188,43 @@ test("an entry the newest page covers but no longer returns is dropped, older on
   // `pruned` sits inside the page's range but is gone; `below` lies under the page.
   assert.deepEqual(ids(merged.window.entries), ids([below, first, kept]));
   assert.equal(merged.changed, true);
+});
+
+test("summary changes replace the same entry and a privacy revision removes older loaded summaries", () => {
+  const older = entry({
+    kind: "assistant",
+    workId: "old",
+    lifecycle: "completed",
+    text: null,
+    turnKey: "c".repeat(64),
+    reasoningSummary: { text: "older retained summary", truncated: false },
+  });
+  const newest = text("newest");
+  const changed = {
+    ...older,
+    reasoningSummary: { text: "changed retained prefix", truncated: true },
+  };
+  const joined = prependTimeline(window([newest]), page([older]));
+  assert.ok(joined);
+  const replacement = prependTimeline(joined, page([changed]));
+  assert.equal(replacement?.entries[0], changed);
+  const updated = mergeTimeline(window([older]), page([changed]));
+  assert.equal(updated.changed, true);
+  assert.equal(updated.window.entries[0], changed);
+  const reset = mergeTimeline(
+    joined,
+    page([newest], { visibilityRevision: v2 }),
+  );
+  assert.equal(reset.reset, true);
+  assert.deepEqual(reset.window.entries, [newest]);
+  assert.doesNotMatch(JSON.stringify(reset.window), /older retained summary/);
+  assert.equal(prependTimeline(reset.window, page([older])), null);
+  const absent = { ...changed };
+  delete (absent as { reasoningSummary?: unknown }).reasoningSummary;
+  assert.equal(
+    mergeTimeline(updated.window, page([absent])).window.entries[0],
+    absent,
+  );
 });
 
 test("an unfinished entry behind the newest page is found, and an older page completes it in place", () => {
@@ -486,6 +525,15 @@ test("hasDelegation finds an assignment's place at any depth, and none when noth
 test("every gap reason has copy", () => {
   for (const reason of timelineGapReasons)
     assert.ok(gapCopy(reason).length > 10, reason);
+});
+
+test("reasoning summary copy labels the disclosure and only reports a truncated retained prefix", () => {
+  assert.equal(reasoningSummaryLabel, "Reasoning summary");
+  assert.equal(
+    reasoningSummaryTruncationCopy(true),
+    "Reasoning summary truncated; only the retained prefix is shown.",
+  );
+  assert.equal(reasoningSummaryTruncationCopy(false), null);
 });
 
 test("the newest page's plans replace the window's, and older pages keep them", () => {

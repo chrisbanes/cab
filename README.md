@@ -158,7 +158,10 @@ owns delivery scope and status.
   exact task, assignment and runtime turn. Only completed, sanitized text is
   retained; unfinished messages show progress metadata and omitted text is labelled.
   Known private instructions, credential values and control paths are redacted before
-  storage, with current exclusions reapplied when history is read. This is a bounded
+  storage, with current exclusions reapplied when history is read. Eligible retained
+  reasoning summaries appear once on their exact turn behind a collapsed plain-text
+  disclosure, with a notice for a truncated retained prefix. A successful privacy
+  refresh removes erased summaries from older loaded pages too. This is a bounded
   diagnostic view, not a complete transcript or ownership-release proof, and missing
   history does not change admission or completion gates.
 - **Browser notifications.** Opt-in Web Push, turned on per browser in Settings →

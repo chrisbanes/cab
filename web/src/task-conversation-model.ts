@@ -450,3 +450,11 @@ const gapText: Record<GapReason, string> = {
     "Tool capture was incomplete. Tools may have run that are not listed.",
 };
 export const gapCopy = (reason: GapReason): string => gapText[reason];
+
+export const reasoningSummaryLabel = "Reasoning summary";
+export const reasoningSummaryTruncationCopy = (
+  truncated: boolean,
+): string | null =>
+  truncated
+    ? "Reasoning summary truncated; only the retained prefix is shown."
+    : null;
