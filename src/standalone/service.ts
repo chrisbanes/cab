@@ -181,7 +181,10 @@ import {
   previousHarnessHomeMessage,
 } from "./runtime-retention.js";
 import { SqliteWorkspaceComparisonStore } from "./comparison-store.js";
-import type { ConversationHistoryAssignmentRead } from "./conversation-history.js";
+import type {
+  ConversationHistoryAssignmentRead,
+  ConversationHistoryBinding,
+} from "./conversation-history.js";
 import {
   ConversationHistoryCapture,
   ConversationHistoryStore,
@@ -3441,6 +3444,57 @@ export class StandaloneService {
 
   executionForWork(workId: string): ExecutionIntent | undefined {
     return this.started().state.byWorkId(workId);
+  }
+
+  /** Only the conversation read may materialize an exact historical turn's summary. */
+  reasoningSummaryFor(
+    binding: ConversationHistoryBinding,
+    excluded: readonly string[] | undefined,
+  ) {
+    if (!excluded) return undefined;
+    try {
+      const state = this.started().state;
+      const intent = state.byWorkId(binding.workId);
+      const task = state.taskBinding(binding.workId);
+      const admission = intent && state.reasoningSummaryAdmission(intent.id);
+      const assignment = this.domain().assignment(binding.assignmentId);
+      const exact = state.conversationHistoryBinding(
+        binding.workId,
+        binding.threadId,
+        binding.turnId,
+      );
+      if (
+        !intent ||
+        task?.harness !== "claude" ||
+        String(assignment.taskId) !== binding.taskId ||
+        !exact ||
+        admission?.enabled !== 1 ||
+        admission.captureMode !== "enhanced" ||
+        Object.entries(exact).some(
+          ([key, value]) =>
+            binding[key as keyof ConversationHistoryBinding] !== value,
+        )
+      )
+        return undefined;
+      const summary = this.conversationHistoryStore()?.readReasoningSummary(
+        exact,
+        () => excluded,
+      );
+      if (
+        !summary?.text ||
+        summary.intentId !== intent.id ||
+        summary.projectId !==
+          String(this.domain().task(binding.taskId).projectId) ||
+        summary.enabled !== admission.enabled ||
+        summary.captureMode !== admission.captureMode ||
+        summary.generation !== admission.generation
+      )
+        return undefined;
+      return { text: summary.text, truncated: summary.truncated === 1 };
+    } catch {
+      // Missing or inconsistent ownership/privacy facts never become summary content.
+      return undefined;
+    }
   }
 
   /** Admission is historical; retained summary facts are independent of diagnostic retention. */

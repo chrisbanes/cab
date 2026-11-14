@@ -5674,6 +5674,24 @@ export class OperatorApi {
       };
       const planUpdates =
         historyStore?.readPlanUpdatesBefore(taskId, before, want) ?? [];
+      const summaryTurns = historyStore?.reasoningSummaryTurns(taskId) ?? [];
+      const turnKey = (binding: ConversationHistoryBinding) =>
+        createHash("sha256")
+          .update(
+            JSON.stringify([
+              binding.workId,
+              binding.taskId,
+              binding.assignmentId,
+              binding.assignmentVersion,
+              binding.instructionsRevision,
+              binding.profileRevision,
+              binding.conversationRevision,
+              binding.workRevision,
+              binding.threadId,
+              binding.turnId,
+            ]),
+          )
+          .digest("hex");
       const assignmentIds = new Set(
         view.assignments.map((a) => a.assignmentId),
       );
@@ -5690,7 +5708,14 @@ export class OperatorApi {
         ...history.items,
         ...history.turnOmissions,
         ...latestPlans,
+        ...summaryTurns,
       ]);
+      const summaries = new Map(
+        summaryTurns.flatMap((turn) => {
+          const summary = this.service.reasoningSummaryFor(turn, excluded);
+          return summary ? [[turnKey(turn), { turn, summary }] as const] : [];
+        }),
+      );
       const detail = (workId: string, turnId?: string, itemId?: string) => ({
         workId: this.safe(workId, excluded),
         turnId: turnId === undefined ? null : this.safe(turnId, excluded),
@@ -5732,8 +5757,15 @@ export class OperatorApi {
               : {
                   kind: "assistant",
                   workId: item.workId,
+                  turnKey: turnKey(item),
                   lifecycle: item.lifecycle,
                   text: text ?? null,
+                  ...(summaries.get(turnKey(item))?.turn.anchorSequence ===
+                  item.sequence
+                    ? {
+                        reasoningSummary: summaries.get(turnKey(item))!.summary,
+                      }
+                    : {}),
                 },
           };
         }),
@@ -5755,6 +5787,32 @@ export class OperatorApi {
           }),
         ),
       ];
+
+      const summarySource: TimelineCandidate[] = [...summaries].flatMap(
+        ([key, { turn, summary }]) =>
+          turn.anchorSequence !== null
+            ? []
+            : [
+                {
+                  key: {
+                    timeMs: turn.createdAt,
+                    rank: timelineRank.history,
+                    ordinal: 0,
+                    id: `summary-${key}`,
+                  },
+                  assignmentId: turn.assignmentId,
+                  precision: "ms",
+                  body: {
+                    kind: "assistant",
+                    workId: turn.workId,
+                    turnKey: key,
+                    lifecycle: "completed",
+                    text: null,
+                    reasoningSummary: summary,
+                  },
+                },
+              ],
+      );
 
       const planSource = planUpdates.map(
         (update): TimelineCandidate => ({
@@ -6001,6 +6059,7 @@ export class OperatorApi {
       const { page, olderCursor } = mergeTimelinePage(
         [
           historySource,
+          newestBelow(summarySource, before, want),
           planSource,
           toolSource,
           ...[gapSource, delegations, records].map((source) =>
