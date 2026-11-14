@@ -335,7 +335,13 @@ Metadata and both execution health projections cover exact binding, retained
 conversations, historical admission, current-setting independence, Codex/no-summary
 unavailability, redaction failure and deletion. CLI tests cover per-execution notes,
 neutral bounded lists, last-successful-page follow notes, verbosity and JSON coverage.
-These checks do not establish live runtime/release qualification or summary rendering.
+Task timeline tests cover exact historical summary binding, a canonical anchor across
+pages, stable summary-only keys, strict Unicode bounds, current/deleted-project
+redaction, credential fences and confirmed erasure. Conversation model and Chromium
+tests cover plain-text disclosures, default/independent keyboard expansion, both
+themes and phone wrapping, retained-window erasure, draft retention and authentication
+purge with a real delayed summary read. These deterministic checks do not establish
+live runtime or release qualification; verbose CLI summary display remains pending.
 
 | Area | Operations requiring evidence | Scenarios |
 | --- | --- | --- |

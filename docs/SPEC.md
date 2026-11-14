@@ -154,8 +154,9 @@ Settings also offers **Delete collected reasoning** (`project.reasoning.delete`)
 explicit, irreversible confirmation. Deletion is safe to repeat and leaves the
 setting unchanged. An admitted on/enhanced Claude turn requests provider summaries;
 only completed, explicit lead `thinking` blocks contribute. Codex requests and
-ordinary conversation and CLI reads contain no summary text. Execution detail and
-events report `collected` for valid retained exact-bound summaries with current
+ordinary assignment-history and CLI reads contain no summary text. The task timeline
+exposes a bounded, re-redacted summary only on its exact historical turn. Execution
+detail and events report `collected` for valid retained exact-bound summaries with current
 redaction available, `unavailable` for an admitted on/enhanced turn without them,
 and `not-requested` for off/baseline or no recorded eligible admission. Unknown
 historical metadata cannot prove the setting was off. Current settings and diagnostic
@@ -173,8 +174,7 @@ removes summaries. **Delete collected reasoning** atomically erases stored text
 and advances a durable fence: buffered or late output from earlier admissions
 cannot restore it, including after restart. Later opted-in admissions can collect.
 This erases cab's collected text; it does not securely erase provider history or
-independent backups. Display, verbose CLI summaries and new capture-health values
-remain unimplemented.
+independent backups. Verbose CLI summary display remains unimplemented.
 The design defines capture limits, credential lifecycle, command
 semantics and required acceptance evidence.
 
@@ -2162,6 +2162,17 @@ capped at 128 characters and redacted, with "outside workspace" for a path outsi
 workspace and unknown tools name-only; and cab's own coordination calls appear as the
 records they produce. A pending or running delegated
 assignment takes a durable message from its sub-conversation header.
+
+A turn with safely readable retained reasoning has one collapsed **Reasoning summary**
+disclosure on its earliest captured assistant item. A summary-only turn retains its
+agent attribution and missing-text context. Expanded summaries are plain text, with
+line breaks and a retained-prefix notice only when truncated; they are separate from
+assistant Copy/Raw text. Expansion choices and reading position survive routine
+refreshes and tab navigation. A successful visibility-changing read replaces the
+retained window, including older loaded pages, so erased or newly withheld summaries
+are removed. A failed read keeps the existing stale/error notice and Retry; it does
+not promise instant retraction of already read browser text. Signing out purges the
+session's retained conversation and rejects late responses.
 
 The lead's latest plan is pinned above the composer as a collapsible card, labelled as
 the agent's working plan and never as a requirement or the task brief. Its ordered

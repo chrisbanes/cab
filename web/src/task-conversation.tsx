@@ -37,6 +37,8 @@ import {
   mergeTimeline,
   pendingBelow,
   prependTimeline,
+  reasoningSummaryLabel,
+  reasoningSummaryTruncationCopy,
   workingStatus,
   type ConversationCache,
   type AgentPlan,
@@ -572,6 +574,11 @@ function Entry({
     case "assistant": {
       const raw = ctx.expanded(`c:raw:${entry.entryId}`);
       const turnName = `${who}'s entry at ${clockLabel(entry.at)}`;
+      const summaryKey = `c:reasoning:${entry.turnKey ?? entry.entryId}`;
+      const summaryOpen = ctx.expanded(summaryKey);
+      const truncation =
+        entry.reasoningSummary &&
+        reasoningSummaryTruncationCopy(entry.reasoningSummary.truncated);
       return (
         <article
           className="conv-entry conv-agent"
@@ -610,6 +617,23 @@ function Entry({
             <pre className="conv-raw">{entry.text}</pre>
           ) : (
             <FormattedText text={entry.text} />
+          )}
+          {entry.reasoningSummary && (
+            <div className="conv-reasoning">
+              <Button
+                variant="secondary"
+                aria-expanded={summaryOpen}
+                onClick={() => ctx.toggle(summaryKey)}
+              >
+                {reasoningSummaryLabel}
+              </Button>
+              {summaryOpen && (
+                <div className="conv-reasoning-content">
+                  <p className="conv-text">{entry.reasoningSummary.text}</p>
+                  {truncation && <p className="metadata muted">{truncation}</p>}
+                </div>
+              )}
+            </div>
           )}
         </article>
       );

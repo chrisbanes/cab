@@ -2458,6 +2458,22 @@ export const taskTimelineSchema = envelope(
                 lifecycle: z.enum(["started", "streaming", "completed"]),
                 // Captured text is bounded at 64 KiB, as in the assignment history.
                 text: z.string().nullable(),
+                turnKey: hash.optional(),
+                reasoningSummary: z
+                  .object({
+                    text: z
+                      .string()
+                      .min(1)
+                      .max(32_000)
+                      .refine(
+                        (text) =>
+                          Array.from(text).length <= 16_000 &&
+                          new TextEncoder().encode(text).length <= 64 * 1024,
+                      ),
+                    truncated: z.boolean(),
+                  })
+                  .strict()
+                  .optional(),
               })
               .strict(),
             z

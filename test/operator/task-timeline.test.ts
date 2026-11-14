@@ -11,6 +11,8 @@ import { operatorRouteAuthority } from "../../src/standalone/operator-credential
 import { instructionSecret } from "../fixtures/instruction-history.js";
 import { seedInstructionHistory } from "../fixtures/instruction-history.js";
 import { startCliService } from "../fixtures/operator-cli.js";
+import { databaseDigest } from "../fixtures/database-digest.js";
+import { DeletedProjectRedactionStore } from "../../src/core/deleted-project-redaction.js";
 
 // biome-ignore lint/suspicious/noExplicitAny: response bodies are asserted structurally
 type Json = Record<string, any>;
@@ -338,6 +340,448 @@ async function setup(t: { after(fn: () => unknown): void }) {
 }
 
 const kinds = (entries: Json[]) => entries.map((e) => e.kind);
+
+function storedSummary(
+  ctx: Awaited<ReturnType<typeof setup>>,
+  options: {
+    workId?: string;
+    text?: string;
+    items?: string[];
+    omitted?: boolean;
+    at?: number;
+  } = {},
+) {
+  const binding = {
+    ...ctx.binding,
+    workId: options.workId ?? randomUUID(),
+    turnId: randomUUID(),
+  };
+  const intentId = randomUUID();
+  ctx.s.f.seedPersistedState((db) => {
+    binding.workRevision = Number(
+      db
+        .prepare(
+          "SELECT COALESCE(MAX(workRevision),0)+1 AS revision FROM task_work_revisions WHERE assignmentId=? AND conversationRevision=1",
+        )
+        .get(binding.assignmentId)!.revision,
+    );
+    db.prepare(`INSERT INTO execution_intents(id,workId,prompt,workspace,state,threadId,turnId,accountType,sandbox,approval)
+      VALUES (?,?,'fixture',?,'completed',?,?,'chatgpt','workspaceWrite','never')`).run(
+      intentId,
+      binding.workId,
+      ctx.s.f.directory,
+      binding.threadId,
+      binding.turnId,
+    );
+    db.prepare(`INSERT INTO task_execution_bindings(workId,taskId,assignmentId,assignmentVersion,instructionsRevision,profileRevision,conversationRevision,harness)
+      VALUES (?,?,?,1,1,1,1,'claude')`).run(
+      binding.workId,
+      binding.taskId,
+      binding.assignmentId,
+    );
+    db.prepare(
+      `INSERT INTO task_work_revisions(workId,assignmentId,conversationRevision,workRevision) VALUES (?,?,1,?)`,
+    ).run(binding.workId, binding.assignmentId, binding.workRevision);
+    db.prepare(
+      `INSERT INTO execution_intent_reasoning_summaries(intentId,enabled,captureMode,generation) VALUES (?,1,'enhanced',0)`,
+    ).run(intentId);
+    const history = new ConversationHistoryStore(
+      db,
+      () => options.at ?? t0 + 1,
+    );
+    for (const [index, text] of (options.items ?? []).entries())
+      history.record(
+        binding,
+        {
+          kind: "completed",
+          threadId: binding.threadId,
+          turnId: binding.turnId,
+          itemId: `summary-item-${index}`,
+          text,
+        },
+        [],
+      );
+    if (options.omitted)
+      history.omitItem(binding, "omitted-summary-item", "size-limit");
+    history.recordReasoningSummary(
+      binding,
+      intentId,
+      options.text ?? "Bound summary",
+      [],
+    );
+  });
+  return { binding, intentId };
+}
+
+test("exact-turn summaries anchor once across pages, including summary-only tied keys and omissions", async (t) => {
+  const ctx = await setup(t);
+  const original = await ctx.readAll(100);
+  const first = storedSummary(ctx, {
+    text: "FIRST_SUMMARY",
+    items: ["first text", "second text"],
+  });
+  storedSummary(ctx, { text: "SECOND_SUMMARY", items: ["another turn"] });
+  storedSummary(ctx, { text: "ONLY_SUMMARY" });
+  storedSummary(ctx, { text: "OMITTED_SUMMARY", omitted: true });
+  storedSummary(ctx, { text: "😀".repeat(16_001) });
+  const digest = databaseDigest(ctx.s.f);
+  const whole = await ctx.readAll(100);
+  assert.equal(databaseDigest(ctx.s.f), digest);
+  const summaries = whole.filter((entry) => entry.reasoningSummary);
+  assert.equal(summaries.length, 5);
+  assert.equal(
+    summaries.find((e) => e.workId === first.binding.workId)?.text,
+    "first text",
+  );
+  assert.equal(
+    whole.find((e) => e.text === "second text")?.reasoningSummary,
+    undefined,
+  );
+  assert.equal(
+    summaries.find((e) => e.reasoningSummary.text === "ONLY_SUMMARY")?.text,
+    null,
+  );
+  assert.ok(whole.some((e) => e.kind === "gap" && e.reason === "size-limit"));
+  const unicode = summaries.find((e) => e.reasoningSummary.truncated);
+  assert.equal(unicode?.reasoningSummary.text, "😀".repeat(16_000));
+  assert.equal(new Set(summaries.map((e) => e.turnKey)).size, 5);
+  for (const limit of [1, 2, 100])
+    assert.deepEqual(
+      (await ctx.readAll(limit)).map((e) => e.key),
+      whole.map((e) => e.key),
+      `limit ${limit}`,
+    );
+  for (const old of original)
+    assert.equal(whole.find((e) => e.entryId === old.entryId)?.key, old.key);
+  // Stored creation time, not updatedAt or today's conversation, owns fallback identity.
+  ctx.s.f.seedPersistedState((db) => {
+    db.exec(
+      "UPDATE conversation_reasoning_summaries SET updatedAt=updatedAt+999999",
+    );
+    db.prepare(
+      "UPDATE assignment_conversations SET revision=revision+1 WHERE assignmentId=?",
+    ).run(ctx.seed.assignmentA);
+  });
+  assert.deepEqual(
+    (await ctx.readAll(100))
+      .filter((e) => e.reasoningSummary)
+      .map((e) => e.key),
+    summaries.map((e) => e.key),
+  );
+});
+
+test("summary lookup uses bounded indexed task identities rather than scanning installation history", async (t) => {
+  const ctx = await setup(t);
+  const { binding } = storedSummary(ctx);
+  ctx.s.f.seedPersistedState((db) => {
+    const prepare = db.prepare.bind(db);
+    const queries: string[] = [];
+    db.prepare = (sql) => {
+      if (
+        sql.includes("FROM task_execution_bindings WHERE taskId") ||
+        sql.includes("FROM conversation_reasoning_summaries s")
+      )
+        queries.push(sql);
+      return prepare(sql);
+    };
+    const store = new ConversationHistoryStore(db);
+    assert.equal(store.reasoningSummaryTurns(ctx.seed.taskA).length, 1);
+    assert.equal(queries.length, 2);
+    const plans = queries.flatMap((sql, index) =>
+      prepare(`EXPLAIN QUERY PLAN ${sql}`)
+        .all(
+          ...(index === 0
+            ? [ctx.seed.taskA]
+            : [binding.workId, ctx.seed.taskA]),
+        )
+        .map((row) => String(row.detail)),
+    );
+    assert.equal(
+      plans.some((step) => /SCAN (s|task_execution_bindings)\b/.test(step)),
+      false,
+      plans.join("\n"),
+    );
+    assert.ok(
+      plans.some(
+        (step) =>
+          step.includes("SEARCH") &&
+          step.includes("task_execution_bindings_task"),
+      ),
+    );
+    assert.ok(
+      plans.some(
+        (step) =>
+          step.includes("SEARCH") &&
+          step.includes("sqlite_autoindex_conversation_reasoning_summaries_1"),
+      ),
+    );
+    // More retained work than the existing privacy bound refuses before a summary lookup.
+    for (let index = 0; index < 129; index++) {
+      const workId = randomUUID();
+      prepare(`INSERT INTO execution_intents(id,workId,prompt,workspace,state,threadId,turnId,accountType,sandbox,approval)
+        SELECT ?,?,prompt,workspace,state,NULL,NULL,accountType,sandbox,approval FROM execution_intents WHERE workId=?`).run(
+        randomUUID(),
+        workId,
+        binding.workId,
+      );
+      prepare(`INSERT INTO task_execution_bindings(workId,taskId,assignmentId,assignmentVersion,instructionsRevision,profileRevision,conversationRevision,harness)
+        VALUES (?,?,?,1,1,1,1,'claude')`).run(
+        workId,
+        ctx.seed.taskA,
+        ctx.seed.assignmentA,
+      );
+    }
+    queries.length = 0;
+    assert.deepEqual(store.reasoningSummaryTurns(ctx.seed.taskA), []);
+    assert.equal(
+      queries.some((sql) =>
+        sql.includes("FROM conversation_reasoning_summaries"),
+      ),
+      false,
+    );
+  });
+});
+
+test("summary contracts are optional, strict and bounded by Unicode characters and bytes", async (t) => {
+  const ctx = await setup(t);
+  storedSummary(ctx, { items: ["plain text"] });
+  const whole = await ctx.get(`${ctx.base}?limit=100`);
+  const index = whole.entries.findIndex((e: Json) => e.reasoningSummary);
+  const check = (reasoningSummary: unknown) =>
+    taskTimelineSchema.safeParse({
+      data: {
+        ...whole,
+        entries: [{ ...whole.entries[index], reasoningSummary }],
+      },
+      observedAt: 1,
+    }).success;
+  assert.equal(check(undefined), true);
+  assert.equal(check({ text: "😀".repeat(16_000), truncated: false }), true);
+  for (const invalid of [
+    null,
+    { text: "", truncated: false },
+    { text: "x".repeat(16_001), truncated: true },
+    { text: "😀".repeat(16_001), truncated: true },
+    { text: "x", truncated: 1 },
+    { text: "x", truncated: false, raw: "no" },
+  ])
+    assert.equal(check(invalid), false);
+});
+
+test("summary reads reject every inconsistent binding, admission, ownership and ambiguous provider identity", async (t) => {
+  const ctx = await setup(t);
+  const { binding, intentId } = storedSummary(ctx, { items: ["ordinary"] });
+  const service = ctx.s.f.service;
+  assert.equal(service.reasoningSummaryFor(binding, [])?.text, "Bound summary");
+  for (const [key, value] of Object.entries(binding)) {
+    const changed = {
+      ...binding,
+      [key]: typeof value === "number" ? value + 1 : `${value}-wrong`,
+    };
+    assert.equal(service.reasoningSummaryFor(changed, []), undefined, key);
+  }
+  assert.equal(service.reasoningSummaryFor(binding, undefined), undefined);
+  const mutations = [
+    ["conversation_reasoning_summaries", "intentId", randomUUID()],
+    ["conversation_reasoning_summaries", "projectId", ctx.seed.projectB],
+    ["conversation_reasoning_summaries", "text", "x".repeat(16_001)],
+    ["conversation_reasoning_summaries", "truncated", 2],
+    ["conversation_reasoning_summaries", "generation", 1],
+    ["execution_intent_reasoning_summaries", "enabled", 0],
+    ["execution_intent_reasoning_summaries", "captureMode", "baseline"],
+    ["task_execution_bindings", "harness", "codex"],
+  ] as const;
+  for (const [table, column, value] of mutations) {
+    ctx.s.f.seedPersistedState((db) => {
+      db.exec("PRAGMA ignore_check_constraints=ON; PRAGMA foreign_keys=OFF");
+      const where =
+        table === "execution_intent_reasoning_summaries"
+          ? "intentId"
+          : "workId";
+      const id = where === "intentId" ? intentId : binding.workId;
+      const old = db
+        .prepare(`SELECT ${column} AS value FROM ${table} WHERE ${where}=?`)
+        .get(id)!.value;
+      db.prepare(`UPDATE ${table} SET ${column}=? WHERE ${where}=?`).run(
+        value,
+        id,
+      );
+      assert.equal(
+        service.reasoningSummaryFor(binding, []),
+        undefined,
+        `${table}.${column}`,
+      );
+      db.prepare(`UPDATE ${table} SET ${column}=? WHERE ${where}=?`).run(
+        old!,
+        id,
+      );
+    });
+  }
+  ctx.s.f.seedPersistedState((db) => {
+    db.prepare(`INSERT INTO execution_intents(id,workId,prompt,workspace,state,threadId,turnId,accountType,sandbox,approval)
+      SELECT ?,? ,prompt,workspace,state,threadId,turnId,accountType,sandbox,approval FROM execution_intents WHERE id=?`).run(
+      randomUUID(),
+      randomUUID(),
+      intentId,
+    );
+  });
+  assert.equal(service.reasoningSummaryFor(binding, []), undefined);
+  assert.equal(
+    (await ctx.readAll(100)).some((e) => e.reasoningSummary),
+    false,
+  );
+});
+
+test("summary projection re-redacts and confirmed erasure invalidates the retained window without changing assistant text", async (t) => {
+  const ctx = await setup(t);
+  const { binding } = storedSummary(ctx, {
+    text: `READ_CANARY ${instructionSecret} ${ctx.s.f.directory} token=hunter2`,
+    items: ["ordinary survives"],
+  });
+  const before = await ctx.get(`${ctx.base}?limit=100`);
+  const summary = before.entries.find((e: Json) => e.reasoningSummary)
+    .reasoningSummary.text;
+  assert.match(summary, /READ_CANARY/);
+  assert.doesNotMatch(
+    summary,
+    new RegExp(`${instructionSecret}|hunter2|${ctx.s.f.directory}`),
+  );
+  const api = new OperatorApi(ctx.s.f.service, [ctx.s.f.directory]);
+  const seam = api as unknown as {
+    exclusions: (...args: unknown[]) => Promise<readonly string[] | undefined>;
+  };
+  const original = seam.exclusions.bind(api);
+  seam.exclusions = async () => undefined;
+  assert.equal(
+    (
+      await api.readTaskTimeline(ctx.seed.taskA, new URLSearchParams())
+    ).data.entries.some((e) => e.kind === "assistant" && e.reasoningSummary),
+    false,
+  );
+  seam.exclusions = original;
+  const deletion = {
+    type: "project.reasoning.delete",
+    actor: "operator",
+    key: randomUUID(),
+    projectId: ctx.seed.projectA,
+    expectedVersion: Number(
+      ctx.s.f.service.domain().project(ctx.seed.projectA).version,
+    ),
+    confirmed: true,
+  };
+  let erased = false;
+  seam.exclusions = async (...args) => {
+    const excluded = await original(...args);
+    if (!erased) {
+      erased = true;
+      ctx.s.f.service.domain().execute(deletion as never);
+    }
+    return excluded;
+  };
+  const after = await api.readTaskTimeline(
+    ctx.seed.taskA,
+    new URLSearchParams(),
+  );
+  assert.equal(
+    after.data.entries.some(
+      (e) => e.kind === "assistant" && e.reasoningSummary,
+    ),
+    false,
+  );
+  assert.notEqual(after.data.visibilityRevision, before.visibilityRevision);
+  assert.ok(
+    after.data.entries.some(
+      (e) => e.kind === "assistant" && e.text === "ordinary survives",
+    ),
+  );
+  ctx.s.f.service.domain().execute(deletion as never);
+  assert.equal(ctx.s.f.service.reasoningSummaryFor(binding, []), undefined);
+  const fresh = new OperatorApi(ctx.s.f.service, [ctx.s.f.directory]);
+  assert.equal(
+    (
+      await fresh.readTaskTimeline(ctx.seed.taskA, new URLSearchParams())
+    ).data.entries.some((e) => e.kind === "assistant" && e.reasoningSummary),
+    false,
+  );
+});
+
+test("summary reads fence late instruction and credential changes and include deleted-project exclusions", async (t) => {
+  const ctx = await setup(t);
+  const { binding } = storedSummary(ctx, {
+    text: "CURRENT_LATE_CANARY DELETED_LATE_CANARY ROTATED_LATE_CANARY",
+  });
+  ctx.s.f.seedPersistedState((db) => {
+    db.exec("BEGIN");
+    new DeletedProjectRedactionStore(db).capture([], ["DELETED_LATE_CANARY"]);
+    db.exec("COMMIT");
+  });
+  const api = new OperatorApi(ctx.s.f.service, [ctx.s.f.directory]);
+  const seam = api as unknown as {
+    exclusions: (...args: unknown[]) => Promise<readonly string[] | undefined>;
+  };
+  const original = seam.exclusions.bind(api);
+  let changed = false;
+  const isSummaryRead = (args: unknown[]) =>
+    Array.isArray(args[2]) &&
+    args[2].some(
+      (value: { workId?: string }) => value.workId === binding.workId,
+    );
+  seam.exclusions = async (...args) => {
+    const excluded = await original(...args);
+    if (!changed && isSummaryRead(args)) {
+      changed = true;
+      const domain = ctx.s.f.service.domain();
+      domain.execute({
+        type: "project.configure",
+        actor: "operator",
+        key: randomUUID(),
+        projectId: ctx.seed.projectA,
+        expectedVersion: Number(
+          ctx.s.f.service.domain().project(ctx.seed.projectA).version,
+        ),
+        instructions: "CURRENT_LATE_CANARY",
+      } as never);
+    }
+    return excluded;
+  };
+  const read = await api.readTaskTimeline(
+    ctx.seed.taskA,
+    new URLSearchParams(),
+  );
+  assert.equal(changed, true);
+  assert.doesNotMatch(
+    JSON.stringify(read),
+    /CURRENT_LATE_CANARY|DELETED_LATE_CANARY/,
+  );
+  assert.match(JSON.stringify(read), /ROTATED_LATE_CANARY/);
+  const env = "CLI2_SYNTHETIC_ROUTING";
+  const old = process.env[env];
+  changed = false;
+  seam.exclusions = async (...args) => {
+    const excluded = await original(...args);
+    if (!changed && isSummaryRead(args)) {
+      changed = true;
+      process.env[env] = "ROTATED_LATE_CANARY";
+    }
+    return excluded;
+  };
+  try {
+    await assert.rejects(
+      api.readTaskTimeline(ctx.seed.taskA, new URLSearchParams()),
+      (error: unknown) => (error as { status?: number }).status === 503,
+    );
+  } finally {
+    if (old === undefined) delete process.env[env];
+    else process.env[env] = old;
+  }
+  seam.exclusions = async () => {
+    throw new Error("exclusions unavailable");
+  };
+  await assert.rejects(
+    api.readTaskTimeline(ctx.seed.taskA, new URLSearchParams()),
+    /exclusions unavailable/,
+  );
+});
 
 test("timeline pages concatenate to one total order with strictly increasing keys", async (t) => {
   const { readAll, get, base } = await setup(t);

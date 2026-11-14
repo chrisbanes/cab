@@ -8,8 +8,9 @@ Operators reviewing or debugging an agent's work need usable explanations of its
 choices. The [probes](../evidence/reasoning-summary-probes-2026-11-06.md) found usable
 provider-produced summaries from Claude Code but not from Codex. The project setting,
 admission snapshot, Claude requesting, separate turn storage and confirmed erasure
-are implemented, including per-execution capture-health values. Web/CLI summary
-display remains pending; ordinary conversation reads contain no summaries.
+are implemented, including per-execution capture-health values and plain-text web
+disclosures on exact historical turns. Ordinary assignment-history and CLI reads
+contain no summaries; verbose CLI summary display remains pending.
 Deterministic scripted-runtime tests establish code integration, without adding live
 runtime or release qualification.
 
