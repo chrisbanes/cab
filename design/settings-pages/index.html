@@ -10,7 +10,8 @@
       h2 { font-size:18px; margin:32px 0 8px; }
       p { max-width:85ch; }
       a { color:inherit; }
-      .pair { display:flex; gap:24px; align-items:start; }
+      .pair { display:flex; gap:24px; align-items:start; flex-wrap:wrap; }
+      .desktop { max-width:100%; }
       figure { margin:0; }
       figcaption { margin-bottom:8px; }
       .desktop { width:888px; height:585px; overflow:hidden; }
@@ -21,7 +22,7 @@
   </head>
   <body>
     <h1>Settings · section pages</h1>
-    <p>Design proposal for maintainer review. Illustrative fixture data; settings controls do not save.
+    <p>Unaccepted design proposal for maintainer review; merging these artifacts does not accept the recommendations. Illustrative fixture data; settings controls do not save.
       Desktop frames render at 1366 × 900 (shown at 65%); phone frames render at 390 × 844.
       Scroll inside each frame to inspect the rest of its page. Frames follow your system theme.</p>
     <p><a href="proposal.md">Read the route table, read inventory and implementation slices</a> ·
@@ -32,14 +33,22 @@
       <figure><figcaption>Phone · Sections closed</figcaption><iframe class="phone" title="Projects phone" src="artboard.html?page=projects"></iframe></figure>
     </div>
     <h2>First-turn landing → Readiness</h2>
+    <p>Illustrative turnStarted=false with two projects. First-project setup uses a separate project-count condition.</p>
     <div class="pair">
-      <figure><figcaption>Desktop · first-turn /settings resolves to /settings/readiness</figcaption><div class="desktop"><iframe title="Readiness desktop" src="artboard.html?page=readiness"></iframe></div></figure>
-      <figure><figcaption>Phone · open Sections to inspect all nine links</figcaption><iframe class="phone" title="Readiness phone" src="artboard.html?page=readiness"></iframe></figure>
+      <figure><figcaption>Desktop · first-turn /settings resolves to /settings/readiness</figcaption><div class="desktop"><iframe title="Readiness desktop" src="artboard.html?page=readiness&turnStarted=false"></iframe></div></figure>
+      <figure><figcaption>Phone · open Sections to inspect all nine links</figcaption><iframe class="phone" title="Readiness phone" src="artboard.html?page=readiness&turnStarted=false"></iframe></figure>
     </div>
     <h2>Notifications</h2>
     <div class="pair">
-      <figure><figcaption>Desktop · explicit /settings/notifications</figcaption><div class="desktop"><iframe title="Notifications desktop" src="artboard.html?page=notifications"></iframe></div></figure>
-      <figure><figcaption>Phone · explicit destination is honoured before the first turn too</figcaption><iframe class="phone" title="Notifications phone" src="artboard.html?page=notifications"></iframe></figure>
+      <figure><figcaption>Desktop · explicit /settings/notifications</figcaption><div class="desktop"><iframe title="Notifications desktop" src="artboard.html?page=notifications&turnStarted=false"></iframe></div></figure>
+      <figure><figcaption>Phone · explicit destination is honoured before the first turn too</figcaption><iframe class="phone" title="Notifications phone" src="artboard.html?page=notifications&turnStarted=false"></iframe></figure>
     </div>
+    <h2>Read states and target landing</h2>
+    <p>These links change fixtures only; no cab API is called. A real initial failure must not show example successful data.</p>
+    <ul>
+      <li><a href="artboard.html?page=projects&state=loading">Projects: initial loading</a></li>
+      <li><a href="artboard.html?page=readiness&state=error&turnStarted=false">Readiness: failed read and illustrative Retry</a></li>
+      <li><a href="artboard.html?page=readiness&state=delayed&target=claude-executable&turnStarted=false">Readiness: delayed check landing</a> — after the fixture settles, focus Claude executable unless the reader interacted.</li>
+    </ul>
   </body>
 </html>

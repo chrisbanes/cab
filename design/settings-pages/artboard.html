@@ -12,7 +12,7 @@
       * { box-sizing:border-box; }
       body { margin:0; font:13px/1.55 Geist,system-ui,sans-serif; background:var(--bg); color:var(--fg); }
       a { color:inherit; text-underline-offset:3px; }
-      a:focus-visible,summary:focus-visible,button:focus-visible,input:focus-visible { outline:2px solid var(--fg); outline-offset:2px; }
+      a:focus-visible,button:focus-visible,input:focus-visible,[tabindex="-1"]:focus-visible { outline:2px solid var(--fg); outline-offset:2px; }
       .sidebar { width:232px; position:fixed; inset:0 auto 0 0; background:var(--surface); border-right:1px solid var(--line); padding:20px 16px; display:flex; flex-direction:column; gap:24px; }
       .brand { font-size:18px; font-weight:600; }
       .muted { color:var(--muted); }
@@ -36,7 +36,11 @@
       .section-nav a { padding:8px 12px; text-decoration:none; border-left:2px solid transparent; border-radius:0 6px 6px 0; color:var(--muted); }
       .section-nav a:hover { background:var(--raised); color:var(--fg); }
       .section-nav a[aria-current=page] { background:var(--overlay); color:var(--fg); border-left-color:var(--fg); }
-      .phone-sections { display:none; }
+      .sections-toggle { display:none; }
+      .section-nav[hidden] { display:none; }
+      .section-nav ul { list-style:none; margin:0; padding:0; display:grid; gap:4px; }
+      .section-nav a { display:block; }
+      .fixture { margin:0 0 16px; padding:12px; border:1px dashed var(--line); color:var(--muted); }
       .content { display:grid; gap:16px; min-width:0; }
       .panel { background:var(--surface); border:1px solid var(--line); border-radius:8px; overflow:hidden; }
       .panel-head { padding:16px; border-bottom:1px solid var(--line); display:flex; justify-content:space-between; gap:12px; align-items:center; }
@@ -67,17 +71,16 @@
         .menu { display:block; }
         .topbar .brand { display:none; }
       }
-      @media (max-width:760px) {
+      @media (max-width:759px) {
         main { padding:16px; }
-        .topbar { height:56px; padding:0 16px; }
+        .topbar { padding:0 16px; }
         .topbar .connection { font-size:12px; }
         .heading { margin-bottom:16px; align-items:start; }
         .heading button { display:none; }
         .layout { display:block; }
-        .desktop-sections { display:none; }
-        .phone-sections { display:block; margin-bottom:16px; border:1px solid var(--line); border-radius:6px; background:var(--surface); }
-        summary { min-height:44px; padding:11px 12px; cursor:pointer; }
-        .phone-sections .section-nav { padding:0 8px 8px; gap:0; }
+        .sections { margin-bottom:16px; border:1px solid var(--line); border-radius:6px; background:var(--surface); }
+        .sections-toggle { display:flex; justify-content:space-between; width:100%; min-height:44px; padding:11px 12px; cursor:pointer; }
+        .sections .section-nav { padding:0 8px 8px; }
         .section-nav a { min-height:44px; padding:12px; }
         button,.action { min-height:44px; }
         .panel-head,.row,.panel-body { padding:12px; }
@@ -99,17 +102,17 @@
       <div class="account"><span class="muted">Account menu</span><nav aria-label="Account illustration"><span class="selected">Settings</span></nav></div>
     </aside>
     <div class="app">
-      <header class="topbar"><span class="menu" aria-hidden="true">☰</span><span class="brand">cab</span><nav class="crumb" aria-label="Breadcrumb"><a href="?page=projects">Settings</a><span aria-hidden="true">›</span><span id="crumb"></span></nav><span class="connection">Connected</span></header>
+      <header class="topbar"><span class="menu" aria-hidden="true">☰</span><span class="brand">cab</span><nav class="crumb" aria-label="Breadcrumb"><a id="settings-crumb" href="?page=projects">Settings</a><span aria-hidden="true">›</span><span id="crumb"></span></nav><span class="connection">Connected</span></header>
       <main>
-        <div class="heading"><div><h1 id="title">Settings</h1><p id="description" class="muted"></p></div><button type="button" disabled>Refresh</button></div>
+        <div class="heading"><div><h1 id="title" tabindex="-1">Settings</h1><p id="description" class="muted"></p></div><button type="button" disabled>Refresh</button></div>
         <div class="layout">
-          <nav class="section-nav desktop-sections" aria-label="Settings sections"></nav>
-          <div>
-            <details class="phone-sections"><summary>Sections · <strong id="current"></strong></summary><nav class="section-nav" aria-label="Settings sections"></nav></details>
-            <div class="content" id="content"></div>
+          <div class="sections">
+            <button class="sections-toggle" id="sections-toggle" type="button" aria-expanded="false" aria-controls="section-links">Sections · <strong id="current"></strong><span aria-hidden="true">⌄</span></button>
+            <nav id="section-links" class="section-nav" aria-label="Settings sections"><ul></ul></nav>
           </div>
+          <div><p class="fixture" id="fixture"></p><div class="content" id="content"></div></div>
         </div>
-        <footer class="review">Design proposal · illustrative data · controls do not save. These three screens explore the shared page structure; other section links open the route proposal.
+        <footer class="review">Unaccepted design proposal · illustrative data · controls do not save. These three screens explore the shared page structure; other section links open the route proposal.
           <nav aria-label="Artboard views"><a href="?page=projects">Returning landing / Projects</a><a href="?page=readiness">First-turn landing / Readiness</a><a href="?page=notifications">Notifications</a><a href="proposal.md">Route and read inventory</a></nav>
         </footer>
       </main>
@@ -119,7 +122,7 @@
       <section class="panel" aria-label="Projects">
         <div class="panel-head"><div><h2>Projects</h2><p class="muted">2 projects · 1 paused</p></div><button type="button" class="primary" disabled>Create project</button></div>
         <div class="panel-body"><label class="check"><input type="checkbox" disabled /> Show archived</label></div>
-        <article class="row"><div class="row-top"><h3>Haze</h3><span class="muted">Lead: Churchill</span><span class="badge">Ⅱ Paused</span><button type="button" class="action" disabled>Configure Haze</button></div><dl class="facts"><dt>Repository access</dt><dd>chrisbanes/haze · main · checkout configured</dd><dt>Discovery</dt><dd>Repository issues · Not synced</dd></dl></article>
+        <article class="row"><div class="row-top"><h3>Haze</h3><span class="muted">Lead: Churchill</span><span class="badge">Ⅱ Paused</span><button type="button" class="action" disabled>Configure Haze</button></div><dl class="facts"><dt>Repository access</dt><dd>chrisbanes/haze · main · checkout configured</dd><dt>Discovery</dt><dd>Repository issues · Not synced</dd><dt>Execution</dt><dd>1 execution hold recorded · illustrative runtime read</dd></dl></article>
         <article class="row"><div class="row-top"><h3>cab</h3><span class="muted">Lead: Churchill</span><span class="badge">✓ Enabled</span><button type="button" class="action" disabled>Configure cab</button></div><dl class="facts"><dt>Repository access</dt><dd>chrisbanes/cab · main · checkout configured</dd><dt>Discovery</dt><dd>Repository issues · Synced 10:52</dd></dl></article>
       </section>
       <p class="note">Discovery and readiness never grant repository access. Each change is saved separately.</p>
@@ -129,7 +132,7 @@
       <section class="panel" aria-label="Readiness checks">
         <div class="panel-head"><div><h2>Readiness checks</h2><p class="muted">Service capabilities and their next steps</p></div><button type="button" disabled>Run again</button></div>
         <article class="row"><div class="row-top"><h3>Codex executable</h3><span class="badge">✓ Pass</span></div><p class="muted">The service can find the Codex executable.</p></article>
-        <article class="row" id="readiness-claude-executable"><div class="row-top"><h3>Claude executable</h3><span class="badge">○ Not configured</span></div><p class="muted">Claude is optional. Add it when you need agents that use Claude.</p><p><a href="proposal.md#route-table">Open Runtime to add Claude</a></p></article>
+        <article class="row" id="readiness-claude-executable"><div class="row-top"><h3 tabindex="-1">Claude executable</h3><span class="badge">○ Not configured</span></div><p class="muted">Claude is optional. Add it when you need agents that use Claude.</p><p><a href="proposal.md#route-table">Open Runtime to add Claude</a></p></article>
         <article class="row"><div class="row-top"><h3>GitHub discovery</h3><span class="badge">○ Not configured</span></div><p class="muted">A discovery credential lists repositories, refs and GitHub Projects. It grants no repository access.</p><p><a href="proposal.md#route-table">Configure GitHub discovery</a></p></article>
       </section>
     </template>
@@ -146,7 +149,8 @@
         ['gitlab-credentials','GitLab credentials'],['cli-credentials','CLI credentials'],
         ['notifications','Notifications'],['readiness','Readiness']
       ];
-      const requested = new URLSearchParams(location.search).get('page');
+      const params = new URLSearchParams(location.search);
+      const requested = params.get('page');
       const page = ['projects','readiness','notifications'].includes(requested) ? requested : 'projects';
       const label = sections.find(([id]) => id === page)[1];
       for (const id of ['title','crumb','current']) document.getElementById(id).textContent = label;
@@ -156,16 +160,67 @@
         readiness:'What the running service can use.',
         notifications:'Browser notifications and registered devices.'
       }[page];
-      document.getElementById('content').append(document.getElementById(page).content.cloneNode(true));
-      for (const nav of document.querySelectorAll('.section-nav')) {
-        for (const [id, name] of sections) {
-          const link = document.createElement('a');
-          link.textContent = name;
-          link.href = ['projects','readiness','notifications'].includes(id) ? `?page=${id}` : 'proposal.md#route-table';
-          if (id === page) link.setAttribute('aria-current','page');
-          nav.append(link);
+      const firstTurn = params.get('turnStarted') === 'false';
+      document.getElementById('settings-crumb').href = firstTurn ? '?page=readiness&turnStarted=false&focus=heading' : '?page=projects&focus=heading';
+      document.getElementById('fixture').textContent = firstTurn
+        ? `Illustrative workspace: turnStarted=false, 2 projects. ${page === 'notifications' ? 'Explicit Notifications wins before the first turn.' : 'Root landing would be Readiness; project count does not choose it.'}`
+        : 'Illustrative workspace: turnStarted=true, 2 projects. Root landing would be Projects.';
+      const content = document.getElementById('content');
+      const state = params.get('state');
+      const target = params.get('target') === 'claude-executable' && page === 'readiness';
+      let interacted = false;
+      for (const event of ['pointerdown','keydown','wheel','touchstart'])
+        addEventListener(event, () => { interacted = true; }, { once:true, passive:true });
+      const showFixture = () => {
+        content.replaceChildren(document.getElementById(page).content.cloneNode(true));
+        if (target && !interacted && performance.getEntriesByType('navigation')[0]?.type !== 'back_forward') {
+          const heading = document.querySelector('#readiness-claude-executable h3');
+          heading.focus();
+          heading.scrollIntoView({ block:'nearest' });
         }
+      };
+      if (state === 'loading' || state === 'delayed') {
+        content.textContent = 'Loading illustrative read… No successful values are shown.';
+        if (state === 'delayed') setTimeout(showFixture, 700);
+      } else if (state === 'error') {
+        const message = document.createElement('p');
+        message.textContent = 'Illustrative read failed. No successful values are available.';
+        const retry = document.createElement('a');
+        retry.className = 'action';
+        retry.textContent = 'Retry fixture';
+        retry.href = `?page=${page}&state=delayed&target=claude-executable&turnStarted=false`;
+        content.append(message, retry);
+      } else showFixture();
+      const nav = document.getElementById('section-links');
+      for (const [id, name] of sections) {
+        const item = document.createElement('li');
+        const link = document.createElement('a');
+        link.textContent = name;
+        link.href = ['projects','readiness','notifications'].includes(id) ? `?page=${id}&focus=heading${firstTurn ? '&turnStarted=false' : ''}` : 'proposal.md#route-table';
+        if (id === page) link.setAttribute('aria-current','page');
+        item.append(link);
+        nav.querySelector('ul').append(item);
       }
+      const trigger = document.getElementById('sections-toggle');
+      const phone = matchMedia('(max-width:759px)');
+      const setExpanded = (expanded) => {
+        trigger.setAttribute('aria-expanded', String(expanded));
+        nav.hidden = phone.matches && !expanded;
+      };
+      trigger.addEventListener('click', () => setExpanded(trigger.getAttribute('aria-expanded') !== 'true'));
+      let lastFocused = document.activeElement;
+      addEventListener('focusin', () => { lastFocused = document.activeElement; });
+      const resizeNavigation = () => {
+        // CSS can blur the hidden trigger before the media-query callback runs.
+        const active = document.activeElement === document.body ? lastFocused : document.activeElement;
+        if (phone.matches && nav.contains(active)) trigger.focus();
+        setExpanded(false);
+        if (!phone.matches && active === trigger) nav.querySelector('[aria-current=page]').focus();
+      };
+      phone.addEventListener('change', resizeNavigation);
+      resizeNavigation();
+      // shortcut: document navigation models browser history only, qualify cab entry restoration in later implementation.
+      if (params.get('focus') === 'heading' && !target && performance.getEntriesByType('navigation')[0]?.type !== 'back_forward') document.getElementById('title').focus();
     </script>
   </body>
 </html>
