@@ -2105,7 +2105,11 @@ position. Explicit section, record, request and legacy conversation links keep t
 targets. An opened question or approval owns the reading area: its form scrolls
 without the docked Reply covering its controls. Reply resumes docking when the
 interaction ends or is left; retained receipts alone do not undock it. On phones,
-Latest result and Task details follow the conversation.
+Latest result and Task details follow the conversation. Task details starts closed at
+all widths; explicit targets and retained disclosure choices win. Results and assignments
+use redacted names and supplied summaries or responsibility. Local Details retains exact
+result, assignment, work and source identities, revisions and provenance. Revision pickers
+appear only for multiple retained records; unavailable exact selections remain explicit.
 The subtitle is the first meaningful outcome sentence, skipping headings, quoted
 context and source metadata. The one-line strip shows the state badge, at most one
 distinct reason, a clickable operator next action and one source identity chip. A lead
@@ -2166,7 +2170,10 @@ links and assignment links) reaches the same task workspace at `/tasks/:id`. The
 is no History tab: a link that names the conversation (`#conversation`), an assignment
 (`?assignment=`) or a request (`?request=` with `#conversation`) opens the Overview at
 that place, reading earlier pages first when it is not in the part already loaded, and
-`?section=context` opens Captured context in the inspector. A link keeps working in the
+`?section=context` and `#context` open Captured context on Execution. Captured-record
+links reveal the same retained material. `#review` and `?section=review` retain Latest result
+on Overview; `?section=viewing-reference` opens the viewing comparison and write recovery
+on Review beside Local review. A link keeps working in the
 former forms `#history` and `?section=history`.
 Preserve visible actionable requests, reading position, disclosure choices and
 unfinished replies as the task updates. Existing execution, recovery and
@@ -2350,12 +2357,12 @@ evidence together:
   failure retains an editable draft for retry; an unknown send outcome requires
   existing reconciliation before another send, and confirmed delivery has a
   receipt.
-- **Changes since viewed.** Identify newer results, superseded evidence and
+- **Changes since viewed.** On Review, identify newer results, superseded evidence and
   changed source requirements relative to the recorded viewing reference.
   Keep earlier revisions accessible. Viewing is not approval. Show no baseline
   or unknown source comparison explicitly; a failed refresh cannot establish
   that requirements are unchanged.
-- **Captured assignment context.** Show who supplied the brief, its captured
+- **Captured assignment context.** On Execution, show who supplied the brief, its captured
   version, recorded instruction/agent revisions and source references, with
   unavailable or incomplete capture explicit. Distinguish that assignment's
   captured context from current requirements. A reference being available does

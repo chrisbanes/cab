@@ -4,8 +4,7 @@ import { assignmentRow } from "./task-overview.js";
 import { ExecutionNotices } from "./execution-notice.js";
 import "./task-detail.css";
 
-const folds =
-  "details.overview-disclosure, details.criteria-more, details.inspector-fold";
+const folds = "details";
 
 /** Opens the collapsed Overview cards (and the inspector holding them) around a linked record, so a link never lands on a closed one. */
 export function openDisclosures(target: HTMLElement) {
@@ -68,7 +67,6 @@ export function AssignmentRows({
               data-record-id={`assignment:${a.assignmentId}`}
             >
               <td>
-                <span className="assignment-id">{row.id}</span>
                 <button type="button" onClick={() => open(a.assignmentId)}>
                   {row.title}
                 </button>

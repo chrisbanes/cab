@@ -30,8 +30,10 @@ why meant reassembling it across tabs, so the task view was hard to read.
   to their decision. Refresh source, Focus mode and Improve with lead share one
   overflow menu; polling and New updates replace Refresh task.
   The brief, evidence and assignments move to the inspector. The History tab is
-  removed; links that opened it (`#history`, `?section=context`, `?assignment=`)
-  open the Overview at the matching place in the conversation.
+  removed; conversation links (`#history`, `?section=history`, `?assignment=`)
+  open the Overview at the matching place in the conversation. Captured context lives
+  on Execution; `?section=context`, `#context` and captured-record links reveal it there.
+  Latest result keeps legacy `#review`; viewing-reference controls live on Review.
 - The conversation interleaves records cab already keeps: captured assistant text,
   operator messages and follow-ups, questions and their answers, approvals, results,
   delegations and tool activity. Assistant text renders as sanitized Markdown with a

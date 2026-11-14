@@ -13,6 +13,8 @@ const sectionTabs: Record<string, TaskTab> = {
   files: "files",
   changes: "changes",
   "local-review": "review",
+  "viewing-reference": "review",
+  context: "execution",
   execution: "execution",
 };
 
@@ -80,7 +82,6 @@ export function conversationTarget(
 export const inspectorTargets = [
   "brief",
   "assignments",
-  "context",
   "review",
   "result-evidence",
 ];
@@ -91,7 +92,5 @@ export function linkNamesInspector(path: string, hash = ""): boolean {
   const params = new URLSearchParams(beforeHash.split("?")[1] ?? "");
   const section = params.get("section") ?? (fragment || hash.slice(1));
   if (section) return inspectorTargets.includes(section);
-  return ["result", "source", "record", "inspectAssignment"].some((p) =>
-    params.has(p),
-  );
+  return ["result", "source", "inspectAssignment"].some((p) => params.has(p));
 }

@@ -10,7 +10,7 @@ import {
 import { type WaitCode, waitLabels } from "../../src/operator/wait-reasons.js";
 import { executionSummary } from "./execution-runtime.js";
 import { pullRequestReference } from "./delivery-presentation.js";
-import { midSentence, shortId } from "./presentation.js";
+import { clockLabel, midSentence, shortId } from "./presentation.js";
 import { taskColumnOf } from "../../src/operator/task-presentation.js";
 import { nextActor, reasonLabels } from "./tasks.js";
 
@@ -19,6 +19,31 @@ export { taskColumnOf };
 type Data = TaskRead["data"];
 type Source = NonNullable<Data["review"]>["sources"][number];
 type Assignment = Data["assignments"][number];
+
+/** Names use only the redacted task projection; the timestamp distinguishes repeated reports. */
+export function resultLabel(
+  result: Data["results"][number],
+  assignments: readonly Assignment[],
+) {
+  const name =
+    assignments.find((a) => a.assignmentId === result.assignmentId)?.name ??
+    "Agent unavailable";
+  const summary = result.summary?.trim().split("\n")[0];
+  const time = clockLabel(
+    result.createdAt < 1e12 ? result.createdAt * 1000 : result.createdAt,
+  );
+  return [
+    name,
+    summary
+      ? summary.length > 80
+        ? `${summary.slice(0, 80)}…`
+        : summary
+      : null,
+    time,
+  ]
+    .filter(Boolean)
+    .join(" · ");
+}
 
 export const criterionLabel = (index: number) => `C${index + 1}`;
 
@@ -80,6 +105,14 @@ export function criterionRows(
         records.length > 1
           ? "Unknown"
           : outcomeWords[record?.outcome ?? "unverified"],
+      symbol:
+        records.length > 1
+          ? "?"
+          : record?.outcome === "supported"
+            ? "✓"
+            : record?.outcome === "failed"
+              ? "×"
+              : "–",
       record,
       records,
       stale: latest?.sourceId !== source.sourceId,

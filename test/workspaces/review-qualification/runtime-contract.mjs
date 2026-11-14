@@ -694,13 +694,19 @@ export async function runQualification(options = {}) {
         .locator("#review")
         .getByText("UI04 synthetic callback recorded", { exact: true })
         .waitFor();
+      await page
+        .locator("#review .criterion-row .material-details > summary")
+        .first()
+        .click();
       await page.getByText(/Synthetic callback transport only/).waitFor();
-      // Captured context is a card in the Overview inspector.
+      // Captured preparation belongs to Execution, independently of the inspector.
+      await page.getByRole("tab", { name: "Execution", exact: true }).click();
       await page.locator("#context > details > summary").click();
       await page
         .getByRole("heading", { name: "Captured context", exact: true })
         .waitFor();
     }, "browser-review");
+    mark("browser-review");
     const screenshot = join(root, "runtime-review.png");
     await step(
       () =>

@@ -48,14 +48,19 @@ export function CriteriaRows({
   data,
   resultId,
   sourceId,
-  ask,
+  details,
   more,
 }: {
   data: TaskRead["data"];
   resultId: string;
   sourceId: string | undefined;
-  /** Offers Ask lead about criterion; a surface with its own feedback form omits it. */
-  ask?: ((r: Reference, label: string) => void) | undefined;
+  /** Task history retains each local attribution disclosure across inspector remounts. */
+  details?:
+    | ((key: string) => {
+        open: boolean;
+        onToggle: (event: SyntheticEvent<HTMLDetailsElement>) => void;
+      })
+    | undefined;
   /** The "N more" disclosure's open state, kept on the history entry like the Overview cards. */
   more: {
     open: boolean;
@@ -64,6 +69,7 @@ export function CriteriaRows({
 }) {
   const s = data.review?.sources.find((s) => s.sourceId === sourceId),
     latest = data.review?.sources.at(-1),
+    result = data.results.find((r) => r.resultId === resultId),
     rows = criterionRows(data, resultId, sourceId);
   const criterionRow = (row: (typeof rows)[number]) => (
     <div
@@ -72,22 +78,31 @@ export function CriteriaRows({
       data-record-id={row.criterionId}
     >
       <p>
+        <span aria-hidden="true">{row.symbol} </span>
         {row.label} · {row.status}
         {row.stale ? " · stale source revision" : ""}
       </p>
       <p>{row.text}</p>
-      <p className="metadata muted">
-        {[
-          `Source revision ${row.revision}`,
-          row.record?.scope,
-          row.record?.provenance,
-        ]
-          .filter(Boolean)
-          .join(" · ")}
-      </p>
       {row.records.length > 1 && (
-        <div>
-          <p>Duplicate criterion identity; overall outcome unknown.</p>
+        <p>Duplicate criterion identity; overall outcome unknown.</p>
+      )}
+      <details
+        className="material-details"
+        {...details?.(`${resultId}:${sourceId}:${row.criterionId}`)}
+      >
+        <summary>Details</summary>
+        <p className="metadata muted">
+          Source revision {row.revision} · source {sourceId} · criterion{" "}
+          {row.criterionId}
+        </p>
+        <p className="metadata muted">
+          Result {resultId} · reporting assignment{" "}
+          {result?.assignmentId ?? "Unavailable"} · work{" "}
+          {result?.workId ?? "Unavailable"} · work revision{" "}
+          {result?.workRevision ?? "Unavailable"} · assignment version{" "}
+          {result?.assignmentVersion ?? "Unavailable"}
+        </p>
+        {row.records.length ? (
           <Literal
             text={row.records
               .map((record) =>
@@ -97,25 +112,10 @@ export function CriteriaRows({
               )
               .join("\n")}
           />
-        </div>
-      )}
-      {ask && (
-        <Button
-          variant="secondary"
-          onClick={() =>
-            ask(
-              {
-                resultId,
-                sourceId: sourceId as string,
-                criterionId: row.criterionId,
-              },
-              `criterion ${row.position + 1} in source revision ${row.revision}`,
-            )
-          }
-        >
-          Ask lead about criterion
-        </Button>
-      )}
+        ) : (
+          <p>No recorded evidence for this criterion.</p>
+        )}
+      </details>
     </div>
   );
   return (

@@ -33,6 +33,7 @@ import {
 } from "../../web/src/lead-feedback.js";
 import {
   openOverviewCard,
+  openTaskDetails,
   openTaskTab,
   overviewCard,
 } from "../fixtures/task-tabs.js";
@@ -233,6 +234,11 @@ test("Task detail shows the designed header, two columns and C1/C2 criteria", as
     assert.ok(b, selector);
     return b;
   };
+  assert.equal(
+    await page.locator("details.inspector-fold").getAttribute("open"),
+    null,
+  );
+  await page.locator("details.inspector-fold > summary").click();
   const conversation = await box("section#conversation"),
     review = await box("section#review"),
     brief = await box("section#brief");
@@ -304,9 +310,9 @@ test("Task detail shows the designed header, two columns and C1/C2 criteria", as
   // Criteria: C1/C2/C3 with recorded words, no aggregate, raw checklist only in the disclosure.
   const rows = page.locator("#review .criterion-row > p:first-child");
   assert.deepEqual(await rows.allTextContents(), [
-    "C1 · Supported by recorded evidence",
-    "C2 · Failed recorded check",
-    "C3 · Unverified",
+    "✓ C1 · Supported by recorded evidence",
+    "× C2 · Failed recorded check",
+    "– C3 · Unverified",
   ]);
   assert.deepEqual(
     await page.locator("#brief .brief-criteria li").allTextContents(),
@@ -338,15 +344,13 @@ test("Task detail shows the designed header, two columns and C1/C2 criteria", as
   for (const literal of ["## Context", "**open**", "- [ ] Restore focus"])
     assert.ok(disclosure.includes(literal), literal);
   assert.equal(
-    await page
-      .getByRole("button", { name: "Ask lead about criterion" })
-      .count(),
-    3,
+    await page.getByRole("button", { name: "Ask lead", exact: true }).count(),
+    1,
   );
   await page
-    .getByRole("button", { name: "Ask lead about criterion" })
-    .first()
-    .click();
+    .getByLabel("Ask lead about", { exact: true })
+    .selectOption(a.source.criteria[0]!.criterionId);
+  await page.getByRole("button", { name: "Ask lead", exact: true }).click();
   await page.waitForFunction(
     () => document.activeElement?.id === "workspace-reply",
   );
@@ -627,8 +631,10 @@ test("An empty local task says so honestly", async (_t, j) => {
   page.setDefaultTimeout(5000);
   await signIn(page, web.origin, web.password, `/tasks/${taskId}`);
   await page.getByRole("heading", { name: "Empty task", level: 1 }).waitFor();
-  const review = page.locator("#review");
-  await review.getByText("No result recorded.", { exact: true }).waitFor();
+  await page
+    .locator("#review")
+    .getByText("No result recorded.", { exact: true })
+    .waitFor();
   // The meaningful outcome is the phone subtitle; identity remains one strip chip.
   assert.equal(
     await page.locator(".page-subtitle-short").textContent(),
@@ -1061,6 +1067,7 @@ for (const [label, viewport] of [
       .getByText("Holds · 3", { exact: true })
       .waitFor();
     const inspector = page.locator('aside[aria-label="Task context"]');
+    await openTaskDetails(page);
     await inspector
       .getByText("Execution held (task not ready)", { exact: true })
       .waitFor();
@@ -1116,6 +1123,7 @@ for (const [label, viewport] of [
       0,
     );
     const inspector = page.locator('aside[aria-label="Task context"]');
+    await openTaskDetails(page);
     const inspectorFold = inspector.locator(".inspector-fold");
     if ((await inspectorFold.getAttribute("open")) === null)
       await inspectorFold.locator(":scope > summary").click();
@@ -2368,11 +2376,14 @@ test("Tab switches, Refresh task and polls keep the reply, expansions and each t
     a.taskId,
   );
   const inspector = page.locator('aside[aria-label="Task context"]');
-  const links = inspector.getByRole("link", { name: /^R\d/ });
-  assert.deepEqual(
-    (await links.allTextContents()).map((t) => t.split(" · ")[0]),
-    ["R2", "R1"],
-  );
+  await openTaskDetails(page);
+  const links = inspector
+    .locator(".inspector-group")
+    .filter({ has: page.getByRole("heading", { name: "Results & artifacts" }) })
+    .getByRole("link");
+  assert.equal(await links.count(), 2);
+  assert.ok((await links.first().getAttribute("href"))?.includes(results[1]));
+  assert.ok((await links.last().getAttribute("href"))?.includes(results[0]));
   const before = await page.evaluate(() => history.length);
   await links.last().click();
   await page.waitForFunction(
@@ -2483,6 +2494,7 @@ test("An open approval leads Overview and stays reachable from every tab in Deci
   };
   // The decisions lead the main column's conversation; the inspector's cards stack in their own.
   const order = ["section#decisions", "section#conversation"];
+  await openTaskDetails(page);
   const beside = ["section#review", "section#brief", "section#assignments"];
   const boxes = await Promise.all(order.map(box));
   for (let i = 1; i < boxes.length; i++)
@@ -2497,6 +2509,7 @@ test("An open approval leads Overview and stays reachable from every tab in Deci
       String(beside[i]),
     );
   const inspector = page.locator('aside[aria-label="Task context"]');
+  await openTaskDetails(page);
   const aside = await box('aside[aria-label="Task context"]');
   assert.ok(boxes[0]!.x + boxes[0]!.width <= aside.x);
   assert.ok(aside.width <= 320);
@@ -2747,12 +2760,14 @@ test("An imported task separates read-only GitHub source from cab execution", as
     await strip.innerText(),
     /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/,
   );
+  await openTaskDetails(page);
   assert.match(
     (await overviewCard(page, "brief").locator("> summary").innerText()) ?? "",
     /Requirements · GitHub/i,
   );
 
   const inspector = page.locator('aside[aria-label="Task context"]');
+  await openTaskDetails(page);
   const github = inspector.locator(".inspector-group").first();
   assert.equal(
     await github.locator(".inspector-label").first().textContent(),
@@ -2825,14 +2840,17 @@ test("An imported task separates read-only GitHub source from cab execution", as
   });
   // A partial sync is named beside the last successful one.
   await page.reload();
+  await openTaskDetails(page);
   await github.getByText(/· partial sync$/).waitFor();
   // No successful sync reads as words, never a blank time.
   sync = "never";
   await page.reload();
+  await openTaskDetails(page);
   await github.getByText(/^Issue open · no successful sync/).waitFor();
   sync = null;
   await page.unroute(taskRead);
   await page.reload();
+  await openTaskDetails(page);
   await github.getByText(/^Issue open/).waitFor();
   await page.setViewportSize({ width: 390, height: 844 });
   await page.evaluate(() => scrollTo(0, 0));
@@ -2914,6 +2932,7 @@ test("A question opened on the task page keeps the holds an answer does not clea
   assert.match(await holds.innerText(), /Answering does not clear it\./);
   // The approval is a "Your decision" row and an inspector row already, so it is not also a hold.
   const aside = page.getByRole("complementary", { name: "Task context" });
+  await openTaskDetails(page);
   await aside.getByText("Approval pending").waitFor();
   assert.equal(await aside.getByText(/approval needs a decision/).count(), 0);
   assert.doesNotMatch(
@@ -2977,6 +2996,7 @@ test("The decision card and inspector do not repeat open approvals as merged hol
   );
   assert.equal(await holds.getByText(approvalHold).count(), 0);
   // Both approval rows and the pause each appear once in the inspector projection.
+  await openTaskDetails(page);
   await aside.getByText("Holds · 3", { exact: true }).waitFor();
   assert.equal(await aside.getByText("Approval pending").count(), 2);
   assert.equal(await card.getByText(approvalHold).count(), 0);
@@ -2984,12 +3004,14 @@ test("The decision card and inspector do not repeat open approvals as merged hol
   // Only the approval in view: it is not a hold on itself.
   await serveApprovals(page, a.taskId, [a.interactionId]);
   await page.reload();
+  await openTaskDetails(page);
   await aside.getByText("Holds · 2", { exact: true }).waitFor();
   assert.equal(await card.getByText(approvalHold).count(), 0);
 
   // Nothing selected: both approvals remain their own rows.
   await serveApprovals(page, a.taskId, [a.interactionId, other]);
   await page.goto(`${web.origin}/tasks/${a.taskId}`);
+  await openTaskDetails(page);
   await aside.getByText("Holds · 3", { exact: true }).waitFor();
   assert.equal(await aside.getByText("Approval pending").count(), 2);
   assert.equal(await card.getByText(approvalHold).count(), 0);
@@ -3033,6 +3055,7 @@ test("A local task without a repository shows no GitHub reply or delivery lines"
     .getByRole("heading", { name: "Latest result", level: 3 })
     .waitFor();
   const inspector = page.locator('aside[aria-label="Task context"]');
+  await openTaskDetails(page);
   const delivery = inspector.locator("dt", { hasText: /^Delivery$/ });
   const github = page.getByRole("radio", { name: "Post GitHub comment" });
   const refreshDelivery = page.getByRole("button", {
@@ -3062,6 +3085,7 @@ test("A local task without a repository shows no GitHub reply or delivery lines"
   setLinkedRepository(fixture.f, a.projectId, true);
   await refreshTask(page, a.taskId);
   await delivery.waitFor();
+  await openTaskTab(page, "Overview");
   assert.equal(
     await page.getByLabel("Editable reply").inputValue(),
     "Keep this draft",
@@ -3121,7 +3145,7 @@ test("The reply box has one sentence above it", async (_t, j) => {
   );
 
   // The immutable reference sits below the box; one sentence still sits above.
-  await page.getByRole("button", { name: "Ask lead about result" }).click();
+  await page.getByRole("button", { name: "Ask lead", exact: true }).click();
   assert.deepEqual(await sentencesAboveReply(page), [`P:${resumes}`]);
   const reference = page.getByText(/^Immutable reference:/);
   await reference.waitFor();
@@ -3167,6 +3191,7 @@ test("The reply box has one sentence above it", async (_t, j) => {
     await page.getByRole("button", { name: "Send to task lead" }).isDisabled(),
     true,
   );
+  await openTaskTab(page, "Overview");
   assert.equal(
     await page.getByLabel("Editable reply").inputValue(),
     "Keep this draft",
@@ -3338,6 +3363,7 @@ test("The GitHub reply says what posting does in one sentence and keeps its draf
 /** The inspector's GitHub group text and the tab's accessible reason, for one sentence. */
 const unavailableComment = async (page: Page, sentence: string) => {
   const inspector = page.locator('aside[aria-label="Task context"]');
+  await openTaskDetails(page);
   await inspector.getByText(sentence, { exact: true }).waitFor();
   assert.match(
     (await inspector.innerText()).replace(/\s+/g, " "),
@@ -3400,6 +3426,7 @@ test("An unavailable GitHub comment gives its reason in the inspector and on a f
   const lead = page.getByRole("radio", { name: "Comment on task" });
   await lead.waitFor();
   const inspector = page.locator('aside[aria-label="Task context"]');
+  await openTaskDetails(page);
   await inspector.getByText("GitHub commenting permitted").waitFor();
   assert.equal(
     await page
@@ -3465,10 +3492,15 @@ test("The viewing reference appears only once a result exists", async (_t, j) =>
   );
   const { web, page } = await fixture.launch();
   await signIn(page, web.origin, web.password, `/tasks/${a.taskId}`);
-  const review = page.locator("#review");
-  await review.getByText("No result recorded.", { exact: true }).waitFor();
+  await page
+    .locator("#review")
+    .getByText("No result recorded.", { exact: true })
+    .waitFor();
+  const review = page.locator("#viewing-reference");
   const view = review.getByRole("button", { name: "Set viewing reference" });
   assert.equal(await view.count(), 0);
+  assert.equal(await page.getByLabel("Result revision").count(), 0);
+  assert.equal(await page.getByLabel("Retained source revision").count(), 0);
   assert.equal(await review.getByText(/No viewing baseline/).count(), 0);
   assert.equal(
     await review.getByText(/Viewing records availability/).count(),
@@ -3479,7 +3511,9 @@ test("The viewing reference appears only once a result exists", async (_t, j) =>
   await page.getByLabel("Editable reply").fill("Keep this draft");
   a.result("Guide drafted");
   await refreshTask(page, a.taskId);
+  await openTaskTab(page, "Review");
   await view.waitFor();
+  assert.equal(await page.getByLabel("Result revision").count(), 0);
   await review
     .getByText(
       "No viewing baseline. Comparison with previously viewed material is unknown.",
@@ -3487,6 +3521,7 @@ test("The viewing reference appears only once a result exists", async (_t, j) =>
     )
     .waitFor();
   await review.getByText(/Viewing records availability only/).waitFor();
+  await openTaskTab(page, "Overview");
   assert.equal(
     await page.getByLabel("Editable reply").inputValue(),
     "Keep this draft",
@@ -3504,7 +3539,8 @@ test("A viewing reference the service refuses while the task page is away says s
   a.result("Guide drafted");
   const { web, page } = await fixture.launch();
   await signIn(page, web.origin, web.password, `/tasks/${a.taskId}`);
-  const review = page.locator("#review");
+  await openTaskTab(page, "Review");
+  const review = page.locator("#viewing-reference");
   const view = review.getByRole("button", { name: "Set viewing reference" });
   await view.waitFor();
   // The reply is held until the task page has been left, then refuses the request.
@@ -3594,7 +3630,7 @@ test("A redacted outcome shows no subtitle and no disclosure", async (_t, j) => 
   await page.unrouteAll({ behavior: "wait" });
 });
 
-test("Task detail identifiers are short mono metadata and tokens read as sentences", async (_t, j) => {
+test("Task detail keeps exact attribution in local Details and names result links", async (_t, j) => {
   const fixture = await openFixture(j);
   const a = await seedReviewTask(
     fixture.f,
@@ -3645,76 +3681,40 @@ test("Task detail identifiers are short mono metadata and tokens read as sentenc
   );
   const uuid = /[0-9a-f]{8}-[0-9a-f]{4}-/;
 
-  // Task details keeps 8 mono characters; the full value is the title; no full id is visible.
+  assert.doesNotMatch(await result.innerText(), uuid);
   await openOverviewCard(page, "brief");
-  const brief = page.locator("#brief .metadata").filter({ hasText: "source" });
+  const briefDetails = page.locator("#brief details.material-details");
+  await briefDetails.locator("> summary").focus();
+  await page.keyboard.press("Enter");
+  assert.match(await briefDetails.innerText(), new RegExp(a.source.sourceId));
+  const resultDetails = page.locator("#result-details");
+  await resultDetails.locator("> summary").click();
+  assert.match(await resultDetails.innerText(), new RegExp(r2.resultId));
+  assert.match(await resultDetails.innerText(), new RegExp(r2.assignmentId));
+  const links = page
+    .locator(".inspector-group")
+    .filter({ has: page.getByRole("heading", { name: "Results & artifacts" }) })
+    .getByRole("link");
+  assert.equal(await links.count(), 2);
+  assert.match(await links.first().innerText(), /Task lead · /);
   assert.match(
-    await brief.innerText(),
-    /^Local source · revision 1 · [0-9a-f]{8}$/,
+    (await links.first().getAttribute("href")) ?? "",
+    new RegExp(r2.resultId),
   );
-  const meta = page.locator("#result-details p.metadata");
+  assert.doesNotMatch(await links.first().innerText(), uuid);
+  assert.equal(
+    await page.locator("#retained-result-revision option").count(),
+    3,
+  );
+  const rows = page.locator("#review .criterion-row");
+  await rows.first().locator("details > summary").click();
   assert.match(
-    await meta.innerText(),
-    /^R2 · [0-9a-f]{8} · assignment [0-9a-f]{8} · work revision \d+ · /,
+    await rows.first().innerText(),
+    /Keyboard opening · Focus check/,
   );
-  const inspector = page.locator('aside[aria-label="Task context"]');
-  const results = inspector.locator(".inspector-group", {
-    has: page.getByRole("heading", { name: "Results & artifacts" }),
-  });
-  for (const region of [brief, meta, results])
-    assert.doesNotMatch(await region.innerText(), uuid);
-  assert.deepEqual(
-    await page.evaluate(
-      ([selectors]) =>
-        selectors!.flatMap((selector) =>
-          [
-            ...document.querySelectorAll<HTMLElement>(
-              `${selector} abbr.identifier`,
-            ),
-          ].map((el) => [el.title, el.textContent, el.tabIndex]),
-        ),
-      [["#brief .metadata", "#result-details p.metadata"]],
-    ),
-    [
-      [a.source.sourceId, a.source.sourceId.slice(0, 8), 0],
-      [r2.resultId, r2.resultId.slice(0, 8), 0],
-      [r2.assignmentId, r2.assignmentId.slice(0, 8), 0],
-    ],
-  );
-  const links = inspector.getByRole("link", { name: /^R\d/ });
-  assert.deepEqual(await links.allInnerTexts(), [
-    `R2 · ${r2.resultId.slice(0, 8)}`,
-    `R1 · ${(await links.nth(1).locator("abbr").getAttribute("title"))!.slice(0, 8)}`,
-  ]);
-  assert.equal(
-    await links.first().locator("abbr").getAttribute("title"),
-    r2.resultId,
-  );
-  assert.equal(
-    await links.first().locator("abbr").getAttribute("tabindex"),
-    null,
-  );
-  assert.deepEqual(
-    await page.locator("#retained-result-revision option").allInnerTexts(),
-    ["Latest result", "R1", "R2"],
-  );
-
-  // A criterion with no record says only what is known.
-  const rows = page.locator(".criterion-row");
-  const metadata = await rows.locator("p.metadata").allInnerTexts();
-  assert.deepEqual(metadata, [
-    "Source revision 1 · Keyboard opening · Focus check",
-    "Source revision 1",
-    "Source revision 1",
-  ]);
-  const review = page.locator("#review");
-  for (const word of [
-    "No supporting scope supplied",
-    "provenance",
-    "Unavailable",
-    "not supplied",
-  ])
-    assert.equal(await review.getByText(word).count(), 0, word);
+  assert.match(await rows.first().innerText(), new RegExp(r2.resultId));
+  assert.match(await rows.first().innerText(), new RegExp(r2.assignmentId));
+  assert.match(await rows.first().innerText(), new RegExp(a.source.sourceId));
 
   // Validation rows: short head, and a comparison that never invents a head.
   await openOverviewCard(page, "evidence");
@@ -4211,6 +4211,7 @@ test("Delivery feedback leaves with the delivery controls and returns with them"
   await refreshTask(page, a.taskId);
   await refresh.waitFor();
   await openTaskTab(page, "Overview");
+  await openTaskTab(page, "Overview");
   assert.equal(
     await page.getByLabel("Editable reply").inputValue(),
     "Keep this draft",
@@ -4417,10 +4418,8 @@ const overviewOrder = [
   "section#reply",
   "section#review",
   "section#result-evidence",
-  "section#result-details",
   "section#brief",
   "section#assignments",
-  "section#context",
 ];
 
 /** Follows an in-app link as the app's own links do: in place, with no page load. */
@@ -4472,7 +4471,7 @@ for (const engine of ["chromium", "webkit"] as const)
         [
           "assignments",
           `Assignments · ${read.data.assignments.length}`,
-          /^[0-9a-f]{8} [A-Z][a-z]+( · [0-9a-f]{8} [A-Z][a-z]+)*$/,
+          /^Task lead · .*Running · Task lead · .*Completed$/,
         ],
       ] as const) {
         const card = overviewCard(page, name);
@@ -4513,7 +4512,8 @@ for (const engine of ["chromium", "webkit"] as const)
         [],
       );
 
-      // Tab order is the visual order: the decision card, the conversation, the reply, then the
+      await openTaskDetails(page);
+      // Tab order with the operator's own Task details choice open is the visual order: the decision card, the conversation, the reply, then the
       // inspector (the result and its summaries), each reached once.
       await page.evaluate(() => {
         const controls = document.querySelectorAll<HTMLElement>(
@@ -4545,7 +4545,6 @@ for (const engine of ["chromium", "webkit"] as const)
         "result-evidence",
         // The inspector fold's own summary, ahead of the brief and the cards beneath it.
         "outside",
-        "result-details",
         "brief",
         "assignments",
       ];
@@ -4611,7 +4610,6 @@ for (const engine of ["chromium", "webkit"] as const)
         "section#review",
         "section#brief",
         "section#assignments",
-        "section#context",
       ];
 
       // No decision: the card has no request and still leads the result.
@@ -4812,7 +4810,7 @@ for (const engine of ["chromium", "webkit"] as const)
         },
         {
           link: "?section=context",
-          tab: "Overview",
+          tab: "Execution",
           open: ["context"],
           target: "#context",
           focus: "#context > details > summary",
@@ -4879,10 +4877,13 @@ for (const engine of ["chromium", "webkit"] as const)
       await page.goto(
         `${web.origin}/tasks/${a.taskId}?source=${a.source.sourceId}`,
       );
-      await page.locator("#retained-source-revision").waitFor();
-      assert.equal(
-        await page.locator("#retained-source-revision").inputValue(),
-        a.source.sourceId,
+      await page.locator("#brief > details[open]").waitFor();
+      assert.equal(await page.locator("#retained-source-revision").count(), 0);
+      await page.locator("#brief .material-details > summary").click();
+      assert.ok(
+        (await page.locator("#brief .material-details").innerText()).includes(
+          a.source.sourceId,
+        ),
       );
       await page.goto(
         `${web.origin}/tasks/${a.taskId}?result=${older.resultId}`,
@@ -4911,7 +4912,7 @@ for (const engine of ["chromium", "webkit"] as const)
       await overviewCard(page, "brief").locator("> summary").click();
       await page
         .locator('aside[aria-label="Task context"]')
-        .getByRole("link", { name: /^R1/ })
+        .locator(`a[href="?result=${older.resultId}#review"]`)
         .click();
       await page.waitForFunction(
         () => document.activeElement?.closest("section")?.id === "review",

@@ -299,8 +299,8 @@ export class TaskWorkspaceState {
   expanded = new Set<string>();
   /** Open Overview cards; written only by the cards' toggles and a deep link's first selection. */
   overview = new Set<OverviewCard>();
-  /** Results (by result and source) whose "N more" criteria are open; the operator's own toggle writes it. */
-  criteriaOpen = new Set<string>();
+  /** Material Details and "N more" criteria open by exact result/source/record identity; the operator's own toggle writes it. */
+  materialOpen = new Set<string>();
   /** The record a link named that the loaded conversation did not hold, or null. */
   conversationNotice: {
     subject: string;
@@ -313,7 +313,10 @@ export class TaskWorkspaceState {
   inlineAnswer: string | null = null;
   /** The request whose form is in the attention card: the linked one, or the operator's choice. */
   cardRequest: string | null = null;
-  /** The inspector's fold; null follows the screen: open beside the conversation, closed above it on a phone. */
+  /** Exact contextual Ask target, scoped to the selected result/source pair. */
+  askTarget: { key: string; criterionId: string } | null = null;
+  askTargetNotice = "";
+  /** The inspector's retained fold; a fresh task starts closed at every width. */
   inspectorOpen: boolean | null = null;
   /** The Changes side pane beside the conversation (1024px and wider); `opener` is the selector that gets focus back on Close. */
   changesPane: { opener: string } | null = null;

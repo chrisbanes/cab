@@ -25,8 +25,9 @@ const test = browserSuite("operator-comments-browser");
 const serviceWords =
   /recorded|receipt|observation|admission|reconcile|submission|revision|\d|project\.|conflict|invalid/i;
 /** Sets the viewing reference and waits for the service to answer it. */
-const setViewingReference = (page: Page) =>
-  Promise.all([
+const setViewingReference = async (page: Page) => {
+  await openTaskTab(page, "Review");
+  await Promise.all([
     page.waitForResponse(
       (r) =>
         r.url().includes("/api/operator/commands") &&
@@ -36,6 +37,8 @@ const setViewingReference = (page: Page) =>
       .getByRole("button", { name: "Set viewing reference", exact: true })
       .click(),
   ]);
+  await openTaskTab(page, "Overview");
+};
 /** The journey's current phase, named in a failure so a recurrence says where it stopped. */
 let phase = "fixture and sign-in";
 async function approvalModeJourney(_t: TestContext, j: BrowserJourney) {
@@ -323,10 +326,12 @@ async function approvalModeJourney(_t: TestContext, j: BrowserJourney) {
   );
   phase = "draft refusal";
   // An earlier viewing-reference outcome must not hide the refusal of a draft that cannot be sent.
+  await openTaskTab(page, "Review");
   await page
     .getByRole("button", { name: "Set viewing reference", exact: true })
     .click();
   await page.getByText("Viewing reference set.", { exact: true }).waitFor();
+  await openTaskTab(page, "Overview");
   phase = "lost review and confirmation responses";
   // Lose actual committed review and confirmation responses, retaining normalized
   // immutable commands independently of the editable whitespace in the draft.
@@ -597,6 +602,7 @@ async function approvalModeJourney(_t: TestContext, j: BrowserJourney) {
     operation.operationId,
   );
   assert.equal(await page.getByLabel("Editable reply").inputValue(), "");
+  await openTaskTab(page, "Review");
   await page
     .getByText(/source unchanged/)
     .first()
@@ -619,7 +625,7 @@ async function approvalModeJourney(_t: TestContext, j: BrowserJourney) {
     f.service.taskReview().sources(taskId).at(-1)!.sourceId,
     retainedSource,
   );
-  await page.goto(`${web.origin}/tasks/${taskId}`);
+  await page.goto(`${web.origin}/tasks/${taskId}?section=viewing-reference`);
   await page
     .getByText(/source comparison unknown; current source state unavailable/)
     .waitFor();
@@ -633,12 +639,12 @@ async function approvalModeJourney(_t: TestContext, j: BrowserJourney) {
       .count(),
     0,
   );
-  await page.locator("#review").scrollIntoViewIfNeeded();
+  await page.locator("#viewing-reference").scrollIntoViewIfNeeded();
   await captureBrowserEvidence(page, "1366-retained-partial-source", {
     fullPage: false,
   });
   await page.setViewportSize({ width: 390, height: 844 });
-  await page.locator("#review").scrollIntoViewIfNeeded();
+  await page.locator("#viewing-reference").scrollIntoViewIfNeeded();
   await captureBrowserEvidence(page, "390-retained-partial-source", {
     fullPage: false,
   });
@@ -1206,6 +1212,7 @@ async function approvalModeJourney(_t: TestContext, j: BrowserJourney) {
         assert.match(String(error), /already handled|Target.*closed/),
       );
   });
+  await openTaskTab(page, "Overview");
   await page
     .getByLabel("Editable reply")
     .fill("Private old-session source draft");

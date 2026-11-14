@@ -1,3 +1,4 @@
+import type { ReactNode } from "react";
 import { randomUUID } from "./browser-crypto.js";
 import { taskProjectReadOnly } from "./project-lifecycle-model.js";
 import { useRef, useState } from "react";
@@ -237,12 +238,14 @@ export function TaskExecution({
   client,
   session,
   onChanged,
+  capturedContext,
 }: {
   data: Data;
   project: Workspace["data"]["projects"][number] | undefined;
   client: OperatorClient;
   session: Session;
   onChanged: () => void;
+  capturedContext: ReactNode;
 }) {
   const taskId = data.task.id,
     recovery = data.executionRecovery,
@@ -372,6 +375,7 @@ export function TaskExecution({
         session={session}
         onChanged={onChanged}
       />
+      {capturedContext}
     </section>
   );
 }

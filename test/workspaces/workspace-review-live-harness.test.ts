@@ -1,3 +1,4 @@
+import { createTestEvidenceDirectory } from "../fixtures/browser-diagnostics.js";
 import { browserTest } from "../fixtures/browser-engines.js";
 import assert from "node:assert/strict";
 import { test } from "node:test";
@@ -5,7 +6,7 @@ import { spawn } from "node:child_process";
 import { once } from "node:events";
 import { resolve } from "node:path";
 import { pathToFileURL } from "node:url";
-import { readFileSync, mkdtempSync, statSync } from "node:fs";
+import { readFileSync, mkdtempSync, statSync, copyFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 const module = await import(
@@ -318,3 +319,38 @@ test("portable fixture proof requires observed exit of its exact owned child and
     }
   }
 });
+
+browserTest(
+  "deterministic fake host completes browser review with owned-child cleanup",
+  async () => {
+    const r = await module.runQualification({
+      fixture: {},
+    });
+    const retained = await createTestEvidenceDirectory(
+      "synthetic-review",
+      "browser success",
+    );
+    copyFileSync(r.evidencePath, join(retained, "manifest.json"));
+    for (const [i, shot] of r.screenshots.entries())
+      copyFileSync(shot.path, join(retained, `browser-review-${i}.png`));
+    const evidence = JSON.stringify(r);
+    console.log(
+      "synthetic-browser-success-evidence",
+      evidence,
+      "retained",
+      retained,
+    );
+    assert.equal(r.mode, "deterministic-fake-host", evidence);
+    assert.equal(r.status, "passed", evidence);
+    assert.ok(
+      r.timeline.some(
+        (entry: { name?: string; event?: string; phase?: string }) =>
+          JSON.stringify(entry).includes("browser-review"),
+      ),
+      evidence,
+    );
+    assert.deepEqual(r.counts, { threads: 1, turns: 1, reports: 1 }, evidence);
+    assert.equal(r.callbackEnded, true, evidence);
+    assert.equal(r.cleanup.verified, true, evidence);
+  },
+);

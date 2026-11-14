@@ -16,7 +16,7 @@ import { choiceForm } from "../fixtures/question-data.js";
 import { seedOwnQuestion } from "../fixtures/questions.js";
 import { stubReadiness } from "../fixtures/setup-browser.js";
 import { seedReviewTask } from "../fixtures/task-review.js";
-import { overviewCard } from "../fixtures/task-tabs.js";
+import { openOverviewCard, overviewCard } from "../fixtures/task-tabs.js";
 
 // The budget is the table under "Budget" in docs/user-flows/review-result.md.
 const test = browserSuite("review-result-budget");
@@ -172,10 +172,10 @@ for (const [label, viewport] of [
         .locator("#review .criterion-row > p:first-child")
         .allTextContents(),
       [
-        "C1 · Supported by recorded evidence",
-        "C2 · Failed recorded check",
-        "C3 · Unverified",
-        "C4 · Supported by recorded evidence",
+        "✓ C1 · Supported by recorded evidence",
+        "× C2 · Failed recorded check",
+        "– C3 · Unverified",
+        "✓ C4 · Supported by recorded evidence",
       ],
     );
     const more = s.page.locator("#review .criteria-more > summary");
@@ -203,20 +203,17 @@ for (const [label, viewport] of [
     if (viewport === phone) {
       // Ask lead keeps its 44px target and its label wraps beside the outcome.
       const box = (await s.page
-        .locator("#review .criterion-row")
-        .first()
-        .getByRole("button", { name: "Ask lead about criterion", exact: true })
+        .getByRole("button", { name: "Ask lead", exact: true })
         .boundingBox())!;
       assert.ok(box.height >= 44, `Ask lead is a 44px target ${box.height}`);
-      assert.ok(box.width <= 120, `Ask lead stays narrow ${box.width}`);
     }
     const result = s.page.locator(`#review [data-record-id="${s.resultId}"]`);
     assert.equal(await result.getAttribute("aria-label"), "Result R1");
     const metadata = s.page.locator("#result-details p.metadata");
     assert.equal(
       await metadata.isVisible(),
-      viewport !== phone,
-      "result provenance follows the existing Task details fold",
+      false,
+      "result provenance starts in local closed Details",
     );
     assert.equal(
       await result
@@ -230,18 +227,16 @@ for (const [label, viewport] of [
     const fold = s.page.locator("details.inspector-fold");
     assert.equal(
       (await fold.getAttribute("open")) !== null,
-      viewport !== phone,
+      false,
       "opening Evidence does not change Task details",
     );
-    assert.equal(await metadata.isVisible(), viewport !== phone);
-    // Inspecting provenance is separate from the Evidence interaction budget.
-    let provenanceInteractions = 0;
-    if (viewport === phone) {
-      await fold.locator("> summary").click();
-      provenanceInteractions++;
-    }
-    assert.equal(provenanceInteractions, viewport === phone ? 1 : 0);
+    assert.equal(await metadata.isVisible(), false);
+    // Inspecting exact provenance is one separate keyboard disclosure interaction.
+    const details = s.page.locator("#result-details > summary");
+    await details.focus();
+    await s.page.keyboard.press("Enter");
     assert.equal(await metadata.isVisible(), true);
+    assert.match(await metadata.innerText(), new RegExp(s.resultId));
   });
 
   test(`review a result budget: two interactions from Home Completed work (${label})`, async (_t, journey) => {
@@ -270,7 +265,7 @@ for (const [label, viewport] of [
     assert.equal(
       (await s.page.locator("details.inspector-fold").getAttribute("open")) !==
         null,
-      viewport !== phone,
+      false,
     );
   });
 
@@ -284,7 +279,7 @@ for (const [label, viewport] of [
     assert.equal(await openEvidence(s.page), 0);
     assert.equal(
       await s.page.locator("#result-details p.metadata").isVisible(),
-      viewport !== phone,
+      false,
     );
     assert.equal(
       await openEvidence(s.page),
@@ -294,7 +289,7 @@ for (const [label, viewport] of [
     assert.equal(
       (await s.page.locator("details.inspector-fold").getAttribute("open")) !==
         null,
-      viewport !== phone,
+      false,
       "the Evidence link and helper leave phone Task details closed",
     );
   });
@@ -341,12 +336,7 @@ test("review a result: criteria past the third open and close under N more", asy
   assert.equal(await fourth.isVisible(), false);
   await more.click();
   await fourth.waitFor();
-  assert.equal(
-    await fourth
-      .getByRole("button", { name: "Ask lead about criterion" })
-      .isEnabled(),
-    true,
-  );
+  assert.equal(await fourth.locator("details > summary").isVisible(), true);
   await more.click();
   assert.equal(await fourth.isVisible(), false);
 });
@@ -394,7 +384,7 @@ test("review a result: a long criterion is shown in full and keeps its outcome",
     "the criterion text is not clipped",
   );
   const outcome = row.locator("> p").first();
-  assert.match((await outcome.textContent()) ?? "", /^C1 · /);
+  assert.match((await outcome.textContent()) ?? "", /C1 · /);
   assert.equal(await outcome.isVisible(), true);
   await noPageOverflow(s.page);
 });
@@ -411,10 +401,7 @@ test("review a result: an open N more, its scroll and the focus in it survive le
   const fourth = more.locator(".criterion-row");
   await more.locator("> summary").click();
   await fourth.waitFor();
-  const ask = fourth.getByRole("button", {
-    name: "Ask lead about criterion",
-    exact: true,
-  });
+  const ask = fourth.locator("details > summary");
   await ask.scrollIntoViewIfNeeded();
   await ask.focus();
   const y = await s.page.evaluate(() => scrollY);
@@ -447,3 +434,136 @@ test("review a result: an open N more, its scroll and the focus in it survive le
   );
   assert.ok(Math.abs((await s.page.evaluate(() => scrollY)) - y) <= 1);
 });
+
+for (const viewport of [desktop, phone]) {
+  test(`one Ask targets hidden criteria and resets stale selection (${viewport.width})`, async (_t, journey) => {
+    const s = await start(
+      journey,
+      viewport,
+      seedFourCriteria,
+      ({ taskId }) => `/tasks/${taskId}?section=review`,
+    );
+    const ask = s.page.getByRole("button", { name: "Ask lead", exact: true });
+    const target = s.page.getByLabel("Ask lead about", { exact: true });
+    assert.equal(await ask.count(), 1);
+    assert.equal(await s.page.getByLabel("Result revision").count(), 0);
+    assert.equal(
+      await s.page.getByLabel("Retained source revision").count(),
+      0,
+    );
+    const criterionId = s.source.criteria[3]!.criterionId;
+    assert.equal(
+      await s.page.locator("#review .criteria-more").getAttribute("open"),
+      null,
+    );
+    await target.selectOption(criterionId);
+    await ask.click();
+    await s.page.waitForFunction(
+      () => document.activeElement?.id === "workspace-reply",
+    );
+    const reply = s.page.getByLabel("Editable reply");
+    await reply.fill("Keep this exact criterion draft");
+    const reference = s.page.getByText(/^Immutable reference:/);
+    const original = await reference.textContent();
+    assert.ok(original?.includes(criterionId));
+    assert.ok(original?.includes(s.resultId));
+    assert.ok(original?.includes(s.source.sourceId));
+    s.result("Another result", { sourceId: s.source.sourceId, criteria: [] });
+    await s.page.evaluate(() =>
+      window.dispatchEvent(new Event("cab-task-changed")),
+    );
+    await s.page
+      .locator("#review")
+      .getByText("Another result", { exact: true })
+      .waitFor();
+    await s.page.getByLabel("Result revision").waitFor();
+    // Incoming material resets the target, while the contextual draft keeps its original reference.
+    assert.equal(await reply.inputValue(), "Keep this exact criterion draft");
+    assert.equal(await reference.textContent(), original);
+    await target.selectOption(criterionId);
+    await s.page.getByLabel("Result revision").selectOption(s.resultId);
+    await s.page
+      .getByText(
+        "The selected criterion is no longer current. Ask lead now targets this result.",
+        { exact: true },
+      )
+      .waitFor();
+    assert.equal(await target.inputValue(), "");
+    await ask.click();
+    assert.equal(await reply.inputValue(), "Keep this exact criterion draft");
+    assert.equal(await reference.textContent(), original);
+    const nextSource = s.f.service
+      .taskReview()
+      .captureSource(s.taskId, "local", {
+        title: "Updated requirements",
+        body: "- [ ] Updated criterion",
+      });
+    assert.ok(nextSource);
+    await s.page.evaluate(() =>
+      window.dispatchEvent(new Event("cab-task-changed")),
+    );
+    await openOverviewCard(s.page, "brief");
+    await s.page.getByLabel("Retained source revision").waitFor();
+    await target.selectOption(criterionId);
+    await s.page
+      .getByLabel("Retained source revision")
+      .selectOption(nextSource.sourceId);
+    await s.page
+      .getByText(
+        "The selected criterion is no longer current. Ask lead now targets this result.",
+        { exact: true },
+      )
+      .waitFor();
+    assert.equal(await target.inputValue(), "");
+    assert.equal(await reply.inputValue(), "Keep this exact criterion draft");
+    assert.equal(await reference.textContent(), original);
+    await noPageOverflow(s.page);
+  });
+}
+
+for (const viewport of [desktop, phone]) {
+  test(`captured record and context links reveal only Execution and keep disclosures (${viewport.width})`, async (_t, journey) => {
+    const s = await start(
+      journey,
+      viewport,
+      seedFourCriteria,
+      ({ taskId }) => `/tasks/${taskId}`,
+    );
+    const capture = s.f.service.taskReview().read(s.taskId).contexts.at(-1)!;
+    assert.ok(capture);
+    for (const target of [
+      "?section=context",
+      "#context",
+      `?record=${capture.captureId}`,
+    ]) {
+      await s.page.goto(
+        new URL(`/tasks/${s.taskId}${target}`, s.page.url()).href,
+      );
+      await s.page
+        .getByRole("tab", { name: "Execution", selected: true })
+        .waitFor();
+      await s.page.locator("#context > details[open]").waitFor();
+      assert.equal(await s.page.locator(".task-inspector #context").count(), 0);
+      assert.equal(await s.page.locator("#context").count(), 1);
+      assert.match(
+        await s.page.locator("#context").innerText(),
+        /Availability is not proof/,
+      );
+      assert.ok(
+        (await s.page.locator("#context").innerText()).includes(
+          capture.assignmentId,
+        ),
+      );
+    }
+    const details = s.page.locator(
+      `#context details[data-record-id="${capture.captureId}"]`,
+    );
+    await details.locator("> summary").focus();
+    if ((await details.getAttribute("open")) === null)
+      await s.page.keyboard.press("Enter");
+    await s.page.getByRole("tab", { name: "Review", exact: true }).click();
+    await s.page.getByRole("tab", { name: "Execution", exact: true }).click();
+    assert.equal(await details.getAttribute("open"), "");
+    await noPageOverflow(s.page);
+  });
+}

@@ -186,7 +186,6 @@ test("leaving focus mode restores the inspector fold as it was", async (_t, j) =
   const { page } = await start(j);
   await readyPage(page);
   const summary = page.getByText("Task details", { exact: true });
-  await summary.click();
   await page.locator(".inspector-fold:not([open])").waitFor();
   await toggle(page).click();
   await toggle(page).click();
@@ -246,7 +245,11 @@ test("a link to an inspector section shows it and the choice returns on Back", a
     `${new URL(page.url()).origin}/tasks/${task.taskId}?section=context`,
   );
   await page.locator("#context").waitFor();
-  assert.equal(await pressed(page), "false");
+  assert.equal(
+    await page.getByRole("tab", { name: "Execution", selected: true }).count(),
+    1,
+  );
+  assert.equal(await inspector(page).count(), 0);
   assert.equal(await stored(page), "1");
 });
 

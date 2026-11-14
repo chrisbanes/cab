@@ -441,9 +441,7 @@ test("production workspace retains literal captured text, pending request, focus
   assert.ok(await question.isVisible());
   // The restored navigation draft has been checked; explicitly finish that intent.
   await page.getByLabel("Editable reply").fill("");
-  await page
-    .getByRole("button", { name: "Ask lead about result", exact: true })
-    .click();
+  await page.getByRole("button", { name: "Ask lead", exact: true }).click();
   await page.getByLabel("Editable reply").fill("Unfinished contextual reply");
   assert.equal(
     await page.getByLabel("Editable reply").inputValue(),
@@ -544,7 +542,7 @@ test("production workspace retains literal captured text, pending request, focus
     .click();
   // One warning, in plain words: the draft is kept, the code is only in Details, and the
   // single action is the exact-request check.
-  const outcome = page.locator("[data-slot=action-outcome]");
+  const outcome = page.locator("#reply [data-slot=action-outcome]");
   await outcome
     .getByText("We couldn't confirm it was sent. Your draft is kept.")
     .waitFor();
@@ -561,6 +559,7 @@ test("production workspace retains literal captured text, pending request, focus
   assert.match(fields, /Command\s+message/);
   assert.match(fields, /Request key\s+[0-9a-f-]{36}/);
   assert.match(fields, /Code\s+command-outcome-unknown/);
+  await openTaskTab(page, "Review");
   await Promise.all([
     page.waitForResponse(
       (r) =>
@@ -571,13 +570,15 @@ test("production workspace retains literal captured text, pending request, focus
       .getByRole("button", { name: "Set viewing reference", exact: true })
       .click(),
   ]);
-  // A different action's outcome never replaces an unknown reply outcome, or takes the focus.
-  await outcome.waitFor();
-  assert.equal(await outcome.count(), 1);
+  // A different action's outcome never replaces the unknown reply outcome.
   assert.equal(
     await page.evaluate(() => document.activeElement?.textContent),
     "Set viewing reference",
   );
+  await openTaskTab(page, "Overview");
+  await outcome.waitFor();
+  assert.equal(await outcome.count(), 1);
+
   assert.ok(
     await page
       .getByRole("button", { name: "Check whether it saved", exact: true })
@@ -647,7 +648,7 @@ test("production workspace retains literal captured text, pending request, focus
     const bodies: string[] = [];
     let lost = true;
     // Viewing is set on Overview; delivery is observed on Changes.
-    await openTaskTab(page, type === "review.view" ? "Overview" : "Changes");
+    await openTaskTab(page, type === "review.view" ? "Review" : "Changes");
     await page.route("**/api/operator/commands", async (route) => {
       const body = route.request().postDataJSON() as { type?: string };
       if (body.type !== type) return route.fallback();
@@ -735,9 +736,7 @@ test("production workspace retains literal captured text, pending request, focus
       .count(),
     0,
   );
-  await page
-    .getByRole("button", { name: "Ask lead about result", exact: true })
-    .click();
+  await page.getByRole("button", { name: "Ask lead", exact: true }).click();
   assert.ok(await page.getByLabel("Editable reply").isEditable());
   assert.equal(
     await page
@@ -935,7 +934,7 @@ test("a replayed auxiliary request focuses its control after the page commits", 
     ] as const) {
       const bodies: string[] = [];
       let lost = true;
-      await openTaskTab(page, type === "review.view" ? "Overview" : "Changes");
+      await openTaskTab(page, type === "review.view" ? "Review" : "Changes");
       await page.route("**/api/operator/commands", async (route) => {
         const body = route.request().postDataJSON() as { type?: string };
         if (body.type !== type) return route.fallback();
@@ -995,7 +994,7 @@ test("a replayed auxiliary request focuses its control after the page commits", 
       await gate;
       await route.fulfill({ response });
     });
-    await openTaskTab(page, "Overview");
+    await openTaskTab(page, "Review");
     await click("Set viewing reference");
     await page
       .getByRole("button", { name: "Check whether it saved", exact: true })

@@ -16,7 +16,7 @@ import {
   setLinkedRepository,
 } from "../fixtures/task-review.js";
 import { leadResumeNotice } from "../../web/src/lead-feedback.js";
-import { openOverviewCard } from "../fixtures/task-tabs.js";
+import { openTaskTab, openOverviewCard } from "../fixtures/task-tabs.js";
 const test = browserSuite("operator-review-browser");
 test("exact S1 R2 R3 S2 review retains scoped outcomes, captured context, comparison identities and local artifact feedback on desktop and phone", async (_t, j) => {
   const f = await j.start("fixture.create", () =>
@@ -255,6 +255,7 @@ test("exact S1 R2 R3 S2 review retains scoped outcomes, captured context, compar
   assert.ok(
     !changesText?.includes("No recorded file, commit or diff metadata"),
   );
+  await openTaskTab(page, "Review");
   await page
     .getByRole("button", { name: "Set viewing reference", exact: true })
     .click();
@@ -266,6 +267,7 @@ test("exact S1 R2 R3 S2 review retains scoped outcomes, captured context, compar
     f.service.taskReview().read(a.taskId).viewed?.sourceId,
     a.source.sourceId,
   );
+  await openTaskTab(page, "Overview");
   await page.getByLabel("Result revision").selectOption(r1.resultId);
   await page.getByText("R1 initial", { exact: true }).waitFor();
   await page
@@ -282,6 +284,7 @@ test("exact S1 R2 R3 S2 review retains scoped outcomes, captured context, compar
     .first()
     .waitFor({ state: "attached" });
 
+  await openTaskTab(page, "Overview");
   await page.getByLabel("Result revision").selectOption(r2.resultId);
   await page.getByText("R2 original scope", { exact: true }).waitFor();
   const pair = page.locator('[data-artifact-pair="focus-pair"]');
@@ -361,9 +364,13 @@ test("exact S1 R2 R3 S2 review retains scoped outcomes, captured context, compar
     fullPage: false,
   });
   const reply = page.getByLabel("Editable reply");
-  const criterionAsk = page
-    .getByRole("button", { name: "Ask lead about criterion", exact: true })
-    .first();
+  await page
+    .getByLabel("Ask lead about", { exact: true })
+    .selectOption(a.source.criteria[0]!.criterionId);
+  const criterionAsk = page.getByRole("button", {
+    name: "Ask lead",
+    exact: true,
+  });
   const artifactAsk = pair
     .locator('[data-artifact-role="before"]')
     .getByRole("button", { name: "Ask lead about artifact", exact: true })
@@ -704,11 +711,10 @@ for (const [limitCase, sourceBody] of [
     await page.evaluate(() =>
       window.dispatchEvent(new Event("cab-task-changed")),
     );
+    await brief.locator(".material-details > summary").click();
     await brief
-      .getByText(
-        `GitHub source · revision ${next.revision} · ${next.sourceId.slice(0, 8)}`,
-        { exact: true },
-      )
+      .locator(".material-details")
+      .getByText(new RegExp(next.sourceId))
       .waitFor();
     await brief.getByText(gap).waitFor();
     assert.equal(
@@ -911,7 +917,7 @@ test("every lead composer shows the same resume line for a completed lead and ke
   // shared comment previews the same resume in its recipient lines).
   const seen: (string | null)[] = [];
   await openOverviewCard(page, "evidence");
-  for (const name of ["Ask lead about result", "Ask lead about artifact"]) {
+  for (const name of ["Ask lead", "Ask lead about artifact"]) {
     await reply.fill("");
     await page.getByRole("button", { name, exact: true }).first().click();
     await page.getByText(/^Immutable reference:/).waitFor();
