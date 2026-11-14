@@ -599,9 +599,14 @@ name, version and preview digest. The service rechecks every confirmation atomic
    (Read, Write and Edit path; Grep and Glob pattern; web search query; MCP
    `server/tool`; Agent subagent type), dropped whole when over its cap, with paths and
    Glob patterns never absolute, and redacted again on every read. No message text,
-   deltas or reasoning is collected and tool observation is never claimed complete.
-   [ADR-1028](adr/1028-reasoning-summaries.md) accepts opt-in reasoning summaries, shown
-   in `logs` only with `--verbose`; they are not yet implemented.
+   deltas or reasoning enters diagnostic runtime items and tool observation is never
+   claimed complete. [ADR-1028](adr/1028-reasoning-summaries.md) implements opt-in Claude
+   summaries in separate turn storage, with a 16,000-character prefix cap and
+   fail-closed turn-start/current/deleted-project redaction. The project setting
+   applies at admission. Confirmed erasure fences old admissions durably and leaves
+   the opt-in unchanged; retention follows conversation history, including replaced
+   conversations. `logs --verbose` summary display and new reasoning capture-health
+   values remain pending. The existing verbose note still describes that projection.
 
    Payloads are redacted before storage and again with current exclusions on every
    read; when exclusions are unavailable an item reads as

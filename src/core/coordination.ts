@@ -1304,7 +1304,7 @@ export class CoordinationStore {
       CREATE TABLE IF NOT EXISTS coordination_undeliverable_inbox_events (
         eventId TEXT PRIMARY KEY REFERENCES coordination_inbox_events(eventId),
         assignmentId TEXT NOT NULL REFERENCES domain_assignments(id),
-        reason TEXT NOT NULL CHECK(reason IN ('delegate-withdrawn','sandbox-escalation'))
+        reason TEXT NOT NULL CHECK(reason IN ('delegate-withdrawn','sandbox-escalation','recipient-completed'))
       );
       CREATE TABLE IF NOT EXISTS sandbox_escalations (
         interactionId TEXT PRIMARY KEY REFERENCES coordination_interactions(interactionId),
@@ -1364,12 +1364,15 @@ export class CoordinationStore {
         updatedAt INTEGER NOT NULL DEFAULT (unixepoch())
       );
       CREATE INDEX IF NOT EXISTS coordination_result_reviews_task ON coordination_result_reviews(taskId,status);`);
-      // Level 33: an escalation's decision event is history, never delivered to the agent.
+      // Levels 33/36: escalation decisions and results without a live recipient remain history.
       widenCheck(
         this.db,
         "coordination_undeliverable_inbox_events",
-        "CHECK(reason IN ('delegate-withdrawn'))",
-        "CHECK(reason IN ('delegate-withdrawn','sandbox-escalation'))",
+        [
+          "CHECK(reason IN ('delegate-withdrawn'))",
+          "CHECK(reason IN ('delegate-withdrawn','sandbox-escalation'))",
+        ],
+        "CHECK(reason IN ('delegate-withdrawn','sandbox-escalation','recipient-completed'))",
       );
       this.db.exec(taskCommentSchemaSql);
       const interactionColumns = this.db
@@ -1752,23 +1755,7 @@ export class CoordinationStore {
           recipient.id &&
           recipient.id !== binding.assignmentId
         ) {
-          this.db
-            .prepare(`INSERT INTO coordination_inbox_events
-            (eventId, taskId, recipientAssignmentId, eventType, resultId, payload)
-            VALUES (?, ?, ?, 'assignment-result', ?, ?)`)
-            .run(
-              randomUUID(),
-              String(binding.taskId),
-              recipient.id,
-              resultId,
-              JSON.stringify({
-                resultId,
-                assignmentId: binding.assignmentId,
-                workId: binding.workId,
-                workRevision: binding.workRevision,
-                summary: call.arguments.summary,
-              }),
-            );
+          this.insertResultEvent(this.resultById(resultId), recipient.id);
         } else if (!recipient.resolved) {
           this.db
             .prepare(`INSERT INTO coordination_unresolved_result_destinations
@@ -6363,9 +6350,24 @@ export class CoordinationStore {
     result: AssignmentResult,
     recipientId: string,
   ): void {
-    this.newEvent(
+    const completed =
+      this.one(
+        "SELECT state FROM domain_assignments WHERE id = ? AND taskId = ?",
+        recipientId,
+        result.taskId,
+      )?.state === "completed";
+    const lead = completed
+      ? this.one(
+          `SELECT assignment.id FROM task_lead_bindings lead
+          JOIN domain_assignments assignment
+            ON assignment.id = lead.assignmentId AND assignment.taskId = lead.taskId
+          WHERE lead.taskId = ? AND assignment.state IN ('pending','running')`,
+          result.taskId,
+        )
+      : undefined;
+    const event = this.newEvent(
       result.taskId,
-      recipientId,
+      lead ? String(lead.id) : recipientId,
       "assignment-result",
       result.resultId,
       JSON.stringify({
@@ -6376,6 +6378,11 @@ export class CoordinationStore {
         summary: result.summary,
       }),
     );
+    if (completed && !lead)
+      this.db
+        .prepare(`INSERT INTO coordination_undeliverable_inbox_events (eventId, assignmentId, reason)
+          VALUES (?, ?, 'recipient-completed')`)
+        .run(event.eventId, recipientId);
   }
 
   private requestInteraction(

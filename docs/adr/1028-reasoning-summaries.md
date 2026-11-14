@@ -4,15 +4,14 @@ status: accepted
 
 # Opt-in reasoning summaries
 
-cab collects no reasoning. Execution reads report `reasoning: "not-collected"`, Codex
-diagnostics are metadata only, Claude `thinking` blocks are dropped, and cab requests
-reasoning summaries from neither runtime. Operators reviewing or debugging an agent's work
-cannot see why it chose an approach. Both runtimes can be asked for provider-produced
-summaries of their reasoning. This decision lets a project opt in to collecting and showing
-them. The [probes](../evidence/reasoning-summary-probes-2026-11-06.md) found usable summaries
-from Claude Code but not from Codex. The project setting, admission snapshot and confirmed
-delete command are implemented. Requesting, storing and displaying summaries remain
-unimplemented: cab still collects no reasoning, so deletion currently has nothing to erase.
+Operators reviewing or debugging an agent's work need usable explanations of its
+choices. The [probes](../evidence/reasoning-summary-probes-2026-11-06.md) found usable
+provider-produced summaries from Claude Code but not from Codex. The project setting,
+admission snapshot, Claude requesting, separate turn storage and confirmed erasure
+are implemented. Web/CLI display and capture-health values remain pending; current
+execution reads still report `reasoning: "not-collected"` and ordinary conversation
+reads contain no summaries. Deterministic scripted-runtime tests establish code
+integration, without adding live runtime or release qualification.
 
 ## Decision
 
@@ -56,6 +55,17 @@ debugging. They are not a live progress feed or an audit trail.
   characters and is marked truncated, and every display of it says so. The largest observed
   per-turn total was 593 characters, and 16,000 characters fit the 64 KiB limit on stored
   conversation text even at four UTF-8 bytes per character.
+  Storage counts Unicode characters without splitting surrogate pairs and redacts
+  against original context before cutting, including values crossing block boundaries.
+  Raw buffering is bounded and released at finish/discard. Reads require current
+  exclusions and fail closed when they are unavailable.
+- **Erasure fencing.** Admission captures on/off, capture mode and a project deletion
+  generation. The confirmed delete transaction erases summary text and advances the
+  generation with its revision and receipt. Earlier admissions cannot store it again,
+  even after restart; replay does not advance the generation twice. Deletion keeps
+  content-free admission facts and leaves the setting unchanged. Retention follows
+  the conversation, including replaced conversations, and not diagnostic payload
+  pruning. No secure erasure of provider history or independent backups is claimed.
 
 ## Runtimes
 

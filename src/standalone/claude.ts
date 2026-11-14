@@ -182,14 +182,14 @@ const assistantSchema = z.object({
   /** Set on a subagent's frames; its prose is not the lead's conversation. */
   parent_tool_use_id: z.string().nullish(),
   message: z.object({
-    content: z.array(
-      z.union([
-        z.object({ type: z.literal("text"), text: z.string() }),
-        z.object({ type: z.string() }),
-      ]),
-    ),
+    content: z.array(z.unknown()),
   }),
 });
+const assistantBlockSchema = z.union([
+  z.object({ type: z.literal("text"), text: z.string() }),
+  z.object({ type: z.literal("thinking"), thinking: z.string().min(1) }),
+  z.object({ type: z.string() }),
+]);
 const resultSchema = z.object({
   type: z.literal("result"),
   subtype: z.string().min(1),
@@ -659,6 +659,7 @@ interface ClaudeEscalation {
 }
 
 interface ClaudeTurn {
+  reasoningSummary: boolean;
   threadId: string;
   turnId: string;
   abort: AbortController;
@@ -1211,6 +1212,8 @@ export class ClaudeRuntime implements Runtime {
       release = resolve;
     });
     const turn: ClaudeTurn = {
+      reasoningSummary:
+        policy?.reasoningSummary === true && policy.access !== "read-only",
       threadId,
       turnId: randomUUID(),
       abort: new AbortController(),
@@ -1281,6 +1284,9 @@ export class ClaudeRuntime implements Runtime {
       return { behavior: "deny", message: "cab grants no permissions" };
     };
     const options: Options = {
+      ...(turn.reasoningSummary
+        ? { thinking: { type: "adaptive", display: "summarized" } as const }
+        : {}),
       cwd: workspace,
       pathToClaudeCodeExecutable: executable,
       env: {
@@ -1689,7 +1695,25 @@ export class ClaudeRuntime implements Runtime {
       const assistant = assistantSchema.safeParse(message);
       if (!assistant.success) return false;
       if (assistant.data.parent_tool_use_id) return true;
-      assistant.data.message.content.forEach((block, index) => {
+      assistant.data.message.content.forEach((input, index) => {
+        const parsed = assistantBlockSchema.safeParse(input);
+        if (!parsed.success) return;
+        const block = parsed.data;
+        if ("thinking" in block) {
+          if (
+            turn.reasoningSummary &&
+            assistant.data.parent_tool_use_id === null &&
+            block.thinking.trim()
+          )
+            this.conversation?.({
+              threadId: turn.threadId,
+              turnId: turn.turnId,
+              itemId: `${assistant.data.uuid}:${index}`,
+              kind: "reasoning-summary",
+              text: block.thinking,
+            });
+          return;
+        }
         if (!("text" in block) || typeof block.text !== "string") return;
         const item = {
           threadId: turn.threadId,

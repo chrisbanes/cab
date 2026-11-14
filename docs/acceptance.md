@@ -314,13 +314,19 @@ deterministic test ([#935](https://github.com/chrisbanes/cab/issues/935)); the r
 bounded to deterministic fixtures, including the `project prepare` write for
 `diagnosticCapture` and `reasoningSummaries`.
 
-Reasoning summaries remain uncollected. Deterministic tests cover the operator-only
-setting's default, enhanced-capture validation, atomic baseline reset and confirmed,
-repeatable no-op deletion (`operator-reasoning-summaries.test.ts`), admission snapshots
-and additive migration (`command-network-admission.test.ts`), CLI parsing and output,
-and the Settings toggle and keyboard-accessible deletion confirmation
-(`operator-project-config-general-browser.test.ts`). These checks do not qualify
-runtime requesting, reasoning storage or display.
+Deterministic reasoning-summary tests cover the operator-only setting, enhanced
+validation, baseline reset, confirmation/version/authorization checks, receipt replay
+and atomic erasure (`operator-reasoning-summaries.test.ts`); admission snapshots and
+migration preserve unknown historical metadata. Scripted production Claude tests
+cover exact adaptive/summarized requesting, off turns, explicit lead-only completed
+blocks and malformed/signature/redacted/partial exclusions. Real-SQLite capture tests
+cover bound turns, ordered deduplication, Unicode caps, redaction across blocks and
+cuts, current exclusions, failures, deletion fencing and restart. Exhaustive project
+deletion fixtures include summary rows and preserve unrelated history and safety
+records. Codex wire requests and reasoning exclusion remain unchanged. CLI parsing
+and the Settings toggle/keyboard deletion confirmation retain their existing coverage.
+These checks do not establish live runtime/release qualification, summary rendering,
+verbose CLI display or new capture-health values.
 
 | Area | Operations requiring evidence | Scenarios |
 | --- | --- | --- |

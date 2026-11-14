@@ -16,6 +16,7 @@ import {
 import { join, resolve } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { test } from "node:test";
+import { CoordinationStore } from "../../src/core/coordination.js";
 import { DomainStore } from "../../src/core/domain.js";
 import { widenCheck } from "../../src/core/store.js";
 import type { Runtime } from "../../src/standalone/codex.js";
@@ -856,8 +857,28 @@ function restoreDraftingSchema25(db: DatabaseSync) {
     DROP TABLE drafting_runs_new;`);
 }
 
+/** Narrow only level 36, preserving the exact level 35 table spelling. */
+function undoCompletedRecipient(db: DatabaseSync) {
+  widenCheck(
+    db,
+    "coordination_undeliverable_inbox_events",
+    "CHECK(reason IN ('delegate-withdrawn','sandbox-escalation','recipient-completed'))",
+    "CHECK(reason IN ('delegate-withdrawn','sandbox-escalation'))",
+  );
+}
+
+/** Remove only level 35 additions, preserving the pinned prior DDL and its rows. */
+function undoReasoningStorage(db: DatabaseSync) {
+  undoCompletedRecipient(db);
+  db.exec(`DROP TABLE conversation_reasoning_summaries;
+    ALTER TABLE project_reasoning_summaries DROP COLUMN generation;
+    ALTER TABLE execution_intent_reasoning_summaries DROP COLUMN captureMode;
+    ALTER TABLE execution_intent_reasoning_summaries DROP COLUMN generation`);
+}
+
 /** Level 34 widened two CHECKs and added the review table; narrowing restores the prior DDL. */
 function undoAutoReview(db: DatabaseSync) {
+  undoReasoningStorage(db);
   db.exec("DROP TABLE sandbox_reviews");
   for (const table of [
     "project_sandbox_level",
@@ -996,6 +1017,8 @@ function restoreRequestSchema21(db: DatabaseSync) {
 
 /** The schema digest each migration level created. Append an entry with every level bump. */
 const SCHEMA_PINS: Record<number, string> = {
+  36: "64917f9796266e55145f76694c1a4418b1bd73982afcfaeba189d55eabee8c9f",
+  35: "fb5fc772157781630dec0b40f1f139c30217307c3607de8a37a9d804829aa422",
   // The escalate-auto-review sandbox level and the sandbox review evidence table.
   34: "bfb71a91662c303a6e67e3df9fd396f29af3ce24193057b8ecacd95f6b374b05",
   // The escalate-approval sandbox level and the sandbox escalation evidence table.
@@ -2034,6 +2057,199 @@ test("withdrawn-state migration refuses an assignment schema it does not recogni
       );
     } finally {
       after.close();
+    }
+  } finally {
+    dirs.cleanup();
+  }
+});
+
+test("summary storage upgrades the pinned level 34 without inventing historical admission facts", async () => {
+  const dirs = layout();
+  try {
+    await run(dirs.data, 34);
+    const database = join(dirs.data, "standalone.sqlite");
+    const before = new DatabaseSync(database);
+    const projectId = randomUUID(),
+      intentId = randomUUID();
+    new DomainStore(before).execute({
+      type: "project.create",
+      actor: "operator",
+      key: randomUUID(),
+      projectId,
+      name: "Retained reasoning project",
+      leadProfileId: null,
+    });
+    before
+      .prepare(
+        "INSERT INTO project_reasoning_summaries (projectId,enabled) VALUES (?,1)",
+      )
+      .run(projectId);
+    before
+      .prepare(`INSERT INTO execution_intents
+      (id,workId,prompt,workspace,state,accountType,sandbox,approval)
+      VALUES (?,?,'retained','/tmp/retained','ready','existing-login','workspaceWrite','never')`)
+      .run(intentId, `work:${intentId}`);
+    before
+      .prepare(
+        "INSERT INTO execution_intent_reasoning_summaries (intentId,enabled,captureMode,generation) VALUES (?,1,'enhanced',0)",
+      )
+      .run(intentId);
+    undoReasoningStorage(before);
+    before.close();
+    assert.equal(schemaDigest(dirs.data), SCHEMA_PINS[34]);
+    await run(dirs.data);
+    const snapshot = readStartupState(dirs.data)?.snapshot;
+    assert.equal(snapshot?.from, 34);
+    assert.ok(snapshot?.path);
+    assert.equal(schemaDigest(snapshot.path), SCHEMA_PINS[34]);
+    assert.equal(schemaDigest(dirs.data), SCHEMA_PINS[MIGRATION_LEVEL]);
+    const after = new DatabaseSync(database);
+    try {
+      assert.deepEqual(
+        {
+          ...after
+            .prepare(
+              "SELECT enabled,captureMode,generation FROM execution_intent_reasoning_summaries WHERE intentId=?",
+            )
+            .get(intentId),
+        },
+        { enabled: 1, captureMode: null, generation: null },
+      );
+      assert.equal(new DomainStore(after).reasoningSummaries(projectId), true);
+      assert.equal(
+        after
+          .prepare("SELECT COUNT(*) AS n FROM conversation_reasoning_summaries")
+          .get()?.n,
+        0,
+      );
+    } finally {
+      after.close();
+    }
+    await assert.rejects(run(dirs.data, 34), refusal("startup-schema-newer"));
+  } finally {
+    dirs.cleanup();
+  }
+});
+
+test("completed-recipient migration preserves level 35 rows, foreign keys and exact schema on repeated startup", async () => {
+  const dirs = layout();
+  try {
+    await run(dirs.data, 35);
+    const database = join(dirs.data, "standalone.sqlite");
+    const before = new DatabaseSync(database);
+    const domain = new DomainStore(before);
+    const projectId = randomUUID(),
+      profileId = randomUUID(),
+      taskId = randomUUID();
+    domain.execute({
+      type: "profile.create",
+      actor: "operator",
+      key: randomUUID(),
+      profileId,
+      name: "Lead",
+      instructions: "Deliver",
+      capabilities: "code",
+    });
+    domain.execute({
+      type: "project.create",
+      actor: "operator",
+      key: randomUUID(),
+      projectId,
+      name: "Retained result history",
+      leadProfileId: profileId,
+    });
+    domain.execute({
+      type: "task.create",
+      actor: "operator",
+      key: randomUUID(),
+      projectId,
+      taskId,
+      title: "Task",
+      outcome: "Deliver",
+      ready: false,
+    });
+    const assignmentId = String(domain.ensureLeadAssignment(taskId)!.id);
+    for (const reason of ["delegate-withdrawn", "sandbox-escalation"]) {
+      const eventId = randomUUID();
+      before
+        .prepare(
+          "INSERT INTO coordination_inbox_events (eventId,taskId,recipientAssignmentId,eventType,payload) VALUES (?,?,?,'operator-message','{}')",
+        )
+        .run(eventId, taskId, assignmentId);
+      before
+        .prepare(
+          "INSERT INTO coordination_undeliverable_inbox_events (eventId,assignmentId,reason) VALUES (?,?,?)",
+        )
+        .run(eventId, assignmentId, reason);
+    }
+    const retained = before
+      .prepare(
+        "SELECT * FROM coordination_undeliverable_inbox_events ORDER BY eventId",
+      )
+      .all();
+    undoCompletedRecipient(before);
+    before.close();
+    assert.equal(schemaDigest(dirs.data), SCHEMA_PINS[35]);
+    await run(dirs.data);
+    const snapshot = readStartupState(dirs.data)?.snapshot;
+    assert.equal(snapshot?.from, 35);
+    assert.ok(snapshot?.path);
+    assert.equal(schemaDigest(snapshot.path), SCHEMA_PINS[35]);
+    assert.equal(schemaDigest(dirs.data), SCHEMA_PINS[36]);
+    const after = new DatabaseSync(database);
+    try {
+      assert.deepEqual(
+        after
+          .prepare(
+            "SELECT * FROM coordination_undeliverable_inbox_events ORDER BY eventId",
+          )
+          .all(),
+        retained,
+      );
+      assert.deepEqual(after.prepare("PRAGMA foreign_key_check").all(), []);
+      const eventId = randomUUID();
+      after
+        .prepare(
+          "INSERT INTO coordination_inbox_events (eventId,taskId,recipientAssignmentId,eventType,payload) VALUES (?,?,?,'assignment-result','{}')",
+        )
+        .run(eventId, taskId, assignmentId);
+      after
+        .prepare(
+          "INSERT INTO coordination_undeliverable_inbox_events (eventId,assignmentId,reason) VALUES (?,?,'recipient-completed')",
+        )
+        .run(eventId, assignmentId);
+    } finally {
+      after.close();
+    }
+    const settled = schemaState(dirs.data);
+    await run(dirs.data);
+    assert.equal(schemaState(dirs.data), settled);
+    assert.equal(schemaDigest(dirs.data), SCHEMA_PINS[36]);
+  } finally {
+    dirs.cleanup();
+  }
+});
+
+test("completed-recipient migration refuses an unknown CHECK atomically", async () => {
+  const dirs = layout();
+  try {
+    await run(dirs.data);
+    const db = new DatabaseSync(join(dirs.data, "standalone.sqlite"));
+    try {
+      widenCheck(
+        db,
+        "coordination_undeliverable_inbox_events",
+        "CHECK(reason IN ('delegate-withdrawn','sandbox-escalation','recipient-completed'))",
+        "CHECK(reason IN ('delegate-withdrawn','unexpected'))",
+      );
+      const before = schemaState(dirs.data);
+      assert.throws(
+        () => new CoordinationStore(db, new DomainStore(db)).migrate(),
+        /Unrecognized coordination_undeliverable_inbox_events schema; migration refused/,
+      );
+      assert.equal(schemaState(dirs.data), before);
+    } finally {
+      db.close();
     }
   } finally {
     dirs.cleanup();

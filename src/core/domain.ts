@@ -1,3 +1,7 @@
+import {
+  initializeReasoningSummaryStorage,
+  eraseReasoningSummaries,
+} from "./reasoning-summary-storage.js";
 import { UnstackStore } from "./unstack.js";
 import { assertCleanupOwnershipAvailableWithinTransaction } from "./project-cleanup-reservations.js";
 import { projectDeleteCommandSchema } from "./project-lifecycle.js";
@@ -1132,6 +1136,7 @@ export class DomainStore {
           "INSERT OR IGNORE INTO scheduler_capacity_limits (singleton, globalLimit) VALUES (1, 6)",
         )
         .run();
+      initializeReasoningSummaryStorage(this.db);
       migrateCapacityLimits(this.db);
       this.db
         .prepare(
@@ -3582,7 +3587,7 @@ export class DomainStore {
       case "project.reasoning.delete": {
         this.operator(command);
         this.version(this.project(command.projectId), command.expectedVersion);
-        // shortcut: no reasoning is stored yet, add erasure when summary storage lands.
+        eraseReasoningSummaries(this.db, command.projectId);
         this.db
           .prepare(
             "UPDATE domain_projects SET version = version + 1 WHERE id = ?",

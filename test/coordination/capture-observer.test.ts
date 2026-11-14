@@ -9,7 +9,7 @@ const itemId = "message-bound";
 const marker = "S05_CAPTURE_OK";
 
 function event(
-  kind: Exclude<RuntimeConversationEvent["kind"], "plan">,
+  kind: Exclude<RuntimeConversationEvent["kind"], "plan" | "reasoning-summary">,
   currentTurnId = turnId,
 ): RuntimeConversationEvent {
   const identity = {
@@ -44,6 +44,13 @@ for (const eventOrder of ["response-first", "event-first"] as const) {
       observer.observe(event(kind));
     if (eventOrder === "event-first") observer.bindTurn(turnId);
 
+    observer.observe({
+      threadId,
+      turnId,
+      itemId: "summary",
+      kind: "reasoning-summary",
+      text: marker,
+    });
     const snapshot = observer.snapshot();
     assert.deepEqual(snapshot.targetTurn, {
       started: 1,

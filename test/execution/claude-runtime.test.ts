@@ -154,7 +154,7 @@ function fixture(
     sandboxSelfTest: async () => (options.selfTest ? options.selfTest() : true),
     probeRetryMs: 20,
   });
-  const emitted: unknown[] = [];
+  const emitted: RuntimeConversationEvent[] = [];
   const anomalies: Array<{
     threadId?: string;
     turnId?: string;
@@ -187,6 +187,7 @@ function fixture(
     localListening?: boolean,
     skipSandbox?: boolean,
     sandboxEscalation?: "approval" | "auto-review",
+    reasoningSummary?: boolean,
   ) => {
     const turnSettings = skills ? { ...settings, skills } : settings;
     assert.equal(
@@ -206,9 +207,11 @@ function fixture(
         gitWritableRoots ||
         localListening ||
         skipSandbox ||
-        sandboxEscalation
+        sandboxEscalation ||
+        reasoningSummary
         ? {
             networkAccess: false,
+            ...(reasoningSummary ? { reasoningSummary } : {}),
             ...(access ? { access } : {}),
             ...(gitWritableRoots ? { gitWritableRoots } : {}),
             ...(localListening ? { localListening } : {}),
@@ -2919,6 +2922,97 @@ test("classifier decisions on passed flagged calls are recorded as reviews; an u
       { behavior: "deny", message: "cab grants no permissions" },
     ]);
     assert.equal(f.unexpected.length, 1);
+  } finally {
+    await f.cleanup();
+  }
+});
+
+test("only requested explicit lead thinking emits designated summaries, independently of malformed blocks", {
+  skip: slashTmpDenied(),
+}, async () => {
+  const script: Script = async function* (session) {
+    yield init(sessionOf(session));
+    for (const parent of [null, "agent", "", undefined]) {
+      const frame = {
+        type: "assistant",
+        uuid: `summary-${String(parent)}`,
+        ...(parent === undefined ? {} : { parent_tool_use_id: parent }),
+        message: {
+          content: [
+            {
+              type: "thinking",
+              thinking: "provider summary",
+              signature: "SIGNATURE_CANARY",
+            },
+            { type: "thinking", thinking: "" },
+            { type: "thinking", thinking: 42 },
+            { type: "thinking" },
+            { type: "thinking", thinking: "  " },
+            null,
+            { type: "redacted_thinking", data: "REDACTED_CANARY" },
+            { type: "text", text: "ordinary prose" },
+            { type: "tool_use", name: "Read", input: {} },
+          ],
+        },
+      };
+      yield frame;
+      yield frame;
+    }
+    yield {
+      type: "stream_event",
+      event: {
+        type: "content_block_delta",
+        delta: { type: "thinking_delta", thinking: "PARTIAL_CANARY" },
+      },
+    };
+    yield result(sessionOf(session));
+  };
+  const f = fixture({ scripts: [script, script] });
+  try {
+    await f.runtime.start();
+    const thread = await f.runtime.startThread(f.workspace, []);
+    const on = await f.turn(
+      thread,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      true,
+    );
+    assert.equal(await f.runtime.waitForTurn(thread, on), "completed");
+    assert.deepEqual(f.sessions[0]?.options.thinking, {
+      type: "adaptive",
+      display: "summarized",
+    });
+    const summaries = f.emitted.filter((e) => e.kind === "reasoning-summary");
+    assert.equal(summaries.length, 2);
+    assert.ok(
+      summaries.every(
+        (e) =>
+          e.kind === "reasoning-summary" &&
+          e.text === "provider summary" &&
+          e.itemId === "summary-null:0",
+      ),
+    );
+    assert.doesNotMatch(
+      JSON.stringify(f.emitted),
+      /SIGNATURE_CANARY|REDACTED_CANARY|PARTIAL_CANARY/,
+    );
+    await f.runtime.resumeThread(thread, []);
+    const off = await f.turn(thread);
+    assert.equal(await f.runtime.waitForTurn(thread, off), "completed");
+    assert.equal(f.sessions[1]?.options.thinking, undefined);
+    assert.equal(
+      f.emitted.filter((e) => e.kind === "reasoning-summary").length,
+      2,
+    );
+    assert.ok(
+      f.emitted.some(
+        (e) => e.kind === "completed" && e.text === "ordinary prose",
+      ),
+    );
   } finally {
     await f.cleanup();
   }

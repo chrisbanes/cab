@@ -317,13 +317,56 @@ import {
   assertNoDeletedReferences,
   deletionCanary,
 } from "../fixtures/project-deletion.js";
+import { ConversationHistoryStore } from "../../src/standalone/conversation-history.js";
 import { DeletedProjectRedactionStore } from "../../src/core/deleted-project-redaction.js";
 import { materialDigest } from "../../src/core/delivery.js";
 import { databaseOf } from "../fixtures/service-internals.js";
 
 test("archived exact-name deletion returns only a stable tombstone and permits fresh-ID name reuse", async (t) => {
-  const f = await projectDeletionFixture(t),
-    command = await f.command();
+  const f = await projectDeletionFixture(t);
+  const summaryBindings = [
+    {
+      workId: f.workId,
+      taskId: f.taskId,
+      assignmentId: f.assignmentId,
+      projectId: f.projectId,
+      intentId: f.intent.id,
+    },
+    {
+      workId: f.workB,
+      taskId: f.taskB,
+      assignmentId: f.assignmentB,
+      projectId: f.projectB,
+      intentId: f.intentB.id,
+    },
+  ].map((identity) => ({
+    ...identity,
+    assignmentVersion: 1,
+    instructionsRevision: 1,
+    profileRevision: 1,
+    conversationRevision: 1,
+    workRevision: 1,
+    threadId: randomUUID(),
+    turnId: randomUUID(),
+  }));
+  for (const b of summaryBindings)
+    f.db
+      .prepare(`INSERT INTO conversation_reasoning_summaries
+    (workId,taskId,assignmentId,assignmentVersion,instructionsRevision,profileRevision,
+      conversationRevision,workRevision,threadId,turnId,projectId,intentId,enabled,captureMode,
+      generation,text,stored,truncated,createdAt,updatedAt)
+    VALUES (?,?,?,1,1,1,1,1,?,?,?,?,1,'enhanced',0,?,1,0,1,1)`)
+      .run(
+        b.workId,
+        b.taskId,
+        b.assignmentId,
+        b.threadId,
+        b.turnId,
+        b.projectId,
+        b.intentId,
+        `Earlier summary mentions ${deletionCanary}`,
+      );
+  const command = await f.command();
   const owner = capture(f.db, f.projectId),
     beforeB = preservedSnapshot(f.db, capture(f.db, f.projectB));
   const result = await f.service.deleteProject(command);
@@ -338,6 +381,17 @@ test("archived exact-name deletion returns only a stable tombstone and permits f
   );
   assertProjectRowsRemoved(f.db, owner);
   assertNoDeletedReferences(f.db, owner);
+  const history = new ConversationHistoryStore(f.db);
+  assert.equal(
+    history.readReasoningSummary(summaryBindings[0]!, () => []),
+    undefined,
+  );
+  assert.equal(
+    history.readReasoningSummary(summaryBindings[1]!, () =>
+      new DeletedProjectRedactionStore(f.db, false).exclusions([]),
+    )?.text,
+    "Earlier summary mentions [redacted]",
+  );
   assert.equal(preservedSnapshot(f.db, capture(f.db, f.projectB)), beforeB);
   assert.ok(
     new DeletedProjectRedactionStore(f.db, false)
@@ -491,7 +545,7 @@ for (const phase of projectDeletionFaultPhases)
 
 test("the inventory classifies every fresh table and column and refuses new unclassified schema", async (t) => {
   const f = await projectDeletionFixture(t);
-  assert.equal(Object.keys(projectDeletionInventory).length, 197);
+  assert.equal(Object.keys(projectDeletionInventory).length, 198);
   assertProjectDeletionInventory(f.db);
   f.db.exec("ALTER TABLE tasks ADD COLUMN unclassifiedOwner TEXT");
   assert.throws(() => assertProjectDeletionInventory(f.db), /column inventory/);
@@ -1285,4 +1339,50 @@ test("an archived project with an injected unfinished Unstack cannot delete owne
     before = databaseSnapshot(f.db);
   await assert.rejects(f.deletion().delete(command), /drained/);
   assert.equal(databaseSnapshot(f.db), before);
+});
+
+test("summary ownership retains orphan history but refuses a conflicting intent owner", async (t) => {
+  const { db, a, b } = await exhaustiveStorageFixture(t);
+  try {
+    db.prepare(
+      "UPDATE conversation_reasoning_summaries SET intentId=? WHERE workId=?",
+    ).run(b.intentId, a.workId);
+    assert.throws(() => capture(db, a.projectId), /summary intent ownership/);
+    db.prepare(
+      "UPDATE conversation_reasoning_summaries SET intentId=? WHERE workId=?",
+    ).run(a.intentId, a.workId);
+    const orphan = randomUUID();
+    db.prepare(`INSERT INTO conversation_reasoning_summaries
+      SELECT ?,taskId,assignmentId,assignmentVersion,instructionsRevision,profileRevision,
+        conversationRevision,workRevision,?,turnId,projectId,?,enabled,captureMode,generation,
+        text,stored,truncated,createdAt,updatedAt FROM conversation_reasoning_summaries WHERE workId=?`).run(
+      orphan,
+      randomUUID(),
+      randomUUID(),
+      a.workId,
+    );
+    const owner = capture(db, a.projectId);
+    assert.ok((owner.parameters.work as string[]).includes(orphan));
+    transaction(db, () =>
+      deleteCapturedProjectRowsWithinTransaction(db, owner),
+    );
+    assert.equal(
+      db
+        .prepare(
+          "SELECT COUNT(*) AS n FROM conversation_reasoning_summaries WHERE projectId=?",
+        )
+        .get(a.projectId)?.n,
+      0,
+    );
+    assert.equal(
+      db
+        .prepare(
+          "SELECT stored FROM conversation_reasoning_summaries WHERE projectId=?",
+        )
+        .get(b.projectId)?.stored,
+      1,
+    );
+  } finally {
+    db.close();
+  }
 });
