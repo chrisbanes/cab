@@ -260,7 +260,10 @@ export async function runQualification(input, dependencies = {}) {
           }),
           Math.max(1, remaining()),
         );
-        checkpoint.settlement = settled ? "ended" : "unknown";
+        checkpoint.settlement =
+          settled && checkpoint.active.callbacks.active === 0
+            ? "ended"
+            : "unknown";
       } catch {
         checkpoint.settlement = "unknown";
       }
@@ -659,7 +662,11 @@ export async function initializeProduction(grant, overrides = {}) {
             status: evidence?.firstStatus ?? null,
             conflicted: evidence?.conflicted ?? null,
           });
-          if (evidence?.firstStatus && !evidence.conflicted) {
+          if (
+            evidence?.firstStatus &&
+            !evidence.conflicted &&
+            record.callbacks.active === 0
+          ) {
             if (record.intentId)
               state.hold(
                 record.intentId,

@@ -539,3 +539,41 @@ test("failed restart retains ownership and allowance; failed shutdown cannot rep
     } else assert.match(result.cleanup, /stop-unconfirmed/);
   }
 });
+
+test("a terminal observation cannot release an unfinished cab callback after failure", async () => {
+  const { runQualification, grantDigest } = await contract();
+  const grant = fakeGrant();
+  let stops = 0;
+  const result = await runQualification(
+    {
+      live: true,
+      oneAttempt: true,
+      grant,
+      authorizedDigest: grantDigest(grant),
+    },
+    {
+      io: { exists: () => false, save: () => {} },
+      initialize: async () => ({
+        turn: async (
+          _record: unknown,
+          save: (identity: Record<string, unknown>) => void,
+        ) => {
+          save({
+            threadId: "held-thread",
+            turnId: "ended-turn",
+            callbacks: { active: 1, ended: 0 },
+          });
+          throw Error("callback unfinished");
+        },
+        reconcile: async () => true,
+        stop: async () => {
+          stops++;
+        },
+      }),
+    },
+  );
+  assert.equal(result.settlement, "unknown");
+  assert.equal(result.active.callbacks.active, 1);
+  assert.equal(result.remainingTurns, 7);
+  assert.equal(stops, 0);
+});
