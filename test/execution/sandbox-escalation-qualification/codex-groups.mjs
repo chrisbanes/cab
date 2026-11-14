@@ -217,7 +217,13 @@ export async function runCodexGroup(
     if (decision === "accept") accepted = true;
     if (spec.hold) {
       log(`holding approval ${holdMs} ms`);
-      await race(sleep(holdMs));
+      // A timer wake is not proof that the minimum monotonic interval elapsed.
+      const notBefore = performance.now() + holdMs;
+      let remaining = holdMs;
+      do {
+        await race(sleep(remaining));
+        remaining = notBefore - performance.now();
+      } while (remaining > 0);
     }
     entry.answer = decision;
     entry.answeredAt = t();

@@ -15,6 +15,7 @@ import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { test } from "node:test";
 import { DomainConflictError } from "../../src/core/domain-errors.js";
+import { ProjectArchiveBlockedError } from "../../src/core/project-lifecycle.js";
 import {
   ClaudeRuntime,
   claudeTemporaryBase,
@@ -2032,6 +2033,235 @@ const instructionProposalFor = (
     use: "supports",
     note: "Asks for keyboard evidence.",
   })),
+});
+
+function assertDraftBlocksArchive(
+  service: StandaloneService,
+  projectId: string,
+  runId: string,
+  kind: "drafting" | "callback" = "drafting",
+) {
+  const domain = service.domain();
+  const project = domain.project(projectId);
+  const run = service.readDrafting(runId);
+  assert.equal(project.paused, 1);
+  assert.equal(project.archived, 0);
+  assert.throws(
+    () =>
+      domain.execute({
+        type: "project.archive",
+        actor: "operator",
+        key: randomUUID(),
+        projectId,
+        expectedVersion: Number(project.version),
+      }),
+    (error) =>
+      error instanceof ProjectArchiveBlockedError &&
+      error.blockers.some(
+        (blocker) =>
+          blocker.kind === kind &&
+          (kind === "callback" || blocker.operationId === runId),
+      ),
+  );
+  assert.deepEqual(domain.project(projectId), project);
+  assert.deepEqual(service.readDrafting(runId), run);
+}
+
+function completeFeedbackFixture(service: StandaloneService, taskId: string) {
+  // The seeded feedback is historical; its assignments must not mask drafting drain.
+  const db = (service as unknown as { db: DatabaseSync }).db;
+  db.prepare(
+    "UPDATE domain_assignments SET state='completed' WHERE taskId=?",
+  ).run(taskId);
+}
+
+async function archiveAndRestoreDrainedDraft(
+  service: StandaloneService,
+  projectId: string,
+) {
+  const domain = service.domain();
+  await waitUntil(
+    () => service.projectLifecycleStatus(projectId).length === 0,
+    () => service.projectLifecycleStatus(projectId),
+  );
+  for (const type of ["project.archive", "project.restore"] as const) {
+    domain.execute({
+      type,
+      actor: "operator",
+      key: randomUUID(),
+      projectId,
+      expectedVersion: Number(domain.project(projectId).version),
+    });
+    assert.equal(
+      domain.project(projectId).archived,
+      type === "project.archive" ? 1 : 0,
+    );
+    assert.equal(domain.project(projectId).paused, 1);
+  }
+}
+
+for (const kind of ["brief", "issue", "instruction"] as const) {
+  test(`archive refuses a paused queued ${kind} draft until Stop drains it`, async (t) => {
+    const w = world(t);
+    const { service, codex } = w.open({ issue: {} });
+    await w.start(service, "codex");
+    const { projectId, lead } = await w.project(service, "codex");
+    const taskId =
+      kind === "issue" ? await w.importIssue(service, projectId) : null;
+    const feedback =
+      kind === "instruction"
+        ? seedOperatorFeedback(service, projectId, lead)
+        : null;
+    if (feedback) completeFeedbackFixture(service, feedback.taskId);
+    w.execute(service, {
+      type: "project.configure",
+      projectId,
+      expectedVersion: Number(service.domain().project(projectId).version),
+      paused: true,
+    });
+    const runId = randomUUID();
+    if (kind === "brief")
+      await service.startDrafting({ runId, projectId, idea });
+    else if (kind === "issue") {
+      assert.ok(taskId);
+      await service.startIssueDrafting({
+        runId,
+        taskId,
+        note: "Check keyboard guidance.",
+      });
+    } else {
+      assert.ok(feedback);
+      await service.startInstructionDrafting({
+        runId,
+        projectId,
+        target: { kind: "project" },
+        feedback: [{ kind: "message", id: feedback.message.id }],
+        note: "Check keyboard guidance.",
+      });
+    }
+    assert.equal(service.readDrafting(runId)?.state, "queued");
+    const request = service
+      .turnRequests()
+      .find((item) => item.workId === `drafting:${runId}`);
+    assert.equal(request?.state, "queued");
+    assert.match(request?.reason ?? "", /project-paused/);
+    assertDraftBlocksArchive(service, projectId, runId);
+    assert.equal(codex.threads.length, 0);
+    assert.equal((await service.stopDrafting(runId)).state, "interrupted");
+    assert.equal(w.tracked(service).usage(projectId).global, 0);
+    if (kind === "issue") {
+      // Import also queued real assignment work; stopping its draft must preserve it.
+      const blockers = service.projectLifecycleStatus(projectId);
+      assert.ok(blockers.some((blocker) => blocker.kind === "assignment"));
+      assert.ok(!blockers.some((blocker) => blocker.kind === "drafting"));
+      assert.equal(service.domain().project(projectId).archived, 0);
+    } else await archiveAndRestoreDrainedDraft(service, projectId);
+    assert.equal(service.readDrafting(runId)?.state, "interrupted");
+    assert.equal(codex.threads.length, 0);
+  });
+}
+
+test("archive refuses a running or stopping instruction draft until its runtime ends and copy is removed", async (t) => {
+  const { w, opened, service, projectId, refs, seeded } =
+    await instructionWorld(t, "codex");
+  completeFeedbackFixture(service, seeded.taskId);
+  const { codex } = opened;
+  codex.holdOnInterrupt = true;
+  t.after(() => codex.release());
+  const runId = randomUUID();
+  await service.startInstructionDrafting({
+    runId,
+    projectId,
+    target: { kind: "project" },
+    feedback: refs,
+    note: "",
+  });
+  await waitUntil(
+    () =>
+      service.readDrafting(runId)?.state === "running" &&
+      codex.prompts.length === 1,
+    () => w.tracked(service).runs(),
+  );
+  w.execute(service, {
+    type: "project.configure",
+    projectId,
+    expectedVersion: Number(service.domain().project(projectId).version),
+    paused: true,
+  });
+  assertDraftBlocksArchive(service, projectId, runId);
+  const workspace = codex.threads[0]?.workspace;
+  assert.ok(workspace && existsSync(workspace));
+  assert.equal((await service.stopDrafting(runId)).state, "stopping");
+  await waitUntil(
+    () => codex.interrupts.length > 0,
+    () => codex.interrupts,
+  );
+  assertDraftBlocksArchive(service, projectId, runId);
+  assert.equal(w.tracked(service).usage(projectId).global, 1);
+  assert.ok(existsSync(workspace));
+  codex.release();
+  await waitUntil(
+    () => service.readDrafting(runId)?.state === "interrupted",
+    () => w.tracked(service).runs(),
+  );
+  assert.equal(w.tracked(service).usage(projectId).global, 0);
+  assert.equal(existsSync(workspace), false);
+  await archiveAndRestoreDrainedDraft(service, projectId);
+});
+
+test("archive refuses an instruction admission callback even after Stop settles its queued run", async (t) => {
+  const { w, opened, service, projectId, refs, seeded } =
+    await instructionWorld(t, "codex");
+  completeFeedbackFixture(service, seeded.taskId);
+  let release!: () => void;
+  const held = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  t.after(() => release());
+  const workspaces = startedOf(service).draftingWorkspaces;
+  const provision = workspaces.provision.bind(workspaces);
+  let workspace: string | undefined;
+  workspaces.provision = async (id, repositories) => {
+    const binding = await provision(id, repositories);
+    workspace = binding.path;
+    await held;
+    return binding;
+  };
+  const runId = randomUUID();
+  const starting = service.startInstructionDrafting({
+    runId,
+    projectId,
+    target: { kind: "project" },
+    feedback: refs,
+    note: "",
+  });
+  try {
+    await waitUntil(
+      () => workspace !== undefined,
+      () => w.tracked(service).runs(),
+    );
+    assert.ok(workspace && existsSync(workspace));
+    assert.equal(service.readDrafting(runId)?.state, "queued");
+    assert.equal(opened.codex.threads.length, 0);
+    w.execute(service, {
+      type: "project.configure",
+      projectId,
+      expectedVersion: Number(service.domain().project(projectId).version),
+      paused: true,
+    });
+    assertDraftBlocksArchive(service, projectId, runId);
+    assert.equal((await service.stopDrafting(runId)).state, "interrupted");
+    assertDraftBlocksArchive(service, projectId, runId, "callback");
+  } finally {
+    release();
+    await starting;
+  }
+  await archiveAndRestoreDrainedDraft(service, projectId);
+  assert.equal(service.readDrafting(runId)?.state, "interrupted");
+  assert.equal(opened.codex.threads.length, 0);
+  assert.equal(w.tracked(service).usage(projectId).global, 0);
+  assert.ok(workspace);
+  assert.equal(existsSync(workspace), false);
 });
 
 for (const harness of harnesses) {
