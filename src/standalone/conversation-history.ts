@@ -551,6 +551,31 @@ export class ConversationHistoryStore {
     return { ...parsed.data, text };
   }
 
+  /** Bounded turn metadata only; canonical anchors include items outside the requested page. */
+  reasoningSummaryTurns(taskId: string) {
+    const fields = Object.keys(bindingSchema.shape);
+    const rows = this.db
+      .prepare(`SELECT ${fields.map((key) => `s.${key}`).join(", ")},
+      s.createdAt,
+      (SELECT h.sequence FROM conversation_history_items h
+        WHERE ${fields.map((key) => `h.${key} = s.${key}`).join(" AND ")}
+          AND h.lifecycle <> 'omitted'
+        ORDER BY h.createdAt, h.sequence LIMIT 1) AS anchorSequence
+      FROM conversation_reasoning_summaries s
+      WHERE s.taskId = ? AND s.stored = 1 LIMIT 129`)
+      .all(taskId);
+    // Match the task read's retained-turn privacy bound before materializing any text.
+    if (rows.length > 128) return [];
+    const schema = bindingSchema.extend({
+      createdAt: z.number().int().nonnegative().safe(),
+      anchorSequence: z.number().int().positive().nullable(),
+    });
+    return rows.flatMap((row) => {
+      const parsed = schema.safeParse(row);
+      return parsed.success ? [parsed.data] : [];
+    });
+  }
+
   record(
     binding: ConversationHistoryBinding,
     event: Exclude<
