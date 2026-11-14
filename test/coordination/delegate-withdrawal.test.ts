@@ -115,8 +115,14 @@ function fixture() {
       )
       .get(workId) as { conversationRevision: number };
     db.prepare(
-      "INSERT INTO task_work_revisions (workId, assignmentId, conversationRevision, workRevision) VALUES (?, ?, ?, 1)",
-    ).run(workId, assignmentId, binding.conversationRevision);
+      "INSERT INTO task_work_revisions (workId, assignmentId, conversationRevision, workRevision) SELECT ?, ?, ?, COALESCE(MAX(workRevision),0)+1 FROM task_work_revisions WHERE assignmentId=? AND conversationRevision=?",
+    ).run(
+      workId,
+      assignmentId,
+      binding.conversationRevision,
+      assignmentId,
+      binding.conversationRevision,
+    );
     db.prepare(
       "INSERT INTO execution_pending_effects (workId, effectKey, state, reason) VALUES (?, 'assignment-result', 'pending', 'Assignment result has not been committed')",
     ).run(workId);
@@ -848,6 +854,257 @@ function revivedChildOfCompletedParent(f: ReturnType<typeof fixture>) {
   );
   assert.equal(f.domain.assignment(child).state, "pending");
   return { parent, child };
+}
+
+/** Admit the follow-up and consume its input before reporting again. */
+function resumedChildReport(f: ReturnType<typeof fixture>, child: string) {
+  const work = f.addWork(child, "follow-up-result");
+  assert.ok(f.coordination.bindDeliveryBatch(child, work));
+  f.coordination.completeDeliveryBatch(work);
+  return f.call(
+    "cab_report_result",
+    { summary: "Revised child result" },
+    undefined,
+    "follow-up-result",
+  );
+}
+
+for (const leadState of ["running", "pending", "paused-held"] as const) {
+  test(`a completed requester's follow-up result reaches the ${leadState} lead without changing provenance`, () => {
+    const f = fixture();
+    try {
+      const { parent, child } = revivedChildOfCompletedParent(f);
+      const call = resumedChildReport(f, child);
+      if (leadState === "pending")
+        f.db
+          .prepare("UPDATE domain_assignments SET state='pending' WHERE id=?")
+          .run(f.leadA);
+      if (leadState === "paused-held") {
+        f.domain.execute({
+          type: "project.configure",
+          actor: "operator",
+          key: nextId(),
+          projectId,
+          expectedVersion: Number(f.domain.project(projectId).version),
+          paused: true,
+        });
+        const intent = f.db
+          .prepare("SELECT id FROM execution_intents WHERE workId=?")
+          .get(f.leadWork)!;
+        new ExecutionState(f.db).hold(
+          String(intent.id),
+          "Independent lead hold",
+        );
+      }
+      const leadBefore = f.domain.assignment(f.leadA);
+      const executionBefore = f.db
+        .prepare("SELECT * FROM execution_intents WHERE workId=?")
+        .get(f.leadWork);
+      const first = f.coordination.recordResult(call);
+      assert.equal(first.result.recipientAssignmentId, parent);
+      assert.equal(f.domain.assignment(parent).state, "completed");
+      assert.equal(f.domain.assignment(child).requesterAssignmentId, parent);
+      assert.equal(
+        f.domain.assignment(child).resultRecipientAssignmentId,
+        parent,
+      );
+      assert.deepEqual(f.coordination.pendingEvents(parent), []);
+      const events = f.coordination
+        .pendingEvents(f.leadA)
+        .filter((e) => e.resultId === first.result.resultId);
+      assert.equal(
+        events.length,
+        1,
+        "the active lead receives the follow-up result",
+      );
+      assert.deepEqual(JSON.parse(events[0]!.payload), {
+        resultId: first.result.resultId,
+        assignmentId: child,
+        workId: first.result.workId,
+        workRevision: first.result.workRevision,
+        summary: first.result.summary,
+      });
+      assert.deepEqual(f.domain.assignment(f.leadA), leadBefore);
+      assert.deepEqual(
+        f.db
+          .prepare("SELECT * FROM execution_intents WHERE workId=?")
+          .get(f.leadWork),
+        executionBefore,
+      );
+      assert.equal(f.coordination.recordResult(call).replayed, true);
+      const filename = String(f.db.prepare("PRAGMA database_list").get()!.file);
+      const reopened = new DatabaseSync(filename);
+      try {
+        const store = new CoordinationStore(
+          reopened,
+          new DomainStore(reopened),
+        );
+        store.migrate();
+        assert.deepEqual(store.recordResult(call), {
+          ...first,
+          replayed: true,
+        });
+        assert.equal(
+          store
+            .pendingEvents(f.leadA)
+            .filter((e) => e.resultId === first.result.resultId).length,
+          1,
+        );
+      } finally {
+        reopened.close();
+      }
+      assert.equal(
+        f.db
+          .prepare(
+            "SELECT COUNT(*) AS n FROM coordination_results WHERE workId=?",
+          )
+          .get(first.result.workId)?.n,
+        1,
+      );
+      if (leadState === "running") {
+        const delivery = f.coordination.bindDeliveryBatch(f.leadA, f.leadWork);
+        assert.ok(delivery);
+        f.coordination.completeDeliveryBatch(f.leadWork);
+        assert.deepEqual(f.coordination.pendingEvents(f.leadA), []);
+      }
+    } finally {
+      f.close();
+    }
+  });
+}
+
+for (const leadState of ["completed", "absent", "held"] as const) {
+  test(`a completed requester's follow-up result stays undeliverable when the lead is ${leadState}`, () => {
+    const f = fixture();
+    try {
+      const { parent, child } = revivedChildOfCompletedParent(f);
+      const call = resumedChildReport(f, child);
+      if (leadState === "absent")
+        f.db
+          .prepare("DELETE FROM task_lead_bindings WHERE taskId=?")
+          .run(taskA);
+      else
+        f.db
+          .prepare("UPDATE domain_assignments SET state=? WHERE id=?")
+          .run(leadState, f.leadA);
+      const { result } = f.coordination.recordResult(call);
+      const events = f.db
+        .prepare(`SELECT e.recipientAssignmentId, u.assignmentId, u.reason FROM coordination_inbox_events e
+        JOIN coordination_undeliverable_inbox_events u ON u.eventId=e.eventId WHERE e.resultId=?`)
+        .all(result.resultId);
+      assert.deepEqual(
+        events.map((e) => ({ ...e })),
+        [
+          {
+            recipientAssignmentId: parent,
+            assignmentId: parent,
+            reason: "recipient-completed",
+          },
+        ],
+      );
+      assert.equal(result.recipientAssignmentId, parent);
+      assert.deepEqual(f.coordination.pendingEvents(parent), []);
+      assert.ok(!f.coordination.pendingEventRecipients().includes(parent));
+      assert.equal(
+        f.coordination.bindDeliveryBatch(parent, "no-completed-delivery"),
+        undefined,
+      );
+      assert.equal(f.coordination.recordResult(call).replayed, true);
+      const blockers = (
+        f.coordination as unknown as {
+          completionBlockers(
+            request: TaskCompletionRequest,
+            terminal: "completed",
+          ): string[];
+        }
+      ).completionBlockers(
+        {
+          requestId: nextId(),
+          taskId: taskA,
+          leadAssignmentId: f.leadA,
+          leadWorkId: f.leadWork,
+          leadWorkRevision: 1,
+          taskVersion: Number(f.domain.task(taskA).version),
+          reviewedResultIds: [],
+          status: "pending",
+          rejectionReasons: [],
+          revision: 1,
+          createdAt: 0,
+          finalizedAt: null,
+        },
+        "completed",
+      );
+      assert.ok(!blockers.includes("pending-inbox-event"), String(blockers));
+    } finally {
+      f.close();
+    }
+  });
+}
+
+for (const liveLead of [true, false]) {
+  test(`explicit recipient reconciliation preserves the completed requester and ${liveLead ? "routes to the lead" : "records undeliverability"}`, () => {
+    const f = fixture();
+    try {
+      const { parent, child } = revivedChildOfCompletedParent(f);
+      const call = resumedChildReport(f, child);
+      f.db
+        .prepare(
+          "UPDATE domain_assignments SET resultRecipientAssignmentId=NULL, resultRecipientDisposition='unresolved' WHERE id=?",
+        )
+        .run(child);
+      const { result } = f.coordination.recordResult(call);
+      if (!liveLead)
+        f.db
+          .prepare("UPDATE domain_assignments SET state='completed' WHERE id=?")
+          .run(f.leadA);
+      const command = {
+        actor: "operator" as const,
+        key: nextId(),
+        resultId: result.resultId,
+        expectedRevision: 1,
+        recipientAssignmentId: parent,
+      };
+      assert.throws(
+        () =>
+          f.coordination.reconcileResultRecipient({
+            ...command,
+            recipientAssignmentId: f.leadB,
+          }),
+        /not permitted/,
+      );
+      const event = f.coordination.reconcileResultRecipient(command);
+      assert.equal(event.recipientAssignmentId, liveLead ? f.leadA : parent);
+      assert.equal(
+        f.db
+          .prepare(
+            "SELECT recipientAssignmentId FROM coordination_results WHERE resultId=?",
+          )
+          .get(result.resultId)?.recipientAssignmentId,
+        parent,
+      );
+      assert.deepEqual(f.coordination.reconcileResultRecipient(command), event);
+      assert.deepEqual(f.coordination.unresolvedResultDestinations(taskA), []);
+      assert.equal(f.domain.assignment(parent).state, "completed");
+      assert.equal(
+        f.db
+          .prepare(
+            "SELECT COUNT(*) AS n FROM coordination_inbox_events WHERE resultId=?",
+          )
+          .get(result.resultId)?.n,
+        1,
+      );
+      assert.equal(
+        f.db
+          .prepare(
+            "SELECT reason FROM coordination_undeliverable_inbox_events WHERE eventId=?",
+          )
+          .get(event.eventId)?.reason,
+        liveLead ? undefined : "recipient-completed",
+      );
+    } finally {
+      f.close();
+    }
+  });
 }
 
 test("an operator withdrawal under a completed requester tells the running lead instead", () => {

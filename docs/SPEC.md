@@ -225,8 +225,14 @@ ambiguity discovered during execution goes to the lead; the existing requirement
 for operator input on unresolved material scope or authority still applies.
 
 Initial assignment results return to the task-scoped lead conversation. Nested
-assignment results return to their requester; the lead can inspect all work without
-being woken for every child result. These destinations survive restart. All lead
+assignment results return to their requester; when that requester has completed,
+new result events go to the same-task lead if it is pending or running. Otherwise
+the event remains undeliverable history with reason `recipient-completed`, addressed
+to the original requester. Result provenance keeps its original recipient. This
+also applies to explicit unresolved-result reconciliation; existing events are not
+rewritten. No completed assignment is revived, and normal pause, hold and admission
+controls still apply. The lead can inspect all work without being woken for every
+child result. These destinations survive restart. All lead
 turns, including draft turns, use normal admission, including project pause, task
 stop and writer controls. For capacity they are lead turns: they may use the slots
 held for lead turns as well as any free slot, they count against the global cap and
