@@ -1833,3 +1833,253 @@ test("reasoning storage caps Unicode after redaction, re-redacts reads, and dura
     rmSync(f.root, { recursive: true, force: true });
   }
 });
+
+test("reasoning health reads exact retained metadata independently of current settings and diagnostics", async () => {
+  const runtime = new HistoryRuntime();
+  const f = await fixture(runtime);
+  runtime.plan({ id: "metadata-turn" });
+  try {
+    f.activate();
+    const turn = await runtime.waitForTurnStart();
+    await waitForExecutionState(f.service, f.workId, "running");
+    const db = serviceDatabase(f.service);
+    const intent = f.service.executionForWork(f.workId)!;
+    const state = new (
+      await import("../../src/standalone/state.js")
+    ).ExecutionState(db);
+    const binding = state.conversationHistoryBinding(
+      f.workId,
+      turn.threadId,
+      turn.turnId,
+    )!;
+    const history = f.service.conversationHistoryStore()!;
+    const health = () => f.service.reasoningSummaryCaptureFor(f.workId);
+    assert.deepEqual(f.service.reasoningSummaryCaptureFor("unknown"), {
+      requested: false,
+      stored: false,
+    });
+    // Today's opt-in cannot fill an absent or ineligible admission.
+    db.prepare(
+      "INSERT OR REPLACE INTO project_reasoning_summaries(projectId, enabled, generation) VALUES (?,1,0)",
+    ).run(f.projectId);
+    for (const [enabled, mode] of [
+      [0, "enhanced"],
+      [1, "baseline"],
+      [1, null],
+    ] as const) {
+      db.prepare(
+        "UPDATE execution_intent_reasoning_summaries SET enabled=?, captureMode=? WHERE intentId=?",
+      ).run(enabled, mode, intent.id);
+      assert.deepEqual(health(), { requested: false, stored: false });
+    }
+    db.prepare(
+      "UPDATE execution_intent_reasoning_summaries SET enabled=1, captureMode='enhanced', generation=0 WHERE intentId=?",
+    ).run(intent.id);
+    assert.deepEqual(health(), { requested: true, stored: false }); // opted-in Codex
+    db.prepare(
+      "UPDATE project_reasoning_summaries SET enabled=0 WHERE projectId=?",
+    ).run(f.projectId);
+    db.prepare(
+      "UPDATE task_execution_bindings SET harness='claude' WHERE workId=?",
+    ).run(f.workId);
+    history.recordReasoningSummary(binding, intent.id, undefined, []);
+    assert.deepEqual(health(), { requested: true, stored: false }); // Claude without thinking
+    db.exec("DELETE FROM conversation_reasoning_summaries");
+    db.exec(`CREATE TEMP TRIGGER fail_summary_insert BEFORE INSERT ON conversation_reasoning_summaries
+      BEGIN SELECT RAISE(FAIL, 'SUMMARY_INSERT_ERROR_CANARY'); END`);
+    const failedCapture = new ConversationHistoryCapture({
+      store: history,
+      workId: f.workId,
+      threadId: turn.threadId,
+      reasoningIntentId: intent.id,
+      reasoningRequested: true,
+      captureStartExclusions: [],
+      currentExclusions: () => [],
+    });
+    failedCapture.bind(binding);
+    failedCapture.receive({
+      kind: "reasoning-summary",
+      ...turn,
+      itemId: "summary",
+      text: "FAILED_SUMMARY_CANARY",
+    });
+    failedCapture.receive({
+      kind: "completed",
+      ...turn,
+      itemId: "ordinary",
+      text: "ordinary history",
+    });
+    assert.doesNotThrow(() => failedCapture.finish());
+    assert.deepEqual(health(), { requested: true, stored: false });
+    assert.equal(
+      db
+        .prepare(
+          "SELECT text FROM conversation_history_items WHERE itemId='ordinary'",
+        )
+        .get()?.text,
+      "ordinary history",
+    );
+    db.exec("DROP TRIGGER fail_summary_insert");
+    history.recordReasoningSummary(
+      binding,
+      intent.id,
+      "SUMMARY_METADATA_CANARY".repeat(1000),
+      [],
+    );
+    assert.deepEqual(health(), { requested: true, stored: true }); // truncated still collected
+    const originalTextRead = history.readReasoningSummary;
+    history.readReasoningSummary = () => {
+      throw new Error("health must never read text");
+    };
+    assert.equal(health().stored, true);
+    history.readReasoningSummary = originalTextRead;
+    const before = db.prepare("SELECT total_changes() AS n").get()!.n;
+    assert.equal(history.hasStoredReasoningSummary(binding, intent.id), true);
+    assert.equal(db.prepare("SELECT total_changes() AS n").get()!.n, before);
+    assert.ok(!JSON.stringify(health()).includes("CANARY"));
+    // Retained conversations need not be the assignment's current revision.
+    db.prepare(
+      "UPDATE assignment_conversations SET revision=revision+1 WHERE assignmentId=?",
+    ).run(f.assignmentId);
+    assert.equal(health().stored, true);
+    for (const key of Object.keys(binding) as (keyof typeof binding)[]) {
+      const value = binding[key];
+      assert.equal(
+        history.hasStoredReasoningSummary(
+          {
+            ...binding,
+            [key]: typeof value === "number" ? value + 1 : `${value}-wrong`,
+          },
+          intent.id,
+        ),
+        false,
+        key,
+      );
+    }
+    assert.equal(
+      history.hasStoredReasoningSummary(binding, randomUUID()),
+      false,
+    );
+    for (const [column, value] of [
+      ["projectId", "wrong"],
+      ["intentId", randomUUID()],
+      ["generation", 5],
+      ["createdAt", -1],
+    ] as const) {
+      const original = db
+        .prepare(
+          `SELECT ${column} AS value FROM conversation_reasoning_summaries`,
+        )
+        .get()!.value;
+      db.prepare(`UPDATE conversation_reasoning_summaries SET ${column}=?`).run(
+        value,
+      );
+      assert.equal(health().stored, false, column);
+      db.prepare(`UPDATE conversation_reasoning_summaries SET ${column}=?`).run(
+        original!,
+      );
+    }
+    db.prepare(
+      "UPDATE execution_intents SET turnId='wrong-turn' WHERE id=?",
+    ).run(intent.id);
+    assert.equal(health().stored, false);
+    db.prepare("UPDATE execution_intents SET turnId=? WHERE id=?").run(
+      turn.turnId,
+      intent.id,
+    );
+    db.exec("DELETE FROM diagnostic_items; DELETE FROM diagnostic_executions");
+    assert.equal(health().stored, true);
+    db.prepare(
+      "UPDATE execution_intent_reasoning_summaries SET generation=NULL WHERE intentId=?",
+    ).run(intent.id);
+    assert.deepEqual(health(), { requested: true, stored: false });
+    db.prepare(
+      "UPDATE execution_intent_reasoning_summaries SET generation=0 WHERE intentId=?",
+    ).run(intent.id);
+    db.prepare(`INSERT INTO execution_intents(id, workId, prompt, workspace, state, threadId, turnId, accountType, sandbox, approval)
+      VALUES (?, 'ambiguous-work', 'test', ?, 'completed', ?, ?, 'chatgpt', 'workspaceWrite', 'never')`).run(
+      randomUUID(),
+      f.root,
+      turn.threadId,
+      turn.turnId,
+    );
+    assert.equal(health().stored, false);
+    db.exec("DELETE FROM execution_intents WHERE workId='ambiguous-work'");
+    assert.equal(health().stored, true);
+    const originalRead = history.hasStoredReasoningSummary;
+    history.hasStoredReasoningSummary = () => {
+      throw new Error("SUMMARY_ERROR_CANARY");
+    };
+    assert.deepEqual(health(), { requested: true, stored: false });
+    history.hasStoredReasoningSummary = originalRead;
+    const deletion = {
+      type: "project.reasoning.delete",
+      projectId: f.projectId,
+      expectedVersion: Number(f.service.domain().project(f.projectId).version),
+      confirmed: true,
+      key: randomUUID(),
+      actor: "operator",
+    };
+    f.service.domain().execute(deletion as never);
+    f.service.domain().execute(deletion as never);
+    assert.deepEqual(health(), { requested: true, stored: false });
+    const reopened = new DatabaseSync(
+      join(f.root, "data", "standalone.sqlite"),
+    );
+    try {
+      const retained = new ConversationHistoryStore(reopened);
+      retained.recordReasoningSummary(binding, intent.id, "LATE_CANARY", []);
+      assert.equal(
+        retained.hasStoredReasoningSummary(binding, intent.id),
+        false,
+      );
+    } finally {
+      reopened.close();
+    }
+    const later = {
+      ...binding,
+      workId: `${f.workId}:later`,
+      turnId: "later-turn",
+      workRevision: binding.workRevision + 1,
+    };
+    const laterIntent = randomUUID();
+    db.prepare(`INSERT INTO execution_intents(id,workId,prompt,workspace,state,threadId,turnId,accountType,sandbox,approval)
+      VALUES (?,?,'later',?,'completed',?,?,'chatgpt','workspaceWrite','never')`).run(
+      laterIntent,
+      later.workId,
+      f.root,
+      later.threadId,
+      later.turnId,
+    );
+    db.prepare(`INSERT INTO task_execution_bindings(workId,taskId,assignmentId,assignmentVersion,instructionsRevision,profileRevision,conversationRevision,harness)
+      SELECT ?,taskId,assignmentId,assignmentVersion,instructionsRevision,profileRevision,conversationRevision,harness FROM task_execution_bindings WHERE workId=?`).run(
+      later.workId,
+      f.workId,
+    );
+    db.prepare(
+      "INSERT INTO task_work_revisions(workId,assignmentId,conversationRevision,workRevision) VALUES (?,?,?,?)",
+    ).run(
+      later.workId,
+      later.assignmentId,
+      later.conversationRevision,
+      later.workRevision,
+    );
+    db.prepare(
+      "INSERT INTO execution_intent_reasoning_summaries(intentId,enabled,captureMode,generation) VALUES (?,1,'enhanced',1)",
+    ).run(laterIntent);
+    history.recordReasoningSummary(later, laterIntent, "LATER_SUMMARY", []);
+    assert.deepEqual(f.service.reasoningSummaryCaptureFor(later.workId), {
+      requested: true,
+      stored: true,
+    });
+    db.prepare(
+      "DELETE FROM execution_intent_reasoning_summaries WHERE intentId=?",
+    ).run(intent.id);
+    assert.deepEqual(health(), { requested: false, stored: false });
+    runtime.complete(turn.turnId);
+    await waitForExecutionState(f.service, f.workId, "completed");
+  } finally {
+    await f.service.stop().catch(() => {});
+    rmSync(f.root, { recursive: true, force: true });
+  }
+});

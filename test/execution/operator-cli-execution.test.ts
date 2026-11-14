@@ -83,7 +83,7 @@ test("execution and logs reads match the API and label their provenance", async 
   );
   assert.deepEqual(get.coverage.notes, [
     "Tool observation is incomplete.",
-    "Reasoning is not collected.",
+    "No recorded request for reasoning summaries for this execution.",
   ]);
   const inputs = await ok([
     "execution",
@@ -121,7 +121,10 @@ test("execution and logs reads match the API and label their provenance", async 
   const detail = await h.run(["execution", "get", seed.captured, "--verbose"]);
   assert.match(detail.out, /model\s+gpt-seeded\s+runtime-reported/);
   assert.match(detail.out, /Note: Tool observation is incomplete\./);
-  assert.match(detail.out, /Note: Reasoning is not collected\./);
+  assert.match(
+    detail.out,
+    /Note: No recorded request for reasoning summaries for this execution\./,
+  );
   const humanLogs = await h.run(["logs", "--execution", seed.captured]);
   assert.match(humanLogs.out, /commandExecution\/completed/);
   for (const text of h.outputs) {
@@ -238,9 +241,9 @@ test("execution and logs reads match the API and label their provenance", async 
 
 test("execution notes print once and only with --verbose", async (t) => {
   const { s, seed, h, ok } = await setup(t);
-  const notes = [
+  const executionNotes = [
     "Tool observation is incomplete.",
-    "Reasoning is not collected.",
+    "No recorded request for reasoning summaries for this execution.",
   ];
   const commands = [
     ["execution", "list", "--task", seed.taskA],
@@ -248,6 +251,13 @@ test("execution notes print once and only with --verbose", async (t) => {
     ["logs", "--execution", seed.captured],
     ["logs", "--execution", seed.captured, "--follow", "--max-duration", "1"],
   ];
+  const notesFor = (args: string[]) =>
+    args[1] === "list"
+      ? [
+          executionNotes[0],
+          "Reasoning summary capture is reported per execution.",
+        ]
+      : executionNotes;
   const noteLines = (out: string) =>
     out.split("\n").filter((line) => line.startsWith("Note: "));
   for (const args of commands) {
@@ -258,7 +268,7 @@ test("execution notes print once and only with --verbose", async (t) => {
     assert.equal(loud.code, 0, `${args.join(" ")}: ${loud.err}`);
     assert.deepEqual(
       noteLines(loud.out),
-      notes.map((n) => `Note: ${n}`),
+      notesFor(args).map((n) => `Note: ${n}`),
       args.join(" "),
     );
   }
@@ -269,7 +279,7 @@ test("execution notes print once and only with --verbose", async (t) => {
     const { observedAt: _a, ...loudCoverage } = loud.coverage;
     const { observedAt: _b, ...quietCoverage } = quiet.coverage;
     assert.deepEqual(loudCoverage, quietCoverage, args.join(" "));
-    assert.deepEqual(quiet.coverage.notes, notes, args.join(" "));
+    assert.deepEqual(quiet.coverage.notes, notesFor(args), args.join(" "));
     assert.deepEqual(loud.data, quiet.data, args.join(" "));
   }
   // The next page keeps the flag, so its notes do not vanish.
@@ -369,4 +379,162 @@ test("execution inputs mark instruction segments the thread already held", async
   const { coverage } = await ok(["execution", "inputs", seed.unchanged]);
   assert.ok(!coverage.gaps.includes("item-omitted"));
   assert.ok(!coverage.gaps.includes("redaction-unavailable"));
+});
+
+test("per-execution notes reflect API health while lists stay neutral and bounded", async (t) => {
+  const { seed, h, api } = await setup(t);
+  const detail = await api(
+    `/api/operator/executions/${encodeURIComponent(seed.captured)}`,
+  );
+  const events = await api(
+    `/api/operator/executions/${encodeURIComponent(seed.captured)}/events`,
+  );
+  const list = await api(
+    `/api/operator/executions?task=${seed.taskA}&limit=50`,
+  );
+  const notes = {
+    "not-requested":
+      "No recorded request for reasoning summaries for this execution.",
+    collected: "Reasoning summaries were collected for this execution.",
+    unavailable: "Reasoning summaries are unavailable for this execution.",
+  };
+  const noteLines = (out: string) =>
+    out.split("\n").filter((line) => line.startsWith("Note: "));
+  for (const [reasoning, note] of Object.entries(notes)) {
+    for (const args of [
+      ["execution", "get", seed.captured],
+      ["logs", "--execution", seed.captured],
+    ]) {
+      const options = {
+        fetch: async (input: string | URL | Request, init?: RequestInit) => {
+          if (String(input).includes("/executions/"))
+            return Response.json({
+              data: {
+                ...(String(input).includes("/events") ? events : detail),
+                health: { ...detail.health, reasoning },
+              },
+              observedAt: 1,
+            });
+          return fetch(input, init);
+        },
+      };
+      const quiet = await h.run(args, options);
+      assert.equal(quiet.code, 0, quiet.err);
+      assert.deepEqual(noteLines(quiet.out), []);
+      const loud = await h.run([...args, "--verbose"], options);
+      assert.equal(loud.code, 0, loud.err);
+      assert.deepEqual(noteLines(loud.out), [
+        "Note: Tool observation is incomplete.",
+        `Note: ${note}`,
+      ]);
+      const json = await h.run([...args, "--output", "json"], options);
+      const verboseJson = await h.run(
+        [...args, "--output", "json", "--verbose"],
+        options,
+      );
+      assert.equal(json.code, 0, json.err);
+      assert.equal(verboseJson.code, 0, verboseJson.err);
+      assert.deepEqual(json.json().coverage.notes, [
+        "Tool observation is incomplete.",
+        note,
+      ]);
+      assert.deepEqual(
+        verboseJson.json().coverage.notes,
+        json.json().coverage.notes,
+      );
+    }
+  }
+  for (const executions of [list.executions, []]) {
+    const requests: string[] = [];
+    const result = await h.run(
+      ["execution", "list", "--task", seed.taskA, "--verbose"],
+      {
+        fetch: async (input, init) => {
+          requests.push(String(input));
+          return String(input).includes("/executions?")
+            ? Response.json({ data: { ...list, executions }, observedAt: 1 })
+            : fetch(input, init);
+        },
+      },
+    );
+    assert.equal(result.code, 0, result.err);
+    assert.deepEqual(noteLines(result.out), [
+      "Note: Tool observation is incomplete.",
+      "Note: Reasoning summary capture is reported per execution.",
+    ]);
+    assert.equal(
+      requests.filter((url) => url.includes("/executions")).length,
+      1,
+    );
+  }
+});
+
+test("follow notes use only the last successful page, with a neutral pre-page interruption", async (t) => {
+  const { seed, h, api } = await setup(t);
+  const events = await api(
+    `/api/operator/executions/${encodeURIComponent(seed.captured)}/events`,
+  );
+  for (const final of ["collected", "unavailable"] as const) {
+    let pages = 0;
+    const result = await h.run(
+      ["logs", "--execution", seed.captured, "--follow", "--verbose"],
+      {
+        sleep: async () => {},
+        fetch: async (input, init) => {
+          if (!String(input).includes("/events")) return fetch(input, init);
+          pages++;
+          return Response.json({
+            data: {
+              ...events,
+              items: [],
+              more: false,
+              finished: pages === 2,
+              health: {
+                ...events.health,
+                reasoning:
+                  pages === 1
+                    ? final === "collected"
+                      ? "unavailable"
+                      : "collected"
+                    : final,
+              },
+            },
+            observedAt: 1,
+          });
+        },
+      },
+    );
+    assert.equal(result.code, 0, result.err);
+    assert.equal(pages, 2);
+    const notes = result.out
+      .split("\n")
+      .filter((line) => line.startsWith("Note: "));
+    assert.deepEqual(notes, [
+      "Note: Tool observation is incomplete.",
+      final === "collected"
+        ? "Note: Reasoning summaries were collected for this execution."
+        : "Note: Reasoning summaries are unavailable for this execution.",
+    ]);
+  }
+  const controller = new AbortController();
+  let pages = 0;
+  const interrupted = await h.run(
+    ["logs", "--execution", seed.captured, "--follow", "--verbose"],
+    {
+      signal: controller.signal,
+      fetch: async (input, init) => {
+        if (String(input).includes("/events")) pages++;
+        const response = await fetch(input, init);
+        const body: unknown = await response.json();
+        controller.abort(); // Connected, with no events page read yet.
+        return Response.json(body, { status: response.status });
+      },
+    },
+  );
+  assert.equal(interrupted.code, 0, interrupted.err);
+  assert.equal(pages, 0);
+  assert.match(
+    interrupted.out,
+    /Note: Reasoning summary capture is reported per execution\./,
+  );
 });

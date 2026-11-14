@@ -5062,12 +5062,21 @@ export class OperatorApi {
       finishedAt: record?.finishedAt ?? null,
     };
   }
-  private captureHealth(record: DiagnosticExecution | undefined) {
+  private captureHealth(
+    workId: string,
+    record: DiagnosticExecution | undefined,
+    excluded: readonly string[] | undefined,
+  ) {
+    const summary = this.service.reasoningSummaryCaptureFor(workId);
     return {
       mode: record?.mode ?? null,
       eventSource: record?.eventSource ?? null,
       toolObservation: "incomplete" as const,
-      reasoning: "not-collected" as const,
+      reasoning: !summary.requested
+        ? ("not-requested" as const)
+        : excluded && summary.stored
+          ? ("collected" as const)
+          : ("unavailable" as const),
       gaps: (record?.gaps ?? []).map((g) => ({
         code: g.code,
         count: g.count,
@@ -5248,7 +5257,7 @@ export class OperatorApi {
             items: record ? (store?.itemCount(workId) ?? 0) : 0,
             payloadBytes: record?.payloadBytes ?? 0,
           },
-          health: this.captureHealth(record),
+          health: this.captureHealth(workId, record, excluded),
         },
         observedAt: Date.now(),
       });
@@ -5488,7 +5497,7 @@ export class OperatorApi {
           resumeAfter: items.at(-1)?.sequence ?? after,
           more: Boolean(page && (page.more || page.items.length > limit)),
           finished: !record || record.finishedAt !== null,
-          health: this.captureHealth(record),
+          health: this.captureHealth(workId, record, excluded),
         },
         observedAt: Date.now(),
       });

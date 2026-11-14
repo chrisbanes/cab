@@ -445,6 +445,7 @@ for (const viewport of [desktop, phone]) {
     );
     const ask = s.page.getByRole("button", { name: "Ask lead", exact: true });
     const target = s.page.getByLabel("Ask lead about", { exact: true });
+    await ask.waitFor();
     assert.equal(await ask.count(), 1);
     assert.equal(await s.page.getByLabel("Result revision").count(), 0);
     assert.equal(
