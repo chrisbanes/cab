@@ -710,6 +710,116 @@ test("codex groups send the granular turn policy, answer only accept or decline,
   );
 });
 
+test("codex approval hold rechecks its monotonic minimum after an early timer wake", async (t) => {
+  const { runCodexGroup } = await load("codex-groups.mjs");
+  const { classify } = await load("outcomes.mjs");
+  const ws = workspace(t);
+  const logPath = join(ws, "..", `${ws.split("/").at(-1)}-log.jsonl`);
+  t.after(() => rmSync(logPath, { force: true }));
+  let now = 0,
+    holding = false,
+    wakes = 0;
+  const timer = globalThis.setTimeout;
+  t.mock.method(performance, "now", () => now);
+  t.mock.method(globalThis, "setTimeout", ((
+    callback: (...args: unknown[]) => void,
+    delay: number,
+    ...args: unknown[]
+  ) => {
+    if (holding && delay > 0 && delay <= 200)
+      return timer(() => {
+        // The first wake is early; only the next wait advances the monotonic clock.
+        if (++wakes > 1) now += delay;
+        callback(...args);
+      }, 1);
+    return timer(callback, delay, ...args);
+  }) as typeof setTimeout);
+  const trace = await runCodexGroup("codex-timing", {
+    executable: process.execPath,
+    args: [join(directory, "fake-app-server.mjs"), logPath],
+    env: process.env,
+    workspace: ws,
+    holdMs: 200,
+    deadlineMs: 60_000,
+    log: (message: string) => {
+      if (message.startsWith("holding approval")) holding = true;
+    },
+  });
+  const request = trace.events.find(
+    (e: Event) =>
+      e.kind === "request" &&
+      e.method === "item/commandExecution/requestApproval",
+  );
+  assert.equal(trace.failure, null);
+  assert.equal(trace.deadline, false);
+  assert.ok(request.answeredAt - request.t >= 200);
+  assert.equal(wakes, 2);
+  assert.equal(
+    classify("codex-timing", trace).withholdFifteenMinutes.outcome,
+    "proved",
+  );
+  assert.equal(trace.cleanup.appServerStopped, true);
+  assert.throws(() => process.kill(trace.appServerPid, 0));
+});
+
+for (const end of ["deadline", "child-exit"] as const) {
+  test(`codex approval hold stops without answering on ${end} and cleans up its child`, async (t) => {
+    const { runCodexGroup } = await load("codex-groups.mjs");
+    const ws = workspace(t);
+    const logPath = join(ws, "..", `${ws.split("/").at(-1)}-log.jsonl`);
+    t.after(() => rmSync(logPath, { force: true }));
+    const timer = globalThis.setTimeout;
+    let expire!: () => void;
+    if (end === "deadline")
+      t.mock.method(globalThis, "setTimeout", ((
+        callback: (...args: unknown[]) => void,
+        delay: number,
+        ...args: unknown[]
+      ) => {
+        if (delay === 60_000) expire = () => callback(...args);
+        return timer(callback, delay, ...args);
+      }) as typeof setTimeout);
+    // Reuse the protocol fixture, but end its process while its approval is unanswered.
+    const exitOnApproval = `data:text/javascript,${encodeURIComponent(`
+      const write = process.stdout.write.bind(process.stdout);
+      process.stdout.write = (...args) => {
+        const sent = write(...args);
+        if (String(args[0]).includes('"method":"item/commandExecution/requestApproval"'))
+          setTimeout(() => process.exit(0), 20);
+        return sent;
+      };
+    `)}`;
+    const trace = await runCodexGroup("codex-timing", {
+      executable: process.execPath,
+      args: [
+        ...(end === "child-exit" ? ["--import", exitOnApproval] : []),
+        join(directory, "fake-app-server.mjs"),
+        logPath,
+      ],
+      env: process.env,
+      workspace: ws,
+      holdMs: 10_000,
+      deadlineMs: 60_000,
+      log: (message: string) => {
+        if (end === "deadline" && message.startsWith("holding approval"))
+          timer(() => expire(), 0);
+      },
+    });
+    const request = trace.events.find(
+      (e: Event) =>
+        e.kind === "request" &&
+        e.method === "item/commandExecution/requestApproval",
+    );
+    assert.ok(request);
+    assert.equal(request.answer, undefined);
+    assert.equal(request.answeredAt, undefined);
+    assert.equal(trace.deadline, end === "deadline");
+    if (end === "child-exit") assert.match(trace.failure, /App Server exited/);
+    assert.equal(trace.cleanup.appServerStopped, true);
+    assert.throws(() => process.kill(trace.appServerPid, 0));
+  });
+}
+
 test("claude auto group sends auto mode with unsandboxed commands allowed and records the hook deny before any classifier signal", async (t) => {
   const { runClaudeGroup } = await load("claude-groups.mjs");
   const { classify, sanitize } = await load("outcomes.mjs");
