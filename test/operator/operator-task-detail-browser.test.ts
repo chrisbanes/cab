@@ -20,6 +20,7 @@ import { withoutChangeStream } from "../fixtures/background-refresh.js";
 import { createOperatorFixture } from "../fixtures/operator-web.js";
 import { guideForm } from "../fixtures/question-data.js";
 import { seedOwnApproval, seedOwnQuestion } from "../fixtures/questions.js";
+import { noPageOverflow } from "../fixtures/operator-settings.js";
 import { seedCatalog } from "../fixtures/operator-work.js";
 import {
   seedImportedCommentTask,
@@ -1919,84 +1920,162 @@ test("An approval request opens the approval review, not the question form", asy
   );
 });
 
-test("An issue edit approval shows its current and proposed text as a diff before its version and hash", async (_t, j) => {
-  const f = await j.start("fixture.create", () =>
-    createOperatorFixture(null, undefined, undefined, j.fixtureOptions),
-  );
-  let browser: Browser | undefined;
-  j.cleanup(
-    (primary) => f.close(browser, primary),
-    "fixture.close",
-    () => f.lifecycle.steps,
-  );
-  const material = {
-    kind: "issue.edit",
-    target: { repositoryId: "R1", nodeId: "I1", number: 1 },
-    fields: { title: "New title", body: "a\nc\n\n**Proposed** body" },
-    expected: { title: "Old title", body: "a\nb\n\n**Proposed** body" },
-  };
-  const a = await seedOwnApproval(
-    f,
-    undefined,
-    undefined,
-    { action: "issue.edit", target: canonicalMaterial(material.target) },
-    material,
-  );
-  const web = await j.start("fixture.web", () => f.startWeb());
-  browser = await j.start("browser.launch", () => chromium.launch());
-  const page = await browser.newPage({
-    viewport: { width: 1366, height: 900 },
-  });
-  j.observe(page);
-  page.setDefaultTimeout(5000);
-  const commands: Record<string, unknown>[] = [];
-  page.on("request", (request) => {
-    if (
-      request.method() === "POST" &&
-      request.url().endsWith("/api/operator/commands")
-    )
-      commands.push(request.postDataJSON());
-  });
-  await signIn(page, web.origin, web.password, `/tasks/${a.taskId}`);
-  await page.goto(`${web.origin}/tasks/${a.taskId}?request=${a.interactionId}`);
-  const panel = page.locator(
-    `.approval-review[data-record-id="${a.interactionId}"]`,
-  );
-  const body = panel.locator(".issue-improve-compare", { hasText: "Body" });
-  await body.getByText("Current", { exact: true }).waitFor();
-  await body.getByText("Proposed", { exact: true }).waitFor();
-  assert.match(
-    (await body.locator('[data-kind="removed"]').textContent()) ?? "",
-    /Removed: b$/,
-  );
-  assert.match(
-    (await body.locator('[data-kind="added"]').textContent()) ?? "",
-    /Added: c$/,
-  );
-  const json = panel.locator("details.approval-material-json");
-  assert.equal(await json.getAttribute("open"), null);
-  assert.ok(
-    await panel.evaluate((root) => {
-      const diff = root.querySelector(".issue-improve-compare");
-      const version = root.querySelector(".approval-review-version");
-      return Boolean(
-        diff &&
-          version &&
-          diff.compareDocumentPosition(version) &
-            Node.DOCUMENT_POSITION_FOLLOWING,
+for (const width of [1366, 390])
+  for (const entry of ["task", "inbox"])
+    test(`${width}/${entry}: An issue edit approval shows its current and proposed text as a diff before its version and hash`, async (_t, j) => {
+      const f = await j.start("fixture.create", () =>
+        createOperatorFixture(null, undefined, undefined, j.fixtureOptions),
       );
-    }),
-  );
-  await panel
-    .getByRole("button", { name: "Approve this exact material" })
-    .click();
-  await panel.getByText(/^Approved\. The action is allowed/).waitFor();
-  assert.deepEqual(commands.at(-1)?.material, material);
-  assert.equal(
-    f.service.coordinationView().readTask(a.taskId).approvals[0]!.status,
-    "approved",
-  );
-});
+      let browser: Browser | undefined;
+      j.cleanup(
+        (primary) => f.close(browser, primary),
+        "fixture.close",
+        () => f.lifecycle.steps,
+      );
+      const long = "unbroken".repeat(70);
+      const markdown =
+        "**Literal Markdown** [link](https://example.com/" + long + ")";
+      const material = {
+        kind: "issue.edit",
+        target: { repositoryId: "R1", nodeId: "I1", number: 1 },
+        fields: {
+          title: "New title",
+          body: `a\nc\n\n${markdown}\n  trailing space  \n${long}`,
+        },
+        expected: {
+          title: "Old title",
+          body: `a\nb\n\n${markdown}\n  trailing space  \n${long}`,
+        },
+      };
+      const a = await seedOwnApproval(
+        f,
+        undefined,
+        undefined,
+        { action: "issue.edit", target: canonicalMaterial(material.target) },
+        material,
+      );
+      const web = await j.start("fixture.web", () => f.startWeb());
+      browser = await j.start("browser.launch", () => chromium.launch());
+      const page = await browser.newPage({
+        viewport: { width, height: 900 },
+      });
+      j.observe(page);
+      page.setDefaultTimeout(5000);
+      const commands: Record<string, unknown>[] = [];
+      page.on("request", (request) => {
+        if (
+          request.method() === "POST" &&
+          request.url().endsWith("/api/operator/commands")
+        )
+          commands.push(request.postDataJSON());
+      });
+      if (entry === "inbox") {
+        await signIn(page, web.origin, web.password, "/inbox");
+        await page
+          .locator(`.inbox-row[data-record-id="${a.interactionId}"]`)
+          .click();
+        await page
+          .getByRole("link", { name: "Review material & decide", exact: true })
+          .click();
+      } else {
+        await signIn(page, web.origin, web.password, `/tasks/${a.taskId}`);
+        await page.goto(
+          `${web.origin}/tasks/${a.taskId}?request=${a.interactionId}`,
+        );
+      }
+      const panel = page.locator(
+        `.approval-review[data-record-id="${a.interactionId}"]`,
+      );
+      assert.match(
+        await panel.locator(".approval-review-version").innerText(),
+        /Version v1.*material/,
+      );
+      const title = panel.locator(".issue-improve-compare", {
+        hasText: "Title",
+      });
+      await title.getByText("Removed: Old title", { exact: true }).waitFor();
+      await title.getByText("Added: New title", { exact: true }).waitFor();
+      const body = panel.locator(".issue-improve-compare", { hasText: "Body" });
+      await body.getByText("Current", { exact: true }).waitFor();
+      await body.getByText("Proposed", { exact: true }).waitFor();
+      assert.match(
+        (await body.locator('[data-kind="removed"]').textContent()) ?? "",
+        /Removed: b$/,
+      );
+      assert.match(
+        (await body.locator('[data-kind="added"]').textContent()) ?? "",
+        /Added: c$/,
+      );
+      for (const column of await body
+        .locator(".issue-improve-diff-column")
+        .all()) {
+        assert.deepEqual(
+          await column.locator(".issue-improve-diff-text").allTextContents(),
+          [
+            "a",
+            (await column.getByText("Current", { exact: true }).count())
+              ? "Removed: b"
+              : "Added: c",
+            " ",
+            markdown,
+            "  trailing space  ",
+            long,
+          ],
+        );
+        assert.equal(
+          await column.locator("a, strong").count(),
+          0,
+          "diff text remains literal",
+        );
+      }
+      assert.ok(
+        await body.evaluate((e) =>
+          [
+            ...e.querySelectorAll<HTMLElement>(
+              ".issue-improve-diff-column, .issue-improve-diff-rows, .issue-improve-diff-text",
+            ),
+          ].every((el) => el.scrollWidth <= el.clientWidth + 1),
+        ),
+        "diff content fits each local box",
+      );
+      await noPageOverflow(page);
+      await captureBrowserEvidence(
+        page,
+        `${width}-${entry}-approval-issue-edit`,
+        {
+          fullPage: false,
+        },
+      );
+      const json = panel.locator("details.approval-material-json");
+      assert.equal(await json.getAttribute("open"), null);
+      assert.ok(
+        await panel.evaluate((root) => {
+          const diff = root.querySelector(".issue-improve-compare");
+          const version = root.querySelector(".approval-review-version");
+          return Boolean(
+            diff &&
+              version &&
+              diff.compareDocumentPosition(version) &
+                Node.DOCUMENT_POSITION_FOLLOWING,
+          );
+        }),
+      );
+      const approve = panel.getByRole("button", {
+        name: "Approve this exact material",
+      });
+      await approve.focus();
+      await page.keyboard.press("Enter");
+      await panel.getByText(/^Approved\. The action is allowed/).waitFor();
+      assert.equal(
+        commands.filter((c) => c.type === "approval.decide").length,
+        1,
+      );
+      assert.deepEqual(commands.at(-1)?.material, material);
+      assert.equal(
+        f.service.coordinationView().readTask(a.taskId).approvals[0]!.status,
+        "approved",
+      );
+    });
 
 test("A recovery approval shows its exact material and a compare link on its code host, and never a foreign link", async (_t, j) => {
   const f = await j.start("fixture.create", () =>

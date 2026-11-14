@@ -1390,7 +1390,11 @@ task item, or the runtime for a runtime problem. Unresolved questions, pending a
 when related history is collapsed.
 
 The Actionable view excludes Done/cancelled tasks and operator-dismissed items. Resolved
-and Dismissed views retain history with reasons and times, without timed deletion. A
+and Dismissed views retain history with reasons and times, without timed deletion. On a wide
+layout, the initial fresh read may open its first request once; the status select
+explicitly arms its chosen status. Status links and Back/Forward cancel a pending
+initial arm, polling never rearms it, and an explicit request link takes priority.
+Phone layouts never auto-open a request. A
 terminal task's execution holds remain accessible through Execution and recovery. Clearing
 one delegate's hold does not clear the lead's: a remaining intervention names the actual
 assignment/work or task hold still requiring action.

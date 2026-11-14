@@ -7,13 +7,18 @@ import { IssueChangedRefusal } from "../../src/standalone/github-delivery.js";
 import {
   type BrowserJourney,
   browserSuite,
+  captureBrowserEvidence,
 } from "../fixtures/browser-diagnostics.js";
 import {
   answerIssueDraft,
   draftingTurn,
   seedDraftingProject,
 } from "../fixtures/drafting.js";
-import { desktop, phone } from "../fixtures/operator-settings.js";
+import {
+  desktop,
+  phone,
+  noPageOverflow,
+} from "../fixtures/operator-settings.js";
 import { createOperatorFixture } from "../fixtures/operator-web.js";
 import { openTaskOptions, taskOptionButton } from "../fixtures/task-tabs.js";
 import { until } from "../fixtures/operator-work.js";
@@ -272,6 +277,9 @@ for (const [name, viewport] of viewports) {
     );
     // The operator edits before reviewing.
     await page.locator("#issue-improve-title").fill("An edited title");
+    const long = "unbroken".repeat(70);
+    const editedBody = `${original.body}\n\n**Literal Markdown**\n${long}\n  trailing space  `;
+    await page.locator("#issue-improve-body").fill(editedBody);
     await panel(page).getByRole("button", { name: "Review changes" }).click();
     await panel(page).getByText("Review the full replacement.").waitFor();
     // Current and proposed text are both shown, and the edit says it cannot be undone.
@@ -286,6 +294,45 @@ for (const [name, viewport] of viewports) {
       ),
       true,
     );
+    const comparison = panel(page).locator(".issue-improve-compare", {
+      hasText: "Body",
+    });
+    await comparison.getByText("Current on GitHub", { exact: true }).waitFor();
+    await comparison.getByText("Proposed", { exact: true }).waitFor();
+    const columns = comparison.locator(".issue-improve-diff-column");
+    assert.deepEqual(
+      await columns
+        .nth(0)
+        .locator(".issue-improve-diff-text")
+        .allTextContents(),
+      [original.body],
+    );
+    assert.deepEqual(
+      await columns
+        .nth(1)
+        .locator(".issue-improve-diff-text")
+        .allTextContents(),
+      [
+        original.body,
+        "Added:  ",
+        "Added: **Literal Markdown**",
+        `Added: ${long}`,
+        "Added:   trailing space  ",
+      ],
+    );
+    assert.ok(
+      await comparison.evaluate((e) =>
+        [
+          ...e.querySelectorAll<HTMLElement>(
+            ".issue-improve-diff-column, .issue-improve-diff-rows, .issue-improve-diff-text",
+          ),
+        ].every((el) => el.scrollWidth <= el.clientWidth + 1),
+      ),
+    );
+    await noPageOverflow(page);
+    await captureBrowserEvidence(page, `${name}-improve-comparison`, {
+      fullPage: false,
+    });
     assert.equal(effects.length, 0, "nothing is sent before Send");
     await panel(page)
       .getByRole("button", { name: "Send edit to GitHub" })
@@ -306,7 +353,7 @@ for (const [name, viewport] of viewports) {
     if (effect?.kind === "issue.edit") {
       assert.deepEqual(effect.fields, {
         title: "An edited title",
-        body: proposal.body,
+        body: editedBody,
       });
       assert.deepEqual(effect.expected, original);
     }

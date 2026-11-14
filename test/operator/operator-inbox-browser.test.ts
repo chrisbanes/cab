@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
+import { canonicalMaterial } from "../../src/core/delivery.js";
 import { chromium, type Browser, type Page, type Request } from "playwright";
 import {
   browserSuite,
@@ -46,6 +47,7 @@ async function openInbox<T = undefined>(
     ReturnType<typeof exhaustibleRuntime>,
     "factory" | "serviceOptions"
   >,
+  preparePage?: (page: Page) => Promise<void>,
 ) {
   const f = await j.start("fixture.create", () =>
     runtimes
@@ -83,6 +85,7 @@ async function openInbox<T = undefined>(
   page.setDefaultTimeout(5000);
   // Installed before the page loads, so the Inbox's 15-second poll runs on the fake clock.
   if (fakeClock) await page.clock.install();
+  await preparePage?.(page);
   await page.goto(`${web.origin}${path}`);
   await page.getByLabel("Password").fill(web.password);
   await page.getByRole("button", { name: "Sign in", exact: true }).click();
@@ -697,6 +700,194 @@ test("a wide Inbox opens the first request by itself without navigating, and kee
   });
 });
 
+for (const navigation of [
+  "link",
+  "history",
+  "select",
+  "mount",
+  "phone",
+  "deep-link",
+] as const)
+  test(`a pending first Inbox read respects ${navigation} status navigation`, async (_t, j) => {
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    let entered!: () => void;
+    const pending = new Promise<void>((resolve) => {
+      entered = resolve;
+    });
+    let gated = true;
+    j.cleanup(async () => release(), "release first Inbox read");
+    const { page, f, seeded, more } = await openInbox(
+      j,
+      2,
+      { width: navigation === "phone" ? 390 : 1366, height: 900 },
+      "/inbox",
+      async (fixture) => {
+        const historical = await seedOwnQuestion(
+          fixture,
+          undefined,
+          "Historical request",
+          "History",
+        );
+        const api = new OperatorApi(fixture.service);
+        const item = (await api.readInbox()).data.items.find(
+          (i) => i.id === historical.interactionId,
+        )!;
+        await api.execute({
+          type: "inbox.dismiss",
+          key: randomUUID(),
+          itemId: item.id,
+          expectedRevision: item.lifecycle!.revision,
+          note: "Later",
+        });
+        return historical;
+      },
+      false,
+      undefined,
+      async (page) => {
+        await page.route("**/api/operator/inbox", async (route) => {
+          if (gated) {
+            entered();
+            await gate;
+          }
+          await route.continue();
+        });
+      },
+    );
+    await pending;
+    const mounted = await page.locator(".action-inbox").elementHandle();
+    assert.ok(mounted);
+    const turns = f.runtime.turns;
+    const commands: string[] = [];
+    page.on("request", (r) => {
+      if (
+        r.method() === "POST" &&
+        new URL(r.url()).pathname === "/api/operator/commands"
+      )
+        commands.push(r.postData()!);
+    });
+    if (["mount", "phone", "deep-link"].includes(navigation)) {
+      if (navigation === "deep-link") {
+        await page.evaluate(
+          (item) => {
+            const link = document.createElement("a");
+            link.href = `/inbox?request=${item.interactionId}&task=${item.taskId}`;
+            link.textContent = "Exact request";
+            document.querySelector(".inbox-filters")!.append(link);
+          },
+          {
+            interactionId: seeded[1]!.interactionId,
+            taskId: seeded[1]!.taskId,
+          },
+        );
+        await page
+          .getByRole("link", { name: "Exact request", exact: true })
+          .click();
+      }
+      gated = false;
+      release();
+      await page.locator(".inbox-row").nth(1).waitFor();
+      await settle(page);
+      const selected = page.locator('.inbox-row[aria-pressed="true"]');
+      if (navigation === "phone") assert.equal(await selected.count(), 0);
+      else {
+        assert.equal(await selected.count(), 1);
+        if (navigation === "deep-link")
+          assert.equal(
+            await selected.getAttribute("data-record-id"),
+            seeded[1]!.interactionId,
+          );
+        else
+          assert.equal(
+            await page
+              .locator(".inbox-row")
+              .first()
+              .getAttribute("aria-pressed"),
+            "true",
+          );
+      }
+      assert.equal(f.runtime.turns, turns);
+      assert.deepEqual(commands, []);
+      return;
+    }
+    if (navigation === "select") {
+      await page
+        .getByLabel("Inbox status", { exact: true })
+        .selectOption("dismissed");
+    } else {
+      // A real intercepted anchor changes the SPA route without remounting Inbox.
+      await page.evaluate(() => {
+        const link = document.createElement("a");
+        link.href = "/inbox?status=dismissed";
+        link.textContent = "Historical Inbox";
+        document.querySelector(".inbox-filters")!.append(link);
+      });
+      await page
+        .getByRole("link", { name: "Historical Inbox", exact: true })
+        .click();
+      if (navigation === "history") {
+        await page.goBack();
+        await page.waitForURL((u) => !u.search);
+        await page.goForward();
+      }
+    }
+    await page.waitForURL((u) => u.searchParams.get("status") === "dismissed");
+    gated = false;
+    release();
+    await page
+      .locator(`.inbox-row[data-record-id="${more.interactionId}"]`)
+      .waitFor();
+    assert.equal(
+      await page
+        .locator(`.inbox-row[data-record-id="${seeded[0]!.interactionId}"]`)
+        .count(),
+      0,
+    );
+    assert.ok(
+      await mounted.evaluate((e) => e.isConnected),
+      "same Inbox component lifetime",
+    );
+    if (navigation === "select") {
+      await page
+        .getByRole("button", { name: "Restore", exact: true })
+        .waitFor();
+      assert.equal(
+        await page.locator(".inbox-row").getAttribute("aria-pressed"),
+        "true",
+      );
+    } else {
+      await settle(page);
+      assert.equal(
+        await page.locator('.inbox-row[aria-pressed="true"]').count(),
+        0,
+      );
+      await page.goBack();
+      await page.waitForURL((u) => !u.search);
+      await page
+        .locator(`.inbox-row[data-record-id="${seeded[0]!.interactionId}"]`)
+        .waitFor();
+      await settle(page);
+      assert.equal(
+        await page.locator('.inbox-row[aria-pressed="true"]').count(),
+        0,
+        "returning must not consume the obsolete mount arm",
+      );
+      await page.goForward();
+      await page
+        .locator(`.inbox-row[data-record-id="${more.interactionId}"]`)
+        .waitFor();
+      await settle(page);
+      assert.equal(
+        await page.locator('.inbox-row[aria-pressed="true"]').count(),
+        0,
+      );
+    }
+    assert.equal(f.runtime.turns, turns);
+    assert.deepEqual(commands, []);
+  });
+
 test("the Inbox is two independent scroll regions in one viewport, with the detail header and submit area in view (desktop)", async (_t, j) => {
   const { page } = await openInbox(j, 7, { width: 1366, height: 900 });
   const rows = page.locator(".inbox-row");
@@ -896,6 +1087,102 @@ test("sign-out clears the Inbox filters and in-memory selection; the header is n
     "3 unresolved across 3 projects",
   );
 });
+
+for (const width of [1366, 390])
+  test(`${width}: Inbox opens recognized approval Markdown with exact material preserved`, async (_t, j) => {
+    const long = "unbroken".repeat(70);
+    const material = {
+      kind: "issue.create",
+      target: { repositoryId: "R1" },
+      title: "Create documented issue",
+      labels: [],
+      body: `# Reviewed heading\n\n*Emphasized text*\n\n- Reviewed item\n\n\`reviewed code\`\n\n[Reviewed link](https://example.com/)\n\n![Reviewed image](https://example.com/image.png)\n\n<div>hidden HTML</div>\n\n${long}`,
+    };
+    const { page, more: approval } = await openInbox(
+      j,
+      0,
+      { width, height: 900 },
+      "/inbox",
+      (f) =>
+        seedOwnApproval(
+          f,
+          undefined,
+          undefined,
+          {
+            action: "issue.create",
+            target: canonicalMaterial(material.target),
+          },
+          material,
+        ),
+    );
+    const commands: Record<string, unknown>[] = [];
+    const remoteImages: string[] = [];
+    page.on("request", (r) => {
+      if (
+        r.method() === "POST" &&
+        new URL(r.url()).pathname === "/api/operator/commands"
+      )
+        commands.push(r.postDataJSON());
+      if (r.url().startsWith("https://example.com/"))
+        remoteImages.push(r.url());
+    });
+    await page.locator(".inbox-row").click();
+    const review = page.getByRole("link", {
+      name: "Review material & decide",
+      exact: true,
+    });
+    await review.focus();
+    await page.keyboard.press("Enter");
+    const panel = page.locator(
+      `.approval-review[data-record-id="${approval.interactionId}"]`,
+    );
+    const markdown = panel
+      .locator(".approval-material-text .file-markdown")
+      .last();
+    await markdown
+      .getByRole("heading", { level: 1, name: "Reviewed heading", exact: true })
+      .waitFor();
+    assert.equal(await markdown.locator("em").innerText(), "Emphasized text");
+    assert.equal(await markdown.locator("li").innerText(), "Reviewed item");
+    assert.equal(await markdown.locator("code").innerText(), "reviewed code");
+    assert.equal(
+      await markdown.locator(".file-markdown-link").innerText(),
+      "Reviewed link",
+    );
+    assert.equal(
+      await markdown.locator(".file-markdown-image").innerText(),
+      "[Image omitted: Reviewed image]",
+    );
+    assert.equal(await markdown.locator("a, img, div").count(), 0);
+    assert.ok(!(await markdown.innerText()).includes("hidden HTML"));
+    assert.ok((await markdown.innerText()).includes(long));
+    assert.ok(
+      await markdown.evaluate((e) => e.scrollWidth <= e.clientWidth + 1),
+    );
+    await noPageOverflow(page);
+    assert.equal(
+      await panel
+        .locator("details.approval-material-json")
+        .getAttribute("open"),
+      null,
+    );
+    await captureBrowserEvidence(page, `${width}-approval-markdown`, {
+      fullPage: false,
+    });
+    const approve = panel.getByRole("button", {
+      name: "Approve this exact material",
+      exact: true,
+    });
+    await approve.focus();
+    await page.keyboard.press("Enter");
+    await panel.getByText(/^Approved\. The action is allowed/).waitFor();
+    assert.equal(
+      commands.filter((c) => c.type === "approval.decide").length,
+      1,
+    );
+    assert.deepEqual(commands.at(-1)?.material, material);
+    assert.deepEqual(remoteImages, []);
+  });
 
 test("an approval shows its exact action, target and independent holds, and decides only at the retained destination", async (_t, j) => {
   const { page, more: approval } = await openInbox(
