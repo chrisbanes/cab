@@ -67,7 +67,7 @@
     "test:built": "node scripts/run-tests.mjs"
   },
   "dependencies": {
-    "@anthropic-ai/claude-agent-sdk": "0.3.319",
+    "@anthropic-ai/claude-agent-sdk": "0.3.322",
     "@fontsource/geist-mono": "5.3.0",
     "@fontsource/geist-sans": "5.3.0",
     "@pierre/diffs": "1.6.4",
