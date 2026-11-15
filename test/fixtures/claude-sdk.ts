@@ -77,9 +77,12 @@ export function fakeSdk(
     mcpStatuses?: unknown[][];
     /** Replaces `accountInfo` on turn queries only; the settings read keeps passing. */
     turnAccountInfo?: () => Promise<unknown>;
+    /** Delays each turn `mcpServerStatus` reply. */
+    mcpStatusDelayMs?: number;
   } = {},
 ) {
   let mcpReads = 0;
+  let readsAtPrompt: number | undefined;
   const metadata = {
     mcpServerStatus: async () =>
       (options.mcpSources ?? ["sdk"]).map((source) => ({
@@ -100,6 +103,8 @@ export function fakeSdk(
     mcpServerStatus: async () => {
       const statuses = options.mcpStatuses;
       mcpReads++;
+      if (options.mcpStatusDelayMs)
+        await new Promise((done) => setTimeout(done, options.mcpStatusDelayMs));
       if (!statuses) return metadata.mcpServerStatus();
       return statuses[Math.min(mcpReads, statuses.length) - 1];
     },
@@ -170,6 +175,7 @@ export function fakeSdk(
             return;
           }
           log.push("prompt");
+          readsAtPrompt = mcpReads;
           const tools =
             (
               options.mcpServers?.cab as unknown as
@@ -299,6 +305,7 @@ export function fakeSdk(
     queries,
     optionsSeen,
     mcpReads: () => mcpReads,
+    readsAtPrompt: () => readsAtPrompt,
   };
 }
 

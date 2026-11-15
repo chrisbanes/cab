@@ -81,6 +81,7 @@ function fixture(
     mcpStatuses?: unknown[][];
     turnAccountInfo?: () => Promise<unknown>;
     admissionTimeoutMs?: number;
+    mcpStatusDelayMs?: number;
     apiProvider?: string;
     apiKeySource?: string | null;
     resolveExecutable?: () => Promise<string | null>;
@@ -94,22 +95,22 @@ function fixture(
   let origin: string | undefined;
   const log: string[] = [];
   const recorded: unknown[] = [];
-  const { sdk, sessions, queries, optionsSeen, mcpReads } = fakeSdk(
-    options.scripts ?? [],
-    log,
-    {
+  const { sdk, sessions, queries, optionsSeen, mcpReads, readsAtPrompt } =
+    fakeSdk(options.scripts ?? [], log, {
       hangModels: options.hangModels ?? false,
       ...(options.mcpSources ? { mcpSources: options.mcpSources } : {}),
       ...(options.mcpStatuses ? { mcpStatuses: options.mcpStatuses } : {}),
       ...(options.turnAccountInfo
         ? { turnAccountInfo: options.turnAccountInfo }
         : {}),
+      ...(options.mcpStatusDelayMs
+        ? { mcpStatusDelayMs: options.mcpStatusDelayMs }
+        : {}),
       ...(options.apiProvider ? { apiProvider: options.apiProvider } : {}),
       ...(options.apiKeySource !== undefined
         ? { apiKeySource: options.apiKeySource }
         : {}),
-    },
-  );
+    });
   const runtime = new ClaudeRuntime({
     safety: {
       ...safetyFixture.safety,
@@ -160,7 +161,7 @@ function fixture(
     exitTimeoutMs: 2000,
     sandboxSelfTest: async () => (options.selfTest ? options.selfTest() : true),
     probeRetryMs: 20,
-    ...(options.admissionTimeoutMs
+    ...(options.admissionTimeoutMs !== undefined
       ? { admissionTimeoutMs: options.admissionTimeoutMs }
       : {}),
   });
@@ -254,6 +255,7 @@ function fixture(
     queries,
     optionsSeen,
     mcpReads,
+    readsAtPrompt,
     cleanup: async () => {
       await releaseClaudeTemporaryBase(workspace);
       await runtime.stop();
@@ -2198,7 +2200,8 @@ for (const [label, mcpStatuses] of [
       const turnId = await f.turn(id);
       assert.equal(f.mcpReads(), mcpStatuses.length);
       assert.equal(await f.runtime.waitForTurn(id, turnId), "completed");
-      assert.ok(f.log.includes("prompt"));
+      // The prompt flows only after the read that reported the connected row.
+      assert.equal(f.readsAtPrompt(), mcpStatuses.length);
     } finally {
       await f.cleanup();
     }
@@ -2222,6 +2225,27 @@ test("Claude admission refuses with the MCP reason when the cab row never appear
     const reads = f.mcpReads();
     await pollSettle();
     assert.equal(f.mcpReads(), reads);
+    assert.ok(!f.log.includes("prompt"));
+  } finally {
+    await f.cleanup();
+  }
+});
+
+test("a connected cab row reported after the admission bound does not release the prompt", {
+  skip: slashTmpDenied(),
+}, async () => {
+  const f = fixture({
+    mcpStatuses: [[cabRow("sdk")]],
+    mcpStatusDelayMs: 600,
+    admissionTimeoutMs: 200,
+    scripts: [oneTurn],
+  });
+  try {
+    await f.runtime.start();
+    const id = await f.runtime.startThread(f.workspace, []);
+    await assert.rejects(f.turn(id), mcpRefusal);
+    await new Promise((resolve) => setTimeout(resolve, 700));
+    assert.equal(f.mcpReads(), 1);
     assert.ok(!f.log.includes("prompt"));
   } finally {
     await f.cleanup();
