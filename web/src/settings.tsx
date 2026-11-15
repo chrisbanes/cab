@@ -19,6 +19,7 @@ import {
   outcomeCopy,
   type ConfigurationDraft,
   type ConfigurationDrafts,
+  type DraftRecovery,
 } from "./settings-state.js";
 import { sameText, type Values } from "./settings-changes.js";
 import { Button } from "./components.js";
@@ -91,9 +92,10 @@ export function useDraft(
   drafts: ConfigurationDrafts,
   key: string,
   readOnly = false,
+  recovery?: DraftRecovery,
 ) {
   const [, render] = useReducer((v) => v + 1, 0);
-  const d = drafts.get(key, render);
+  const d = drafts.get(key, render, recovery);
   d.readOnly = readOnly;
   // Each commit reports the changes it shows, so `afterRender` runs on the one that shows its own.
   const revision = d.revision;

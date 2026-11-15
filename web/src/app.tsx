@@ -1,3 +1,4 @@
+import { purgeProposalRecovery } from "./instruction-proposal-model.js";
 import { randomUUID } from "./browser-crypto.js";
 import { ProjectDeliveryWarning } from "./project-delivery-warning.js";
 import { visibleProjects } from "./project-lifecycle-model.js";
@@ -595,6 +596,7 @@ export function App() {
     clientRef.current?.invalidateAuthentication();
     acceptedIdentity.current = null;
     setLogoutPending(false);
+    purgeProposalRecovery();
     drafts.current.purge();
     taskStates.current.purge();
     questionStates.current.purge();
@@ -616,6 +618,11 @@ export function App() {
   const acceptSession = useCallback(
     (next: Session) => {
       const identity = next.authenticated ? next.csrfToken : null;
+      if (
+        !identity ||
+        (acceptedIdentity.current && identity !== acceptedIdentity.current)
+      )
+        purgeProposalRecovery();
       if (identity !== acceptedIdentity.current) {
         if (!identity && acceptedIdentity.current) {
           navigationScope.current = randomUUID();
@@ -1041,6 +1048,7 @@ export function App() {
     client.invalidateAuthentication();
     acceptedIdentity.current = null;
     const isCurrentScope = client.captureAuthenticationScope();
+    purgeProposalRecovery();
     drafts.current.purge();
     taskStates.current.purge();
     questionStates.current.purge();

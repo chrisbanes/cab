@@ -2,6 +2,7 @@ import { randomUUID } from "./browser-crypto.js";
 import type { z } from "zod";
 import {
   genericInvalidInputMessage,
+  commandReceiptSchema,
   operationTypeSchema,
   operatorCommandSchema,
   type OperatorCommand,
@@ -39,7 +40,10 @@ function commandResource(c: OperatorCommand) {
         : null;
 }
 
-function matchesConfigurationReceipt(c: OperatorCommand, r: CommandReceipt) {
+export function matchesConfigurationReceipt(
+  c: OperatorCommand,
+  r: CommandReceipt,
+) {
   if (r.key !== c.key || r.kind !== "configuration") return false;
   const result = r.result;
   if (result.commandType !== c.type) return false;
@@ -247,6 +251,16 @@ function canonical(field: string, value: unknown): string {
   return `s:${value}`;
 }
 
+export interface ConfigurationRecovery {
+  values: Record<string, string | boolean | string[]>;
+  command: OperatorCommand | null;
+  receipt: CommandReceipt | null;
+}
+export interface DraftRecovery {
+  read: () => ConfigurationRecovery | null;
+  write: (value: ConfigurationRecovery) => void;
+}
+
 export class ConfigurationDraft {
   /** Presentation write gate from the authoritative direct-ID owner read; frozen receipts stay readable. */
   readOnly = false;
@@ -277,6 +291,41 @@ export class ConfigurationDraft {
   get receipt() {
     return this.lifecycle.receipt;
   }
+  private recovery: DraftRecovery | undefined;
+  private recoveryReceipt: CommandReceipt | null = null;
+  enableRecovery(recovery: DraftRecovery) {
+    if (this.recovery) return;
+    this.recovery = recovery;
+    const saved = recovery.read();
+    if (!saved) return;
+    const command =
+      saved.command && operatorCommandSchema.safeParse(saved.command);
+    const receipt =
+      saved.receipt && commandReceiptSchema.safeParse(saved.receipt);
+    if (
+      (saved.command && !command?.success) ||
+      (saved.receipt && !receipt?.success)
+    )
+      return;
+    if (
+      command?.success &&
+      receipt?.success &&
+      !matchesConfigurationReceipt(command.data, receipt.data)
+    )
+      return;
+    this.values = structuredClone(saved.values);
+    if (command?.success) {
+      this.lifecycle.restoreUnknown(command.data);
+      this.recoveryReceipt = receipt?.success ? receipt.data : null;
+      this.phase = "unknown";
+      this.notice = outcomeCopy.unknown;
+    }
+  }
+  /** Reload candidates are checked by GET before any save or close is confirmed. */
+  async verifyRecovery(client: OperatorClient) {
+    if (this.recovery && this.phase === "unknown")
+      await this.send(client, "", true, true);
+  }
   private generation = 0;
   /** Counts announced changes, so a caller can wait for the commit that shows them. */
   revision = 0;
@@ -292,6 +341,11 @@ export class ConfigurationDraft {
   }
   private changed = () => {
     this.revision++;
+    this.recovery?.write({
+      values: structuredClone(this.values),
+      command: this.frozen,
+      receipt: this.receipt ?? this.recoveryReceipt,
+    });
     this.render();
     this.onChanged();
   };
@@ -489,6 +543,7 @@ export class ConfigurationDraft {
     this.values = {};
     this.base = {};
     this.lifecycle.reset();
+    this.recoveryReceipt = null;
     this.errors = {};
     this.phase = "editing";
     this.notice = "";
@@ -568,6 +623,7 @@ export class ConfigurationDraft {
     client: OperatorClient,
     csrf: string,
     checkReceipt = false,
+    recoveryOnly = false,
   ) {
     const c = this.lifecycle.begin();
     if (!c) return;
@@ -578,7 +634,44 @@ export class ConfigurationDraft {
     this.changed();
     if (generation !== this.generation) return;
     let result: CommandState;
-    if (this.readOnly) {
+    if (
+      checkReceipt &&
+      this.recovery &&
+      (c.type === "project.configure" || c.type === "profile.configure")
+    ) {
+      try {
+        const operation = await client.operation({
+          scope:
+            c.type === "profile.configure"
+              ? `profile:${c.profileId}`
+              : `project:${c.projectId}`,
+          type: c.type,
+          key: c.key,
+        });
+        if (generation !== this.generation) return;
+        if (!currentAuthentication())
+          result = { state: "unknown", command: c, code: "unauthenticated" };
+        else if (operation.data.state === "recorded") {
+          const matchesStored =
+            !this.recoveryReceipt ||
+            JSON.stringify(
+              commandReceiptSchema.parse(operation.data.receipt),
+            ) ===
+              JSON.stringify(commandReceiptSchema.parse(this.recoveryReceipt));
+          result = matchesStored
+            ? { state: "recorded", receipt: operation.data.receipt }
+            : { state: "unknown", command: c, code: "unavailable" };
+        } else if (!recoveryOnly && !this.readOnly)
+          result = await client.command(c, csrf);
+        else result = { state: "unknown", command: c, code: "unavailable" };
+      } catch (error) {
+        result = {
+          state: "unknown",
+          command: c,
+          code: error instanceof ClientError ? error.code : "unavailable",
+        };
+      }
+    } else if (this.readOnly) {
       result = { state: "unknown", command: c, code: "unavailable" };
       const type = operationTypeSchema.safeParse(c.type);
       const scope =
@@ -679,7 +772,10 @@ export class ConfigurationDraft {
       result = await client.command(c, csrf);
     }
     if (generation !== this.generation) return;
-    if (translatedConfiguration(c) && !currentAuthentication())
+    if (
+      (this.recovery || translatedConfiguration(c)) &&
+      !currentAuthentication()
+    )
       result = { state: "unknown", command: c, code: "unauthenticated" };
     const disposition = this.lifecycle.settle(
       result,
@@ -855,7 +951,7 @@ export class ConfigurationDrafts {
         draft.receipt.result.commandType === "github.place",
     );
   }
-  get(key: string, render: () => void) {
+  get(key: string, render: () => void, recovery?: DraftRecovery) {
     let draft = this.drafts.get(key);
     if (!draft) {
       draft = new ConfigurationDraft(
@@ -868,6 +964,7 @@ export class ConfigurationDrafts {
       );
       this.drafts.set(key, draft);
     }
+    if (recovery) draft.enableRecovery(recovery);
     draft.bind(render);
     return draft;
   }

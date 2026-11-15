@@ -285,6 +285,13 @@ export function Inbox({
   // Open the first request once per chosen status when its first fresh read arrives on a wide layout.
   // Keyed by status so a stale effect for the outgoing status cannot use up the next one's auto-open.
   const autoFor = useRef<string | null>(status);
+  const observedStatus = useRef(status);
+  useEffect(() => {
+    if (observedStatus.current === status) return;
+    observedStatus.current = status;
+    // Only the select arms its destination; links and history cancel an obsolete mount arm.
+    if (autoFor.current !== status) autoFor.current = null;
+  }, [status]);
   useEffect(() => {
     if (
       autoFor.current !== status ||

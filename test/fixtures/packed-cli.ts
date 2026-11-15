@@ -8,13 +8,16 @@ import { packTarball } from "./npm-package.js";
 
 const run = promisify(execFile);
 // Configuration exported by an enclosing `npm run` must not leak into the nested installs,
-// except its cache, which serves --offline and may be the only one a sandboxed run can write.
+// except its offline cache and diagnostic retention, which keep installs and their logs reproducible.
 const npmEnv = {
   ...Object.fromEntries(
     Object.entries(process.env).filter(([key]) => !/^npm_/i.test(key)),
   ),
   ...(process.env.npm_config_cache
     ? { NPM_CONFIG_CACHE: process.env.npm_config_cache }
+    : {}),
+  ...(process.env.npm_config_logs_max
+    ? { NPM_CONFIG_LOGS_MAX: process.env.npm_config_logs_max }
     : {}),
 };
 // Compiled to dist/test/fixtures, three levels below the repository root.
