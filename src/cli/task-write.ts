@@ -16,6 +16,7 @@ import {
   startAgainUnavailable,
   startAgainUnavailableText,
 } from "../operator/task-restart-copy.js";
+import { allowanceExcludedText } from "../operator/execution-allowance-copy.js";
 import { taskColumnOf } from "../operator/task-presentation.js";
 import { cliFix, type Wait, waitLabels } from "../operator/wait-reasons.js";
 import { uuidArg } from "./browse.js";
@@ -122,6 +123,16 @@ export async function sendStartAgain(
     ],
     data: { workId: restarted?.workId ?? null },
   });
+}
+
+function nonNegativeIntFlag(value: string | undefined, flag: string) {
+  if (value === undefined) return undefined;
+  if (!/^(0|[1-9][0-9]{0,8})$/.test(value))
+    throw new CliError(
+      "invalid-input",
+      `--${flag} must be a non-negative integer.`,
+    );
+  return Number(value);
 }
 
 export function requiredVersion(ctx: WriteContext) {
@@ -827,6 +838,103 @@ export const taskWriteCommands = new Map<string, WriteCommand>([
           ],
           notes: [resetIrreversibleText],
           data: { workId: reset?.workId ?? null },
+        });
+      },
+    },
+  ],
+  [
+    "task allowance",
+    {
+      usage:
+        "task allowance TASK_ID (--total N | --remove) --expected-version N [--request-id UUID]",
+      positionals: 1,
+      expects:
+        "--expected-version: the allowance version ('cab task get TASK_ID', 0 before one is set), not the task version; required. --total sets the absolute total of charged executions; --remove turns the allowance off.",
+      flags: ["total", "remove", "expected-version", "request-id"],
+      async run(ctx) {
+        const taskId = uuidArg(ctx.positionals[2] ?? "", "TASK_ID");
+        const remove = ctx.values.remove === true;
+        if (remove === (ctx.values.total !== undefined))
+          throw new CliError(
+            "usage",
+            "Pass exactly one of --total N or --remove.",
+          );
+        const total = remove
+          ? null
+          : nonNegativeIntFlag(ctx.values.total, "total")!;
+        const expectedAllowanceVersion = nonNegativeIntFlag(
+          ctx.values["expected-version"],
+          "expected-version",
+        );
+        if (expectedAllowanceVersion === undefined)
+          throw new CliError("usage", "--expected-version N is required.");
+        const session = await connectWrite(ctx, TASK_WRITE);
+        const type = "task.allowance.set";
+        const scope = `task:${taskId}`;
+        const command = { type, taskId, expectedAllowanceVersion, total };
+        const { key, digest, reused } = await chooseKey(
+          ctx,
+          session,
+          { scope, type },
+          command,
+        );
+        const { receipt, request } = await withConflictRemedy(
+          () =>
+            sendCommand(ctx, session, {
+              scope,
+              type,
+              key,
+              digest,
+              resource: taskId,
+              command: exactCommand(command, key),
+              match: (r) => r.kind === "task-allowance" && r.taskId === taskId,
+            }),
+          {
+            subject: `Task ${taskId} allowance`,
+            sent: expectedAllowanceVersion,
+            read: `cab task get ${taskId}`,
+            current: () =>
+              readAfter(session, taskId).then(
+                (t) =>
+                  t?.executionAllowance && {
+                    version: t.executionAllowance.version,
+                  },
+              ),
+          },
+        );
+        const set = receipt.kind === "task-allowance" ? receipt : undefined;
+        return writeOutput({
+          request,
+          receipt,
+          reused,
+          effect: "saved",
+          summary:
+            set?.total === null
+              ? "Removed the execution allowance"
+              : "Set the execution allowance",
+          lines: [
+            ["Task", taskId],
+            ["Total", set?.total === null ? "off" : String(set?.total ?? "")],
+            ["Charged", String(set?.charged ?? "")],
+            ...(set?.remaining !== null && set?.remaining !== undefined
+              ? ([["Remaining", String(set.remaining)]] as [string, string][])
+              : []),
+            ...(set?.overBy
+              ? ([["Over the total", String(set.overBy)]] as [string, string][])
+              : []),
+            ["Allowance version", String(set?.version ?? "")],
+          ],
+          notes: [
+            "Gates only new admissions; admitted work continues. Raising the total re-attempts held requests; nothing new is queued.",
+            allowanceExcludedText,
+          ],
+          data: {
+            total: set?.total ?? null,
+            charged: set?.charged ?? null,
+            remaining: set?.remaining ?? null,
+            overBy: set?.overBy ?? null,
+            version: set?.version ?? null,
+          },
         });
       },
     },

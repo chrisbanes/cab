@@ -178,6 +178,7 @@ import {
   WithdrawalRecord,
 } from "./task-execution.js";
 import { stackSummary } from "../../src/operator/stacking-copy.js";
+import { attentionNext } from "../../src/operator/attention.js";
 import { WaitReasons } from "./wait-reasons.js";
 import {
   ChecklistCoverage,
@@ -203,6 +204,7 @@ const sectionIds = [
   "viewing-reference",
   "reply",
   "execution",
+  "execution-allowance",
 ];
 /** The section a tab opens at when a link names no section. */
 const tabSections: Record<TaskTab, string> = {
@@ -2711,6 +2713,19 @@ export function TaskWorkspace({
                 href={`/tasks/${taskId}?section=execution`}
               >
                 Inspect execution
+              </ActionLink>
+            </p>
+          ))}
+        {attention.actions
+          .filter((item) => item.id === "allowance-exhausted")
+          .map((item) => (
+            <p key={item.id} className="metadata">
+              {item.title} ·{" "}
+              <ActionLink
+                variant="secondary"
+                href={`/tasks/${taskId}?section=execution-allowance`}
+              >
+                {attentionNext["allowance-exhausted"].inboxAction}
               </ActionLink>
             </p>
           ))}

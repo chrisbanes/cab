@@ -23,6 +23,7 @@ import {
 } from "../../src/operator/sandbox-escalation-copy.js";
 import {
   admissionLine,
+  allowanceSection,
   evidenceNotice,
   evidenceWarning,
   executionHoldLines,
@@ -41,6 +42,7 @@ import {
   DialogTitle,
   DialogTrigger,
 } from "./ui/dialog.js";
+import { Input } from "./ui/input.js";
 import { NativeSelect } from "./ui/native-select.js";
 import { Textarea } from "./ui/textarea.js";
 
@@ -231,6 +233,117 @@ function Dependencies({
   );
 }
 
+/**
+ * The task's execution allowance and its set/remove form, fenced on the allowance version read.
+ * A typed total stays through a conflict or failure, so it can be sent again after the reread.
+ */
+function ExecutionAllowance({
+  data,
+  client,
+  session,
+  onChanged,
+}: {
+  data: Data;
+  client: OperatorClient;
+  session: Session;
+  onChanged: () => void;
+}) {
+  const readOnly = taskProjectReadOnly(data.task.projectId, data.project);
+  const taskId = data.task.id,
+    allowance = data.executionAllowance;
+  const [draft, setDraft] = useState("");
+  const { entry, send, sending, outcome, uncertain, clear } = useCommandSend(
+    client,
+    session,
+    `${taskId}:allowance`,
+    (c, r) =>
+      c.type === "task.allowance.set" &&
+      r.kind === "task-allowance" &&
+      r.key === c.key &&
+      r.taskId === taskId,
+    (kind) => {
+      if (kind === "recorded") setDraft("");
+      if (kind === "recorded" || kind === "conflict") onChanged();
+    },
+    readOnly,
+  );
+  if (!allowance) return null;
+  const section = allowanceSection(allowance);
+  const total = /^\d{1,9}$/.test(draft.trim()) ? Number(draft.trim()) : null;
+  const busy = readOnly || Boolean(sending) || uncertain;
+  const set = (value: number | null) =>
+    void send(
+      operatorCommandSchema.parse({
+        type: "task.allowance.set",
+        key: randomUUID(),
+        taskId,
+        expectedAllowanceVersion: allowance.version,
+        total: value,
+      }),
+    );
+  return (
+    <section id="execution-allowance" aria-labelledby="execution-allowance-h">
+      <h4 id="execution-allowance-h">Execution allowance</h4>
+      <p data-allowance-summary>{section.summary}</p>
+      <p className="muted">
+        It holds only new admissions; admitted work continues.{" "}
+        {section.excluded}
+      </p>
+      {section.canSet && (
+        <form
+          className="execution-add"
+          onSubmit={(event) => {
+            event.preventDefault();
+            if (total !== null) set(total);
+          }}
+        >
+          <label htmlFor="execution-allowance-total">Total</label>
+          <Input
+            id="execution-allowance-total"
+            className="w-24"
+            type="number"
+            min={0}
+            step={1}
+            inputMode="numeric"
+            value={draft}
+            disabled={busy}
+            onChange={(event) => setDraft(event.target.value)}
+          />
+          <Button
+            type="submit"
+            variant="secondary"
+            disabled={busy || total === null}
+          >
+            {sending ? "Saving…" : "Set total"}
+          </Button>
+          {section.canRemove && (
+            <ConfirmCommand
+              trigger="Remove…"
+              title="Remove the execution allowance?"
+              description="New admissions are no longer held by it. Charges stay recorded, and setting a total again counts them."
+              confirm="Remove allowance"
+              disabled={busy}
+              onConfirm={() => set(null)}
+            />
+          )}
+        </form>
+      )}
+      <SendFeedback
+        entry={entry}
+        outcome={outcome}
+        recorded={(c) =>
+          c.type === "task.allowance.set" && c.total === null
+            ? "Allowance removed."
+            : "Allowance set."
+        }
+        conflict="Not changed: the allowance changed since it was read."
+        check={() => void send()}
+        review={{ label: "Review current allowance", onClick: clear }}
+      />
+    </section>
+  );
+}
+
 /** The Execution tab: status, gates, lead, holds, recovery evidence and local dependencies. */
 export function TaskExecution({
   data,
@@ -365,6 +478,12 @@ export function TaskExecution({
           </ul>
         )}
       </section>
+      <ExecutionAllowance
+        data={data}
+        client={client}
+        session={session}
+        onChanged={onChanged}
+      />
       <SandboxEscalations
         escalations={data.sandboxEscalations ?? []}
         reviews={data.sandboxReviews ?? []}

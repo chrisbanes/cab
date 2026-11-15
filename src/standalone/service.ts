@@ -359,6 +359,7 @@ import {
   type TaskControlReceipt,
   type WorkspaceRecheckReceipt,
   type TaskResetReceipt,
+  type TaskAllowanceReceipt,
   type AssignmentWithdrawReceipt,
   type TaskExecutionBinding,
   type TaskExecutionBindingRecord,
@@ -5348,6 +5349,7 @@ export class StandaloneService {
       code:
         | "execution-uncertain"
         | "not-started"
+        | "allowance-exhausted"
         | "stacked-blocker-failed"
         | "external-action-uncertain"
         | "unresolved-result"
@@ -5428,6 +5430,15 @@ export class StandaloneService {
               : "Refused before it started; nothing ran",
         });
     }
+    const allowance = state.taskAllowance(taskId);
+    if (allowance.heldWorkIds.length)
+      conditions.push({
+        code: "allowance-exhausted",
+        // Stable while the same request waits, whatever other wait it shows; a recurrence after an
+        // admission, a new total or a new first held request is a new episode, never one resolved.
+        key: `allowance-exhausted:${taskId}:${allowance.version}:${allowance.charged + allowance.corrected}:${allowance.heldWorkIds[0]}`,
+        reason: attentionNext["allowance-exhausted"].reason,
+      });
     if (this.hasNonStopTaskHold(taskId))
       held.push(`task hold: ${this.nonStopTaskHoldReason(taskId)}`);
     if (!held.length)
@@ -6453,6 +6464,24 @@ export class StandaloneService {
         ),
       };
     });
+    if (!replayed) this.wakeAfterCommit();
+    return receipt;
+  }
+
+  taskAllowance(taskId: string) {
+    return this.started().state.taskAllowance(taskId);
+  }
+
+  /** Operator-only: no coordination tool reaches it, so an agent cannot extend its task. */
+  setTaskAllowance(command: {
+    key: string;
+    taskId: string;
+    expectedAllowanceVersion: number;
+    total: number | null;
+  }): TaskAllowanceReceipt {
+    this.domain().task(command.taskId);
+    const { receipt, replayed } =
+      this.started().state.setTaskAllowance(command);
     if (!replayed) this.wakeAfterCommit();
     return receipt;
   }

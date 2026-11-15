@@ -9,6 +9,7 @@ import type {
 export const attentionCodes = [
   "execution-uncertain",
   "not-started",
+  "allowance-exhausted",
   "stacked-blocker-failed",
   "external-action-uncertain",
   "approval",
@@ -45,6 +46,13 @@ export const attentionNext: Record<
     reason:
       "Refused before it ran, or its held turn was released; Start again queues it",
     inboxAction: "Start again",
+  },
+  "allowance-exhausted": {
+    operator: true,
+    action: "set the execution allowance",
+    reason:
+      "The task's execution allowance holds a new turn; admitted work continues",
+    inboxAction: "Set execution allowance",
   },
   "stacked-blocker-failed": {
     operator: true,

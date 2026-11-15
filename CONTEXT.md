@@ -221,7 +221,7 @@ turns cannot take a held slot; lead turns can also use any free slot.
 _Avoid_: Lead reserve per project
 
 **Task execution allowance**:
-A planned, optional, operator-set total on net charged execution generations for one
+An optional, operator-set total on net charged execution generations for one
 task, shared by its lead and cab delegates. At exhaustion only new admissions are held.
 It is not a time, spend, token or host-wide limit.
 _Avoid_: Budget, task cap
