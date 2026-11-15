@@ -77,7 +77,7 @@ for (const engine of ["chromium", "webkit"] as const) {
       journey.observe(page);
       const errors: string[] = [];
       page.on("pageerror", (error) => errors.push(error.message));
-      await page.goto(`${web.lanOrigin}/settings`);
+      await page.goto(`${web.lanOrigin}/settings/cli-credentials`);
       await page.getByLabel("Password", { exact: true }).fill(web.password);
       await page.getByRole("button", { name: "Sign in", exact: true }).click();
       const panel = page.locator("section.settings-panel").filter({

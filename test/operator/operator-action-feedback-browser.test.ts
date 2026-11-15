@@ -338,7 +338,7 @@ test("Profile edit, capacity and discovery saves each leave one message", async 
   await savedOutcome(page);
 
   // Each credential row keeps the confirmation of its own save.
-  await go("/settings");
+  await go("/settings/github-discovery");
   assert.equal(
     await page.getByLabel("Claude token reference", { exact: true }).count(),
     0,

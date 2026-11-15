@@ -33,9 +33,9 @@ wizard progress. A row shows Done, Next or Needs attention, with one action.
   step 3 (the first-run path) and, separately, on the Settings GitHub discovery
   credential row and the Settings → Readiness GitHub discovery row
   ([readiness check](readiness-check.md)).
-- Settings actions open their own section, so no two rows open the same place:
-  `/settings#readiness`, `#github-discovery`, `#readiness-claude-executable`
-  and `/settings/runtime#add-claude`.
+- Settings actions open their own section page, so no two rows open the same place:
+  `/settings/readiness`, `/settings/github-discovery`,
+  `/settings/readiness#readiness-claude-executable` and `/settings/runtime#add-claude`.
 - Create task is shown but unavailable while no project exists: it stays focusable
   and its reason ("Needs a project first.") is announced.
 - A required row (Runtime, Project, First task) that is not done

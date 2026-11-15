@@ -38,6 +38,9 @@ export interface SettingsProps {
   /** Bumped by the header Refresh; each settings page re-reads its own resources. */
   refreshNonce?: number;
 }
+/** Input a form left in the draft store: changed, or refused and kept for another try. */
+export const unfinished = (d: ConfigurationDraft) =>
+  d.dirty || d.phase === "rejected" || d.phase === "conflict";
 /** Re-read a page's resources when the header Refresh is pressed. */
 export function useHeaderRefresh(nonce: number | undefined, read: () => void) {
   const latest = useRef(read);

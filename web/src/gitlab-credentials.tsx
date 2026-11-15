@@ -12,6 +12,7 @@ import {
   locked,
   type SettingsProps,
   submitDraft,
+  unfinished,
   useDraft,
   useHeaderRefresh,
 } from "./settings.js";
@@ -21,7 +22,14 @@ type Credential = z.infer<
 >["data"]["credentials"][number];
 
 const envName = /^[A-Z][A-Z0-9_]*$/;
-const blank = (host = "") => ({ host, source: "glab", name: "", key: key() });
+// `target` remembers which host the form edits ("" adds one), so it can reopen after a remount.
+const blank = (host = "") => ({
+  host,
+  target: host,
+  source: "glab",
+  name: "",
+  key: key(),
+});
 
 const reasonCopy: Record<
   Extract<Credential, { state: "unavailable" }>["reason"],
@@ -62,8 +70,11 @@ export function GitLabCredentialsSection(p: SettingsProps) {
   useHeaderRefresh(p.refreshNonce, status.refresh);
   const d = useDraft(p.drafts, "code-host-credential.configure");
   useEffect(() => d.initialize(blank()), [d]);
-  // The host being edited; "" is a new host and null closes the form.
-  const [editing, setEditing] = useState<string | null>(null);
+  // The host being edited; "" is a new host and null closes the form. Input kept in the
+  // draft store from an earlier visit reopens its form.
+  const [editing, setEditing] = useState<string | null>(() =>
+    unfinished(d) ? String(d.values.target ?? "") : null,
+  );
   const shown =
     editing !== null || d.phase === "unknown" || d.phase === "pending";
   const credentials = status.state.data?.data.credentials;

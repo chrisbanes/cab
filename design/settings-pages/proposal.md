@@ -1,7 +1,7 @@
 # Settings as section pages
 
 Accepted design for [#1581](https://github.com/chrisbanes/cab/issues/1581), reusing [PR #1613](https://github.com/chrisbanes/cab/pull/1613). The section routes, reads and
-behaviour described here are not implemented; production still serves the long index, and implementation needs its own authorization. [Open the six artboards](index.html) in a browser; their fixture
+behaviour described here are implemented ([#1745](https://github.com/chrisbanes/cab/issues/1745)); the web app and its browser tests define the shipped screens. [Open the six artboards](index.html) in a browser; their fixture
 data is illustrative and their controls do not save. The gallery has fixed desktop
 and phone viewports; [the prototype](artboard.html) responds to your browser width.
 
@@ -9,7 +9,7 @@ and phone viewports; [the prototype](artboard.html) responds to your browser wid
 
 The audit uses [main at a1ab52f5](https://github.com/chrisbanes/cab/tree/a1ab52f5729317a6b0cc552e99aed96d1d90c01f), not the artboards as evidence of shipped behaviour.
 
-Today `/settings` mounts the long index; only Runtime already has its section page. The following owners must agree in any later implementation:
+Before this design, `/settings` mounted the long index and only Runtime had its section page. The following owners had to agree in the implementation:
 
 | Current source | Verified responsibility; later change |
 | --- | --- |
@@ -20,7 +20,7 @@ Today `/settings` mounts the long index; only Runtime already has its section pa
 | [`settings-sections.ts`](../../web/src/settings-sections.ts) | Safe fragment decode, section order/selection and `useFragmentLanding` share landing decisions with App. Saved scroll wins; entry URL, nav key and authentication scope distinguish history entries. |
 | [`settings-index.tsx`](../../web/src/settings-index.tsx) | All panels mount, Readiness moves first when turnStarted is false, select-plus-Go uses max-width 759px and an effect corrects focused content after reordering. Page separation can retire these index-only mechanics. |
 
-The source audit includes all href helpers and literal Settings callers, push payloads, Recovery/Readiness landing, create/detail headers, shell history, sign-in and page loaders. The route/read tables below allocate existing behaviour; they do not authorize changes to provider access, credentials, holds, approvals or recovery. Concurrent #1666 recovery work is not a dependency or an assumed shipped capability. The SPEC, user flows and production code describe the current application until implementation.
+The source audit includes all href helpers and literal Settings callers, push payloads, Recovery/Readiness landing, create/detail headers, shell history, sign-in and page loaders. The route/read tables below allocate existing behaviour; they do not authorize changes to provider access, credentials, holds, approvals or recovery. Concurrent #1666 recovery work is not a dependency or an assumed shipped capability. The SPEC and user flows describe the implemented pages.
 
 ## Recommendation
 
@@ -95,11 +95,11 @@ For fresh Chromium evidence, run the existing helper with `CAB_TEST_EVIDENCE_DIR
 
 Fresh Chromium qualification produced and visually inspected 25 captures: six desktop/phone frames (three pairs), Readiness in light and dark at 390×480, 800×768, 1024×768 and widths 759/760/1119/1120/1121, plus loading/error/delayed-target variants. All mockup assertions passed: one h1/current link, matching crumb, ordinary link/Back navigation, heading focus, Enter/Space disclosure, Tab/Shift-Tab order, hidden-link exclusion, resize focus, touch activation, 44px disclosure/link targets, overflow and zero page errors. `node --check`, typecheck, lint, format and the design-only diff checks passed. The output guard rejected missing/relative/outside-revision/source/symlink destinations before launch.
 
-This is prototype evidence, not production qualification. Production route/legacy 308/sign-in integration, real read isolation/cancellation/stale handling, saved cab history/focus, Add Claude and command reconciliation remain later implementation evidence. No screen reader/VoiceOver, physical touch device, Firefox or WebKit pass is claimed; no macOS WebKit was run. The headless touch check uses Chromium emulation. The prototype's browser Back check verifies navigation, not cab's private history restoration. The global drawer remains an inert illustration. The controller's final-head CI and external review gates remain separate from these local checks.
+This is prototype evidence, not production qualification. Production route/legacy 308/sign-in integration, real read isolation/cancellation/stale handling, saved cab history/focus, Add Claude and command reconciliation are covered by the implementation's browser tests, not by this prototype. No screen reader/VoiceOver, physical touch device, Firefox or WebKit pass is claimed; no macOS WebKit was run. The headless touch check uses Chromium emulation. The prototype's browser Back check verifies navigation, not cab's private history restoration. The global drawer remains an inert illustration. The controller's final-head CI and external review gates remain separate from these local checks.
 
 ## Route table
 
-The destinations below are planned. Existing detail URLs remain supported.
+The destinations below are implemented. Existing detail URLs remain supported.
 Legacy rewrites use client-side `replaceState`, before section resources mount:
 URL fragments never reach the server, so an HTTP redirect alone cannot do this.
 Preserve unrelated query parameters. A rewrite must not add a Back-button loop.
@@ -216,11 +216,11 @@ with the implementation.
 
 ## Foundation wording
 
-Accepted foundation wording, to be added to the foundations in `design/DESIGN.md` when implemented:
+Accepted foundation wording, now part of the foundations in `design/DESIGN.md`:
 
 > Global Settings uses a stable nine-link section navigation. Desktop content retains the 176px local column within the existing 232px/48px shell. Through 759px a house Button exposes the same ordinary links inline, reports expanded state, and keeps the current section visible while closed. At 760px local links remain visible; the global drawer threshold stays 1120px. Phone controls retain 44px targets. Section route, page title, current link, ancestor crumbs and parent Back agree. New navigation focuses its heading; saved browser-history restoration and reader interaction take precedence over delayed target landing.
 
-This changes navigation composition, not tokens, typography, colour, global drawer or density foundations. It is not yet part of the shipped foundations. Fixtures keep compact panels, 13px body text and visible state words; no form redesign or unrelated copy programme is included.
+This changes navigation composition, not tokens, typography, colour, global drawer or density foundations. Fixtures keep compact panels, 13px body text and visible state words; no form redesign or unrelated copy programme is included.
 
 ## Decisions
 
@@ -234,6 +234,6 @@ Each choice below states the adopted design and its alternative:
 | Phone | House Button plus inline ordinary links. Always-visible wrapped links remove the reveal tap but push content down; a house Sheet/drawer saves vertical space but adds overlay/focus/Back interactions alongside global navigation. Native details/summary is simpler HTML but navigation announcements vary across browser/AT combinations. | A drawer materially expands focus and history validation; inline disclosure is bounded. |
 | Order | Stable Projects → Runtime → Agents → Routing → GitHub discovery → GitLab credentials → CLI credentials → Notifications → Readiness. Readiness first is a landing choice, not a reorder. | Dynamic order recreates displacement/focus work; keep the medium slice bounded. |
 | Crumbs and Back | Link concrete ancestor sections; final crumb is text. Parent Back follows that hierarchy; browser Back restores its own entry. An alternative generic Settings parent is simpler but may resolve to a different section before first turn. | Concrete parents need focused header/Back tests; no existing create/detail URL rename. |
-| Foundations | Adopt the wording above with the navigation choices. Alternative: retain the current long-index foundation. | No shipped DESIGN/SPEC/user-flow edit until implementation. |
+| Foundations | Adopt the wording above with the navigation choices. Alternative: retain the current long-index foundation. | DESIGN, SPEC and user flows describe the implemented navigation. |
 
 The four increments require a separately authorized implementation contract. They are not four mandated PRs, new issues or elapsed-time promises.

@@ -10,6 +10,7 @@ import { QuestionResponseStates } from "./question-response-state.js";
 import {
   useCallback,
   useEffect,
+  useLayoutEffect,
   useId,
   useMemo,
   useReducer,
@@ -937,7 +938,9 @@ export function App() {
   };
   const signedIn = session?.authenticated ? session.csrfToken : null;
   // A browser set up before the app moved to the root moves its notifications on sign-in.
-  useEffect(() => {
+  // A layout effect starts the move before a directly opened Notifications page reads
+  // this browser's state, so that read waits for it.
+  useLayoutEffect(() => {
     if (signedIn) void migrateLegacyPush(client, signedIn);
   }, [client, signedIn]);
   // Registered before the sign-in early returns, so a signed-out tab routes in place too.

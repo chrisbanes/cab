@@ -118,15 +118,12 @@ export function SettingsSectionNav({
 }: {
   current: SettingsSectionId | null;
 }) {
-  const phone = useMediaQuery(phoneQuery);
   const [open, setOpen] = useState(false);
   const listId = useId();
   const trigger = useRef<HTMLButtonElement>(null),
     list = useRef<HTMLUListElement>(null);
-  // biome-ignore lint/correctness/useExhaustiveDependencies: a new section closes the list on arrival.
-  useEffect(() => setOpen(false), [current]);
-  // Focus on a control that a resize hides moves to its counterpart. The media change
-  // is seen here before the re-render removes the control.
+  // Focus on a control that a resize hides moves to its counterpart. This listener is
+  // registered before `useMediaQuery`'s, so it sees the focus before the re-render.
   const refocus = useRef<"trigger" | "link" | null>(null);
   useEffect(() => {
     const media = matchMedia(phoneQuery);
@@ -144,6 +141,9 @@ export function SettingsSectionNav({
     media.addEventListener("change", change);
     return () => media.removeEventListener("change", change);
   }, []);
+  const phone = useMediaQuery(phoneQuery);
+  // biome-ignore lint/correctness/useExhaustiveDependencies: a new section closes the list on arrival.
+  useEffect(() => setOpen(false), [current]);
   // biome-ignore lint/correctness/useExhaustiveDependencies: runs after the layout switch renders.
   useEffect(() => {
     const target = refocus.current;

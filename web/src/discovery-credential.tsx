@@ -15,6 +15,7 @@ import {
   type SettingsProps,
   submitDraft,
   useDiscoveryUnsettled,
+  unfinished,
   useDraft,
   useHeaderRefresh,
 } from "./settings.js";
@@ -73,7 +74,8 @@ export function DiscoveryCredentialRow(
   // biome-ignore lint/correctness/useExhaustiveDependencies: initialize once per draft.
   useEffect(() => d.initialize(fresh()), [d]);
   // An unsettled submission keeps the form open until it is reconciled.
-  const [open, setOpen] = useState(false);
+  // Input kept in the draft store from an earlier visit reopens the form.
+  const [open, setOpen] = useState(() => unfinished(d));
   const shown = open || d.phase === "unknown" || d.phase === "pending";
   const gh = s?.gh;
   const line = s

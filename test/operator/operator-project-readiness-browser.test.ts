@@ -564,7 +564,7 @@ test("the readiness picker offer is held by a Settings save that is not confirme
     await check.waitFor();
     assert.equal(await ghOffer(page).count(), 0);
     // Settings, reached inside the app, holds its offer and controls until this is checked.
-    await page.getByRole("link", { name: "Settings", exact: true }).click();
+    await openDiscoverySettings(page);
     const row = page.getByRole("region", {
       name: "GitHub discovery credential",
     });
@@ -606,7 +606,7 @@ test("the readiness picker offer is held by a Settings save that is not confirme
   const check = page
     .getByRole("region", { name: "GitHub discovery credential" })
     .getByRole("button", { name: "Check whether it saved" });
-  await page.getByRole("link", { name: "Settings", exact: true }).click();
+  await openDiscoverySettings(page);
   const offer = page
     .getByRole("region", { name: "GitHub discovery credential" })
     .getByRole("button", { name: "Use GitHub CLI login (@octo)" });
@@ -637,6 +637,18 @@ test("the readiness picker offer is held by a Settings save that is not confirme
     "gh:github.com",
   );
 });
+
+/** Opens Settings → GitHub discovery as one in-app entry, as a Settings link would. */
+async function openDiscoverySettings(page: Page) {
+  await page.evaluate(() => {
+    const a = document.createElement("a");
+    a.href = "/settings/github-discovery";
+    a.id = "open-discovery-settings";
+    a.textContent = "GitHub discovery settings";
+    document.querySelector("main")?.prepend(a);
+  });
+  await page.locator("#open-discovery-settings").click();
+}
 
 const labelCalls = (state: { calls: string[] }) =>
   state.calls.filter((c) => c === "labels").length;
