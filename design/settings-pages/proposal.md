@@ -99,7 +99,7 @@ This is prototype evidence, not production qualification. Production route/legac
 
 ## Route table
 
-All destinations below are new. Existing detail URLs remain supported.
+The destinations below are planned. Existing detail URLs remain supported.
 Legacy rewrites use client-side `replaceState`, before section resources mount:
 URL fragments never reach the server, so an HTTP redirect alone cannot do this.
 Preserve unrelated query parameters. A rewrite must not add a Back-button loop.

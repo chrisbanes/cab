@@ -54,7 +54,7 @@ non-negative whole-number total per task, and zero holds all new task admissions
   Admission records are kept while enforcement is off, so toggling cannot reset the
   count; activation is refused when history cannot be proved, and an enabled task whose
   accounting is missing or inconsistent holds affected admissions visibly. The total is
-  configured per task, before its first admission. Configure and admit serialize.
+  configured per task; enabling it after admissions requires provable history. Configure and admit serialize.
 
 ## Non-guarantees
 
