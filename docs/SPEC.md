@@ -1189,6 +1189,12 @@ push or provisioned-base preservation before removal. There is no force override
 The internal cleanup path still refuses while a result's uncommitted changes are
 neither committed nor delivered (see [Result workspace identity](#result-workspace-identity)).
 Missing workspaces hold affected execution visibly.
+Each task workspace root has a `scratch` directory, created when the workspace is
+provisioned or, for an older workspace, before its next turn. An occupied scratch path
+that is not a real directory refuses the turn and is left as it is. Every task turn on
+either runtime gets the directory as `CAB_SCRATCH_DIR`; Codex turns also get it as
+`TMPDIR`, set per thread rather than for the whole App Server. Project drafting turns
+get no scratch.
 A workspace held only because Git could not read its worktree identity is rechecked
 at startup, before admitting a turn and by `task workspace-recheck`, and returns to
 ready once the check passes; every other workspace hold still needs a person.
@@ -1902,7 +1908,8 @@ Codex's ([ADR-1008](adr/1008-claude-code-execution-harness.md)):
   unsandboxed retry. At `escalate-approval`, a command runs outside it only after the
   operator approves it.
 - A sandbox self-test runs before each turn; if it fails, the work waits visibly.
-- Each task has its own sandbox temporary directory (`CLAUDE_CODE_TMPDIR`).
+- Each task has its own sandbox temporary directory (`CLAUDE_CODE_TMPDIR`); its shell
+  sees `TMPDIR` as the CLI's per-user directory inside it.
 - File-editing tools are confined by the hook, not by the OS sandbox.
 - Claude loads trusted native user/project/plugin configuration alongside cab instructions.
 - Agents ask questions only through `cab_ask_question`.

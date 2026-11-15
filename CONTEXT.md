@@ -360,6 +360,12 @@ A local task's holds the project's repository links; an imported task's holds it
 repository.
 _Avoid_: Conversation when referring to a task's working files
 
+**Task scratch**:
+The `scratch` directory in a task workspace root, outside its repositories. Every task
+turn gets it as `CAB_SCRATCH_DIR`, and Codex also as `TMPDIR`. It holds disposable
+temporary files and caches; cab never treats its contents as work.
+_Avoid_: Temporary base, which is Claude's per-workspace directory outside the workspace
+
 **Workspace trimming**:
 The planned operation that deletes Git-reported ignored worktree files and scratch
 contents, keeping worktrees, tracked and non-ignored work, and other workspace-root files.

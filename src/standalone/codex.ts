@@ -749,7 +749,7 @@ export function unexpectedRequest(
 
 /** Model settings of the bound profile revision, passed only when it sets a value. */
 export interface RuntimeTurnSettings {
-  /** Candidate task-scoped binding; supplied only by the qualification harness until T1 passes. */
+  /** The task workspace's scratch child; set for every task turn, never for drafting. */
   scratchDirectory?: string;
   model: string | null;
   reasoningEffort: string | null;

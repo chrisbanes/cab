@@ -808,8 +808,15 @@ export class WorkspaceManager implements TaskWorkspaceLifecycle {
     const id = z.string().trim().min(1).max(512).parse(taskId);
     const binding = await this.withTaskLock(id, async () => {
       const current = this.store.get(id);
-      if (current && releasable(current)) return this.recheckHeld(current);
-      return current?.state === "ready" ? this.validateReady(current) : current;
+      const checked =
+        current && releasable(current)
+          ? await this.recheckHeld(current)
+          : current?.state === "ready"
+            ? await this.validateReady(current)
+            : current;
+      // A workspace provisioned before task scratch existed gets it at admission.
+      if (checked?.state === "ready") await ensureTaskScratch(checked.path);
+      return checked;
     });
     if (!binding) throw new Error(`Task ${taskId} has no workspace binding`);
     if (binding.state !== "ready")
@@ -1560,6 +1567,7 @@ export class WorkspaceManager implements TaskWorkspaceLifecycle {
         await this.assertProvisionedWorktree(repository);
         await this.recordGitDirectory(binding.taskId, repository);
       }
+      await ensureTaskScratch(binding.path);
       return this.store.update(binding.taskId, "ready", null);
     } catch (error) {
       if (isUncertainGitError(error) && error.uncertain)
@@ -2260,6 +2268,23 @@ function canonicalRoot(path: string): string {
 
 /** Bounds how long an unchanged worktree may skip its Git identity read. */
 const worktreeCheckReuseMs = 1_000;
+
+/** The task's scratch directory: created once, kept with its contents, never replaced. */
+export function taskScratchPath(workspace: string): string {
+  return join(workspace, "scratch");
+}
+
+/** Refuses a symlink or non-directory at the scratch path rather than clearing it. */
+async function ensureTaskScratch(workspace: string): Promise<void> {
+  const scratch = taskScratchPath(workspace);
+  if (!(await lstatIfExists(scratch)))
+    await mkdir(scratch, { mode: 0o700 }).catch((error: unknown) => {
+      if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
+    });
+  const info = await lstat(scratch);
+  if (info.isSymbolicLink() || !info.isDirectory())
+    throw new Error("Task scratch path is not a real directory");
+}
 
 async function lstatIfExists(path: string) {
   try {

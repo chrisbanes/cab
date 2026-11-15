@@ -408,6 +408,7 @@ import {
   repositoryBindingPaths,
   SqliteWorkspaceBindingStore,
   taskGitWritableRoots,
+  taskScratchPath,
   type TaskWorkspaceBinding,
   type TaskWorkspaceRepositoryInput,
   type WorkspaceCleanupEvidence,
@@ -10240,7 +10241,7 @@ export class StandaloneService {
         const reason = await this.untilFailure(
           runtime,
           (async () => {
-            const settings = this.turnSettings(request);
+            const settings = this.turnSettings(request, workspaceKey);
             // A stale hint fails closed: admission records the setting itself, and a
             // sandboxed turn keeps `failIfUnavailable: true`.
             const level =
@@ -10375,20 +10376,43 @@ export class StandaloneService {
       : undefined;
   }
 
-  /** Model and effort from the bound immutable profile revision. */
-  private turnSettings(request: TurnRequest): RuntimeTurnSettings | undefined {
+  /** Model and effort from the bound immutable profile revision, and a task turn's scratch. */
+  private turnSettings(
+    request: TurnRequest,
+    workspace: string,
+  ): RuntimeTurnSettings | undefined {
     const bound = this.boundProfile(request);
-    if (!bound) return undefined;
-    const runtime = this.domain().profileRuntime(
-      bound.profileId,
-      bound.revision,
-    );
-    const model = runtime.model ?? null,
-      reasoningEffort = runtime.reasoningEffort ?? null;
-    return runtime.harness === "claude" ||
+    const runtime = bound
+      ? this.domain().profileRuntime(bound.profileId, bound.revision)
+      : undefined;
+    const model = runtime?.model ?? null,
+      reasoningEffort = runtime?.reasoningEffort ?? null;
+    const scratchDirectory = this.taskScratch(request, workspace);
+    return runtime?.harness === "claude" ||
       model !== null ||
-      reasoningEffort !== null
-      ? { model, reasoningEffort }
+      reasoningEffort !== null ||
+      scratchDirectory !== undefined
+      ? {
+          model,
+          reasoningEffort,
+          ...(scratchDirectory === undefined ? {} : { scratchDirectory }),
+        }
+      : undefined;
+  }
+
+  /** A task turn in its ready bound workspace; drafting and draft turns get none. */
+  private taskScratch(
+    request: TurnRequest,
+    workspace: string,
+  ): string | undefined {
+    if (!request.taskId || request.kind === "drafting" || request.draftTurn)
+      return undefined;
+    const binding = this.started().workspaceBindings.get(request.taskId);
+    // Admission runs a task turn in the canonical path of its binding's root.
+    return binding?.state === "ready" &&
+      (binding.path === workspace ||
+        canonicalOrUndefined(binding.path) === workspace)
+      ? taskScratchPath(workspace)
       : undefined;
   }
 
@@ -10567,7 +10591,7 @@ export class StandaloneService {
           runtime.resumeThread(
             previous.threadId,
             tools,
-            this.turnSettings(request),
+            this.turnSettings(request, workspace),
             workspace,
           ),
         );
@@ -10575,7 +10599,7 @@ export class StandaloneService {
       } else {
         if (state.get(intent.id).state !== "submitting")
           throw new Error("Execution admission was held");
-        const threadSettings = this.turnSettings(request);
+        const threadSettings = this.turnSettings(request, workspace);
         threadId = await guard(
           threadSettings
             ? runtime.startThread(workspace, tools, threadSettings)
@@ -10616,7 +10640,7 @@ export class StandaloneService {
         threadId,
       );
       const prebindingGeneration = runtime.currentUserInputGeneration?.();
-      const settings = this.turnSettings(request);
+      const settings = this.turnSettings(request, workspace);
       // Only a completed predecessor is known to hold its prompt; an interrupted one
       // (shutdown requeue) leaves the thread's instructions unknown, so they are re-sent.
       const resumed =
@@ -11522,5 +11546,13 @@ export class StandaloneService {
   private started(): Started {
     if (!this.current) throw new Error("Service is not started");
     return this.current;
+  }
+}
+
+function canonicalOrUndefined(path: string): string | undefined {
+  try {
+    return realpathSync(path);
+  } catch {
+    return undefined;
   }
 }

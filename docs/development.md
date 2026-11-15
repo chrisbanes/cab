@@ -195,14 +195,18 @@ so the check there runs with the service profile: `npm ci`, then
 environment:
 
 - **Codex:** the sandbox writes only the task workspace and the managed repository's
-  Git roots; the OS temp root, `/tmp` and `~/.npm` are not writable. Set `TMPDIR`
-  and `npm_config_cache` to directories in the task workspace outside the checkout,
-  for example `../tmp` and `../npm-cache` from `repo-1`, before `npm ci`. Tests listen
-  on loopback, and Codex allows that only with the project's command network access
-  on.
-- **Claude:** the sandbox already points `TMPDIR` at the task's private temporary
-  directory. Set `npm_config_cache` as for Codex. Loopback listening needs the
-  project's local listening setting on.
+  Git roots; the OS temp root, `/tmp` and `~/.npm` are not writable. Every task turn
+  sets `CAB_SCRATCH_DIR` to the task's `scratch` directory and `TMPDIR` to the same
+  directory. Set `npm_config_cache="$CAB_SCRATCH_DIR/npm"` before `npm ci`. Tests
+  listen on loopback, and Codex allows that only with the project's command network
+  access on.
+- **Claude:** every task turn sets `CAB_SCRATCH_DIR` as for Codex; the sandbox points
+  `TMPDIR` at the task's private temporary directory. Set `npm_config_cache` as for
+  Codex. Loopback listening needs the project's local listening setting on.
+
+Keep temporary files and caches under `$CAB_SCRATCH_DIR`, not in the checkout. Scratch
+is the task's own disposable space: its contents survive between turns, but cab does
+not preserve them as work.
 
 Tests that need host access a sandbox denies check it once, before they run, and
 skip with the reason (`# SKIP process identity is unavailable here: ...` or
