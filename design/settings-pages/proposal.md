@@ -7,14 +7,14 @@ and phone viewports; [the prototype](artboard.html) responds to your browser wid
 
 ## Current source and scope
 
-The audit uses [main at a1ab52f5](https://github.com/chrisbanes/cab/tree/a1ab52f5729317a6b0cc552e99aed96d1d90c01f), not the artboards as evidence of shipped behaviour. The [design-only brief](https://github.com/chrisbanes/cab/issues/1581#issuecomment-6746154794) and [r1 plan](https://github.com/chrisbanes/cab/issues/1581#issuecomment-6876502974) govern this delivery. The brief's “no artboard” statement is stale.
+The audit uses [main at a1ab52f5](https://github.com/chrisbanes/cab/tree/a1ab52f5729317a6b0cc552e99aed96d1d90c01f), not the artboards as evidence of shipped behaviour.
 
 Today `/settings` mounts the long index; only Runtime already has its section page. The following owners must agree in any later implementation:
 
 | Current source | Verified responsibility; later change |
 | --- | --- |
-| [`app.tsx`](../../web/src/app.tsx) | `knownRoute` allow-list and pathname dispatch are separate; both need the exact proposed sections. `parentRoute` owns phone Back. `AccountRows` currently marks Settings current only at `/settings`; section and existing detail descendants need consistent Settings ancestry. `account-menu.tsx` also opens the root. |
-| [`operator-web.ts`](../../src/standalone/operator-web.ts) | `OperatorWebBoundary.shell` separately permits index, Runtime, create and UUID detail/recovery paths. Register only the proposed concrete section paths; no wildcard `/settings/*` contract. |
+| [`app.tsx`](../../web/src/app.tsx) | `knownRoute` allow-list and pathname dispatch are separate; both need the exact sections. `parentRoute` owns phone Back. `AccountRows` currently marks Settings current only at `/settings`; section and existing detail descendants need consistent Settings ancestry. `account-menu.tsx` also opens the root. |
+| [`operator-web.ts`](../../src/standalone/operator-web.ts) | `OperatorWebBoundary.shell` separately permits index, Runtime, create and UUID detail/recovery paths. Register only the concrete section paths; no wildcard `/settings/*` contract. |
 | [`operator.ts`](../../src/standalone/operator.ts) | GET/HEAD `/app/...` returns 308 to the root path with query, without a new cookie; leading slashes are collapsed. The browser owns the fragment. |
 | [`settings-view.ts`](../../web/src/settings-view.ts) | `settingsHeader` owns titles and crumbs; intermediate Projects/Agents crumbs currently have no href. Keep first-project setup's latched Overview/New project exception and the `?tab=github` → Task source alias. |
 | [`settings-sections.ts`](../../web/src/settings-sections.ts) | Safe fragment decode, section order/selection and `useFragmentLanding` share landing decisions with App. Saved scroll wins; entry URL, nav key and authentication scope distinguish history entries. |
@@ -99,7 +99,7 @@ This is prototype evidence, not production qualification. Production route/legac
 
 ## Route table
 
-All destinations below are proposed. Existing detail URLs remain supported.
+All destinations below are new. Existing detail URLs remain supported.
 Legacy rewrites use client-side `replaceState`, before section resources mount:
 URL fragments never reach the server, so an HTTP redirect alone cannot do this.
 Preserve unrelated query parameters. A rewrite must not add a Back-button loop.
@@ -214,7 +214,7 @@ to a subsequent implementation task.
 User-flow and SPEC documents describe the shipped application and change only
 with the implementation.
 
-## Proposed foundation wording
+## Foundation wording
 
 Accepted foundation wording, to be added to the foundations in `design/DESIGN.md` when implemented:
 
@@ -222,9 +222,9 @@ Accepted foundation wording, to be added to the foundations in `design/DESIGN.md
 
 This changes navigation composition, not tokens, typography, colour, global drawer or density foundations. It is not yet part of the shipped foundations. Fixtures keep compact panels, 13px body text and visible state words; no form redesign or unrelated copy programme is included.
 
-## Maintainer decisions
+## Decisions
 
-The maintainer accepted these choices as recommended:
+Each choice below states the adopted design and its alternative:
 
 | Choice | Recommendation and credible alternative | Consequence for later work |
 | --- | --- | --- |

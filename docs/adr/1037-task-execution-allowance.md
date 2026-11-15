@@ -52,8 +52,9 @@ non-negative whole-number total per task, and zero holds all new task admissions
   their own task's allowance. Lowering to or below `U` holds further admissions without
   revoking admitted work. Removing the allowance is an explicit operator decision.
   Admission records are kept while enforcement is off, so toggling cannot reset the
-  count; activation is refused when history cannot be proved. Configure and admit
-  serialize.
+  count; activation is refused when history cannot be proved, and an enabled task whose
+  accounting is missing or inconsistent holds affected admissions visibly. The total is
+  configured per task, before its first admission. Configure and admit serialize.
 
 ## Non-guarantees
 
