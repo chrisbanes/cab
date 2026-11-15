@@ -177,24 +177,27 @@ test("measurement checks actual sentinel attribution and deliberately crossed sc
   assert.throws(() =>
     assertMeasurement({ ...actual, sentinel: "b" }, expected),
   );
-  const claude = {
-    ...actual,
+  const shell = `/tmp/ens-fixture/claude-${process.getuid!()}`;
+  const claude = { ...actual, claudeBase: shell, tmp: shell };
+  const claudeExpected = {
+    ...expected,
+    harness: "claude",
     claudeBase: "/tmp/ens-fixture",
-    tmp: "/tmp/ens-fixture/claude-501",
   };
-  assert.doesNotThrow(() =>
-    assertMeasurement(claude, {
-      ...expected,
-      harness: "claude",
-      claudeBase: "/tmp/ens-fixture",
-    }),
-  );
-  assert.throws(() =>
-    assertMeasurement(
-      { ...claude, tmp: "/tmp/unowned" },
-      { ...expected, harness: "claude", claudeBase: "/tmp/ens-fixture" },
-    ),
-  );
+  assert.doesNotThrow(() => assertMeasurement(claude, claudeExpected));
+  for (const observed of [
+    { ...claude, tmp: "/tmp/unowned" },
+    // The shell sees the CLI's per-user child, never the base cab configured.
+    { ...claude, claudeBase: "/tmp/ens-fixture" },
+    // Another path under the base is not the per-user child.
+    {
+      ...claude,
+      tmp: "/tmp/ens-fixture/other",
+      claudeBase: "/tmp/ens-fixture/other",
+    },
+    { ...claude, tmp: `/tmp/ens-task-b/claude-${process.getuid!()}` },
+  ])
+    assert.throws(() => assertMeasurement(observed, claudeExpected));
 });
 
 test("finite offline matrix keeps same conversation on moved resume and writes one durable checkpoint before each dispatch", async () => {
@@ -254,8 +257,8 @@ test("finite offline matrix keeps same conversation on moved resume and writes o
                 tmp:
                   record.harness === "codex"
                     ? `${workspace}/scratch`
-                    : `${claudeBase}/claude-501`,
-                claudeBase,
+                    : `${claudeBase}/claude-${process.getuid!()}`,
+                claudeBase: `${claudeBase}/claude-${process.getuid!()}`,
                 nonce,
                 sentinel: nonce,
               },
@@ -463,8 +466,8 @@ test("production qualification bookkeeping persists exact admitted work and term
                     tmp:
                       harness === "codex"
                         ? settings.scratchDirectory
-                        : `${claudeBase}/claude-501`,
-                    claudeBase,
+                        : `${claudeBase}/claude-${process.getuid!()}`,
+                    claudeBase: `${claudeBase}/claude-${process.getuid!()}`,
                     nonce,
                     sentinel: nonce,
                   }),
@@ -580,8 +583,8 @@ test("failed restart retains ownership and allowance; failed shutdown cannot rep
                 tmp:
                   record.harness === "codex"
                     ? join(record.workspace, "scratch")
-                    : "/managed/child",
-                claudeBase: "/managed",
+                    : `/managed/claude-${process.getuid!()}`,
+                claudeBase: `/managed/claude-${process.getuid!()}`,
                 nonce: record.nonce,
                 sentinel: record.nonce,
               },

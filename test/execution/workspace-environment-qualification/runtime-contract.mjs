@@ -101,8 +101,10 @@ export function assertMeasurement(observed, expected) {
   if (expected.harness === "codex")
     assert.equal(observed.tmp, observed.scratch);
   else {
-    assert.equal(observed.claudeBase, expected.claudeBase);
-    assert.ok(observed.tmp.startsWith(`${expected.claudeBase}/`));
+    // cab sets CLAUDE_CODE_TMPDIR to the managed base; the CLI moves both to its per-user child.
+    const shell = join(expected.claudeBase, `claude-${process.getuid()}`);
+    assert.equal(observed.claudeBase, shell);
+    assert.equal(observed.tmp, shell);
   }
 }
 
