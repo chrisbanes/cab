@@ -2,10 +2,12 @@ import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import { join } from "node:path";
 import { test } from "node:test";
+import { ProjectArchivedError } from "../../src/core/project-lifecycle.js";
+import { projectArchiveBlockedMessage } from "../../src/operator/project-lifecycle-copy.js";
 import {
-  ProjectArchiveBlockedError,
-  ProjectArchivedError,
-} from "../../src/core/project-lifecycle.js";
+  OperatorApi,
+  OperatorApiError,
+} from "../../src/standalone/operator-api.js";
 import { controlledGit } from "../fixtures/controlled-git.js";
 import { processIdentityDenied } from "../fixtures/host-access.js";
 import { createOperatorFixture } from "../fixtures/operator-web.js";
@@ -69,13 +71,31 @@ async function stalledInspection(t: test.TestContext) {
     { repositoryId: "R_atlas", path: source, ref: "main" },
   ]);
   assert.equal(provisioned.state, "ready");
-  if (!domain.project(projectId).paused)
+  const api = new OperatorApi(f.service, [f.directory]);
+  const archive = () =>
+    api.execute({
+      type: "project.archive",
+      key: randomUUID(),
+      projectId,
+      expectedVersion: Number(domain.project(projectId).version),
+    });
+  const pause = (paused: boolean) =>
     run({
       type: "project.configure",
       projectId,
       expectedVersion: Number(domain.project(projectId).version),
-      paused: true,
+      paused,
     });
+  pause(false);
+  // An archive refused for active work keeps the sentence the operator UI recognises.
+  await assert.rejects(
+    archive(),
+    (error) =>
+      error instanceof OperatorApiError &&
+      error.status === 409 &&
+      error.publicMessage === projectArchiveBlockedMessage,
+  );
+  pause(true);
   assert.deepEqual(f.service.projectLifecycleStatus(projectId), []);
   const stored = () => startedOf(f.service).workspaceBindings.get(taskId);
   const before = stored();
@@ -97,12 +117,6 @@ async function stalledInspection(t: test.TestContext) {
         (e) => e.event === "ready" && e.operation === "repository-identity",
       ),
   );
-  const archive = () =>
-    run({
-      type: "project.archive",
-      projectId,
-      expectedVersion: Number(domain.project(projectId).version),
-    });
   return { f, domain, projectId, inspection, stored, before, archive };
 }
 
@@ -111,7 +125,8 @@ test("a workspace inspection read in flight does not block archive", {
 }, async (t) => {
   const { f, domain, projectId, archive } = await stalledInspection(t);
   assert.deepEqual(f.service.projectLifecycleStatus(projectId), []);
-  assert.doesNotThrow(archive, ProjectArchiveBlockedError);
+  const receipt = await archive();
+  assert.ok(receipt.kind === "configuration" && receipt.recorded);
   assert.ok(domain.project(projectId).archived);
 });
 
@@ -119,7 +134,7 @@ test("an inspection whose check fails after archive writes nothing", {
   skip: processIdentityDenied(),
 }, async (t) => {
   const { inspection, stored, before, archive } = await stalledInspection(t);
-  archive();
+  await archive();
   await assert.rejects(inspection, ProjectArchivedError);
   const after = stored();
   assert.equal(after?.state, "ready");

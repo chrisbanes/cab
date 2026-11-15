@@ -476,6 +476,14 @@ function domainApiError(error: unknown): OperatorApiError | undefined {
     return new OperatorApiError(503, "command-outcome-unknown");
   if (error instanceof DomainOperationError)
     return new OperatorApiError(503, "command-outcome-unknown");
+  if (error instanceof ProjectArchiveBlockedError)
+    return new OperatorApiError(
+      409,
+      "conflict",
+      undefined,
+      undefined,
+      projectArchiveBlockedMessage,
+    );
   if (error instanceof DomainConflictError)
     return new OperatorApiError(409, "conflict");
   if (error instanceof DomainNotFoundError)
