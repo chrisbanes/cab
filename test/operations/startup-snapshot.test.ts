@@ -865,7 +865,7 @@ function undoWorkspaceLifecycle(db: DatabaseSync) {
   );
 }
 
-/** Level 39 added the archival hold's owner token; the level 38 DDL verbatim. */
+/** Level 38 also added the archival hold's owner token; the level 37 DDL verbatim. */
 function undoArchivalHoldOwner(db: DatabaseSync) {
   db.exec(`ALTER TABLE task_archival_holds RENAME TO task_archival_holds_owned;
     CREATE TABLE IF NOT EXISTS task_archival_holds (
@@ -1044,10 +1044,9 @@ function restoreRequestSchema21(db: DatabaseSync) {
 
 /** The schema digest each migration level created. Append an entry with every level bump. */
 const SCHEMA_PINS: Record<number, string> = {
-  // The archival hold's owner token.
-  39: "b309bded2b802f5d286db17450407f99b2e11d800432b1671772d69549965464",
-  // The workspace generation, lifecycle event and maintenance operation tables.
-  38: "999116a19c47f9045181e76d236d7a74554eaed5bf36d889ddb963af41fdbe54",
+  // The workspace generation, lifecycle event and maintenance operation tables, and the
+  // archival hold's owner token.
+  38: "b309bded2b802f5d286db17450407f99b2e11d800432b1671772d69549965464",
   // The execution allowance charge ledger, allowance and unprovable-history tables.
   37: "0c31b5b745f6ff687b839528dc5481597b0fd7ef18354b8a7507697eac322795",
   36: "64917f9796266e55145f76694c1a4418b1bd73982afcfaeba189d55eabee8c9f",
@@ -2294,7 +2293,43 @@ test("workspace lifecycle migration snapshots exact level37 and retains unknown 
   try {
     await run(dirs.data, 37);
     const before = new DatabaseSync(join(dirs.data, "standalone.sqlite"));
+    // A level 37 archival hold kept for a Git-uncertain workspace: it has no owner to release it.
+    const domain = new DomainStore(before);
+    const projectId = randomUUID(),
+      taskId = randomUUID(),
+      workspaceId = randomUUID();
+    domain.execute({
+      type: "project.create",
+      actor: "operator",
+      key: randomUUID(),
+      projectId,
+      name: "Legacy hold",
+      leadProfileId: null,
+    });
+    domain.execute({
+      type: "task.create",
+      actor: "operator",
+      key: randomUUID(),
+      projectId,
+      taskId,
+      title: "Task",
+      outcome: "O",
+    });
     undoWorkspaceLifecycle(before);
+    before
+      .prepare(
+        "INSERT INTO task_workspace_bindings (taskId, workspaceId, path, repositories, state, reason, gitUncertain, createdAt, updatedAt) VALUES (?, ?, ?, '[]', 'held', 'uncertain', 1, ?, ?)",
+      )
+      .run(
+        taskId,
+        workspaceId,
+        join(dirs.data, "workspaces", workspaceId),
+        new Date().toISOString(),
+        new Date().toISOString(),
+      );
+    before
+      .prepare("INSERT INTO task_archival_holds (taskId, reason) VALUES (?, ?)")
+      .run(taskId, "Task archival in progress");
     before.close();
     assert.equal(schemaDigest(dirs.data), SCHEMA_PINS[37]);
     await run(dirs.data);
@@ -2307,33 +2342,42 @@ test("workspace lifecycle migration snapshots exact level37 and retains unknown 
     try {
       assert.deepEqual(after.prepare("PRAGMA foreign_key_check").all(), []);
       assert.equal(
-        after.prepare("SELECT count(*) n FROM workspace_generations").get()?.n,
+        after
+          .prepare(
+            "SELECT count(*) n FROM workspace_generations WHERE taskId<>?",
+          )
+          .get(taskId)?.n,
         0,
+      );
+      assert.deepEqual(
+        after
+          .prepare(
+            "SELECT reason, ownerToken FROM task_archival_holds WHERE taskId=?",
+          )
+          .all(taskId)
+          .map((row) => ({ ...row })),
+        [{ reason: "Task archival in progress", ownerToken: null }],
       );
     } finally {
       after.close();
     }
-    await assert.rejects(run(dirs.data, 37), refusal("startup-schema-newer"));
-  } finally {
-    dirs.cleanup();
-  }
-});
-
-test("archival hold owner migration snapshots exact level38 and rebuilds the table", async () => {
-  const dirs = layout();
-  try {
-    await run(dirs.data, 38);
-    const before = new DatabaseSync(join(dirs.data, "standalone.sqlite"));
-    undoArchivalHoldOwner(before);
-    before.close();
-    assert.equal(schemaDigest(dirs.data), SCHEMA_PINS[38]);
+    // A repeated start changes nothing and keeps the tokenless hold.
     await run(dirs.data);
-    const snapshot = readStartupState(dirs.data)?.snapshot;
-    assert.equal(snapshot?.from, 38);
-    assert.ok(snapshot?.path);
-    assert.equal(schemaDigest(snapshot.path), SCHEMA_PINS[38]);
-    assert.equal(schemaDigest(dirs.data), SCHEMA_PINS[39]);
-    await assert.rejects(run(dirs.data, 38), refusal("startup-schema-newer"));
+    assert.equal(schemaDigest(dirs.data), SCHEMA_PINS[MIGRATION_LEVEL]);
+    const again = new DatabaseSync(join(dirs.data, "standalone.sqlite"));
+    try {
+      assert.equal(
+        again
+          .prepare(
+            "SELECT count(*) n FROM task_archival_holds WHERE taskId=? AND ownerToken IS NULL",
+          )
+          .get(taskId)?.n,
+        1,
+      );
+    } finally {
+      again.close();
+    }
+    await assert.rejects(run(dirs.data, 37), refusal("startup-schema-newer"));
   } finally {
     dirs.cleanup();
   }
