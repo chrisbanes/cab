@@ -13,14 +13,10 @@ import {
 } from "../fixtures/native-result.js";
 import { createOperatorFixture } from "../fixtures/operator-web.js";
 import { startCliService } from "../fixtures/operator-cli.js";
-
-const allEvidence = {
-  deliveryConfirmed: true,
-  writerOwnershipResolved: true,
-  handoffsPreserved: true,
-  reconciliationEvidencePreserved: true,
-  workspaceContentsPreserved: true,
-};
+import {
+  finishTask,
+  recordDeliveredHeads,
+} from "../fixtures/workspace-removal.js";
 
 type Fixture = Awaited<ReturnType<typeof createOperatorFixture>>;
 const recorded = (f: Fixture, taskId: string, resultId: string) =>
@@ -116,9 +112,14 @@ test("a failed workspace observation still records the result, with no workspace
   assert.deepEqual(recorded(f, native.seeded.taskId, native.resultId), []);
 });
 
-test("cleanup refuses an unsettled dirty result and allows it once committed, delivered or reset", async (t) => {
+test("removal refuses an unsettled dirty result and allows it once committed, delivered or reset", async (t) => {
   const f = await createOperatorFixture();
   t.after(() => f.close());
+  const remove = (taskId: string) => {
+    if (f.service.domain().task(taskId).state === "open")
+      finishTask(f.service, taskId);
+    return f.service.removeTaskWorkspace(taskId, "manual");
+  };
   const dirtyThenCleaned = async () => {
     const native = await captureNativeResult(f, { repository: true });
     await rm(native.textPath);
@@ -129,7 +130,7 @@ test("cleanup refuses an unsettled dirty result and allows it once committed, de
 
   // (a) The files are gone but the reported work was never committed.
   const lost = await dirtyThenCleaned();
-  const refused = await f.service.archiveTask(lost.seeded.taskId, allEvidence);
+  const refused = await remove(lost.seeded.taskId);
   assert.equal(refused.outcome, "retained");
   assert.equal(
     refused.outcome === "retained" && refused.reason,
@@ -138,14 +139,12 @@ test("cleanup refuses an unsettled dirty result and allows it once committed, de
   assert.equal(refused.binding.state, "ready");
   assert.ok(existsSync(lost.worktree));
 
-  // (b) Committed: a new commit descends from the recorded HEAD.
+  // (b) Committed: a new commit descends from the recorded HEAD, and was delivered.
   const committed = await captureNativeResult(f, { repository: true });
   worktreeGit(committed.worktree, "add", "-A");
   worktreeGit(committed.worktree, "commit", "--quiet", "-m", "keep");
-  assert.equal(
-    (await f.service.archiveTask(committed.seeded.taskId, allEvidence)).outcome,
-    "cleaned",
-  );
+  await recordDeliveredHeads(f, committed.seeded.taskId);
+  assert.equal((await remove(committed.seeded.taskId)).outcome, "cleaned");
 
   // (c) Delivered: the last push descends from the recorded HEAD.
   const delivered = await dirtyThenCleaned();
@@ -165,10 +164,7 @@ test("cleanup refuses an unsettled dirty result and allows it once committed, de
       )
       .run(delivered.seeded.taskId, "R1", `cb/${randomUUID()}`, pushed),
   );
-  assert.equal(
-    (await f.service.archiveTask(delivered.seeded.taskId, allEvidence)).outcome,
-    "cleaned",
-  );
+  assert.equal((await remove(delivered.seeded.taskId)).outcome, "cleaned");
 
   // (e) A HEAD moved to an ancestor is not a commit of the reported work.
   const rewound = await captureNativeResult(f, {
@@ -185,10 +181,7 @@ test("cleanup refuses an unsettled dirty result and allows it once committed, de
   });
   await rm(rewound.textPath);
   worktreeGit(rewound.worktree, "reset", "--quiet", "--hard", "HEAD~1");
-  const rewoundResult = await f.service.archiveTask(
-    rewound.seeded.taskId,
-    allEvidence,
-  );
+  const rewoundResult = await remove(rewound.seeded.taskId);
   assert.equal(
     rewoundResult.outcome === "retained" && rewoundResult.reason,
     refusal(rewound.resultId),
@@ -196,17 +189,23 @@ test("cleanup refuses an unsettled dirty result and allows it once committed, de
 
   // (f) Files that remain keep the existing dirty-tree refusal.
   const remaining = await captureNativeResult(f, { repository: true });
-  const kept = await f.service.archiveTask(
-    remaining.seeded.taskId,
-    allEvidence,
-  );
+  const kept = await remove(remaining.seeded.taskId);
   assert.equal(
     kept.outcome === "retained" && kept.reason,
-    "Uncommitted or ignored work remains in R1",
+    "Uncommitted work remains in R1: modified tracked files or untracked files that are not ignored",
   );
 
   // (d) Reset discards the uncommitted result work once; a replay does not move it.
   const domain = f.service.domain();
+  domain.execute({
+    type: "task.configure",
+    actor: "operator",
+    key: randomUUID(),
+    projectId: lost.seeded.projectId,
+    taskId: lost.seeded.taskId,
+    expectedVersion: Number(domain.task(lost.seeded.taskId).version),
+    state: "open",
+  });
   domain.execute({
     type: "project.configure",
     actor: "operator",
@@ -229,7 +228,7 @@ test("cleanup refuses an unsettled dirty result and allows it once committed, de
     recorded(f, lost.seeded.taskId, lost.resultId)[0]?.discardedAt,
     discardedAt,
   );
-  // The reset's fresh turn reports and finishes, so cleanup sees no other writer.
+  // The reset's fresh turn reports and finishes, so removal sees no other writer.
   domain.execute({
     type: "project.configure",
     actor: "operator",
@@ -255,10 +254,7 @@ test("cleanup refuses an unsettled dirty result and allows it once committed, de
   await waitFor(
     () => !f.service.list().some((work) => work.state === "running"),
   );
-  assert.equal(
-    (await f.service.archiveTask(lost.seeded.taskId, allEvidence)).outcome,
-    "cleaned",
-  );
+  assert.equal((await remove(lost.seeded.taskId)).outcome, "cleaned");
 });
 
 test("a recorded branch name is disclosed only under the current exclusions", async (t) => {

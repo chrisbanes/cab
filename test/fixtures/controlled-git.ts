@@ -81,6 +81,7 @@ const classify = (value) => {
   if (value.startsWith("worktree add")) return "worktree-add";
   if (value.startsWith("worktree remove")) return "worktree-remove";
   if (value.startsWith("status --porcelain=v1 --untracked-files=all")) return "archive-status";
+  if (value.startsWith("--no-optional-locks status")) return "archive-status";
   if (value.startsWith("status")) return "checkout-validation";
   if (value.startsWith("rev-parse --show-toplevel") || value.startsWith("rev-parse --git-common-dir")) return "repository-identity";
   if (value.startsWith("rev-parse --verify --end-of-options")) return "ref-resolution";

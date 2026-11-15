@@ -16,6 +16,7 @@ import type {
 } from "../../src/standalone/workspace-comparison.js";
 import { createOperatorFixture } from "../fixtures/operator-web.js";
 import { seedReviewTask } from "../fixtures/task-review.js";
+import { finishTask } from "../fixtures/workspace-removal.js";
 
 function digest(bytes: Uint8Array | string): string {
   return createHash("sha256").update(bytes).digest("hex");
@@ -398,13 +399,8 @@ test("no-result draft captures exact text and comparison sides, seals, discards,
     false,
   );
 
-  const archived = await f.service.archiveTask(task.taskId, {
-    deliveryConfirmed: true,
-    writerOwnershipResolved: true,
-    handoffsPreserved: true,
-    reconciliationEvidencePreserved: true,
-    workspaceContentsPreserved: true,
-  });
+  finishTask(f.service, task.taskId);
+  const archived = await f.service.removeTaskWorkspace(task.taskId, "manual");
   assert.equal(archived.outcome, "cleaned");
   await assert.rejects(readFile(join(workspace.path, "notes.txt")));
   await f.reopen();

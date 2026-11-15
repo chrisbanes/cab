@@ -17,6 +17,7 @@ import type {
 } from "../../src/standalone/workspace-comparison.js";
 import { createOperatorFixture } from "../fixtures/operator-web.js";
 import { seedReviewTask } from "../fixtures/task-review.js";
+import { finishTask } from "../fixtures/workspace-removal.js";
 
 const digest = (bytes: Uint8Array | string) =>
   createHash("sha256").update(bytes).digest("hex");
@@ -421,13 +422,8 @@ test("submitted comparison context survives replacement, cleanup, restart and SQ
     f.service.workspaceComparisonExport(seeded.taskId, sourceComparisonId),
     undefined,
   );
-  const archived = await f.service.archiveTask(seeded.taskId, {
-    deliveryConfirmed: true,
-    writerOwnershipResolved: true,
-    handoffsPreserved: true,
-    reconciliationEvidencePreserved: true,
-    workspaceContentsPreserved: true,
-  });
+  finishTask(f.service, seeded.taskId);
+  const archived = await f.service.removeTaskWorkspace(seeded.taskId, "manual");
   assert.equal(archived.outcome, "cleaned");
   await f.reopen();
 

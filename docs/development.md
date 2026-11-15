@@ -344,8 +344,9 @@ synchronously persists the Stop hold and returns a bounded observation; only
 exact execution identities and never replays an ambiguous generation. Held-turn release
 frees only the exact generation's writer and capacity holds.
 `replaceConversation` keeps assignment snapshots while advancing its conversation
-revision, and `recordTaskResult` rejects early or stale results. `archiveTask`
-requires delivery and preservation evidence and refuses unresolved task work.
+revision, and `recordTaskResult` rejects early or stale results.
+`removeTaskWorkspace` takes only a trigger, derives every safety fact itself and
+refuses unresolved task work.
 These service contracts do not provide physical process containment. An untracked
 detached child may overlap a later writer after qualified normal success.
 

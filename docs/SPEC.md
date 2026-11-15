@@ -1174,8 +1174,9 @@ verified exit of its exact process or its 30-minute quiet period, once no indepe
 hold remains. Otherwise a timer, expired lease, quiet interval, empty terminal list,
 acknowledged Stop or operator acknowledgement cannot release them. Conversation replacement and archival
 do not automatically delete
-workspaces. Workspaces are currently retained: manual removal and the automatic
-maintenance pass are not implemented, and nothing schedules trimming yet.
+workspaces. Workspaces are retained until removed: removal has no CLI, API or UI entry
+point yet, the automatic maintenance pass is not implemented, and nothing schedules
+trimming yet.
 
 Trimming is implemented as a service-internal operation with no CLI, API or UI
 entry point. It takes the archival lease at any task status, so it refuses while
@@ -1208,11 +1209,32 @@ do not move an episode's anchor. These facts never release execution ownership.
 An interrupted maintenance journal stays held for reconciliation, even if a path is
 absent or its retention has expired.
 
-The accepted maintenance contract derives terminal and settled ownership, repository
-identity, clean tracked/non-ignored state, pending-result settlement and confirmed
-push or provisioned-base preservation before removal. There is no force override.
-The internal cleanup path still refuses while a result's uncommitted changes are
-neither committed nor delivered (see [Result workspace identity](#result-workspace-identity)).
+Removal is implemented as a service-internal operation that takes only the task and a
+trigger (manual, delivered retention, merged retention or disk limit); callers assert
+no safety fact and there is no force override. It applies only to a done or cancelled
+task. It takes the archival lease under its own operation identity and refuses unless
+execution is settled, no cab callback is running, no delivery action of the task is
+unsettled and no result's uncommitted changes are left neither committed nor
+delivered (see [Result workspace identity](#result-workspace-identity)). Every
+repository is checked before any is deleted: a modified, staged or deleted tracked
+file or an untracked file Git does not ignore refuses, ignored files do not, and a
+nested repository, submodule or task branch changed outside cab refuses. HEAD must
+equal or be an ancestor of the task branch's last push, or have no commits beyond its
+provisioned base, proved from rehashed commit objects rather than refs or a commit
+graph. Committed work beyond the last push is pushed first through normal delivery, as
+a service caller bound to the task, workspace generation, removal operation and policy
+version that may request only `branch.push`; the repository's push grant, its approval
+mode, the target-conflict check and outside-change refusal apply as for an agent, and
+the service gives no approval. A refused push keeps the whole workspace and names the
+delivery's reason; a push that already succeeded in another repository stays recorded
+and is not repeated. A removal push is recorded without restarting the delivered
+retention clock. Every repository is then proved again. Each worktree removal (never
+forced), the root deletion and the Claude temporary base release are journaled before
+they run and settled only after readback shows them gone; the completed record, with
+each repository's pushed commit or base, and the archived binding are written
+together, and asking again returns that record. A failure or uncertain Git outcome
+after an effect started holds the workspace and the journal, keeps the lease and is
+never reported as removal; after a restart it stays held with nothing more deleted.
 Missing workspaces hold affected execution visibly.
 Each task workspace root has a `scratch` directory, created when the workspace is
 provisioned or, for an older workspace, before its next turn. An occupied scratch path

@@ -12,14 +12,10 @@ import {
   worktreeGit,
 } from "../fixtures/native-result.js";
 import { seedReviewTask } from "../fixtures/task-review.js";
-
-const allEvidence = {
-  deliveryConfirmed: true,
-  writerOwnershipResolved: true,
-  handoffsPreserved: true,
-  reconciliationEvidencePreserved: true,
-  workspaceContentsPreserved: true,
-};
+import {
+  finishTask,
+  recordDeliveredHeads,
+} from "../fixtures/workspace-removal.js";
 
 const flipped = () => {
   const changed = Buffer.from(png);
@@ -117,11 +113,13 @@ test("a committed artifact is served from the recorded commit once the workspace
   assert.deepEqual(Buffer.from(await r.arrayBuffer()), png);
   assert.equal(r.headers.get("x-cab-evidence-source"), "recorded-commit");
 
-  // After cleanup the worktree is gone; the repository still holds the commit.
+  // After removal the worktree is gone; the repository still holds the commit.
   worktreeGit(native.worktree, "checkout", "--quiet", "--", ".");
-  const cleaned = await s.f.service.archiveTask(
+  await recordDeliveredHeads(s.f, native.seeded.taskId);
+  finishTask(s.f.service, native.seeded.taskId);
+  const cleaned = await s.f.service.removeTaskWorkspace(
     native.seeded.taskId,
-    allEvidence,
+    "manual",
   );
   assert.equal(cleaned.outcome, "cleaned");
   r = await s.bearer(token, path);

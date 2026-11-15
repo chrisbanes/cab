@@ -25,6 +25,8 @@ import { basename, dirname, join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { test } from "node:test";
 import { Store } from "../../src/core/store.js";
+import { WorkspaceLifecycleStore } from "../../src/core/workspace-lifecycle.js";
+import { coordinationFixture } from "../fixtures/coordination.js";
 import {
   gitEnvironmentProbe,
   hardenedGitEnvironment,
@@ -40,7 +42,6 @@ import {
   type TaskWorkspaceBinding,
   taskRepositoryBase,
   type TaskWorkspaceRepositoryInput,
-  type WorkspaceCleanupEvidence,
   type WorkspaceBindingStore,
   type WorkspaceManagerOptions,
   taskGitWritableRoots,
@@ -184,13 +185,78 @@ test("controlled Git cleanup does not signal an unrelated process from a stale i
 // Time the controlled Git gets to record SIGTERM before SIGKILL; a loaded runner can take
 // longer than 20 ms to run its handler, which lost the "term" evidence.
 const termGraceMs = 250;
-const approvedCleanup: WorkspaceCleanupEvidence = {
-  deliveryConfirmed: true,
-  writerOwnershipResolved: true,
-  handoffsPreserved: true,
-  reconciliationEvidencePreserved: true,
-  workspaceContentsPreserved: true,
-};
+const taskA = "20000000-0000-4000-8000-000000000001";
+
+/**
+ * Real domain tasks whose bound work has finished, so removal's journal and archival lease work
+ * as the service uses them; `remove` supplies no delivery facts, so only base proofs pass.
+ */
+function removalFixture(options: WorkspaceManagerOptions = {}) {
+  const coordination = coordinationFixture();
+  coordination.db.exec("UPDATE execution_intents SET state = 'completed'");
+  const root = mkdtempSync(join(tmpdir(), "cab-workspace-removal-"));
+  const workspaceRoot = join(root, "task-workspaces");
+  const open = (managerOptions: WorkspaceManagerOptions) =>
+    new WorkspaceManager(
+      new SqliteWorkspaceBindingStore(coordination.db),
+      workspaceRoot,
+      managerOptions,
+    );
+  let manager = open(options);
+  return {
+    root,
+    get manager() {
+      return manager;
+    },
+    reopen(managerOptions: WorkspaceManagerOptions = options) {
+      manager.cancelGitWork();
+      coordination.reopen();
+      coordination.db.exec("UPDATE execution_intents SET state = 'completed'");
+      manager = open(managerOptions);
+      return manager;
+    },
+    /** Removal as the service runs it, under a fresh operation's archival lease. */
+    remove(target: WorkspaceManager = manager, taskId = taskA) {
+      const operationId = randomUUID();
+      assert.equal(coordination.state.beginArchive(taskId, operationId), true);
+      const binding = new SqliteWorkspaceBindingStore(coordination.db).get(
+        taskId,
+      )!;
+      const lifecycle = new WorkspaceLifecycleStore(coordination.db);
+      lifecycle.beginOperation(
+        { taskId, workspaceId: binding.workspaceId },
+        {
+          operationId,
+          kind: "remove",
+          trigger: "manual",
+          startedAt: Date.now(),
+        },
+      );
+      const owner = { taskId, workspaceId: binding.workspaceId };
+      return target
+        .remove(taskId, {
+          workspaceId: binding.workspaceId,
+          branches: {},
+          pendingResultWork: [],
+          ownership: () =>
+            coordination.state.confirmArchive(taskId, operationId),
+          lifecycle,
+          operationId,
+          releaseClaudeBase: async () => true,
+        })
+        .finally(() => {
+          // As the service does: a refusal before any effect releases its lease.
+          if (lifecycle.operation(owner, operationId).state === "refused")
+            coordination.state.endArchive(taskId, operationId);
+        });
+    },
+    close() {
+      manager.cancelGitWork();
+      coordination.close();
+      rmSync(root, { recursive: true, force: true });
+    },
+  };
+}
 
 test("concurrent requests persist one task binding and reuse its Git worktree after reopen", async () => {
   const f = fixture();
@@ -452,41 +518,30 @@ test("interrupted checkout remains provisioning when tracked files are incomplet
   }
 });
 
-test("cleanup retains delivered workspaces with uncommitted files and removes clean archived worktrees", async () => {
-  const f = fixture();
+test("removal refuses tracked changes and removes a clean worktree from its source's list", async () => {
+  const f = removalFixture();
   try {
     const source = repository(f.root, "cleanup-source");
-    const binding = await f.manager.provision("task-cleanup", [
+    const binding = await f.manager.provision(taskA, [
       { repositoryId: "repo", path: source },
     ]);
-    const repositoryBinding = binding.repositories[0];
-    assert.ok(repositoryBinding);
-    const repoWorkspace = repositoryBinding.workspacePath;
-
-    const awaitingDelivery = await f.manager.archiveAndCleanup("task-cleanup", {
-      ...approvedCleanup,
-      deliveryConfirmed: false,
-    });
-    assert.equal(awaitingDelivery.outcome, "retained");
-    assert.equal((await f.manager.forExecution("task-cleanup")).state, "ready");
+    const repoWorkspace = binding.repositories[0]!.workspacePath;
 
     writeFileSync(join(repoWorkspace, "README.md"), "uncommitted\n");
-    const uncommitted = await f.manager.archiveAndCleanup(
-      "task-cleanup",
-      approvedCleanup,
-    );
+    const uncommitted = await f.remove();
     assert.equal(uncommitted.outcome, "retained");
-    assert.match(uncommitted.reason, /Uncommitted or ignored work remains/);
+    assert.match(
+      uncommitted.outcome === "retained" ? uncommitted.reason : "",
+      /Uncommitted work remains in repo/,
+    );
     assert.equal(
       readFileSync(join(repoWorkspace, "README.md"), "utf8"),
       "uncommitted\n",
     );
+    assert.equal((await f.manager.forExecution(taskA)).state, "ready");
 
     git(repoWorkspace, "checkout", "--", "README.md");
-    const clean = await f.manager.archiveAndCleanup(
-      "task-cleanup",
-      approvedCleanup,
-    );
+    const clean = await f.remove();
     assert.equal(clean.outcome, "cleaned");
     assert.equal(clean.binding.state, "archived");
     assert.equal(exists(binding.path), false);
@@ -502,23 +557,20 @@ test("cleanup retains delivered workspaces with uncommitted files and removes cl
 test("workspace Git runs with the hardened environment", async (t) => {
   const probe = gitEnvironmentProbe();
   t.after(() => probe.close());
-  const f = fixture({ gitExecutable: probe.executable });
+  const f = removalFixture({ gitExecutable: probe.executable });
   t.after(() => f.close());
   const repositoryA = repository(f.root, "hardened-a");
   const repositoryB = repository(f.root, "hardened-b");
 
   const result = await withHostileGitEnvironment(async () => {
-    const binding = await f.manager.provision("hardened-task", [
+    const binding = await f.manager.provision(taskA, [
       { repositoryId: "alpha", path: repositoryA },
       { repositoryId: "beta", path: repositoryB },
     ]);
     const revalidated = await f
       .reopen({ gitExecutable: probe.executable })
-      .forExecution("hardened-task");
-    const cleanup = await f.manager.archiveAndCleanup(
-      "hardened-task",
-      approvedCleanup,
-    );
+      .forExecution(taskA);
+    const cleanup = await f.remove();
     return { binding, revalidated, cleanup };
   });
 
@@ -691,17 +743,21 @@ test("validation, archive status, and removal uncertainty preserve the binding",
     },
     {
       name: "archive status",
-      commandPrefix: "status --porcelain=v1 --untracked-files=all",
+      commandPrefix: "--no-optional-locks status",
       operation: "archive-status",
-      run: async (manager: WorkspaceManager) =>
-        manager.archiveAndCleanup("uncertain-cleanup", approvedCleanup),
+      run: async (
+        manager: WorkspaceManager,
+        f: ReturnType<typeof removalFixture>,
+      ) => f.remove(manager),
     },
     {
       name: "worktree removal",
       commandPrefix: "worktree remove",
       operation: "worktree-remove",
-      run: async (manager: WorkspaceManager) =>
-        manager.archiveAndCleanup("uncertain-cleanup", approvedCleanup),
+      run: async (
+        manager: WorkspaceManager,
+        f: ReturnType<typeof removalFixture>,
+      ) => f.remove(manager),
     },
   ] as const;
 
@@ -712,10 +768,10 @@ test("validation, archive status, and removal uncertainty preserve the binding",
         NonNullable<WorkspaceManagerOptions["gitFailureObserver"]>
       >[0][] = [];
       const failureObservedAt: number[] = [];
-      const f = fixture();
+      const f = removalFixture();
       try {
         const source = repository(f.root, `source-${scenario.operation}`);
-        const ready = await f.manager.provision("uncertain-cleanup", [
+        const ready = await f.manager.provision(taskA, [
           { repositoryId: "repo", path: source },
         ]);
         assert.equal(ready.state, "ready");
@@ -735,7 +791,7 @@ test("validation, archive status, and removal uncertainty preserve the binding",
           },
         });
 
-        const pending = scenario.run(manager);
+        const pending = scenario.run(manager, f);
         const operationReady = await waitForGitEvent(
           controlled,
           ({ event, operation }) =>
@@ -791,7 +847,7 @@ test("validation, archive status, and removal uncertainty preserve the binding",
           }
         }
 
-        const held = await f.reopen().get("uncertain-cleanup");
+        const held = await f.reopen().get(taskA);
         assert.equal(held?.state, "held");
         assert.equal(held?.gitUncertain, true);
         assert.equal(held?.workspaceId, ready.workspaceId);
@@ -1033,34 +1089,6 @@ test("a legacy binding table migrates git uncertainty to false", () => {
   } finally {
     db.close();
     rmSync(root, { recursive: true, force: true });
-  }
-});
-
-test("repository-free files are retained until preservation evidence is complete", async () => {
-  const f = fixture();
-  try {
-    const binding = await f.manager.provision("artifact-task");
-    const artifact = join(binding.path, "summary.md");
-    const archive = join(f.root, "preserved-summary.md");
-    writeFileSync(artifact, "task result\n");
-
-    const held = await f.manager.archiveAndCleanup("artifact-task", {
-      ...approvedCleanup,
-      workspaceContentsPreserved: false,
-    });
-    assert.equal(held.outcome, "retained");
-    assert.equal(readFileSync(artifact, "utf8"), "task result\n");
-
-    writeFileSync(archive, readFileSync(artifact));
-    const cleaned = await f.manager.archiveAndCleanup(
-      "artifact-task",
-      approvedCleanup,
-    );
-    assert.equal(cleaned.outcome, "cleaned");
-    assert.equal(readFileSync(archive, "utf8"), "task result\n");
-    assert.equal(exists(binding.path), false);
-  } finally {
-    f.close();
   }
 });
 
@@ -1338,26 +1366,6 @@ test("task worktrees come from a cab-owned reftable repository that reads the so
     assert.notEqual(other.repositories[0]!.gitCommonDir, managed);
     assert.equal(git(source, "for-each-ref"), refs);
 
-    // Cleanup removes the worktree from the managed repository's list, not the source's.
-    git(
-      repo.workspacePath,
-      "switch",
-      "--quiet",
-      "--detach",
-      git(source, "rev-parse", "HEAD"),
-    );
-    const cleaned = await f.manager.archiveAndCleanup(
-      "project-a:task-1",
-      approvedCleanup,
-    );
-    assert.equal(cleaned.outcome, "cleaned");
-    assert.equal(
-      git(managed, "worktree", "list", "--porcelain").includes(
-        repo.workspacePath,
-      ),
-      false,
-    );
-    assert.equal(exists(managed), true);
     // The admin directory is identity: a worktree redirected to another task's is held.
     const third = await f.manager.provision("project-a:task-3", [
       { repositoryId: "repo", path: source },
@@ -1411,16 +1419,42 @@ for (const tamper of ["alternates", "files-backend"] as const) {
   });
 }
 
-test("a legacy binding made from the source checkout still validates and cleans up", async () => {
-  const { f, close } = managedFixture();
+test("removal takes a managed worktree out of the managed repository's list and keeps the repository", async () => {
+  const managedRoot = join(
+    realpathSync(tmpdir()),
+    `cab-managed-${randomUUID()}`,
+  );
+  const f = removalFixture({
+    managedRepositories: { root: managedRoot, scopeOf: () => "project" },
+  });
   try {
     const source = repository(f.root, "source");
-    const legacy = new WorkspaceManager(
-      // biome-ignore lint/complexity/useLiteralKeys: the fixture's own store
-      f.manager["store"] as WorkspaceBindingStore,
-      f.workspaceRoot,
+    const binding = await f.manager.provision(taskA, [
+      { repositoryId: "repo", path: source },
+    ]);
+    const repo = binding.repositories[0]!;
+    const managed = repo.gitCommonDir!;
+    const cleaned = await f.remove();
+    assert.equal(cleaned.outcome, "cleaned");
+    assert.equal(
+      git(managed, "worktree", "list", "--porcelain").includes(
+        repo.workspacePath,
+      ),
+      false,
     );
-    const binding = await legacy.provision("project-a:legacy", [
+    assert.equal(exists(repo.gitDirectory!), false);
+    assert.equal(exists(managed), true);
+  } finally {
+    f.close();
+    rmSync(managedRoot, { recursive: true, force: true });
+  }
+});
+
+test("a legacy binding made from the source checkout still validates and is removed", async () => {
+  const f = removalFixture();
+  try {
+    const source = repository(f.root, "source");
+    const binding = await f.manager.provision(taskA, [
       { repositoryId: "repo", path: source },
     ]);
     const repo = binding.repositories[0]!;
@@ -1428,14 +1462,8 @@ test("a legacy binding made from the source checkout still validates and cleans 
     assert.equal(repo.sourceGitCommonDir, undefined);
     assert.deepEqual(taskGitWritableRoots(binding), []);
     const reopened = f.reopen();
-    assert.equal(
-      (await reopened.forExecution("project-a:legacy")).state,
-      "ready",
-    );
-    const cleaned = await reopened.archiveAndCleanup(
-      "project-a:legacy",
-      approvedCleanup,
-    );
+    assert.equal((await reopened.forExecution(taskA)).state, "ready");
+    const cleaned = await f.remove(reopened);
     assert.equal(cleaned.outcome, "cleaned");
     assert.equal(
       git(source, "worktree", "list", "--porcelain").includes(
@@ -1444,15 +1472,21 @@ test("a legacy binding made from the source checkout still validates and cleans 
       false,
     );
   } finally {
-    close();
+    f.close();
   }
 });
 
 test("cab's Git never runs the configuration of a submodule an agent staged in its workspace", async () => {
-  const { f, close } = managedFixture();
+  const managedRoot = join(
+    realpathSync(tmpdir()),
+    `cab-managed-${randomUUID()}`,
+  );
+  const f = removalFixture({
+    managedRepositories: { root: managedRoot, scopeOf: () => "project" },
+  });
   try {
     const source = repository(f.root, "source");
-    const binding = await f.manager.provision("project-a:task-1", [
+    const binding = await f.manager.provision(taskA, [
       { repositoryId: "repo", path: source },
     ]);
     const workspace = binding.repositories[0]!.workspacePath;
@@ -1473,15 +1507,17 @@ test("cab's Git never runs the configuration of a submodule an agent staged in i
       join(workspace, ".gitmodules"),
       '[submodule "sub"]\n\tpath = sub\n\turl = ./sub\n\tignore = none\n',
     );
-    const retained = await f.manager.archiveAndCleanup(
-      "project-a:task-1",
-      approvedCleanup,
-    );
+    const retained = await f.remove();
     assert.equal(retained.outcome, "retained");
-    assert.match(retained.reason, /Uncommitted or ignored work remains/);
+    assert.match(
+      retained.outcome === "retained" ? retained.reason : "",
+      /Removing repo is refused: it contains a Git submodule/,
+    );
     assert.equal(exists(marker), false);
+    assert.equal(exists(workspace), true);
   } finally {
-    close();
+    f.close();
+    rmSync(managedRoot, { recursive: true, force: true });
   }
 });
 

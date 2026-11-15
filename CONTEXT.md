@@ -373,8 +373,10 @@ itself and other workspace-root files. Nothing schedules it yet.
 _Avoid_: Archive; Project archive is restorable
 
 **Workspace removal**:
-The planned irreversible deletion of a whole task workspace and its owned Claude
-temporary base. Task branches, change requests, results and conversations remain.
+The irreversible deletion of a done or cancelled task's whole workspace and its owned
+Claude temporary base, once cab has proved every repository delivered or still at its
+provisioned base. Task branches, change requests, results and conversations remain.
+It is service-internal; no command reaches it yet.
 _Avoid_: Archive; removed files have no restore operation
 
 **Task branch**:

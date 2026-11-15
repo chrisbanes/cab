@@ -29,6 +29,7 @@ import type {
 import { WorkspaceManager } from "../../src/standalone/workspaces.js";
 import { startedOf } from "../fixtures/service-internals.js";
 import { processIdentityDenied } from "../fixtures/host-access.js";
+import { finishTask } from "../fixtures/workspace-removal.js";
 
 class RuntimeFixture implements Runtime {
   resultReports: Array<{
@@ -205,6 +206,13 @@ async function waitForControlledGitEvent(
         })),
     )}`,
   );
+}
+
+/** Ends the fixture's task, then asks for removal as the operator would. */
+function removeWorkspace(f: { service: StandaloneService; taskId: string }) {
+  if (f.service.domain().task(f.taskId).state === "open")
+    finishTask(f.service, f.taskId);
+  return f.service.removeTaskWorkspace(f.taskId, "manual");
 }
 
 async function fixture(
@@ -1180,15 +1188,7 @@ test("ready work prevents conversation replacement and remains retryable", async
     );
     assert.equal(revision(), 1);
     assert.equal(
-      (
-        await f.service.archiveTask(f.taskId, {
-          deliveryConfirmed: true,
-          writerOwnershipResolved: true,
-          handoffsPreserved: true,
-          reconciliationEvidencePreserved: true,
-          workspaceContentsPreserved: true,
-        })
-      ).outcome,
+      (await f.service.removeTaskWorkspace(f.taskId, "manual")).outcome,
       "retained",
     );
 
@@ -1206,18 +1206,7 @@ test("ready work prevents conversation replacement and remains retryable", async
       "completed",
     );
     assert.equal(f.service.isCurrentResult("ready"), true);
-    assert.equal(
-      (
-        await f.service.archiveTask(f.taskId, {
-          deliveryConfirmed: true,
-          writerOwnershipResolved: true,
-          handoffsPreserved: true,
-          reconciliationEvidencePreserved: true,
-          workspaceContentsPreserved: true,
-        })
-      ).outcome,
-      "cleaned",
-    );
+    assert.equal((await removeWorkspace(f)).outcome, "cleaned");
   } finally {
     await f.close();
   }
@@ -1324,21 +1313,18 @@ test("archival hold prevents writer admission after workspace validation", async
     const cleanupGate = deferred();
     const cleanupEntered = deferred();
     const manager = startedOf(f.service).workspaces;
-    const archiveAndCleanup = manager.archiveAndCleanup.bind(manager);
-    manager.archiveAndCleanup = async (...args) => {
+    const removalPlan = manager.removalPlan.bind(manager);
+    manager.removalPlan = async (...args) => {
       cleanupEntered.resolve();
       await cleanupGate.promise;
-      return archiveAndCleanup(...args);
+      return removalPlan(...args);
     };
 
-    const archival = f.service.archiveTask(f.taskId, {
-      deliveryConfirmed: true,
-      writerOwnershipResolved: true,
-      handoffsPreserved: true,
-      reconciliationEvidencePreserved: true,
-      workspaceContentsPreserved: true,
-    });
+    finishTask(f.service, f.taskId);
+    const archival = removeWorkspace(f);
     await cleanupEntered.promise;
+    // A reopen during validation lets a writer queue; the archival hold still keeps it out.
+    finishTask(f.service, f.taskId, "open");
 
     const queued = await f.service.submitTask(
       "racing-writer",
@@ -1392,14 +1378,14 @@ test("archival hold prevents writer admission after workspace validation", async
 
     cleanupGate.resolve();
     assert.equal((await archival).outcome, "retained");
-    for (let attempt = 0; attempt < 100; attempt++) {
-      if (
-        f.service.turnRequests().find((item) => item.workId === "racing-writer")
-          ?.state === "completed"
-      )
-        break;
-      await new Promise<void>((resolve) => setTimeout(resolve, 0));
-    }
+    // The reopened task's writer is admitted once the lease is released; allow a loaded runner time.
+    for (
+      const deadline = Date.now() + 5_000;
+      Date.now() < deadline &&
+      f.service.turnRequests().find((item) => item.workId === "racing-writer")
+        ?.state !== "completed";
+    )
+      await new Promise<void>((resolve) => setTimeout(resolve, 10));
     const afterArchive = f.service
       .turnRequests()
       .find((item) => item.workId === "racing-writer");
@@ -1459,6 +1445,7 @@ test("uncertain archive status keeps its archival hold across restart", {
     assert.deepEqual(f.service.list(), []);
     assert.deepEqual(f.service.turnRequests(), []);
     assert.equal(f.service.taskHold(f.taskId), undefined);
+    finishTask(f.service, f.taskId);
     const serviceWithWake = f.service as unknown as {
       wakeScheduler: () => Promise<void>;
     };
@@ -1469,17 +1456,11 @@ test("uncertain archive status keeps its archival hold across restart", {
       await wakeScheduler();
     };
     controlled.setRule({
-      commandPrefix: "status --porcelain=v1 --untracked-files=all",
+      commandPrefix: "--no-optional-locks status",
       behavior: "stall",
       holdPipe: true,
     });
-    const archival = f.service.archiveTask(f.taskId, {
-      deliveryConfirmed: true,
-      writerOwnershipResolved: true,
-      handoffsPreserved: true,
-      reconciliationEvidencePreserved: true,
-      workspaceContentsPreserved: true,
-    });
+    const archival = removeWorkspace(f);
     let ready: ControlledGitEvent;
     try {
       ready = await waitForControlledGitEvent(
@@ -1862,7 +1843,7 @@ test("service stop settles archive status and worktree removal before database c
   const scenarios = [
     {
       name: "archive status",
-      commandPrefix: "status --porcelain=v1 --untracked-files=all",
+      commandPrefix: "--no-optional-locks status",
       operation: "archive-status",
     },
     {
@@ -1918,13 +1899,7 @@ test("service stop settles archive status and worktree removal before database c
           behavior: "stall",
           holdPipe: true,
         });
-        const archival = f.service.archiveTask(f.taskId, {
-          deliveryConfirmed: true,
-          writerOwnershipResolved: true,
-          handoffsPreserved: true,
-          reconciliationEvidencePreserved: true,
-          workspaceContentsPreserved: true,
-        });
+        const archival = removeWorkspace(f);
         const ready = await waitForControlledGitEvent(
           controlled,
           ({ event, operation }) =>
@@ -2626,13 +2601,7 @@ test("real Git service provisioning, execution lookup, and clean archive stay wi
         taskHold: f.service.taskHold(f.taskId),
       })}`,
     );
-    const archived = await f.service.archiveTask(f.taskId, {
-      deliveryConfirmed: true,
-      writerOwnershipResolved: true,
-      handoffsPreserved: true,
-      reconciliationEvidencePreserved: true,
-      workspaceContentsPreserved: true,
-    });
+    const archived = await removeWorkspace(f);
     t.diagnostic(`clean-archive-result ${JSON.stringify(archived)}`);
     assert.equal(archived.outcome, "cleaned");
     assert.equal(existsSync(binding?.path ?? ""), false);
@@ -2710,22 +2679,16 @@ test("archival rechecks writer ownership after cleanup validation", async () => 
       "completed",
     );
     const manager = startedOf(f.service).workspaces;
-    const archiveAndCleanup = manager.archiveAndCleanup.bind(manager);
-    manager.archiveAndCleanup = async (...args) => {
+    const remove = manager.remove.bind(manager);
+    manager.remove = async (...args) => {
       f.service.registerExecutionCallback("completed", callback.promise);
-      return archiveAndCleanup(...args);
+      return remove(...args);
     };
 
-    const result = await f.service.archiveTask(f.taskId, {
-      deliveryConfirmed: true,
-      writerOwnershipResolved: true,
-      handoffsPreserved: true,
-      reconciliationEvidencePreserved: true,
-      workspaceContentsPreserved: true,
-    });
+    const result = await removeWorkspace(f);
     assert.equal(result.outcome, "retained");
     if (result.outcome === "retained")
-      assert.match(result.reason, /writer ownership changed/);
+      assert.match(result.reason, /Task execution is not settled/);
     assert.equal(result.binding.state, "ready");
     assert.equal(
       f.service.list().find((item) => item.workId === "completed")?.state,

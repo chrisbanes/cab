@@ -859,9 +859,20 @@ function restoreDraftingSchema25(db: DatabaseSync) {
 
 /** Level 38 added only the workspace lifecycle tables. */
 function undoWorkspaceLifecycle(db: DatabaseSync) {
+  undoArchivalHoldOwner(db);
   db.exec(
     "DROP TABLE IF EXISTS workspace_lifecycle_events; DROP TABLE IF EXISTS workspace_maintenance_operations; DROP TABLE IF EXISTS workspace_generations",
   );
+}
+
+/** Level 39 added the archival hold's owner token; the level 38 DDL verbatim. */
+function undoArchivalHoldOwner(db: DatabaseSync) {
+  db.exec(`ALTER TABLE task_archival_holds RENAME TO task_archival_holds_owned;
+    CREATE TABLE IF NOT EXISTS task_archival_holds (
+      taskId TEXT PRIMARY KEY, reason TEXT NOT NULL
+    );
+    INSERT INTO task_archival_holds SELECT taskId, reason FROM task_archival_holds_owned;
+    DROP TABLE task_archival_holds_owned;`);
 }
 
 /** Level 37 added only the execution allowance tables. */
@@ -1033,6 +1044,8 @@ function restoreRequestSchema21(db: DatabaseSync) {
 
 /** The schema digest each migration level created. Append an entry with every level bump. */
 const SCHEMA_PINS: Record<number, string> = {
+  // The archival hold's owner token.
+  39: "b309bded2b802f5d286db17450407f99b2e11d800432b1671772d69549965464",
   // The workspace generation, lifecycle event and maintenance operation tables.
   38: "999116a19c47f9045181e76d236d7a74554eaed5bf36d889ddb963af41fdbe54",
   // The execution allowance charge ledger, allowance and unprovable-history tables.
@@ -2289,7 +2302,7 @@ test("workspace lifecycle migration snapshots exact level37 and retains unknown 
     assert.equal(snapshot?.from, 37);
     assert.ok(snapshot?.path);
     assert.equal(schemaDigest(snapshot.path), SCHEMA_PINS[37]);
-    assert.equal(schemaDigest(dirs.data), SCHEMA_PINS[38]);
+    assert.equal(schemaDigest(dirs.data), SCHEMA_PINS[MIGRATION_LEVEL]);
     const after = new DatabaseSync(join(dirs.data, "standalone.sqlite"));
     try {
       assert.deepEqual(after.prepare("PRAGMA foreign_key_check").all(), []);
@@ -2301,6 +2314,26 @@ test("workspace lifecycle migration snapshots exact level37 and retains unknown 
       after.close();
     }
     await assert.rejects(run(dirs.data, 37), refusal("startup-schema-newer"));
+  } finally {
+    dirs.cleanup();
+  }
+});
+
+test("archival hold owner migration snapshots exact level38 and rebuilds the table", async () => {
+  const dirs = layout();
+  try {
+    await run(dirs.data, 38);
+    const before = new DatabaseSync(join(dirs.data, "standalone.sqlite"));
+    undoArchivalHoldOwner(before);
+    before.close();
+    assert.equal(schemaDigest(dirs.data), SCHEMA_PINS[38]);
+    await run(dirs.data);
+    const snapshot = readStartupState(dirs.data)?.snapshot;
+    assert.equal(snapshot?.from, 38);
+    assert.ok(snapshot?.path);
+    assert.equal(schemaDigest(snapshot.path), SCHEMA_PINS[38]);
+    assert.equal(schemaDigest(dirs.data), SCHEMA_PINS[39]);
+    await assert.rejects(run(dirs.data, 38), refusal("startup-schema-newer"));
   } finally {
     dirs.cleanup();
   }

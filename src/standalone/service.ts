@@ -1,4 +1,7 @@
-import { WorkspaceLifecycleStore } from "../core/workspace-lifecycle.js";
+import {
+  unfinishedOperation,
+  WorkspaceLifecycleStore,
+} from "../core/workspace-lifecycle.js";
 import {
   resolveWorkspaceMaintenanceSettings,
   type WorkspaceMaintenanceSettings,
@@ -86,11 +89,13 @@ import {
   isOperatorDeliveryCaller,
   isOperatorPublicationCaller,
   isServiceDeliveryCaller,
+  isWorkspaceRemovalCaller,
   materialDigest,
   type OperatorCommentReview,
   type OperatorDeliveryCaller,
   registerPrArgumentsSchema,
   type RuntimeDeliveryCaller,
+  type WorkspaceRemovalCaller,
 } from "../core/delivery.js";
 import { leadDeliveryGuidance } from "../core/delivery-guidance.js";
 import {
@@ -130,6 +135,7 @@ import type {
   RuntimeRestartFailure,
 } from "../operator/contracts.js";
 import { ClaudeRuntime, releaseClaudeTemporaryBase } from "./claude.js";
+import { projectCleanupId } from "./project-cleanup-identities.js";
 import {
   type DraftingRun,
   DraftingRunStore,
@@ -411,7 +417,7 @@ import {
   taskScratchPath,
   type TaskWorkspaceBinding,
   type TaskWorkspaceRepositoryInput,
-  type WorkspaceCleanupEvidence,
+  type WorkspaceCleanupResult,
   type WorkspaceTrimResult,
   WorkspaceManager,
   taskRepositoryBase,
@@ -487,6 +493,17 @@ export function powerSupervisionEnabled(
     (power?.eventSource !== undefined || runtime.harness !== undefined)
   );
 }
+
+/** One removal attempt pushes an exact HEAD once: a replay names the same delivery operation. */
+const removalPushOperationId = (
+  removalOperationId: string,
+  repositoryId: string,
+  head: string,
+) =>
+  projectCleanupId(
+    "workspace-removal-push",
+    JSON.stringify([removalOperationId, repositoryId, head]),
+  );
 
 /** A synchronous throw from stop() becomes a rejection like any other. */
 const stopRuntime = (runtime: Runtime) =>
@@ -1533,6 +1550,8 @@ export class StandaloneService {
             if (isOperatorPublicationCaller(caller)) return;
             // Its mapping, task and readiness are checked by `DeliveryStore.authorize`.
             if (isServiceDeliveryCaller(caller)) return;
+            // Its removal lease, generation and task are checked by `authorizeDelivery`.
+            if (isWorkspaceRemovalCaller(caller)) return;
             if (
               request &&
               (request.action.kind === "pr.merge" ||
@@ -1688,7 +1707,7 @@ export class StandaloneService {
               : null;
           },
           approved: (request, caller) =>
-            isServiceDeliveryCaller(caller)
+            isServiceDeliveryCaller(caller) || isWorkspaceRemovalCaller(caller)
               ? false
               : isOperatorPublicationCaller(caller)
                 ? taskPublications.actionApproved(request, caller)
@@ -4530,6 +4549,35 @@ export class StandaloneService {
         throw new DomainConflictError("Task is no longer in the mapped event");
       return;
     }
+    if (isWorkspaceRemovalCaller(caller)) {
+      // Pushes only for the removal that still owns this exact workspace generation.
+      const task = domain.task(caller.taskId);
+      const binding = workspaceBindings.get(caller.taskId);
+      const generation = new WorkspaceLifecycleStore(this.cache!).current(
+        caller.taskId,
+      );
+      const operation = generation
+        ? new WorkspaceLifecycleStore(this.cache!)
+            .operations(generation)
+            .find((o) => o.operationId === caller.removalOperationId)
+        : undefined;
+      if (
+        (task.state !== "done" && task.state !== "cancelled") ||
+        Number(task.version) !== caller.taskVersion ||
+        binding?.state !== "ready" ||
+        binding.workspaceId !== caller.workspaceId ||
+        generation?.workspaceId !== caller.workspaceId ||
+        operation?.kind !== "remove" ||
+        operation.state !== "active" ||
+        !state.confirmArchive(caller.taskId, caller.removalOperationId)
+      )
+        throw new DomainConflictError(
+          "Workspace removal no longer owns the task",
+        );
+      if (deliveryStore.actionBlockers(caller.taskId, exceptOperationId).length)
+        throw new DeliveryHoldError("Task has unresolved external action");
+      return;
+    }
     const intent = state.byWorkId(caller.workId);
     if (!intent?.threadId || !intent.turnId || intent.state !== "running")
       throw new Error("Delivery caller is stale");
@@ -5901,51 +5949,209 @@ export class StandaloneService {
     }
   }
 
-  async archiveTask(taskId: string, evidence: WorkspaceCleanupEvidence) {
+  /**
+   * Removes a done or cancelled task's workspace once cab proves it safe: settled execution under
+   * this operation's archival hold, no unsettled delivery or result work, clean repositories, and
+   * each HEAD on its task branch or provisioned base. Committed but unpushed work is pushed first
+   * through normal delivery. Callers name only the trigger; a replay after success returns the
+   * original record.
+   */
+  async removeTaskWorkspace(
+    taskId: string,
+    trigger: "manual" | "delivered" | "merged" | "disk",
+  ): Promise<WorkspaceCleanupResult> {
+    const cause = z
+      .enum(["manual", "delivered", "merged", "disk"])
+      .parse(trigger);
     return this.withProjectWrite(
       this.taskProject(taskId),
       "callback",
       async () => {
-        this.domain().task(taskId);
-        const state = this.started().state;
-        const acquired =
-          evidence.writerOwnershipResolved && state.beginArchive(taskId);
-        if (!acquired)
-          return this.started().workspaces.archiveAndCleanup(taskId, {
-            ...evidence,
-            writerOwnershipResolved: false,
-          });
-        let releaseArchiveHold = false;
-        try {
-          const path = this.current?.workspaceBindings.get(taskId)?.path;
-          const workspace =
-            path && existsSync(path) ? realpathSync(path) : path;
-          const { coordination, deliveryStore } = this.started();
-          const pendingResultWork = coordination
-            .pendingDirtyResultWork(taskId)
-            .map((work) => ({
-              ...work,
-              lastPushedSha:
-                deliveryStore.taskBranch(taskId, work.repositoryId)
-                  ?.lastPushedSha ?? null,
-            }));
-          const result = await this.started().workspaces.archiveAndCleanup(
-            taskId,
-            evidence,
-            () => state.confirmArchive(taskId),
-            pendingResultWork,
+        const domain = this.domain();
+        domain.task(taskId);
+        const {
+          state,
+          workspaces,
+          workspaceBindings,
+          deliveryStore,
+          deliveryCoordinator,
+          coordination,
+        } = this.started();
+        const lifecycle = new WorkspaceLifecycleStore(this.cache!);
+        const binding = workspaceBindings.get(taskId);
+        if (!binding)
+          throw new Error(`Task ${taskId} has no workspace binding`);
+        const retained = (
+          current: TaskWorkspaceBinding,
+          reason: string,
+        ): WorkspaceCleanupResult => ({
+          outcome: "retained",
+          binding: current,
+          reason,
+        });
+        if (binding.state === "archived") {
+          const record = lifecycle.get(binding.workspaceId)
+            ? lifecycle
+                .operations(binding)
+                .find((o) => o.kind === "remove" && o.state === "completed")
+            : undefined;
+          return record
+            ? { outcome: "cleaned", binding, operation: record }
+            : retained(
+                binding,
+                "The workspace was archived without a removal record",
+              );
+        }
+        const terminal = () => {
+          const task = domain.task(taskId);
+          return task.state === "done" || task.state === "cancelled"
+            ? Number(task.version)
+            : undefined;
+        };
+        const taskVersion = terminal();
+        if (taskVersion === undefined)
+          return retained(
+            binding,
+            "Only a done or cancelled task's workspace can be removed",
           );
-          // The Claude sandbox temporary base lives exactly as long as the workspace.
-          if (result.outcome === "cleaned" && workspace)
-            await releaseClaudeTemporaryBase(workspace).catch(() => {});
-          releaseArchiveHold =
-            result.outcome === "cleaned" ||
-            (result.outcome === "retained" &&
-              result.binding.state === "ready" &&
-              !result.binding.gitUncertain);
-          return result;
+        const operationId = randomUUID();
+        if (!state.beginArchive(taskId, operationId))
+          return retained(
+            binding,
+            "Task execution is not settled or its workspace is held",
+          );
+        const owner = { taskId, workspaceId: binding.workspaceId };
+        const attempt = () =>
+          lifecycle.get(binding.workspaceId)
+            ? lifecycle
+                .operations(owner)
+                .find((o) => o.operationId === operationId)
+            : undefined;
+        try {
+          const works = (
+            this.cache!.prepare(
+              "SELECT workId FROM task_execution_bindings WHERE taskId=?",
+            ).all(taskId) as { workId: string }[]
+          ).map((row) => row.workId);
+          const blocked = () =>
+            terminal() !== taskVersion
+              ? "The task changed during workspace removal"
+              : works.some((workId) => this.callbacks.get(workId)?.size)
+                ? "A cab callback for this task is still running"
+                : deliveryStore.actionBlockers(taskId).length
+                  ? "The task has delivery actions whose outcome is not settled"
+                  : !state.confirmArchive(taskId, operationId)
+                    ? "Task execution is not settled or its workspace is held"
+                    : undefined;
+          const facts = () => ({
+            workspaceId: binding.workspaceId,
+            branches: Object.fromEntries(
+              binding.repositories.map((r) => [
+                r.repositoryId,
+                deliveryStore.taskBranch(taskId, r.repositoryId) ?? null,
+              ]),
+            ),
+            pendingResultWork: coordination
+              .pendingDirtyResultWork(taskId)
+              .map((work) => ({
+                ...work,
+                lastPushedSha:
+                  deliveryStore.taskBranch(taskId, work.repositoryId)
+                    ?.lastPushedSha ?? null,
+              })),
+            ownership: () => blocked() === undefined,
+          });
+          const refusal = blocked();
+          if (refusal) return retained(binding, refusal);
+          const generation = lifecycle.current(taskId);
+          if (generation?.workspaceId !== binding.workspaceId)
+            return retained(binding, "Workspace generation is not recorded");
+          if (lifecycle.operations(generation).some(unfinishedOperation))
+            return retained(binding, "Workspace has unfinished maintenance");
+          const plan = await workspaces.removalPlan(taskId, facts());
+          if (plan.outcome === "retained") return plan;
+          lifecycle.beginOperation(owner, {
+            operationId,
+            kind: "remove",
+            trigger: cause,
+            startedAt: Date.now(),
+          });
+          // The archival hold, not the workspace lock, spans the push: delivery reads the workspace.
+          for (const repository of plan.repositories) {
+            if (repository.proof) continue;
+            const caller: WorkspaceRemovalCaller = {
+              actor: "service",
+              purpose: "workspace-removal",
+              projectId: String(domain.task(taskId).projectId),
+              taskId,
+              taskVersion,
+              workspaceId: binding.workspaceId,
+              removalOperationId: operationId,
+              policyVersion: deliveryStore.configuration(
+                String(domain.task(taskId).projectId),
+              ).version,
+            };
+            let refused: unknown;
+            const record = await deliveryCoordinator
+              .submit(
+                {
+                  operationId: removalPushOperationId(
+                    operationId,
+                    repository.repositoryId,
+                    repository.head,
+                  ),
+                  action: {
+                    kind: "branch.push",
+                    target: { repositoryId: repository.repositoryId },
+                    commitSha: repository.head,
+                  },
+                },
+                caller,
+                (error) => {
+                  refused = error;
+                },
+              )
+              .catch((error: unknown) => {
+                refused = error;
+                return undefined;
+              });
+            if (record?.state !== "confirmed-success") {
+              const why =
+                refused instanceof Error
+                  ? refused.message
+                  : (record?.observation?.reason ?? record?.state ?? "failed");
+              const reason = `Pushing ${repository.repositoryId} to its task branch was refused: ${why}`;
+              lifecycle.refuseOperation(owner, operationId, reason);
+              return retained(workspaceBindings.get(taskId) ?? binding, reason);
+            }
+          }
+          return await workspaces.remove(taskId, {
+            ...facts(),
+            lifecycle,
+            operationId,
+            releaseClaudeBase: async () =>
+              (await releaseClaudeTemporaryBase(binding.path)).outcome ===
+              "complete",
+          });
+        } catch (error) {
+          const current = attempt();
+          if (current?.state === "active" && !current.effects.length)
+            lifecycle.refuseOperation(
+              owner,
+              operationId,
+              "Workspace removal failed before deleting anything",
+            );
+          throw error;
         } finally {
-          if (releaseArchiveHold) state.endArchive(taskId);
+          // A held removal may have deleted something, and uncertain Git may still act: both keep
+          // this operation's hold until reconciled.
+          const current = attempt();
+          if (
+            !workspaceBindings.get(taskId)?.gitUncertain &&
+            current?.state !== "active" &&
+            current?.state !== "held"
+          )
+            state.endArchive(taskId, operationId);
           await this.wakeScheduler();
         }
       },
@@ -5966,7 +6172,8 @@ export class StandaloneService {
       async () => {
         this.domain().task(taskId);
         const { state, workspaces, workspaceBindings } = this.started();
-        if (!state.beginArchive(taskId))
+        const owner = randomUUID();
+        if (!state.beginArchive(taskId, owner))
           return {
             outcome: "refused",
             binding: workspaceBindings.get(taskId),
@@ -5977,13 +6184,13 @@ export class StandaloneService {
             taskId,
             trigger,
             new WorkspaceLifecycleStore(this.cache!),
-            () => state.confirmArchive(taskId),
+            () => state.confirmArchive(taskId, owner),
           );
         } finally {
           // Trim effects are awaited before it returns or throws, so only Git uncertainty
           // recorded on the workspace can mean an unsettled child; that keeps the lease.
           if (!workspaceBindings.get(taskId)?.gitUncertain)
-            state.endArchive(taskId);
+            state.endArchive(taskId, owner);
           await this.wakeScheduler();
         }
       },

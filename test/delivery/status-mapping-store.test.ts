@@ -14,7 +14,7 @@ import { StatusMappingStore } from "../../src/core/status-mapping.js";
 import type { StatusMapping } from "../../src/core/status-mapping-contracts.js";
 import { Store } from "../../src/core/store.js";
 
-type ServiceCaller = Extract<DeliveryCaller, { actor: "service" }>;
+type ServiceCaller = Extract<DeliveryCaller, { purpose: "status-mapping" }>;
 import type { IssueSnapshot } from "../../src/standalone/github-source.js";
 
 const P = "P_1",

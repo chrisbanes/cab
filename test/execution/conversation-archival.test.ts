@@ -112,7 +112,7 @@ const protectedCases: [string, string][] = [
   ],
   [
     "archival hold",
-    "INSERT INTO task_archival_holds SELECT taskId, 'cleanup' FROM task_execution_bindings WHERE workId = 'work-child-a'",
+    "INSERT INTO task_archival_holds (taskId, reason) SELECT taskId, 'cleanup' FROM task_execution_bindings WHERE workId = 'work-child-a'",
   ],
   [
     "capacity ownership",

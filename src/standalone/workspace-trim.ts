@@ -18,13 +18,14 @@ export const trimStatusArguments = [
   "--ignore-submodules=all",
 ] as const;
 
+/** `dirty`: a tracked change or a non-ignored untracked file, which removal must not discard. */
 export type TrimScan =
-  | { ok: true; ignored: string[] }
+  | { ok: true; ignored: string[]; dirty: boolean }
   | { ok: false; reason: string };
 
 /** Ignored untracked file paths, or a refusal when any entry cannot be proved disposable. */
 export function ignoredTrimPaths(output: Buffer): TrimScan {
-  if (output.length === 0) return { ok: true, ignored: [] };
+  if (output.length === 0) return { ok: true, ignored: [], dirty: false };
   const text = output.toString("utf8");
   if (!Buffer.from(text, "utf8").equals(output))
     return { ok: false, reason: "Git reported a path that is not UTF-8" };
@@ -32,11 +33,13 @@ export function ignoredTrimPaths(output: Buffer): TrimScan {
   if (entries.pop() !== "")
     return { ok: false, reason: "Git status output was incomplete" };
   const ignored: string[] = [];
+  let dirty = false;
   for (const entry of entries) {
     const code = entry.slice(0, 2);
     const path = entry.slice(3);
     if (entry[2] !== " " || !path || /[RC]/.test(code))
       return { ok: false, reason: "Git status output was not understood" };
+    if (code !== "!!") dirty = true;
     if (code !== "!!" && code !== "??") continue;
     // Only a directory Git declined to enumerate appears with a trailing slash.
     if (path.endsWith("/"))
@@ -46,7 +49,7 @@ export function ignoredTrimPaths(output: Buffer): TrimScan {
       return { ok: false, reason: "Git reported an unsafe ignored path" };
     ignored.push(path);
   }
-  return { ok: true, ignored };
+  return { ok: true, ignored, dirty };
 }
 
 /** A relative path with no empty, `.`, `..` or `.git` component. */

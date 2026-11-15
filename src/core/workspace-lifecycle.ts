@@ -129,7 +129,8 @@ export const workspaceOperationSchema = operationInputSchema
   .extend({
     taskId: identity,
     workspaceId: z.uuid(),
-    state: z.enum(["active", "held", "completed"]),
+    /** Refused: stopped before any destructive effect, so it blocks nothing. */
+    state: z.enum(["active", "held", "refused", "completed"]),
     reason: z.string().min(1).max(4096).nullable(),
     effects: z.array(effectSchema).max(1024),
     completedAt: time.nullable(),
@@ -145,7 +146,9 @@ export const workspaceOperationSchema = operationInputSchema
         operation.effects.length ||
       (operation.repositories !== null) !==
         (completed && operation.kind === "remove") ||
-      (operation.reason !== null) !== (operation.state === "held") ||
+      (operation.reason !== null) !==
+        (operation.state === "held" || operation.state === "refused") ||
+      (operation.state === "refused" && operation.effects.length > 0) ||
       operation.effects.some(
         (effect) =>
           effect.startedAt < operation.startedAt ||
@@ -162,6 +165,11 @@ export const workspaceOperationSchema = operationInputSchema
       });
   });
 export type WorkspaceOperation = z.infer<typeof workspaceOperationSchema>;
+export type WorkspaceRemovalProof = z.infer<typeof removalProofSchema>;
+
+/** Active or held maintenance still owns its workspace generation. */
+export const unfinishedOperation = (operation: WorkspaceOperation) =>
+  operation.state === "active" || operation.state === "held";
 
 /** Stores facts only; callers retain ownership, safety checks and physical readback. */
 export class WorkspaceLifecycleStore {
@@ -331,6 +339,30 @@ export class WorkspaceLifecycleStore {
       repositoryId,
       commit: sha,
       removalOperationId: null,
+    });
+  }
+
+  /** A push made by a removal attempt; it is recorded but never restarts a retention clock. */
+  recordRemovalPush(
+    caller: { taskId: string; workspaceId: string; removalOperationId: string },
+    repositoryId: string,
+    operationId: string,
+    sha: string,
+    at: number,
+  ): void {
+    const generation = this.get(caller.workspaceId);
+    if (
+      generation?.taskId !== caller.taskId ||
+      !generation.repositories.some((r) => r.repositoryId === repositoryId)
+    )
+      return;
+    this.observe(generation, {
+      kind: "push",
+      eventId: `push:${operationId}`,
+      at,
+      repositoryId,
+      commit: sha,
+      removalOperationId: caller.removalOperationId,
     });
   }
 
@@ -634,9 +666,11 @@ export class WorkspaceLifecycleStore {
           this.conflict("Repository is outside workspace generation");
         if (event.kind === "push") {
           if (event.removalOperationId !== null) {
-            const operation = this.operation(owner, event.removalOperationId);
-            if (operation.kind !== "remove" || operation.state !== "active")
-              this.conflict("Removal push requires its active operation");
+            // A push whose outcome was reconciled later may outlive its attempt.
+            if (
+              this.operation(owner, event.removalOperationId).kind !== "remove"
+            )
+              this.conflict("Removal push requires its removal operation");
           } else {
             generation.lastPushAt = at;
             if (repository.pushedCommit !== event.commit) {
@@ -698,11 +732,7 @@ export class WorkspaceLifecycleStore {
           this.conflict("Maintenance operation identity reused");
         return existing;
       }
-      if (
-        this.operations(owner).some(
-          (operation) => operation.state !== "completed",
-        )
-      )
+      if (this.operations(owner).some(unfinishedOperation))
         this.conflict("Workspace has unfinished maintenance");
       const operation: WorkspaceOperation = {
         ...parsed,
@@ -842,6 +872,28 @@ export class WorkspaceLifecycleStore {
       operation.reason = z.string().min(1).max(4096).parse(reason);
       this.saveOperation(operation);
     });
+  }
+
+  /** Ends an attempt that started no destructive effect; a started effect must be held instead. */
+  refuseOperation(
+    owner: GenerationIdentity,
+    operationId: string,
+    reason: string,
+  ): void {
+    this.write(() => {
+      const operation = this.operation(owner, operationId);
+      this.active(operation);
+      if (operation.effects.length)
+        this.conflict("Maintenance with started effects cannot be refused");
+      operation.state = "refused";
+      operation.reason = z.string().min(1).max(4096).parse(reason);
+      this.saveOperation(operation);
+    });
+  }
+
+  /** Runs `action` in one transaction with other writes on the same database. */
+  atomically<T>(action: () => T): T {
+    return this.write(action);
   }
 
   completeOperation(

@@ -291,7 +291,7 @@ test("merge clocks need every exact repository and do not advance on polling or 
   }
 });
 
-test("a removal push preserves the retention anchor and requires its exact active operation", () => {
+test("a removal push preserves the retention anchor and requires its own removal operation", () => {
   const { db, store, input } = fixture();
   try {
     const push = {
@@ -328,10 +328,14 @@ test("a removal push preserves the retention anchor and requires its exact activ
       operation.operationId,
       "child settlement unknown",
     );
-    assert.throws(
-      () => store.observe(input, { ...cleanupPush, eventId: "held-push" }),
-      /active operation/,
-    );
+    // A push reconciled after its attempt stopped is still the removal's, never a delivery clock.
+    const late = store.observe(input, {
+      ...cleanupPush,
+      eventId: "held-push",
+      at: 130,
+    });
+    assert.equal(late.lastPushAt, 90);
+    assert.equal(late.repositoryClocks[0]?.pushedAt, 130);
   } finally {
     db.close();
   }

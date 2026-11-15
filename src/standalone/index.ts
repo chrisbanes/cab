@@ -75,7 +75,6 @@ export type {
   TaskWorkspaceRepository,
   TaskWorkspaceRepositoryInput,
   WorkspaceBindingStore,
-  WorkspaceCleanupEvidence,
   WorkspaceCleanupResult,
   WorkspaceTrimResult,
 } from "./workspaces.js";

@@ -47,6 +47,8 @@ import { tmpdir } from "../fixtures/temp.js";
 
 const taskA = "20000000-0000-4000-8000-000000000001";
 const taskB = "20000000-0000-4000-8000-000000000002";
+// The operation that owns the archival lease in these tests.
+const leaseOwner = "60000000-0000-4000-8000-000000000001";
 const newline = "new\nline.log";
 
 function git(cwd: string, ...args: string[]): string {
@@ -203,11 +205,11 @@ function lease(
   taskId: string,
   atCall?: (call: number) => void,
 ) {
-  assert.equal(f.state.beginArchive(taskId), true);
+  assert.equal(f.state.beginArchive(taskId, leaseOwner), true);
   let calls = 0;
   return () => {
     atCall?.(++calls);
-    return f.state.confirmArchive(taskId);
+    return f.state.confirmArchive(taskId, leaseOwner);
   };
 }
 
@@ -359,7 +361,7 @@ test("a nested repository or submodule refuses that repository's trim and delete
       "Trimming repo-a is refused: it contains a nested Git repository",
     );
     assert.deepEqual(tree(binding.path), before);
-    f.state.endArchive(taskA);
+    f.state.endArchive(taskA, leaseOwner);
 
     const submodule = source(f.root, "source-sub", "*.o\n");
     commit(submodule);
@@ -412,9 +414,9 @@ test("an unsettled lease at the start refuses without journaling or deleting", a
     f.db
       .prepare("INSERT INTO task_writer_holds (taskId, reason) VALUES (?, ?)")
       .run(taskA, "writer");
-    assert.equal(f.state.beginArchive(taskA), false);
+    assert.equal(f.state.beginArchive(taskA, leaseOwner), false);
     const result = await manager.trim(taskA, "manual", f.lifecycle, () =>
-      f.state.confirmArchive(taskA),
+      f.state.confirmArchive(taskA, leaseOwner),
     );
     assert.deepEqual(
       result.outcome === "refused" && result.reason,
@@ -453,7 +455,7 @@ for (const [name, inject] of [
   ],
   [
     "a lost lease",
-    (f: ReturnType<typeof fixture>) => f.state.endArchive(taskA),
+    (f: ReturnType<typeof fixture>) => f.state.endArchive(taskA, leaseOwner),
   ],
 ] as const)
   test(`${name} between repositories holds the journal with the completed repository only`, async () => {
@@ -497,7 +499,7 @@ for (const [name, inject] of [
       f.db.exec(
         "DELETE FROM task_writer_holds; DELETE FROM task_writer_ambiguity_holds",
       );
-      f.state.endArchive(taskA);
+      f.state.endArchive(taskA, leaseOwner);
       const again = await manager.trim(
         taskA,
         "disk",

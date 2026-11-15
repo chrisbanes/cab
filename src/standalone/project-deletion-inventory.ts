@@ -1602,7 +1602,7 @@ export const projectDeletionInventory = {
     ownership: "projectId=P",
   },
   task_archival_holds: {
-    columns: ["taskId", "reason"],
+    columns: ["taskId", "reason", "ownerToken"],
     ownership: "taskId in T",
   },
   task_control_receipts: {

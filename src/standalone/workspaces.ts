@@ -1,7 +1,9 @@
 import {
   initializedWorkspaceLifecycle,
+  unfinishedOperation,
   type WorkspaceLifecycleStore,
   type WorkspaceOperation,
+  type WorkspaceRemovalProof,
 } from "../core/workspace-lifecycle.js";
 import {
   assertRealDirectory,
@@ -240,15 +242,38 @@ export interface CapturedWorkspaceRemovalJournal {
   unobserved(): void;
 }
 
-export interface WorkspaceCleanupEvidence {
-  deliveryConfirmed: boolean;
-  writerOwnershipResolved: boolean;
-  handoffsPreserved: boolean;
-  reconciliationEvidencePreserved: boolean;
-  workspaceContentsPreserved: boolean;
+/** The task branch a repository delivers to, as the delivery store recorded it. */
+export interface RemovalBranch {
+  branch: string;
+  lastPushedSha: string | null;
+  outsideHeadSha: string | null;
 }
 
-/** A result that recorded uncommitted changes; cleanup refuses until the work is committed or delivered. */
+/** Facts the service derived for removal; the manager proves the rest from Git and the disk. */
+export interface WorkspaceRemovalInput {
+  workspaceId: string;
+  branches: Readonly<Record<string, RemovalBranch | null>>;
+  pendingResultWork: readonly PendingResultWork[];
+  /** The caller's lease and settled facts, rechecked before and between destructive phases. */
+  ownership: () => boolean;
+}
+
+type WorkspaceRemovalPlanRepository = {
+  repositoryId: string;
+  head: string;
+  /** Null: HEAD has committed work beyond its last push that must be pushed first. */
+  proof: WorkspaceRemovalProof | null;
+};
+
+export type WorkspaceRemovalPlan =
+  | {
+      outcome: "planned";
+      binding: TaskWorkspaceBinding;
+      repositories: WorkspaceRemovalPlanRepository[];
+    }
+  | { outcome: "retained"; binding: TaskWorkspaceBinding; reason: string };
+
+/** A result that recorded uncommitted changes; removal refuses until the work is committed or delivered. */
 export interface PendingResultWork {
   resultId: string;
   repositoryId: string;
@@ -256,8 +281,13 @@ export interface PendingResultWork {
   lastPushedSha: string | null;
 }
 
+/** Cleaned: the workspace and Claude base were read back gone, with the completed removal record. */
 export type WorkspaceCleanupResult =
-  | { outcome: "cleaned"; binding: TaskWorkspaceBinding }
+  | {
+      outcome: "cleaned";
+      binding: TaskWorkspaceBinding;
+      operation: WorkspaceOperation;
+    }
   | { outcome: "retained"; binding: TaskWorkspaceBinding; reason: string };
 
 /** Trimmed: every effect settled after readback. Held: effects may have run; the journal says which. */
@@ -326,12 +356,6 @@ export interface TaskWorkspaceLifecycle {
     options?: { reuseRecentIdentity?: boolean },
   ): Promise<TaskWorkspaceBinding | undefined>;
   forExecution(taskId: string): Promise<TaskWorkspaceBinding>;
-  archiveAndCleanup(
-    taskId: string,
-    evidence: WorkspaceCleanupEvidence,
-    finalWriterCheck?: () => boolean,
-    pendingResultWork?: readonly PendingResultWork[],
-  ): Promise<WorkspaceCleanupResult>;
 }
 
 export interface WorkspaceBindingStore {
@@ -926,122 +950,304 @@ export class WorkspaceManager implements TaskWorkspaceLifecycle {
       : checked;
   }
 
-  archiveAndCleanup(
+  /**
+   * Proves, under the task lock, whether every repository can be removed: no tracked change or
+   * non-ignored untracked file, no outside head, and HEAD contained in its last push or provisioned
+   * base. A repository whose committed work descends from both still needs a push (`proof` null).
+   */
+  removalPlan(
     taskId: string,
-    evidence: WorkspaceCleanupEvidence,
-    finalWriterCheck?: () => boolean,
-    pendingResultWork: readonly PendingResultWork[] = [],
+    input: WorkspaceRemovalInput,
+  ): Promise<WorkspaceRemovalPlan> {
+    const id = z.string().trim().min(1).max(512).parse(taskId);
+    return this.withTaskLock(id, () => this.inspectRemoval(id, input));
+  }
+
+  /**
+   * Removes the workspace once every repository is proved delivered: each effect is journaled
+   * before it runs and settled only after readback, then the record and archived binding are
+   * written together. A refusal before any effect ends the operation as refused; a failure after
+   * one holds the binding and the operation with the partial journal.
+   */
+  remove(
+    taskId: string,
+    input: WorkspaceRemovalInput & {
+      lifecycle: WorkspaceLifecycleStore;
+      operationId: string;
+      /** Releases the Claude sandbox temporary base; true only after readback shows it gone. */
+      releaseClaudeBase: () => Promise<boolean>;
+    },
   ): Promise<WorkspaceCleanupResult> {
     const id = z.string().trim().min(1).max(512).parse(taskId);
-    const approval = z
-      .object({
-        deliveryConfirmed: z.boolean(),
-        writerOwnershipResolved: z.boolean(),
-        handoffsPreserved: z.boolean(),
-        reconciliationEvidencePreserved: z.boolean(),
-        workspaceContentsPreserved: z.boolean(),
-      })
-      .parse(evidence);
-    return this.withTaskLock(id, async () => {
-      const binding = this.store.get(id);
-      if (!binding) throw new Error(`Task ${id} has no workspace binding`);
-      if (binding.state !== "ready")
-        return this.retained(
-          binding,
-          binding.reason ?? `Workspace is ${binding.state}`,
+    const { lifecycle, operationId } = input;
+    const owner = { taskId: id, workspaceId: input.workspaceId };
+    return this.withTaskLock(id, async (): Promise<WorkspaceCleanupResult> => {
+      const refuse = (binding: TaskWorkspaceBinding, reason: string) => {
+        lifecycle.refuseOperation(owner, operationId, reason);
+        return this.retained(binding, reason);
+      };
+      const plan = await this.inspectRemoval(id, input);
+      if (plan.outcome === "retained") return refuse(plan.binding, plan.reason);
+      const unpushed = plan.repositories.find((r) => !r.proof);
+      if (unpushed)
+        return refuse(
+          plan.binding,
+          `${unpushed.repositoryId} has commits that are not on its task branch`,
         );
-
-      const missingEvidence = Object.entries(approval).find(
-        ([, value]) => !value,
-      )?.[0];
-      if (missingEvidence)
-        return this.retained(
-          binding,
-          `Workspace retained until ${missingEvidence} is confirmed`,
+      const generation = lifecycle.current(id);
+      const operation = lifecycle.operation(owner, operationId);
+      if (
+        generation?.workspaceId !== plan.binding.workspaceId ||
+        generation.path !== plan.binding.path ||
+        operation.kind !== "remove" ||
+        operation.state !== "active" ||
+        operation.effects.length
+      )
+        return refuse(plan.binding, "Workspace generation changed");
+      if (!input.ownership())
+        return refuse(
+          plan.binding,
+          "Workspace retained because task ownership changed during removal validation",
         );
-
-      const checked = await this.validateReady(binding);
-      if (checked.state !== "ready")
-        return this.retained(
-          checked,
-          checked.reason ?? "Workspace is not available for cleanup",
-        );
-
-      for (const repository of checked.repositories) {
-        const status = await this.git(
-          repository.workspacePath,
-          "archive-status",
-          "status",
-          "--porcelain=v1",
-          "--untracked-files=all",
-          "--ignored=matching",
-          "--ignore-submodules=dirty",
-        ).catch((error: unknown) => {
-          if (isUncertainGitError(error)) {
-            const held = this.store.markGitUncertain(id, error.message);
-            return this.retained(held, error.message);
-          }
-          throw error;
-        });
-        if (typeof status !== "string") return status;
-        if (status.length > 0)
-          return this.retained(
-            checked,
-            `Uncommitted or ignored work remains in ${repository.repositoryId}`,
-          );
-      }
-
-      for (const work of pendingResultWork) {
-        const repository = checked.repositories.find(
-          (candidate) => candidate.repositoryId === work.repositoryId,
-        );
-        if (repository && (await this.resultWorkSettled(repository, work)))
-          continue;
-        return this.retained(
-          checked,
-          `Result ${work.resultId} recorded uncommitted changes in ${work.repositoryId} that are neither committed nor delivered; commit or deliver them, or reset the task to discard them`,
-        );
-      }
-
-      if (finalWriterCheck && !finalWriterCheck())
-        return this.retained(
-          checked,
-          "Workspace retained because writer ownership changed during cleanup validation",
-        );
-
       const archiving = this.store.update(
         id,
         "archiving",
-        "Workspace cleanup in progress",
+        "Workspace removal in progress",
       );
-      try {
-        for (const repository of archiving.repositories) {
-          await this.git(
-            worktreeOwner(repository),
-            "worktree-remove",
-            "worktree",
-            "remove",
-            repository.workspacePath,
+      let running: string | undefined;
+      const effect = async (
+        target:
+          | { kind: "repository"; repositoryId: string }
+          | { kind: "root" | "claude-base" },
+        run: () => Promise<boolean>,
+      ) => {
+        const current = this.store.get(id);
+        if (
+          !input.ownership() ||
+          current?.workspaceId !== archiving.workspaceId ||
+          current.path !== archiving.path ||
+          current.state !== "archiving"
+        )
+          throw new Error("Task ownership changed during workspace removal");
+        running = randomUUID();
+        lifecycle.startEffect(owner, operationId, {
+          effectId: running,
+          target,
+          startedAt: Date.now(),
+        });
+        if (!(await run()))
+          throw new Error(
+            `${target.kind === "repository" ? target.repositoryId : target.kind} is still present after removal`,
           );
-        }
-        await this.assertManagedRoot(archiving);
-        await rm(archiving.path, { recursive: true });
-        return {
-          outcome: "cleaned",
-          binding: this.store.update(id, "archived", null),
-        };
-      } catch (error) {
-        const reason = `Workspace cleanup interrupted: ${messageOf(error)}`;
-        const held =
-          isUncertainGitError(error) && error.uncertain
-            ? this.store.markGitUncertain(id, error.message)
-            : this.store.update(id, "held", reason);
-        return this.retained(
-          held,
-          held.reason ?? "Workspace cleanup interrupted",
+        lifecycle.settleEffect(
+          owner,
+          operationId,
+          running,
+          "succeeded",
+          Date.now(),
         );
+        running = undefined;
+      };
+      try {
+        for (const repository of archiving.repositories)
+          await effect(
+            { kind: "repository", repositoryId: repository.repositoryId },
+            async () => {
+              await this.assertManagedRoot(archiving);
+              if (!(await this.isExistingWorktree(repository)))
+                throw new Error(
+                  `Worktree ${repository.repositoryId} is missing`,
+                );
+              // Never --force: Git refuses a worktree that is no longer clean.
+              await this.git(
+                worktreeOwner(repository),
+                "worktree-remove",
+                "worktree",
+                "remove",
+                repository.workspacePath,
+              );
+              return (
+                !(await lstatIfExists(repository.workspacePath)) &&
+                !(
+                  repository.gitDirectory &&
+                  (await lstatIfExists(repository.gitDirectory))
+                )
+              );
+            },
+          );
+        await effect({ kind: "root" }, async () => {
+          await this.assertManagedRoot(archiving);
+          await rm(archiving.path, { recursive: true });
+          return !(await lstatIfExists(archiving.path));
+        });
+        await effect({ kind: "claude-base" }, input.releaseClaudeBase);
+        if (await lstatIfExists(archiving.path))
+          throw new Error("Task workspace reappeared after removal");
+        return lifecycle.atomically(() => ({
+          outcome: "cleaned" as const,
+          operation: lifecycle.completeOperation(
+            owner,
+            operationId,
+            lifecycle.get(archiving.workspaceId)!.revision,
+            Date.now(),
+            plan.repositories.map((r) => r.proof!),
+          ),
+          binding: this.store.update(id, "archived", null),
+        }));
+      } catch (error) {
+        const uncertain = isUncertainGitError(error) && error.uncertain;
+        const reason = `Workspace removal stopped: ${messageOf(error)}`;
+        // Recorded first, so a failing journal write cannot hide the uncertainty from the lease.
+        const held = uncertain
+          ? this.store.markGitUncertain(id, error.message)
+          : this.store.update(id, "held", reason);
+        // An unobserved child may still act: its effect stays unsettled, never failed.
+        if (running && !uncertain)
+          lifecycle.settleEffect(
+            owner,
+            operationId,
+            running,
+            "failed",
+            Date.now(),
+          );
+        lifecycle.holdOperation(owner, operationId, reason);
+        return this.retained(held, held.reason ?? reason);
       }
     });
+  }
+
+  /** Call under the task lock. */
+  private async inspectRemoval(
+    id: string,
+    input: WorkspaceRemovalInput,
+  ): Promise<WorkspaceRemovalPlan> {
+    const binding = this.store.get(id);
+    if (!binding) throw new Error(`Task ${id} has no workspace binding`);
+    if (binding.state !== "ready" || binding.workspaceId !== input.workspaceId)
+      return this.retained(
+        binding,
+        binding.reason ?? `Workspace is ${binding.state}`,
+      );
+    if (!input.ownership())
+      return this.retained(binding, "Task execution is not settled");
+    const checked = await this.validateReady(binding);
+    if (checked.state !== "ready")
+      return this.retained(
+        checked,
+        checked.reason ?? "Workspace is not available for removal",
+      );
+    const repositories: WorkspaceRemovalPlanRepository[] = [];
+    for (const repository of checked.repositories) {
+      const { repositoryId } = repository;
+      let scan: Awaited<ReturnType<WorkspaceManager["trimScan"]>>;
+      let head: string;
+      try {
+        scan = await this.trimScan(repository, "archive-status");
+        head = scan.ok
+          ? await this.git(
+              repository.workspacePath,
+              "archive-status",
+              "rev-parse",
+              "--verify",
+              "HEAD^{commit}",
+            )
+          : "";
+      } catch (error) {
+        if (isUncertainGitError(error)) {
+          const held = this.store.markGitUncertain(id, error.message);
+          return this.retained(held, error.message);
+        }
+        return this.retained(
+          checked,
+          `Git could not read the status or HEAD of ${repositoryId}`,
+        );
+      }
+      if (!scan.ok)
+        return this.retained(
+          checked,
+          `Removing ${repositoryId} is refused: ${scan.reason}`,
+        );
+      if (scan.dirty)
+        return this.retained(
+          checked,
+          `Uncommitted work remains in ${repositoryId}: modified tracked files or untracked files that are not ignored`,
+        );
+      const branch = input.branches[repositoryId] ?? null;
+      if (branch?.outsideHeadSha)
+        return this.retained(
+          checked,
+          `The task branch of ${repositoryId} changed outside cab; recover the branch before removing the workspace`,
+        );
+      if (!/^[0-9a-f]{40}$/.test(head))
+        return this.retained(
+          checked,
+          `Git could not read the HEAD of ${repositoryId}`,
+        );
+      const git = verifierGit(
+        repository.workspacePath,
+        this.gitCancellation.signal,
+        this.gitExecutable,
+      );
+      // Ancestry is proved from rehashed commit objects, never from refs or a commit graph.
+      const contains = async (tip: string | null | undefined) =>
+        !!tip &&
+        (tip === head || (await provedAncestor(git, head, tip)) === true);
+      const descends = async (older: string | null | undefined) =>
+        !older || (await provedAncestor(git, older, head)) === true;
+      const lastPushed = branch?.lastPushedSha ?? null;
+      if (branch && lastPushed && (await contains(lastPushed)))
+        repositories.push({
+          repositoryId,
+          head,
+          proof: {
+            kind: "pushed",
+            repositoryId,
+            branch: branch.branch,
+            commit: lastPushed,
+          },
+        });
+      else if (
+        repository.commit &&
+        /^[0-9a-f]{40}$/.test(repository.commit) &&
+        (await contains(repository.commit))
+      )
+        repositories.push({
+          repositoryId,
+          head,
+          proof: {
+            kind: "base",
+            repositoryId,
+            branch: branch?.branch ?? repository.baseBranch ?? repository.ref,
+            commit: repository.commit,
+            noTaskCommits: true,
+          },
+        });
+      else if (
+        repository.commit &&
+        (await descends(repository.commit)) &&
+        (await descends(lastPushed))
+      )
+        repositories.push({ repositoryId, head, proof: null });
+      else
+        return this.retained(
+          checked,
+          `The history of ${repositoryId} does not provably follow its last push or provisioned base`,
+        );
+    }
+    for (const work of input.pendingResultWork) {
+      const repository = checked.repositories.find(
+        (candidate) => candidate.repositoryId === work.repositoryId,
+      );
+      if (repository && (await this.resultWorkSettled(repository, work)))
+        continue;
+      return this.retained(
+        checked,
+        `Result ${work.resultId} recorded uncommitted changes in ${work.repositoryId} that are neither committed nor delivered; commit or deliver them, or reset the task to discard them`,
+      );
+    }
+    if (!input.ownership())
+      return this.retained(checked, "Task execution is not settled");
+    return { outcome: "planned", binding: checked, repositories };
   }
 
   /**
@@ -1074,7 +1280,7 @@ export class WorkspaceManager implements TaskWorkspaceLifecycle {
         generation.path !== binding.path
       )
         return refused(binding, "Workspace generation is not recorded");
-      if (lifecycle.operations(generation).some((o) => o.state !== "completed"))
+      if (lifecycle.operations(generation).some(unfinishedOperation))
         return refused(binding, "Workspace has unfinished maintenance");
       if (!ownership())
         return refused(binding, "Task execution is not settled");
@@ -1219,12 +1425,15 @@ export class WorkspaceManager implements TaskWorkspaceLifecycle {
     });
   }
 
-  private async trimScan(repository: TaskWorkspaceRepository) {
+  private async trimScan(
+    repository: TaskWorkspaceRepository,
+    operation: "trim-scan" | "archive-status" = "trim-scan",
+  ) {
     const root = repository.workspacePath;
     // A submodule's ignored files are invisible to its parent's status; never trim around one.
     const modes = await this.gitBytes(
       root,
-      "trim-scan",
+      operation,
       maxTrimScanBytes,
       "ls-files",
       "-z",
@@ -1235,7 +1444,7 @@ export class WorkspaceManager implements TaskWorkspaceLifecycle {
     return ignoredTrimPaths(
       await this.gitBytes(
         root,
-        "trim-scan",
+        operation,
         maxTrimScanBytes,
         ...trimStatusArguments,
       ),
@@ -1358,8 +1567,8 @@ export class WorkspaceManager implements TaskWorkspaceLifecycle {
 
   /**
    * Removes a disposable worktree even when its files were written. Task
-   * workspaces never use this: they are cleaned with evidence by
-   * `archiveAndCleanup`. A failure leaves the binding held for a retry.
+   * workspaces never use this: only `remove` deletes one, after proving it
+   * delivered. A failure leaves the binding held for a retry.
    */
   discard(id: string): Promise<TaskWorkspaceBinding | undefined> {
     return this.withTaskLock(id, async () => {
@@ -2390,7 +2599,7 @@ export class WorkspaceManager implements TaskWorkspaceLifecycle {
   private retained(
     binding: TaskWorkspaceBinding,
     reason: string,
-  ): WorkspaceCleanupResult {
+  ): Extract<WorkspaceCleanupResult, { outcome: "retained" }> {
     return { outcome: "retained", binding, reason };
   }
 

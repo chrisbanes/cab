@@ -510,6 +510,26 @@ export type ServiceDeliveryCaller = z.output<
   typeof serviceDeliveryCallerSchema
 >;
 /**
+ * The service pushing a terminal task's committed work before it removes the workspace: bound to one
+ * workspace generation, removal operation and delivery policy, and accepted only for `branch.push`.
+ * It consults the repository grant and approval policy like an agent and has no approval to give.
+ */
+export const workspaceRemovalCallerSchema = z
+  .object({
+    actor: z.literal("service"),
+    purpose: z.literal("workspace-removal"),
+    projectId: z.string().uuid(),
+    taskId: z.string().uuid(),
+    taskVersion: z.number().int().positive(),
+    workspaceId: z.string().uuid(),
+    removalOperationId: z.string().uuid(),
+    policyVersion: z.number().int().positive(),
+  })
+  .strict();
+export type WorkspaceRemovalCaller = z.output<
+  typeof workspaceRemovalCallerSchema
+>;
+/**
  * The operator publishing a local task: it has no imported issue to bind to, so it names the
  * publication, the target selection and the repository instead.
  */
@@ -537,6 +557,7 @@ const bindingSchema = z.union([
   operatorDeliveryCallerSchema,
   serviceDeliveryCallerSchema,
   operatorPublicationCallerSchema,
+  workspaceRemovalCallerSchema,
 ]);
 export type DeliveryCaller = z.output<typeof bindingSchema>;
 /** The operator acting on a task's bound issue; a publication caller has its own guard. */
@@ -560,7 +581,20 @@ export function isOperatorPublicationCaller(
 export function isServiceDeliveryCaller(
   caller: DeliveryCaller,
 ): caller is ServiceDeliveryCaller {
-  return "actor" in caller && caller.actor === "service";
+  return (
+    "actor" in caller &&
+    caller.actor === "service" &&
+    caller.purpose === "status-mapping"
+  );
+}
+export function isWorkspaceRemovalCaller(
+  caller: DeliveryCaller,
+): caller is WorkspaceRemovalCaller {
+  return (
+    "actor" in caller &&
+    caller.actor === "service" &&
+    caller.purpose === "workspace-removal"
+  );
 }
 /** The agent callers: those with an assignment, work and conversation behind them. */
 export function isRuntimeDeliveryCaller(
@@ -1369,7 +1403,7 @@ export class DeliveryStore {
     return (
       this.db
         .prepare(
-          "SELECT operationId FROM delivery_actions WHERE taskId=? AND json_extract(recordJson,'$.binding.actor')='service' AND json_extract(recordJson,'$.state')<>'denied' AND NOT (json_extract(recordJson,'$.state')='confirmed-failure' AND json_extract(recordJson,'$.attempts')=0) ORDER BY rowid DESC LIMIT 1",
+          "SELECT operationId FROM delivery_actions WHERE taskId=? AND json_extract(recordJson,'$.binding.purpose')='status-mapping' AND json_extract(recordJson,'$.state')<>'denied' AND NOT (json_extract(recordJson,'$.state')='confirmed-failure' AND json_extract(recordJson,'$.attempts')=0) ORDER BY rowid DESC LIMIT 1",
         )
         .get(taskId) as { operationId: string } | undefined
     )?.operationId;
@@ -1472,6 +1506,19 @@ export class DeliveryStore {
     if (isServiceDeliveryCaller(binding)) {
       this.validateServiceCaller(request, binding);
       // The service has no approval to give.
+      approved = false;
+    }
+    if (isWorkspaceRemovalCaller(binding)) {
+      if (
+        request.action.kind !== "branch.push" ||
+        request.approval ||
+        policy.version !== binding.policyVersion
+      )
+        throw new DomainPolicyError(
+          "forbidden",
+          "Workspace removal caller only permits branch.push under its policy version",
+        );
+      // The service has no approval to give; an approval grant refuses below.
       approved = false;
     }
     if (isOperatorPublicationCaller(binding))
@@ -2720,18 +2767,26 @@ export class DeliveryStore {
           pushBefore.success &&
           pushBefore.data.beforeHead !== observation.receipt?.headSha &&
           observation.receipt?.headSha &&
-          (action.kind === "branch.push" ||
-            action.kind === "branch.force-push") &&
-          "workId" in record.binding
-        )
-          initializedWorkspaceLifecycle(this.db)?.recordPush(
-            taskId,
-            record.binding.workId,
-            repositoryId,
-            operationId,
-            observation.receipt.headSha,
-            record.updatedAt,
-          );
+          (action.kind === "branch.push" || action.kind === "branch.force-push")
+        ) {
+          if ("workId" in record.binding)
+            initializedWorkspaceLifecycle(this.db)?.recordPush(
+              taskId,
+              record.binding.workId,
+              repositoryId,
+              operationId,
+              observation.receipt.headSha,
+              record.updatedAt,
+            );
+          else if (isWorkspaceRemovalCaller(record.binding))
+            initializedWorkspaceLifecycle(this.db)?.recordRemovalPush(
+              record.binding,
+              repositoryId,
+              operationId,
+              observation.receipt.headSha,
+              record.updatedAt,
+            );
+        }
         if (
           outside ||
           observation.outsideDeleted ||
@@ -3601,12 +3656,14 @@ export class DeliveryStore {
       actions: this.actions(taskId).map((a) => ({
         operationId: a.operationId,
         kind: a.request.action.kind,
-        caller: isServiceDeliveryCaller(a.binding)
-          ? ("service" as const)
-          : isOperatorDeliveryCaller(a.binding) ||
-              isOperatorPublicationCaller(a.binding)
-            ? ("operator" as const)
-            : ("agent" as const),
+        caller:
+          isServiceDeliveryCaller(a.binding) ||
+          isWorkspaceRemovalCaller(a.binding)
+            ? ("service" as const)
+            : isOperatorDeliveryCaller(a.binding) ||
+                isOperatorPublicationCaller(a.binding)
+              ? ("operator" as const)
+              : ("agent" as const),
         event: isServiceDeliveryCaller(a.binding) ? a.binding.event : null,
         target: a.request.action.target,
         state: a.state,

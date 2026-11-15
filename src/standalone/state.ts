@@ -508,6 +508,11 @@ const processIdentitySchema = z.object({
   bootId: z.string().min(1).max(128),
 });
 
+/** One DDL for a fresh start and the rebuild that adds the owner, so both spell the same schema. */
+const archivalHoldsTable = `CREATE TABLE IF NOT EXISTS task_archival_holds (
+      taskId TEXT PRIMARY KEY, reason TEXT NOT NULL, ownerToken TEXT
+    )`;
+
 // Binds the task id three times: ambiguity hold, writer hold, execution bindings.
 const archiveUnblockedClause = `NOT EXISTS (
             SELECT 1 FROM task_writer_ambiguity_holds WHERE taskId = ?
@@ -593,9 +598,7 @@ export class ExecutionState {
     CREATE TABLE IF NOT EXISTS task_writer_ambiguity_holds (
       taskId TEXT PRIMARY KEY, reason TEXT NOT NULL
     );
-    CREATE TABLE IF NOT EXISTS task_archival_holds (
-      taskId TEXT PRIMARY KEY, reason TEXT NOT NULL
-    );
+    ${archivalHoldsTable};
     CREATE TABLE IF NOT EXISTS task_execution_results (
       workId TEXT PRIMARY KEY REFERENCES task_execution_bindings(workId),
       payload TEXT NOT NULL
@@ -932,18 +935,46 @@ export class ExecutionState {
     // Earlier builds kept Stop targets after a receipt reconciled their work.
     this.db.exec(`DELETE FROM execution_stop_targets
       WHERE workId IN (SELECT workId FROM execution_intents WHERE state = 'reconciled')`);
-    // Workspace recovery runs before this state is opened. Keep the archival
-    // hold only when bounded Git work recorded unresolved filesystem effects.
+    // A hold written before holds carried an owner stays tokenless: no operation can release it.
+    if (
+      !(
+        this.db.prepare("PRAGMA table_info(task_archival_holds)").all() as {
+          name: string;
+        }[]
+      ).some(({ name }) => name === "ownerToken")
+    )
+      transaction(this.db, () =>
+        this.db.exec(`ALTER TABLE task_archival_holds RENAME TO task_archival_holds_untokened;
+          ${archivalHoldsTable};
+          INSERT INTO task_archival_holds (taskId, reason)
+            SELECT taskId, reason FROM task_archival_holds_untokened;
+          DROP TABLE task_archival_holds_untokened;`),
+      );
+    // Workspace recovery runs before this state is opened. Keep the archival hold only when
+    // bounded Git work recorded unresolved filesystem effects, or its maintenance is unfinished.
     const workspaceColumns = this.db
       .prepare("PRAGMA table_info(task_workspace_bindings)")
       .all() as Array<{ name: string }>;
+    const maintenance = this.db
+      .prepare(
+        "SELECT 1 FROM sqlite_master WHERE type='table' AND name='workspace_maintenance_operations'",
+      )
+      .get()
+      ? `OR task_archival_holds.ownerToken IN (
+          SELECT operationId FROM workspace_maintenance_operations
+          WHERE json_extract(data, '$.state') IN ('active', 'held'))`
+      : "";
     if (workspaceColumns.some(({ name }) => name === "gitUncertain"))
       this.db.exec(`DELETE FROM task_archival_holds
-        WHERE NOT EXISTS (
+        WHERE NOT (EXISTS (
           SELECT 1 FROM task_workspace_bindings binding
           WHERE binding.taskId = task_archival_holds.taskId
             AND binding.gitUncertain = 1
-        )`);
+        ) ${maintenance})`);
+    else if (maintenance)
+      this.db.exec(
+        `DELETE FROM task_archival_holds WHERE NOT (0 ${maintenance})`,
+      );
     else this.db.exec("DELETE FROM task_archival_holds");
     this.db.exec(`INSERT OR IGNORE INTO task_writer_ambiguity_holds (taskId, reason)
       SELECT taskId, reason FROM task_writer_holds
@@ -2085,18 +2116,20 @@ export class ExecutionState {
     return row?.reason;
   }
 
-  beginArchive(taskId: string): boolean {
+  /** Acquires the archival hold for `ownerToken`, the durable identity of the operation using it. */
+  beginArchive(taskId: string, ownerToken: string): boolean {
     assertOwnedTaskWritable(this.db, taskId);
     const id = z.string().uuid().parse(taskId);
+    const owner = z.string().uuid().parse(ownerToken);
     return transaction(this.db, () => {
       const acquired =
         this.db
-          .prepare(`INSERT INTO task_archival_holds (taskId, reason)
-          SELECT ?, 'Task archival in progress'
+          .prepare(`INSERT INTO task_archival_holds (taskId, reason, ownerToken)
+          SELECT ?, 'Task archival in progress', ?
           WHERE NOT EXISTS (
             SELECT 1 FROM task_archival_holds WHERE taskId = ?
           ) AND ${archiveUnblockedClause} RETURNING taskId`)
-          .get(id, id, id, id, id) !== undefined;
+          .get(id, owner, id, id, id, id) !== undefined;
       return acquired;
     });
   }
@@ -2119,24 +2152,31 @@ export class ExecutionState {
     );
   }
 
-  confirmArchive(taskId: string): boolean {
+  /** The hold is still `ownerToken`'s and execution is still settled. */
+  confirmArchive(taskId: string, ownerToken: string): boolean {
     const id = z.string().uuid().parse(taskId);
-    return transaction(this.db, () => {
-      const confirmed =
-        this.db
-          .prepare(`SELECT 1 FROM task_archival_holds archival
-          WHERE archival.taskId = ?
+    const owner = z.string().uuid().parse(ownerToken);
+    // One statement, so it is atomic inside a caller's transaction too.
+    return (
+      this.db
+        .prepare(`SELECT 1 FROM task_archival_holds archival
+          WHERE archival.taskId = ? AND archival.ownerToken = ?
           AND ${archiveUnblockedClause}`)
-          .get(id, id, id, id) !== undefined;
-      return confirmed;
-    });
+        .get(id, owner, id, id, id) !== undefined
+    );
   }
 
-  endArchive(taskId: string): void {
+  /** Releases only the hold `ownerToken` owns; another or a tokenless hold stays. */
+  endArchive(taskId: string, ownerToken: string): void {
     assertOwnedTaskWritable(this.db, taskId);
     this.db
-      .prepare("DELETE FROM task_archival_holds WHERE taskId = ?")
-      .run(z.string().uuid().parse(taskId));
+      .prepare(
+        "DELETE FROM task_archival_holds WHERE taskId = ? AND ownerToken = ?",
+      )
+      .run(
+        z.string().uuid().parse(taskId),
+        z.string().uuid().parse(ownerToken),
+      );
   }
 
   bindTask(
