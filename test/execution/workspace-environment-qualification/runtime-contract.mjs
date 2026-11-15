@@ -18,6 +18,11 @@ const planDigest =
   "5d2a4fa84fc5ecab2a0d0e8f27181e43dc10aefa7ca8e4ddfeefa72dda81a245";
 const sha256 = (value) => createHash("sha256").update(value).digest("hex");
 export const grantDigest = (grant) => sha256(JSON.stringify(grant));
+/** The granted runtimes, in qualification order. */
+const grantedHarnesses = (grant) =>
+  ["codex", "claude"].filter((harness) =>
+    Object.hasOwn(grant.runtimes, harness),
+  );
 
 /** The digest is supplied separately by the controller after authorization, never minted here. */
 export function validateGrant(input, grant, authorizedDigest) {
@@ -53,7 +58,15 @@ export function validateGrant(input, grant, authorizedDigest) {
   assert.equal(grant.planDigest, planDigest);
   // Controller grant identifiers are opaque short slugs, such as `1727-t1-20261115-a`.
   assert.match(grant.grantId, /^[0-9a-z][0-9a-z-]{0,63}$/);
-  assert.equal(grant.maxTurns, 8);
+  assert.ok(grant.runtimes && typeof grant.runtimes === "object");
+  const harnesses = grantedHarnesses(grant);
+  // Both runtimes, or Claude alone when an earlier attempt's Codex pass is reused.
+  assert.ok(
+    harnesses.join() === "codex,claude" || harnesses.join() === "claude",
+    "grant must name both runtimes or Claude alone",
+  );
+  // Four phases per granted runtime: eight turns for both, four for Claude alone.
+  assert.equal(grant.maxTurns, 4 * harnesses.length);
   assert.equal(grant.deadlineMs, 900_000);
   assert.ok(
     Number.isSafeInteger(grant.expiresAt) && grant.expiresAt > Date.now(),
@@ -72,7 +85,7 @@ export function validateGrant(input, grant, authorizedDigest) {
     isAbsolute(grant.evidenceDir) &&
       resolve(grant.evidenceDir) === grant.evidenceDir,
   );
-  assert.deepEqual(Object.keys(grant.runtimes).sort(), ["claude", "codex"]);
+  assert.deepEqual(Object.keys(grant.runtimes).sort(), [...harnesses].sort());
   for (const [harness, runtime] of Object.entries(grant.runtimes)) {
     assert.deepEqual(
       Object.keys(runtime).sort(),
@@ -166,7 +179,7 @@ export async function runQualification(input, dependencies = {}) {
     startedAt: Date.now(),
     deadline,
     turnsUsed: 0,
-    remainingTurns: 8,
+    remainingTurns: grant.maxTurns,
     records: [],
     active: null,
     pass: false,
@@ -181,7 +194,7 @@ export async function runQualification(input, dependencies = {}) {
       initialize(grant),
       Math.max(1, remaining() - 120_000),
     );
-    for (const harness of ["codex", "claude"]) {
+    for (const harness of grantedHarnesses(grant)) {
       let threadA;
       for (const phase of ["A-old", "B", "A-follow-up", "A-new"]) {
         allowDispatch();
@@ -193,7 +206,7 @@ export async function runQualification(input, dependencies = {}) {
         const nonce = randomUUID();
         checkpoint.turnsUsed++;
         checkpoint.remainingTurns--;
-        assert.ok(checkpoint.turnsUsed <= 8);
+        assert.ok(checkpoint.turnsUsed <= grant.maxTurns);
         const record = {
           harness,
           phase,
@@ -364,18 +377,19 @@ export async function initializeProduction(grant, overrides = {}) {
       claudeProfileId = randomUUID();
     const execute = (command) =>
       domain.execute({ key: randomUUID(), actor: "operator", ...command });
-    execute({
-      type: "profile.create",
-      profileId,
-      name: "Environment qualification",
-      instructions: "Synthetic sentinel only",
-      capabilities: "shell",
-      runtime: {
-        harness: "codex",
-        model: grant.runtimes.codex.model,
-        reasoningEffort: grant.runtimes.codex.effort,
-      },
-    });
+    if (grant.runtimes.codex)
+      execute({
+        type: "profile.create",
+        profileId,
+        name: "Environment qualification",
+        instructions: "Synthetic sentinel only",
+        capabilities: "shell",
+        runtime: {
+          harness: "codex",
+          model: grant.runtimes.codex.model,
+          reasoningEffort: grant.runtimes.codex.effort,
+        },
+      });
     execute({
       type: "profile.create",
       profileId: claudeProfileId,
@@ -392,7 +406,7 @@ export async function initializeProduction(grant, overrides = {}) {
       type: "project.create",
       projectId,
       name: "Environment qualification",
-      leadProfileId: profileId,
+      leadProfileId: grant.runtimes.codex ? profileId : claudeProfileId,
     });
     execute({
       type: "project.configure",

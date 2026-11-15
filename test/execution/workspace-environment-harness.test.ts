@@ -83,6 +83,23 @@ test("missing, invalid, expired or changed grant refuses before runtime initiali
       grant: { ...grant, maxTurns: 9 },
       authorizedDigest,
     },
+    // A single-runtime grant allows only that runtime's four phases.
+    ...[
+      { ...grant, runtimes: { claude: grant.runtimes.claude } },
+      { ...grant, maxTurns: 4 },
+      { ...grant, maxTurns: 0, runtimes: {} },
+      { ...grant, maxTurns: 4, runtimes: { codex: grant.runtimes.codex } },
+      {
+        ...grant,
+        maxTurns: 4,
+        runtimes: { other: grant.runtimes.claude },
+      },
+    ].map((changed) => ({
+      live: true,
+      oneAttempt: true,
+      grant: changed,
+      authorizedDigest: grantDigest(changed),
+    })),
     {
       live: true,
       oneAttempt: true,
@@ -389,160 +406,187 @@ test("failed asynchronous dispatch retains consumed allowance, exact identity an
 test("production qualification bookkeeping persists exact admitted work and terminal identities across offline runtime restart", async () => {
   const { runQualification, grantDigest, initializeProduction } =
     await contract();
-  const root = mkdtempSync(
-    join(realpathSync("/tmp"), "cab-1727-runtime-offline-"),
-  );
-  const evidenceParent = process.env.CAB_TEST_EVIDENCE_DIR ?? root;
-  mkdirSync(evidenceParent, { recursive: true, mode: 0o700 });
-  const evidenceDir = join(
-    evidenceParent,
-    `workspace-environment-${process.pid}-${Date.now()}`,
-  );
-  mkdirSync(evidenceDir, { mode: 0o700 });
-  const grant = { ...fakeGrant(), root, evidenceDir };
-  let terminalWrites = 0;
-  try {
-    for (const harness of ["codex", "claude"]) {
-      const configHome = join(root, `${harness}-home`),
-        binary = join(root, `${harness}-FAKE`);
-      mkdirSync(configHome, { mode: 0o700 });
-      writeFileSync(binary, "offline fixture only");
-      grant.runtimes[harness] = {
-        ...grant.runtimes[harness]!,
-        configHome,
-        binary,
-        sha256: createHash("sha256").update(readFileSync(binary)).digest("hex"),
-      };
-    }
-    const result = await runQualification(
-      {
-        live: true,
-        oneAttempt: true,
-        grant,
-        authorizedDigest: grantDigest(grant),
-      },
-      {
-        initialize: (approved: unknown) =>
-          initializeProduction(approved, {
-            createRuntime: ({
-              harness,
-              safety,
-            }: {
-              harness: string;
-              safety: RuntimeSafetyPort;
-            }) => ({
-              async start() {},
-              async stop() {},
-              onUnexpectedRequest() {},
-              onToolCall() {},
-              async startThread() {
-                const threadId = randomUUID();
-                safety.registerThreadTools!(
-                  threadId,
-                  createHash("sha256").update("[]").digest("hex"),
-                );
-                return threadId;
-              },
-              async resumeThread() {},
-              currentUserInputGeneration() {
-                return "offline-generation";
-              },
-              async startTurn(
-                threadId: string,
-                workspace: string,
-                prompt: string,
-                settings: { scratchDirectory: string },
-              ) {
-                const nonce = JSON.parse(
-                  /const n=("[^";]+")/.exec(prompt)![1]!,
-                );
-                const turnId = randomUUID(),
-                  claudeBase = claudeTemporaryBase(workspace);
-                writeFileSync(
-                  join(workspace, "observation.json"),
-                  JSON.stringify({
-                    cwd: workspace,
-                    scratch: settings.scratchDirectory,
-                    tmp:
-                      harness === "codex"
-                        ? settings.scratchDirectory
-                        : `${claudeBase}/claude-${process.getuid!()}`,
-                    claudeBase: `${claudeBase}/claude-${process.getuid!()}`,
-                    nonce,
-                    sentinel: nonce,
-                  }),
-                );
-                setImmediate(() => {
-                  terminalWrites++;
-                  safety.recordTerminal!({
-                    threadId,
-                    turnId,
-                    status: "completed",
-                    runtimeGeneration: "offline-generation",
-                  });
-                });
-                return turnId;
-              },
-              async waitForTurn(threadId: string, turnId: string) {
-                for (let i = 0; i < 100; i++) {
-                  const evidence = safety.terminal!(
-                    threadId,
-                    turnId,
-                    "offline-generation",
-                  );
-                  if (evidence?.firstStatus) return evidence.firstStatus;
-                  await new Promise((ready) => setImmediate(ready));
-                }
-                throw Error("fake terminal not persisted");
-              },
-            }),
-          }),
-      },
+  // Both runtimes, and the Claude-only grant that reuses an earlier Codex pass.
+  for (const harnesses of [["codex", "claude"], ["claude"]])
+    await bookkeepingRun(harnesses);
+  async function bookkeepingRun(harnesses: string[]) {
+    const root = mkdtempSync(
+      join(realpathSync("/tmp"), "cab-1727-runtime-offline-"),
     );
-    assert.equal(result.pass, true, JSON.stringify(result));
-    assert.equal(terminalWrites, 8);
-    const db = new DatabaseSync(join(root, "qualification.sqlite"), {
-      readOnly: true,
-    });
+    const evidenceParent = process.env.CAB_TEST_EVIDENCE_DIR ?? root;
+    mkdirSync(evidenceParent, { recursive: true, mode: 0o700 });
+    const evidenceDir = join(
+      evidenceParent,
+      `workspace-environment-${process.pid}-${Date.now()}`,
+    );
+    mkdirSync(evidenceDir, { mode: 0o700 });
+    const all = fakeGrant();
+    const grant = {
+      ...all,
+      root,
+      evidenceDir,
+      maxTurns: 4 * harnesses.length,
+      runtimes: Object.fromEntries(
+        harnesses.map((harness) => [
+          harness,
+          all.runtimes[harness as "codex" | "claude"],
+        ]),
+      ) as typeof all.runtimes,
+    };
+    const turns = 4 * harnesses.length;
+    let terminalWrites = 0;
+    const started: string[] = [];
     try {
-      assert.equal(
-        db
-          .prepare(
-            "SELECT count(*) n FROM execution_intents WHERE state='completed'",
-          )
-          .get()?.n,
-        8,
+      for (const harness of harnesses) {
+        const configHome = join(root, `${harness}-home`),
+          binary = join(root, `${harness}-FAKE`);
+        mkdirSync(configHome, { mode: 0o700 });
+        writeFileSync(binary, "offline fixture only");
+        grant.runtimes[harness] = {
+          ...grant.runtimes[harness]!,
+          configHome,
+          binary,
+          sha256: createHash("sha256")
+            .update(readFileSync(binary))
+            .digest("hex"),
+        };
+      }
+      const result = await runQualification(
+        {
+          live: true,
+          oneAttempt: true,
+          grant,
+          authorizedDigest: grantDigest(grant),
+        },
+        {
+          initialize: (approved: unknown) =>
+            initializeProduction(approved, {
+              createRuntime: ({
+                harness,
+                safety,
+              }: {
+                harness: string;
+                safety: RuntimeSafetyPort;
+              }) => ({
+                async start() {
+                  started.push(harness);
+                },
+                async stop() {},
+                onUnexpectedRequest() {},
+                onToolCall() {},
+                async startThread() {
+                  const threadId = randomUUID();
+                  safety.registerThreadTools!(
+                    threadId,
+                    createHash("sha256").update("[]").digest("hex"),
+                  );
+                  return threadId;
+                },
+                async resumeThread() {},
+                currentUserInputGeneration() {
+                  return "offline-generation";
+                },
+                async startTurn(
+                  threadId: string,
+                  workspace: string,
+                  prompt: string,
+                  settings: { scratchDirectory: string },
+                ) {
+                  const nonce = JSON.parse(
+                    /const n=("[^";]+")/.exec(prompt)![1]!,
+                  );
+                  const turnId = randomUUID(),
+                    claudeBase = claudeTemporaryBase(workspace);
+                  writeFileSync(
+                    join(workspace, "observation.json"),
+                    JSON.stringify({
+                      cwd: workspace,
+                      scratch: settings.scratchDirectory,
+                      tmp:
+                        harness === "codex"
+                          ? settings.scratchDirectory
+                          : `${claudeBase}/claude-${process.getuid!()}`,
+                      claudeBase: `${claudeBase}/claude-${process.getuid!()}`,
+                      nonce,
+                      sentinel: nonce,
+                    }),
+                  );
+                  setImmediate(() => {
+                    terminalWrites++;
+                    safety.recordTerminal!({
+                      threadId,
+                      turnId,
+                      status: "completed",
+                      runtimeGeneration: "offline-generation",
+                    });
+                  });
+                  return turnId;
+                },
+                async waitForTurn(threadId: string, turnId: string) {
+                  for (let i = 0; i < 100; i++) {
+                    const evidence = safety.terminal!(
+                      threadId,
+                      turnId,
+                      "offline-generation",
+                    );
+                    if (evidence?.firstStatus) return evidence.firstStatus;
+                    await new Promise((ready) => setImmediate(ready));
+                  }
+                  throw Error("fake terminal not persisted");
+                },
+              }),
+            }),
+        },
       );
-      assert.equal(
-        db
-          .prepare(
-            "SELECT count(*) n FROM runtime_terminal_evidence WHERE conflicted=0 AND workId IS NOT NULL AND firstObservedAt IS NOT NULL",
-          )
-          .get()?.n,
-        8,
+      assert.equal(result.pass, true, JSON.stringify(result));
+      assert.equal(terminalWrites, turns);
+      assert.deepEqual(
+        started,
+        harnesses.flatMap((harness) => [harness, harness]),
       );
-      assert.equal(
-        db
-          .prepare(
-            "SELECT count(*) n FROM execution_recovery_identities WHERE threadId IS NOT NULL AND turnId IS NOT NULL AND runtimeGeneration='offline-generation'",
-          )
-          .get()?.n,
-        8,
-      );
-      assert.equal(
-        db
-          .prepare(
-            "SELECT count(DISTINCT taskId) n FROM task_execution_bindings",
-          )
-          .get()?.n,
-        4,
-      );
-      assert.deepEqual(db.prepare("PRAGMA foreign_key_check").all(), []);
+      const db = new DatabaseSync(join(root, "qualification.sqlite"), {
+        readOnly: true,
+      });
+      try {
+        assert.equal(
+          db
+            .prepare(
+              "SELECT count(*) n FROM execution_intents WHERE state='completed'",
+            )
+            .get()?.n,
+          turns,
+        );
+        assert.equal(
+          db
+            .prepare(
+              "SELECT count(*) n FROM runtime_terminal_evidence WHERE conflicted=0 AND workId IS NOT NULL AND firstObservedAt IS NOT NULL",
+            )
+            .get()?.n,
+          turns,
+        );
+        assert.equal(
+          db
+            .prepare(
+              "SELECT count(*) n FROM execution_recovery_identities WHERE threadId IS NOT NULL AND turnId IS NOT NULL AND runtimeGeneration='offline-generation'",
+            )
+            .get()?.n,
+          turns,
+        );
+        assert.equal(
+          db
+            .prepare(
+              "SELECT count(DISTINCT taskId) n FROM task_execution_bindings",
+            )
+            .get()?.n,
+          2 * harnesses.length,
+        );
+        assert.deepEqual(db.prepare("PRAGMA foreign_key_check").all(), []);
+      } finally {
+        db.close();
+      }
     } finally {
-      db.close();
+      rmSync(root, { recursive: true, force: true });
     }
-  } finally {
-    rmSync(root, { recursive: true, force: true });
   }
 });
 
