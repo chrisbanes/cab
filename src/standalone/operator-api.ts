@@ -11173,14 +11173,6 @@ export class OperatorApi {
         throw new OperatorApiError(400, "local-review-batch-too-large");
       if (error instanceof LocalReviewRecipientUnavailableError)
         throw new OperatorApiError(409, "local-review-recipient-unavailable");
-      if (error instanceof ProjectArchiveBlockedError)
-        throw new OperatorApiError(
-          409,
-          "conflict",
-          undefined,
-          undefined,
-          projectArchiveBlockedMessage,
-        );
       if (error instanceof ProjectArchivedError)
         throw new OperatorApiError(
           409,
