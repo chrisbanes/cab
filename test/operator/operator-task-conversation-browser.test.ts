@@ -2766,6 +2766,7 @@ for (const laterCount of [325, 575])
         .list()
         .some((w) => w.workId === active.workId && w.state === "completed"),
     );
+    await refresh(page);
     const changed = (await (await changedResponse).json()).data;
     await toggle.waitFor();
     const applied = await reread();
