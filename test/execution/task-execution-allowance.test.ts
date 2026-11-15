@@ -695,7 +695,7 @@ test("exhaustion holds the next turn visibly until the total is raised", async (
     .filter((c) => c.code === "allowance-exhausted");
   assert.deepEqual(
     conditions.map((c) => c.key),
-    [`allowance-exhausted:${f.taskId}:2:${next}`],
+    [`allowance-exhausted:${f.taskId}:2:1`],
   );
 
   await f.set(2);

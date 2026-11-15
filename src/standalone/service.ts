@@ -5434,8 +5434,9 @@ export class StandaloneService {
     if (allowance.heldWorkIds.length)
       conditions.push({
         code: "allowance-exhausted",
-        // A new held generation is a new episode, so one resolved earlier cannot hide it.
-        key: `allowance-exhausted:${taskId}:${allowance.version}:${allowance.heldWorkIds[0]}`,
+        // Exhaustion recurs only after another admission or a new total, so the charge count and
+        // version name the episode: a capacity wait keeps it, a recurrence never reuses one resolved.
+        key: `allowance-exhausted:${taskId}:${allowance.version}:${allowance.charged + allowance.corrected}`,
         reason: attentionNext["allowance-exhausted"].reason,
       });
     if (this.hasNonStopTaskHold(taskId))
