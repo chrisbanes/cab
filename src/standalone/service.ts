@@ -10400,18 +10400,14 @@ export class StandaloneService {
       : undefined;
   }
 
-  /** A task turn in its ready bound workspace; drafting and draft turns get none. */
+  /** A task turn in its ready bound workspace, as for its Git roots; project drafting gets none. */
   private taskScratch(
     request: TurnRequest,
     workspace: string,
   ): string | undefined {
-    if (!request.taskId || request.kind === "drafting" || request.draftTurn)
-      return undefined;
+    if (!request.taskId || request.kind === "drafting") return undefined;
     const binding = this.started().workspaceBindings.get(request.taskId);
-    // Admission runs a task turn in the canonical path of its binding's root.
-    return binding?.state === "ready" &&
-      (binding.path === workspace ||
-        canonicalOrUndefined(binding.path) === workspace)
+    return binding?.state === "ready" && binding.path === workspace
       ? taskScratchPath(workspace)
       : undefined;
   }
@@ -11546,13 +11542,5 @@ export class StandaloneService {
   private started(): Started {
     if (!this.current) throw new Error("Service is not started");
     return this.current;
-  }
-}
-
-function canonicalOrUndefined(path: string): string | undefined {
-  try {
-    return realpathSync(path);
-  } catch {
-    return undefined;
   }
 }

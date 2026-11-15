@@ -2277,10 +2277,9 @@ export function taskScratchPath(workspace: string): string {
 /** Refuses a symlink or non-directory at the scratch path rather than clearing it. */
 async function ensureTaskScratch(workspace: string): Promise<void> {
   const scratch = taskScratchPath(workspace);
-  if (!(await lstatIfExists(scratch)))
-    await mkdir(scratch, { mode: 0o700 }).catch((error: unknown) => {
-      if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
-    });
+  await mkdir(scratch, { mode: 0o700 }).catch((error: unknown) => {
+    if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
+  });
   const info = await lstat(scratch);
   if (info.isSymbolicLink() || !info.isDirectory())
     throw new Error("Task scratch path is not a real directory");

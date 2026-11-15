@@ -398,4 +398,6 @@ test("a follow-up turn of a Codex profile without settings resumes with its work
   });
   for (const root of [String(workspace), otherWorkspace])
     assert.ok(statSync(join(root, "scratch")).isDirectory());
+  // Scratch is per thread; the service never sets it for the whole installation.
+  assert.equal(process.env.CAB_SCRATCH_DIR, undefined);
 });
