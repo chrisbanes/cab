@@ -1063,15 +1063,45 @@ settle external effects, or qualify a final operational cutover. See the
 [macOS operations procedure](operations/standalone-macos.md) and its
 [bounded evidence](evidence/s08a-operations-2026-09-30.md).
 
-### Task execution allowance (planned)
+### Task execution allowance
 
-Accepted by [ADR-1037](adr/1037-task-execution-allowance.md); not implemented. A task
-may carry an optional allowance, off by default with no default number, on net charged
-execution generations shared by its lead and every cab delegate. It is checked and
-charged in the admission transaction, corrected once for a proved pre-turn refusal, and
-holds only new admissions at exhaustion while admitted work finishes. Only the operator
-can set its absolute total. It does not bound a turn's duration, runtime steps, native
-subagents, tool work, tokens, cost or host load, and is not a deadline or spend cap.
+Decided by [ADR-1037](adr/1037-task-execution-allowance.md). A task may carry an
+optional allowance, off by default with no default number, on net charged execution
+generations shared by its lead and every cab delegate, including task draft turns.
+
+- **Charge.** Every admission of task-bound work records one charge for its `workId`
+  in the admission transaction, whether or not the allowance is on, so turning it off
+  and on never resets the count. Direct work and project drafting runs are not charged
+  and are disclosed as such. A rolled-back admission charges nothing.
+- **Correction.** Only a runtime pre-turn refusal that proves `startTurn` was never
+  called corrects its charge, once. An uncertain submission, a failure after
+  `startTurn`, a crash, a release or an operator-adopted refusal keeps it charged.
+- **Gate.** While the allowance is on, admission requires charged `U` below total `L`;
+  otherwise the request stays queued with an `Allowance waiting:` reason, and the task
+  reads Waiting with reason code `allowance-held`. Admitted work finishes under the
+  ordinary rules. Retries, planned-shutdown requeues, follow-ups and Start again each
+  charge on admission; Reset and conversation replacement keep the total and the count.
+- **Control.** `task.allowance.set {key, taskId, expectedAllowanceVersion, total}` (CLI
+  `cab task allowance TASK_ID (--total N | --remove) --expected-version N`) sets the
+  absolute total, or removes it with `total: null`. It is keyed and fenced on the
+  allowance's own version (0 before one is set), not the task version. Raising the total
+  re-attempts the same held request; lowering it to or below `U` reports how far over it
+  is and revokes nothing. No coordination tool reaches it, so an agent cannot extend its
+  own task's allowance.
+- **History.** A task admitted before the charge ledger existed cannot prove its history:
+  the allowance reads `history-unavailable` and activation is refused with a conflict. An
+  enabled task whose admissions lack charges reads `inconsistent` and holds new admissions
+  with `Allowance waiting: accounting unavailable`.
+- **Surfaces.** The task read's `executionAllowance` gives the state, total, version,
+  charged, corrected and remaining units, provisional charges (admitted without a bound
+  turn yet), held work and how far over the total it is; the Execution tab and `cab task
+  get` show it with a set/remove control. One `allowance-exhausted` attention item exists
+  per open task with a request held by the allowance; it opens the Execution tab's
+  allowance section.
+
+The allowance gates new admissions against net charged generations. It does not cap raw
+admission attempts, and does not bound a turn's duration, runtime steps, native
+subagents, tool work, tokens, cost or host load. It is not a deadline or spend cap.
 
 ## Workspaces and execution access
 

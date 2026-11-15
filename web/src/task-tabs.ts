@@ -16,6 +16,7 @@ const sectionTabs: Record<string, TaskTab> = {
   "viewing-reference": "review",
   context: "execution",
   execution: "execution",
+  "execution-allowance": "execution",
 };
 
 /** The tab whose panel holds a section; Overview holds the rest. */

@@ -1,5 +1,10 @@
 import type { Execution, TaskRead } from "../../src/operator/contracts.js";
 import { type HoldLine, holdLines } from "../../src/operator/wait-reasons.js";
+import {
+  allowanceExcludedText,
+  allowanceSummary,
+  type ExecutionAllowance,
+} from "../../src/operator/execution-allowance-copy.js";
 import { reasonLabels } from "./tasks.js";
 
 type Data = TaskRead["data"];
@@ -91,9 +96,12 @@ export function executionStatus(
         : execution.reasonCodes.includes("held-turn-released")
           ? "Released; the held turn was interrupted"
           : execution.state === "waiting" &&
-              execution.reasonCodes.includes("admission-blocked")
-            ? "Waiting; blocked from admission"
-            : stateLabels[execution.state];
+              execution.reasonCodes.includes("allowance-held")
+            ? "Waiting; held by the execution allowance"
+            : execution.state === "waiting" &&
+                execution.reasonCodes.includes("admission-blocked")
+              ? "Waiting; blocked from admission"
+              : stateLabels[execution.state];
   // A running turn owns its writer and capacity; any other hold, or one left behind, is held.
   const leftover =
     Object.values(holds).some(Boolean) && settled.has(execution.state);
@@ -125,6 +133,19 @@ export function executionHoldLines(
 ): HoldLine[] {
   const holds = taskHolds(execution, recovery);
   return holdLines(holds, taskHold ?? (holds.task ? { reason: null } : null));
+}
+
+/**
+ * The Execution tab's allowance section: the shared summary, the fixed exclusion, and whether a
+ * total can be set (unprovable history refuses it) or removed.
+ */
+export function allowanceSection(a: ExecutionAllowance) {
+  return {
+    summary: allowanceSummary(a),
+    excluded: allowanceExcludedText,
+    canSet: a.state !== "history-unavailable",
+    canRemove: a.total !== null,
+  };
 }
 
 export const admissionLine = (admission: Data["admission"]) =>

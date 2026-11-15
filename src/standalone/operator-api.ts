@@ -3983,7 +3983,7 @@ export class OperatorApi {
               excluded,
             ),
             attentionCode: code,
-            destination: `/tasks/${taskId}?section=decisions`,
+            destination: `/tasks/${taskId}?section=${code === "allowance-exhausted" ? "execution-allowance" : "decisions"}`,
             conversation: null,
             headline: null,
             lifecycle,

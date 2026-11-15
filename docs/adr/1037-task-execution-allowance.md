@@ -4,8 +4,7 @@ status: accepted
 
 # Bound a task's new admissions with an optional execution allowance
 
-Decision for [#1573](https://github.com/chrisbanes/cab/issues/1573). Accepted but not
-implemented: no allowance, charge or control exists yet.
+Decision for [#1573](https://github.com/chrisbanes/cab/issues/1573).
 
 cab limits how many turns run at once, not how many turns one task gets. A lead can
 delegate, receive results, repair work and continue in a replacement conversation;
