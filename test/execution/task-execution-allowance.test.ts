@@ -695,7 +695,7 @@ test("exhaustion holds the next turn visibly until the total is raised", async (
     .filter((c) => c.code === "allowance-exhausted");
   assert.deepEqual(
     conditions.map((c) => c.key),
-    [`allowance-exhausted:${f.taskId}:2:1`],
+    [`allowance-exhausted:${f.taskId}:2:1:${next}`],
   );
 
   await f.set(2);
@@ -775,4 +775,52 @@ test("releasing a held generation that never bound a thread keeps its charge", a
     [before.charged, before.corrected],
     "an operator release is not a proved pre-turn refusal",
   );
+});
+
+test("a request held again after the held one was refused raises a fresh Inbox episode", async (t) => {
+  const f = await serviceFixture(t);
+  await f.set(0);
+  f.unpause();
+  await waitUntil(
+    () => f.service.taskAllowance(f.taskId).heldWorkIds.length === 1,
+    f.describe,
+  );
+  const actionable = () => {
+    f.service.reconcileInbox();
+    return f.service
+      .inboxLifecycle()
+      .rows(f.taskId)
+      .filter(
+        (r) =>
+          r.status !== "resolved" &&
+          JSON.parse(r.dataJson).code === "allowance-exhausted",
+      );
+  };
+  assert.equal(actionable().length, 1);
+  // A task edit refuses the held request at its next admission attempt.
+  f.service.domain().execute({
+    key: randomUUID(),
+    actor: "operator",
+    type: "task.configure",
+    projectId: f.service.domain().task(f.taskId).projectId,
+    taskId: f.taskId,
+    expectedVersion: Number(f.service.domain().task(f.taskId).version),
+    title: "Changed",
+  } as never);
+  const version = f.allowance().version;
+  // A capacity change wakes admission without touching the allowance.
+  await f.service.configureCapacity({
+    key: randomUUID(),
+    minimumLeadSlots: 0,
+    globalLimit: 2,
+  });
+  await waitUntil(() => f.request(f.initial)?.state === "held", f.describe);
+  assert.equal(actionable().length, 0);
+  const restarted = (await f.startAgain(f.initial)).workId;
+  await waitUntil(
+    () => f.service.taskAllowance(f.taskId).heldWorkIds.includes(restarted),
+    f.describe,
+  );
+  assert.equal(f.allowance().version, version, "same total, same count");
+  assert.equal(actionable().length, 1, "the new hold is actionable");
 });

@@ -5434,9 +5434,9 @@ export class StandaloneService {
     if (allowance.heldWorkIds.length)
       conditions.push({
         code: "allowance-exhausted",
-        // Exhaustion recurs only after another admission or a new total, so the charge count and
-        // version name the episode: a capacity wait keeps it, a recurrence never reuses one resolved.
-        key: `allowance-exhausted:${taskId}:${allowance.version}:${allowance.charged + allowance.corrected}`,
+        // Stable while the same request waits, whatever other wait it shows; a recurrence after an
+        // admission, a new total or a new first held request is a new episode, never one resolved.
+        key: `allowance-exhausted:${taskId}:${allowance.version}:${allowance.charged + allowance.corrected}:${allowance.heldWorkIds[0]}`,
         reason: attentionNext["allowance-exhausted"].reason,
       });
     if (this.hasNonStopTaskHold(taskId))
