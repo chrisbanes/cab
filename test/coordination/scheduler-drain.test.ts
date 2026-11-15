@@ -321,6 +321,84 @@ test("timer-triggered failure reaches the background observer once", async () =>
   });
 });
 
+test("a request whose backoff ends during a slow attempt is attempted after the pass", async () => {
+  await withStore(async (db, store) => {
+    let now = 1_000;
+    store.ensure(request("A"));
+    store.ensure(request("B"));
+    db.prepare(
+      "UPDATE turn_requests SET nextEligibleAt = ? WHERE workId = ?",
+    ).run(now + 300, "B");
+    const attempted = deferred();
+    const attempts: string[] = [];
+    const scheduler = new TurnScheduler(
+      store,
+      async ({ workId }) => {
+        attempts.push(workId);
+        if (workId === "A") {
+          await Promise.resolve();
+          now += 400;
+        }
+        store.hold(workId, "Attempt done");
+        if (workId === "B") attempted.resolve();
+      },
+      () => now,
+    );
+
+    scheduler.start();
+    const timeout = setTimeout(() => {
+      attempted.reject(new Error("B was never attempted"));
+    }, 2_000);
+    try {
+      await scheduler.wake();
+      await attempted.promise;
+    } finally {
+      clearTimeout(timeout);
+      scheduler.stop();
+      await scheduler.settle();
+    }
+
+    assert.deepEqual(attempts, ["A", "B"]);
+    assert.equal(
+      store.queued(now).some((r) => r.workId === "B"),
+      false,
+    );
+  });
+});
+
+test("an eligible capacity-blocked request does not cause repeated zero-delay drains", async () => {
+  await withStore(async (db, store) => {
+    const now = 1_000;
+    store.ensure(request("C"));
+    db.prepare(
+      "UPDATE turn_requests SET nextEligibleAt = ? WHERE workId = ?",
+    ).run(now - 10, "C");
+    const attempts: string[] = [];
+    const scheduler = new TurnScheduler(
+      store,
+      async ({ workId }) => {
+        attempts.push(workId); // Returns without holding, as a capacity refusal does.
+      },
+      () => now,
+    );
+
+    scheduler.start();
+    try {
+      await scheduler.wake();
+      await new Promise((resolve) => setTimeout(resolve, 200));
+    } finally {
+      scheduler.stop();
+      await scheduler.settle();
+    }
+
+    assert.deepEqual(attempts, ["C"]);
+    assert.deepEqual(
+      store.queued(now).map((r) => r.workId),
+      ["C"],
+    );
+  });
+});
+
 test("a queued retry of direct work is resumed work, ahead of older unstarted requests", async () => {
   await withStore(async (db, store) => {
     // A retry is queued with its retry lineage and no task or predecessor link.

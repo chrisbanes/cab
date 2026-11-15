@@ -598,6 +598,8 @@ export class TurnScheduler {
     }
   }
 
+  private eligibilityReadAt: number | undefined;
+
   private startDrain(): Promise<void> {
     const draining = this.drain().finally(() => {
       if (this.draining !== draining) return;
@@ -615,7 +617,11 @@ export class TurnScheduler {
 
   private scheduleNextWake(): void {
     if (this.stopped) return;
-    const next = this.store.nextEligibility(this.now());
+    // Bound by the pass's read, not its end: a request that became eligible mid-pass was
+    // filtered out of the pass and needs a timer, while one it saw as eligible must not.
+    const next = this.store.nextEligibility(
+      this.eligibilityReadAt ?? this.now(),
+    );
     if (next === undefined) return;
     const delay = Math.max(0, Math.min(next - this.now(), 2_147_483_647));
     this.timer = setTimeout(() => {
@@ -637,7 +643,8 @@ export class TurnScheduler {
         const now = this.store.capacity();
         return now.reserved < since.reserved || now.limits !== since.limits;
       };
-      for (const request of this.store.queued(this.now())) {
+      this.eligibilityReadAt = this.now();
+      for (const request of this.store.queued(this.eligibilityReadAt)) {
         if (this.stopped) return;
         // Freed room starts the pass again from the highest-priority request, so it never
         // goes to a later one; an attempt that sees room freed while it awaited gives way

@@ -141,7 +141,7 @@ const quiet = () =>
 /** A paused project whose ready task's lead runs on the fake runtime; the service can restart. */
 async function world(
   t: { after: (fn: () => Promise<void> | void) => void },
-  options: { backoffMs?: number } = {},
+  options: { backoffMs?: number; now?: () => number } = {},
 ) {
   const root = mkdtempSync(join(tmpdir(), "cab-allowance-lifecycle-"));
   const runtime = new LifecycleRuntime();
@@ -160,7 +160,10 @@ async function world(
         power: { enabled: false },
         routingClient: null,
         supervisor: { observationMs: 5, shutdownWaitMs: 2000 },
-        retry: { fallbackBackoffMs: options.backoffMs ?? 0 },
+        retry: {
+          fallbackBackoffMs: options.backoffMs ?? 0,
+          ...(options.now ? { now: options.now } : {}),
+        },
       },
     );
     services.push(service);
@@ -471,7 +474,14 @@ test("a lost turn-start reply stays charged and is never dispatched again, also 
 });
 
 test("each cab retry generation charges one, backoff charges nothing and the retry limit holds", async (t) => {
-  const f = await world(t, { backoffMs: 300 });
+  const backoffMs = 300;
+  // A manual retry clock: backoff ends only when the test moves time and wakes the scheduler.
+  let clock = Date.now();
+  const f = await world(t, { backoffMs, now: () => clock });
+  const elapse = async () => {
+    clock += backoffMs;
+    await startedOf(f.service).scheduler.wake();
+  };
   f.set(10);
   f.runtime.onTurn = async (turn) => {
     await report(turn);
@@ -491,13 +501,22 @@ test("each cab retry generation charges one, backoff charges nothing and the ret
     f.service.turnRequests().filter((r) => r.workId.startsWith("retry:"));
   await waitUntil(() => retries().length === 1, f.describe);
   // Waiting out the backoff admits nothing.
+  await quiet();
   assert.equal(f.request(retries()[0]!.workId)?.state, "queued");
   assert.equal(f.allowance().charged, 1);
   assert.equal(f.runtime.startedTurns.length, 1);
+  await elapse();
+  await waitUntil(() => retries().length === 2, f.describe);
+  await quiet();
+  assert.equal(f.request(retries()[1]!.workId)?.state, "queued");
+  assert.equal(f.allowance().charged, 2);
+  assert.equal(f.runtime.startedTurns.length, 2);
+  await elapse();
   await waitUntil(
     () => f.runtime.startedTurns.length === 3 && f.settled(),
     f.describe,
   );
+  await elapse();
   await quiet();
   assert.equal(f.runtime.startedTurns.length, 3, "two cab retries at most");
   assert.deepEqual(
