@@ -559,14 +559,14 @@ test("desktop shell lists the designed destinations, an honest Inbox count and a
   await page.locator(".top-bar").waitFor();
   assert.equal(await page.locator(".top-bar-connection").count(), 0);
   await page.unroute("**/api/operator/workspace");
-  // The Settings index, whose own trail is empty, still names the current page.
-  await page.goto(`${web.origin}/settings`);
+  // A Settings section page names itself as the current crumb.
+  await page.goto(`${web.origin}/settings/projects`);
   assert.equal(
     await page
       .getByRole("navigation", { name: "Breadcrumb" })
       .locator('[aria-current="page"]')
       .textContent(),
-    "Settings",
+    "Projects",
   );
   await page.goto(`${web.origin}/`);
   await page.locator("main.page h1").waitFor();
@@ -599,7 +599,7 @@ test("desktop shell lists the designed destinations, an honest Inbox count and a
     }),
   );
   const failed = page.waitForResponse(inboxResponse);
-  await page.goto(`${web.origin}/settings`);
+  await page.goto(`${web.origin}/settings/projects`);
   await failed;
   await page.locator("main.page h1").waitFor();
   assert.equal(await sidebar.locator('a[href="/inbox"] .nav-count').count(), 0);
@@ -663,7 +663,7 @@ test("page-owned refresh replaces the shell Refresh and still re-reads the works
     0,
     "/search has no Refresh button",
   );
-  for (const route of ["/inbox", "/settings"]) {
+  for (const route of ["/inbox", "/settings/projects"]) {
     await page.goto(web.origin + route);
     await page.locator("main.page h1").waitFor();
     assert.equal(
@@ -676,7 +676,7 @@ test("page-owned refresh replaces the shell Refresh and still re-reads the works
     ...owned.map(([r]) => r),
     "/search?query=Refresh",
     "/inbox",
-    "/settings",
+    "/settings/projects",
   ]) {
     await page.goto(web.origin + route);
     await page.locator("main.page h1").waitFor();
@@ -754,8 +754,9 @@ test("every route renders in the shell on desktop and phone without horizontal s
   page.setDefaultTimeout(5000);
   await signIn(page, web.origin, web.password, "/");
   const notFound = "/does-not-exist";
-  // [route, evidence name, top-level on a phone]
-  const routes: [string, string | null, boolean][] = [
+  // [route, evidence name, top-level on a phone]; a Settings section page has Back and
+  // the drawer, because its parent Settings opens a section again.
+  const routes: [string, string | null, boolean | "section"][] = [
     ["/", "overview", true],
     ["/inbox", "inbox", true],
     ["/tasks", null, true],
@@ -765,8 +766,8 @@ test("every route renders in the shell on desktop and phone without horizontal s
     [`/projects/${projectId}/settings`, null, false],
     ["/tasks/new", null, false],
     [`/tasks/${taskId}`, null, false],
-    ["/settings", "settings", true],
-    ["/settings/runtime", null, false],
+    ["/settings/projects", "settings", "section"],
+    ["/settings/runtime", null, "section"],
     ["/settings/projects/new", null, false],
     ["/settings/profiles/new", null, false],
     [`/profiles/${profileId}/settings`, null, false],
@@ -822,11 +823,11 @@ test("every route renders in the shell on desktop and phone without horizontal s
         assert.equal(state.sidebar, false, `${route}: drawer replaces sidebar`);
         assert.equal(
           state.variant,
-          topLevel ? "top-level" : "detail",
+          topLevel === true ? "top-level" : "detail",
           `${route}: phone header variant`,
         );
-        assert.equal(state.menu, topLevel, `${route}: menu button`);
-        assert.equal(state.back, !topLevel, `${route}: Back link`);
+        assert.equal(state.menu, topLevel !== false, `${route}: menu button`);
+        assert.equal(state.back, topLevel !== true, `${route}: Back link`);
       }
       if (width === 390 && route === "/inbox")
         assert.equal(
@@ -905,7 +906,7 @@ test("create forms have no shell Refresh while read views keep one, across navig
   ])
     await expectRefresh(route, 0);
   for (const route of [
-    "/settings",
+    "/settings/projects",
     "/getting-started",
     "/settings/runtime",
     "/inbox",
@@ -914,7 +915,7 @@ test("create forms have no shell Refresh while read views keep one, across navig
 
   // Client navigation re-evaluates the header: leaving a read view for a form drops Refresh,
   // Back brings it back, and the account menu's Settings returns to a read view.
-  await page.goto(`${web.origin}/settings`);
+  await page.goto(`${web.origin}/settings/projects`);
   await page.locator("main.page h1").waitFor();
   assert.equal(await shellRefresh(page).count(), 1);
   await page
@@ -924,7 +925,7 @@ test("create forms have no shell Refresh while read views keep one, across navig
   await page.waitForURL("**/settings/projects/new");
   assert.equal(await shellRefresh(page).count(), 0);
   await page.goBack();
-  await page.waitForURL("**/settings");
+  await page.waitForURL("**/settings/projects");
   await shellRefresh(page).waitFor();
   assert.equal(await shellRefresh(page).count(), 1);
 
@@ -935,7 +936,7 @@ test("create forms have no shell Refresh while read views keep one, across navig
     .getByRole("button", { name: "Operator account", exact: true })
     .click();
   await page.getByRole("menuitem", { name: "Settings", exact: true }).click();
-  await page.waitForURL("**/settings");
+  await page.waitForURL(/\/settings\/(?:projects|readiness)$/);
   await shellRefresh(page).waitFor();
   assert.equal(await shellRefresh(page).count(), 1);
 });
@@ -947,7 +948,7 @@ test("create forms have no Refresh in the phone header", async (_t, journey) => 
     await page.locator("main.page h1").waitFor();
     assert.equal(await shellRefresh(page).count(), 0, route);
   }
-  await page.goto(`${web.origin}/settings`);
+  await page.goto(`${web.origin}/settings/projects`);
   await page.locator("main.page h1").waitFor();
   assert.equal(await shellRefresh(page).count(), 1);
 });
@@ -1213,11 +1214,12 @@ async function assertBrandMark(mark: import("playwright").Locator) {
 
 test("an old /app address opens the same view at the root, keeping its query and fragment", async (_t, journey) => {
   const { web, page } = await startShell(journey, { width: 1366, height: 900 });
+  // The 308 keeps the query and the browser the fragment, which opens its section page.
   await page.goto(`${web.origin}/app/settings?tab=x#notifications`);
   await page
     .getByRole("heading", { name: "Notifications", level: 2 })
     .waitFor();
-  assert.equal(page.url(), `${web.origin}/settings?tab=x#notifications`);
+  assert.equal(page.url(), `${web.origin}/settings/notifications?tab=x`);
 
   // Signed out, the old Inbox link asks for sign-in at the root address and returns to it.
   await page.context().clearCookies();

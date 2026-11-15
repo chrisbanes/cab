@@ -27,6 +27,7 @@ import {
   useLoadedDraft,
   type SettingsProps,
 } from "./settings.js";
+import { settingsSectionHref } from "./settings-sections.js";
 type Live = Extract<z.output<typeof projectSchema>["data"], { state: "live" }>;
 export function ProjectLifecyclePanel(
   p: SettingsProps & {
@@ -367,7 +368,7 @@ export function DeletedProject(
         check={() => deletion.reconcile(p.client, p.session.csrfToken)}
         success="Original deletion receipt confirmed."
       />
-      <a href="/settings">Projects</a>
+      <a href={settingsSectionHref("projects")}>Projects</a>
     </section>
   );
 }

@@ -201,7 +201,11 @@ export class OperatorWebBoundary {
       /^\/tasks\/[a-f0-9-]{36}$/.test(path) ||
       path === "/settings" ||
       /^\/assignments\/[a-f0-9-]{36}\/recovery$/.test(path) ||
-      /^\/settings\/(?:projects\/new|profiles\/new|runtime)$/.test(path) ||
+      /^\/settings\/(?:projects\/new|profiles\/new)$/.test(path) ||
+      // The nine section pages, listed so a misspelled section is not found.
+      /^\/settings\/(?:projects|runtime|agents|routing|github-discovery|gitlab-credentials|cli-credentials|notifications|readiness)$/.test(
+        path,
+      ) ||
       /^\/(?:projects|profiles)\/[a-f0-9-]{36}\/settings$/.test(path) ||
       path === "/login" ||
       /^\/projects\/[a-f0-9-]{36}$/.test(path)

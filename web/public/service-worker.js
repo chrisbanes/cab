@@ -18,7 +18,10 @@ const safeUrl = (url) =>
   typeof url === "string" &&
   url.length <= 600 &&
   /^[\x21-\x7e]+$/.test(url) &&
-  (url.startsWith("/inbox?") || url === "/settings#notifications");
+  // The Notifications page, and its address before Settings had section pages.
+  (url.startsWith("/inbox?") ||
+    url === "/settings/notifications" ||
+    url === "/settings#notifications");
 
 const accepted = (payload) =>
   payload !== null &&

@@ -1065,7 +1065,7 @@ test("settings headers, saved lines, state cards and hold pills", () => {
       documentTitle: "Project configuration",
       trail: [
         { label: "Settings", href: "/settings" },
-        { label: "Projects" },
+        { label: "Projects", href: "/settings/projects" },
         { label: "Atlas", href: `/projects/${projectId}/settings` },
         { label: "Task source" },
       ],
@@ -1088,6 +1088,69 @@ test("settings headers, saved lines, state cards and hold pills", () => {
     "Recovery",
   );
   assert.equal(settingsHeader("/tasks", "", null), null);
+  const settings = { label: "Settings", href: "/settings" };
+  // Each section page: its own title, `Settings › Section` and a description.
+  for (const [path, title, crumb] of [
+    ["/settings/projects", "Projects", "Projects"],
+    ["/settings/runtime", "Runtime capacity and recovery", "Runtime"],
+    ["/settings/agents", "Agents", "Agents"],
+    ["/settings/routing", "Routing", "Routing"],
+    ["/settings/github-discovery", "GitHub discovery", "GitHub discovery"],
+    [
+      "/settings/gitlab-credentials",
+      "GitLab credentials",
+      "GitLab credentials",
+    ],
+    ["/settings/cli-credentials", "CLI credentials", "CLI credentials"],
+    ["/settings/notifications", "Notifications", "Notifications"],
+    ["/settings/readiness", "Readiness", "Readiness"],
+  ] as const) {
+    const header = settingsHeader(path, "", workspace);
+    assert.equal(header?.title, title, path);
+    assert.deepEqual(header?.trail, [settings, { label: crumb }], path);
+    assert.ok(header?.subtitle, path);
+  }
+  // Detail pages link their concrete section; the final crumb is text.
+  assert.deepEqual(
+    settingsHeader(`/profiles/${mira}/settings`, "", workspace)?.trail,
+    [
+      settings,
+      { label: "Agents", href: "/settings/agents" },
+      { label: "Mira" },
+    ],
+  );
+  assert.deepEqual(
+    settingsHeader("/settings/profiles/new", "", workspace)?.trail,
+    [
+      settings,
+      { label: "Agents", href: "/settings/agents" },
+      { label: "Create agent" },
+    ],
+  );
+  assert.deepEqual(
+    settingsHeader(`/assignments/${id()}/recovery`, "", null)?.trail,
+    [
+      settings,
+      { label: "Runtime", href: "/settings/runtime" },
+      { label: "Assignment recovery" },
+    ],
+  );
+  // Creating a project from Settings returns to Projects; the first project keeps Overview.
+  assert.deepEqual(
+    settingsHeader("/settings/projects/new", "", workspace, false)?.trail,
+    [
+      settings,
+      { label: "Projects", href: "/settings/projects" },
+      { label: "Create project" },
+    ],
+  );
+  assert.deepEqual(
+    settingsHeader("/settings/projects/new", "", workspace, true),
+    {
+      title: "Set up your first project",
+      trail: [{ label: "Overview", href: "/" }, { label: "New project" }],
+    },
+  );
   const receipt = {
     kind: "configuration",
     key: "k",

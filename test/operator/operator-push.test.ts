@@ -1489,7 +1489,7 @@ test("subscribe, list, test and revoke round trip through the session routes", a
     {
       v: 1,
       title: "Test notification from cab",
-      url: "/settings#notifications",
+      url: "/settings/notifications",
       tag: "test:notification",
     },
   ]);

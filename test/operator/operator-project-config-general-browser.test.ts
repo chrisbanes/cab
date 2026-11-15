@@ -2069,7 +2069,7 @@ test("phone project settings lead with state and next step and keep the form usa
     "/projects/:atlas/settings",
     phone,
   );
-  await page.getByRole("link", { name: "Back to Settings" }).waitFor();
+  await page.getByRole("link", { name: "Back to Projects" }).waitFor();
   const state = page.getByRole("region", { name: "Current state" });
   await state.getByText("Lead: Mira · repository access: acme/atlas").waitFor();
   await page

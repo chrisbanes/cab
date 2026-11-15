@@ -1389,7 +1389,14 @@ is stopped, Resume…, and a stale row of a started assignment applies current i
 for its next turn. Active and unsettled recovery records appear first; known terminal,
 effect-free records with no recorded holds are collapsed under a settled count. The
 evidence caveat stays visible, and every record remains available in the disclosure. These
-use the same receipted JSON commands as the CLI. Runtime settings at `/settings/runtime` show capacity, runtime availability and
+use the same receipted JSON commands as the CLI. Settings is nine section pages, each
+with its own route and a persistent section navigation: Projects, Runtime & recovery,
+Agents (`/settings/agents`), Routing, GitHub discovery, GitLab credentials, CLI
+credentials, Notifications and Readiness, at `/settings/<section>`. Each page reads
+only what it shows. `/settings` opens Readiness until a task starts a turn, Projects
+afterwards, and stays with its Retry when the workspace cannot be read; an older
+`/settings#<section>` or `/settings#readiness-<check>` address opens its section page,
+and any other fragment is dropped. Runtime settings at `/settings/runtime` show capacity, runtime availability and
 effective policy. The separate cross-project admission summary is dropped; List/Board
 per-task waiting reasons and project views replace it. Assignment recovery shows curated task status, the accountable lead, task-wide holds and their available reason, destination and lifecycle with its admission caveat. It links to task-wide Execution and the exact inspector row for a stale started assignment. Advanced identities and uncurated reasons remain available through the existing bounded CLI recovery options where supported; the recovery page offers Release for a generation that never sent a turn and the same Start again as the task page once cab has released a held turn. The former assignment HTML pages and Apply form route are not found. Project Settings edits delivery policy at `/projects/:id/settings?tab=delivery`. The technical
 contracts are the [foundation](design/ui02-foundation.md),
@@ -1797,7 +1804,8 @@ Agents are reusable identities; assignments and their conversations remain disti
 The UI calls them agents. For compatibility, CLI commands retain `cab profile`,
 API routes and fields retain names such as `/api/operator/profiles` and `profileId`,
 and command types, reason codes, stored IDs and revision records retain their existing
-names and meanings. Existing web routes and Settings fragments also remain valid.
+names and meanings. Existing web routes remain valid, and an older Settings fragment
+such as `/settings#profiles` opens its section page (`/settings/agents`).
 
 An agent has a name, an optional short summary, private instructions and
 capabilities. Settings and routing candidate lists show the name with its summary

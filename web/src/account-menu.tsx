@@ -22,6 +22,7 @@ import {
   useTheme,
   type ThemeChoice,
 } from "./theme.js";
+import { isSettingsRoute } from "./settings-sections.js";
 
 export const THEME_OPTIONS: Record<
   ThemeChoice,
@@ -138,7 +139,13 @@ export function AccountMenu({
       tabIndex={-1}
       className="account-menu-item"
       href={href}
-      aria-current={pathname === href ? "page" : undefined}
+      aria-current={
+        href === "/settings" && isSettingsRoute(pathname ?? "")
+          ? "true"
+          : pathname === href
+            ? "page"
+            : undefined
+      }
       onClick={(event) => {
         if (
           event.button === 0 &&

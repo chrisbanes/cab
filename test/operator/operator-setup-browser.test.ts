@@ -606,7 +606,7 @@ test("Setup falls back to typed entry without discovery and on first run", async
     await page
       .getByRole("link", { name: "Set discovery credential" })
       .getAttribute("href"),
-    "/settings#github-discovery",
+    "/settings/github-discovery",
   );
   // With no profiles the lead is chosen by creating one in place, never by leaving setup.
   await page.getByRole("group", { name: "New lead agent" }).waitFor();
@@ -1430,7 +1430,7 @@ test("Setup opens Add a repository for a rejected row and keeps it open for a ke
   await ref.fill("main");
   // A kept draft with no error opens the section on its own: the row holds a value.
   await page.getByRole("link", { name: "Set discovery credential" }).click();
-  await page.locator("main.page h1", { hasText: "Settings" }).waitFor();
+  await page.locator("main.page h1", { hasText: "GitHub discovery" }).waitFor();
   await page.getByRole("link", { name: "New project" }).click();
   // Once the discovery read has settled as unconfigured the section is still open.
   await page.getByText("GitHub discovery is unavailable").waitFor();

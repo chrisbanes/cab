@@ -4,7 +4,7 @@ import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import { browserSuite, killBrowser } from "../fixtures/browser-diagnostics.js";
 import { deletedCleanupFixture } from "../fixtures/deleted-project-cleanup.js";
-import { signIn } from "../fixtures/operator-settings.js";
+import { routeTurnStarted, signIn } from "../fixtures/operator-settings.js";
 import { OperatorApi } from "../../src/standalone/operator-api.js";
 
 const test = browserSuite("operator-project-lifecycle-browser");
@@ -29,7 +29,7 @@ for (const engine of ["chromium", "webkit"] as const) {
       journey.observe(page);
       page.setDefaultTimeout(5000);
       const settings = `${web.origin}/projects/${f.projectId}/settings`;
-      await signIn(page, web, "/settings#projects");
+      await signIn(page, web, "/settings/projects");
       const projects = page.locator("section#projects");
       assert.equal(
         await projects
@@ -337,6 +337,14 @@ for (const engine of ["chromium", "webkit"] as const) {
       await page.getByRole("region", { name: "Deleted project" }).waitFor();
       assert.equal(JSON.stringify(posts.at(-1)), original);
       assert.equal(posts.length, 2, "receipt check is GET-only");
+      // Before any turn, the Projects return still opens Projects, not the first-run landing.
+      await routeTurnStarted(page, false);
+      await page
+        .getByRole("region", { name: "Deleted project" })
+        .getByRole("link", { name: "Projects", exact: true })
+        .click();
+      await page.getByRole("heading", { level: 1, name: "Projects" }).waitFor();
+      assert.equal(new URL(page.url()).pathname, "/settings/projects");
       const receipt = await new OperatorApi(f.service, [
         f.fixture.directory,
       ]).readOperation(

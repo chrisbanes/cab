@@ -604,16 +604,20 @@ test("phone drawer shows the account group with Settings, Getting started and Si
     0,
   );
   await dialog.getByRole("link", { name: "Settings", exact: true }).click();
-  await page.waitForURL("**/settings");
-  // Runtime stays reachable from Settings, and Back returns there.
-  await page.getByRole("link", { name: "Open runtime", exact: true }).click();
+  await page.waitForURL(/\/settings\/(?:projects|readiness)$/);
+  // Runtime stays reachable from the Settings sections, and Back returns to Settings.
+  await page.getByRole("button", { name: /^Sections · / }).click();
+  await page
+    .getByRole("navigation", { name: "Settings sections" })
+    .getByRole("link", { name: "Runtime & recovery", exact: true })
+    .click();
   await page.waitForURL("**/settings/runtime");
   const back = page.getByRole("link", {
     name: "Back to Settings",
     exact: true,
   });
   await back.click();
-  await page.waitForURL("**/settings");
+  await page.waitForURL(/\/settings\/(?:projects|readiness)$/);
   await open();
   await page
     .getByRole("dialog")
@@ -1008,7 +1012,7 @@ for (const viewport of viewports)
       await github
         .getByRole("link", { name: "Set discovery credential" })
         .getAttribute("href"),
-      "/settings#github-discovery",
+      "/settings/github-discovery",
     );
     await page.goto(`${web.origin}/getting-started`);
     await page

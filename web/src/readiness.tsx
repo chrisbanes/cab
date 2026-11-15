@@ -16,7 +16,7 @@ import {
   useHeaderRefresh,
   type SettingsProps,
 } from "./settings.js";
-import { useFragmentLanding } from "./settings-sections.js";
+import { useTargetLanding } from "./settings-sections.js";
 
 const status = {
   pass: { label: "Pass", tone: "success" },
@@ -53,8 +53,8 @@ export function ReadinessPanel(
     discovery.refresh();
   };
   useHeaderRefresh(p.refreshNonce, reread);
-  // A check's own article is a landing target (`#readiness-<check id>`) once it exists.
-  useFragmentLanding(Boolean(readiness.state.data));
+  // A check's own article (`#readiness-<check id>`) is landed on once this read is fresh.
+  useTargetLanding(readiness.state);
   const checks = readiness.state.data?.data.checks;
   const d = useDraft(p.drafts, "discovery.configure:readiness");
   useEffect(() => d.startOperation({ key: key() }), [d]);
