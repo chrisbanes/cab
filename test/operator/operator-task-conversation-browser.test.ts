@@ -2697,15 +2697,43 @@ for (const laterCount of [325, 575])
             requestAnimationFrame(() => requestAnimationFrame(() => resolve())),
           ),
       );
+    // Read bodies only from requests that finished: the UI aborts a superseded
+    // timeline read, and Chromium drops an aborted response's body.
+    type Timeline = {
+      data: {
+        reasoningSummaryRevision: string;
+        reasoningSummaryAnchors?: { reasoningSummary: { text: string } }[];
+      };
+    };
+    const finishedTimeline = (
+      accept: (url: URL, body: Timeline) => boolean = () => true,
+    ): Promise<Timeline> => {
+      let found: Timeline | undefined;
+      return page
+        .waitForEvent("requestfinished", {
+          predicate: async (request) => {
+            const url = new URL(request.url());
+            if (!url.pathname.endsWith("/timeline")) return false;
+            const response = await request.response();
+            if (response?.status() !== 200) return false;
+            try {
+              const body = await response.json();
+              if (!accept(url, body)) return false;
+              found ??= body;
+              return true;
+            } catch {
+              return false;
+            }
+          },
+        })
+        .then(() => found!);
+    };
     const reread = async () => {
-      const response = page.waitForResponse(
-        (r) =>
-          new URL(r.url()).pathname.endsWith("/timeline") && r.status() === 200,
-      );
+      const read = finishedTimeline();
       await refresh(page);
-      const read = await response;
+      const body = await read;
       await frames();
-      return (await read.json()).data;
+      return body.data;
     };
     let knownRevision = initial.reasoningSummaryRevision as string;
     for (let batch = 0; batch < laterCount / 25; batch++) {
@@ -2732,28 +2760,19 @@ for (const laterCount of [325, 575])
     await frames();
     const top = (await anchor.boundingBox())!.y;
     const start = requests.length;
-    const changedResponse = page.waitForResponse(async (response) => {
-      const url = new URL(response.url());
-      if (
-        url.pathname !== `/api/operator/tasks/${a.taskId}/timeline` ||
-        url.searchParams.has("before") ||
-        url.searchParams.get("reasoningSummaryRevision") !== knownRevision ||
-        response.status() !== 200
-      )
-        return false;
-      try {
-        const data = (await response.json()).data;
-        return (
-          data.reasoningSummaryRevision !== knownRevision &&
-          Array.isArray(data.reasoningSummaryAnchors) &&
-          data.reasoningSummaryAnchors.some(
-            (value: { reasoningSummary: { text: string } }) =>
-              value.reasoningSummary.text === "TERMINAL_RETAINED_SUMMARY",
-          )
-        );
-      } catch {
-        return false;
-      }
+    const changedResponse = finishedTimeline((url, body) => {
+      const data = body.data;
+      return (
+        url.pathname === `/api/operator/tasks/${a.taskId}/timeline` &&
+        !url.searchParams.has("before") &&
+        url.searchParams.get("reasoningSummaryRevision") === knownRevision &&
+        data.reasoningSummaryRevision !== knownRevision &&
+        Array.isArray(data.reasoningSummaryAnchors) &&
+        data.reasoningSummaryAnchors.some(
+          (value: { reasoningSummary: { text: string } }) =>
+            value.reasoningSummary.text === "TERMINAL_RETAINED_SUMMARY",
+        )
+      );
     });
     emit({
       kind: "reasoning-summary",
@@ -2767,7 +2786,7 @@ for (const laterCount of [325, 575])
         .some((w) => w.workId === active.workId && w.state === "completed"),
     );
     await refresh(page);
-    const changed = (await (await changedResponse).json()).data;
+    const changed = (await changedResponse).data;
     await toggle.waitFor();
     const applied = await reread();
     assert.equal(
@@ -2776,7 +2795,7 @@ for (const laterCount of [325, 575])
     );
     assert.equal(applied.reasoningSummaryAnchors, undefined);
     assert.ok(
-      changed.reasoningSummaryAnchors.some(
+      changed.reasoningSummaryAnchors!.some(
         (value: { reasoningSummary: { text: string } }) =>
           value.reasoningSummary.text === "TERMINAL_RETAINED_SUMMARY",
       ),
