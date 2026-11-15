@@ -1,6 +1,6 @@
 ---
 status: superseded
-superseded_by: ADR-1037
+superseded_by: [ADR-1037]
 ---
 
 # Bound task work by cab-admitted turns
