@@ -21,15 +21,55 @@ import {
 const test = browserSuite("operator-first-run-browser");
 
 /** Every target is wholly in the first screen, unscrolled and without sideways overflow. */
-async function firstScreen(page: Page, where: string, targets: Locator[]) {
-  for (const target of targets)
+async function firstScreen(
+  journey: BrowserJourney,
+  page: Page,
+  where: string,
+  targets: Locator[],
+) {
+  try {
+    for (const target of targets)
+      assert.equal(
+        await inFirstViewport(page, target),
+        true,
+        `${where} is in the first view ${JSON.stringify(await target.boundingBox())}`,
+      );
     assert.equal(
-      await inFirstViewport(page, target),
-      true,
-      `${where} is in the first view ${JSON.stringify(await target.boundingBox())}`,
+      await page.evaluate(() => scrollY),
+      0,
+      `${where} not scrolled`,
     );
-  assert.equal(await page.evaluate(() => scrollY), 0, `${where} not scrolled`);
-  await noPageOverflow(page);
+    await noPageOverflow(page);
+  } catch (error) {
+    try {
+      console.error(
+        "first-screen-observation",
+        JSON.stringify({
+          where,
+          ...(await page.evaluate(() => ({
+            scroll: { x: scrollX, y: scrollY },
+            viewport: { width: innerWidth, height: innerHeight },
+            visualViewport: window.visualViewport
+              ? {
+                  width: visualViewport!.width,
+                  height: visualViewport!.height,
+                  offsetTop: visualViewport!.offsetTop,
+                  offsetLeft: visualViewport!.offsetLeft,
+                }
+              : null,
+            focusTag: document.activeElement?.tagName ?? null,
+          }))),
+          targets: await Promise.all(
+            targets.map((target) => target.boundingBox()),
+          ),
+        }),
+      );
+      await journey.capture(page, "first-screen-failure", false);
+    } catch {
+      console.error("first-screen-observation-unavailable");
+    }
+    throw error;
+  }
 }
 
 // docs/user-flows/first-run.md: a fresh sign-in on Home to a created task. Readiness is
@@ -74,7 +114,7 @@ async function firstRun(
   });
   await create.waitFor();
   await row.getByText("Next", { exact: true }).waitFor();
-  await firstScreen(page, "Home", [card, create]);
+  await firstScreen(journey, page, "Home", [card, create]);
   await click(create);
 
   const profile = page.getByRole("group", { name: "New lead agent" });
@@ -90,7 +130,7 @@ async function firstRun(
   assert.equal(await starter.isChecked(), true);
   if (!starters) await starter.uncheck();
   interactions++;
-  await firstScreen(page, "setup", [
+  await firstScreen(journey, page, "setup", [
     projectName,
     profileName,
     createProfile,
@@ -120,7 +160,11 @@ async function firstRun(
   );
   // The repository fill scrolled the page; the sticky bar still keeps Create in view.
   if (linked) assert.equal(await inFirstViewport(page, createProject), true);
-  else await firstScreen(page, "setup with the profile", [lead, createProject]);
+  else
+    await firstScreen(journey, page, "setup with the profile", [
+      lead,
+      createProject,
+    ]);
   await click(createProject);
 
   const ready = page.getByRole("region", { name: "Ready check" });
@@ -138,7 +182,7 @@ async function firstRun(
   });
   assert.equal(await imported.count(), 0);
   if (linked) {
-    await firstScreen(page, "ready check", [ready, importNow]);
+    await firstScreen(journey, page, "ready check", [ready, importNow]);
     await click(importNow);
     await imported.waitFor(refreshed);
     for (const line of [/^Previewed/, /Read .* completely at/])
@@ -154,7 +198,7 @@ async function firstRun(
     await noPageOverflow(page);
   } else {
     assert.equal(await importNow.count(), 0);
-    await firstScreen(page, "ready check", [ready, resume]);
+    await firstScreen(journey, page, "ready check", [ready, resume]);
   }
   const importedTasks = f.service
     .domain()
@@ -176,7 +220,7 @@ async function firstRun(
   await outcome.fill("The first task is created.");
   interactions++;
   await badge.waitFor();
-  await firstScreen(page, "composer", [
+  await firstScreen(journey, page, "composer", [
     composerProject,
     title,
     outcome,
@@ -189,7 +233,7 @@ async function firstRun(
   const created = page.getByRole("region", { name: "Task created" });
   const open = created.getByRole("link", { name: "Open task" });
   await created.waitFor();
-  await firstScreen(page, "result", [created, open]);
+  await firstScreen(journey, page, "result", [created, open]);
   assert.equal(interactions, linked ? 8 : 7);
   const domain = f.service.domain();
   assert.equal(domain.projects().length, 1);
