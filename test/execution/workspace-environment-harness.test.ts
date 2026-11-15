@@ -32,7 +32,7 @@ const fakeRoot = join(
 );
 const fakeGrant = () => ({
   schema: "cab.workspace-environment-grant/v1",
-  grantId: randomUUID(),
+  grantId: "1727-t1-fake",
   planDigest:
     "5d2a4fa84fc5ecab2a0d0e8f27181e43dc10aefa7ca8e4ddfeefa72dda81a245",
   auth: "native-disposable-homes",

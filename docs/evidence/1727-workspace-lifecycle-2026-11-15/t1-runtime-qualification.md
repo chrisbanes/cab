@@ -43,10 +43,13 @@ configuration or App Server environment change was needed. This holds only for t
 phases above; it is not a claim of provider-wide isolation.
 
 The Claude refusal comes from cab's admission check, which runs before the prompt is
-released. It needs both `accountInfo()` to report a first-party subscription and cab's SDK
-MCP server to be connected, and the error does not say which check failed. The Claude
-process had settled before the harness returned. No Claude session transcript was written,
-so the model got no prompt. Claude's measurement and its moved-root resume are **untested**.
+released. It refuses when `accountInfo()` does not report a first-party subscription, when
+cab's SDK MCP server is not connected, when either read throws or fails to parse (for
+example, because the CLI exited early), or when the 30-second admission timer expires. The
+error does not say which of these happened. A refusal releases the prompt gate without
+yielding the prompt, so the model got no prompt; no Claude session transcript was written.
+The Claude process had settled before the harness returned. Claude's measurement and its
+moved-root resume are **untested**.
 
 ## Accounting
 
@@ -63,6 +66,6 @@ so the model got no prompt. Claude's measurement and its moved-root resume are *
 
 ## Next step
 
-Diagnosing Claude admission needs a new grant. A model-free check of `accountInfo()` and MCP
-status under the same wiring would identify the failing condition before any turn is
-spent. T2 and its dependants stay blocked until both harnesses pass.
+Diagnosing Claude admission needs a new grant. A model-free check under the same wiring of
+`accountInfo()`, MCP status, early CLI exit and admission timing would identify the
+failing condition before any turn is spent. T2 and its dependants stay blocked until both harnesses pass.
