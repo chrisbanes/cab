@@ -118,7 +118,38 @@ test("a failed workspace read keeps Settings with Retry and the section links", 
   });
   await h1(page, "Readiness");
   assert.equal(path(page), "/settings/readiness");
+  // A page that lists the workspace shows no counts or rows without it, never "0 projects".
+  for (const [route, heading] of [
+    ["/settings/projects", "Projects"],
+    ["/settings/agents", "Agents"],
+    ["/settings/routing", "Routing"],
+  ] as const) {
+    await page.goto(`${web.origin}${route}`);
+    await h1(page, heading);
+    await page.getByRole("button", { name: "Try again" }).first().waitFor();
+    assert.equal(await page.locator(".settings-panel").count(), 0, route);
+    assert.equal(await page.getByText(/^0 (projects|agents)/).count(), 0);
+  }
   await page.unroute("**/api/operator/workspace", fail);
+  await page.getByRole("button", { name: "Try again" }).first().click();
+  await page.getByRole("link", { name: "Open routing for Relay" }).waitFor();
+});
+
+test("Show archived waits for its own read instead of listing no projects", async (_t, journey) => {
+  const { page } = await startSettings(journey, "/settings/projects");
+  await page.getByText("Lead: Mira").waitFor();
+  await page.route("**/api/operator/workspace?includeArchived=true", (r) =>
+    r.fulfill({
+      status: 503,
+      json: { error: { code: "unavailable", message: "x" } },
+    }),
+  );
+  await page.getByLabel("Show archived").check();
+  await page
+    .getByText("Archived projects are unavailable. Try again.")
+    .waitFor();
+  assert.equal(await page.getByText(/^0 projects/).count(), 0);
+  assert.equal(await page.locator("article.settings-row").count(), 0);
 });
 
 test("legacy Settings fragments open their section page, keeping the query", async (_t, journey) => {

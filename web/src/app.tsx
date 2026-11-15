@@ -1331,6 +1331,7 @@ export function App() {
               <SettingsSectionPage
                 key={pathname}
                 section={sectionForPath(pathname) ?? "projects"}
+                workspaceFailed={workspace.state.status === "error"}
                 client={client}
                 session={session}
                 drafts={drafts.current}

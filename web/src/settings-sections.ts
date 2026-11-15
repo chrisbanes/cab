@@ -41,7 +41,8 @@ export const sectionForPath = (pathname: string): SettingsSectionId | null =>
 /** Whether a path is Settings or one of its pages, for the account menu's Settings link. */
 export const isSettingsRoute = (pathname: string) =>
   pathname === "/settings" ||
-  pathname.startsWith("/settings/") ||
+  sectionForPath(pathname) !== null ||
+  /^\/settings\/(?:projects|profiles)\/new$/.test(pathname) ||
   /^\/(?:projects|profiles)\/[^/]+\/settings$/.test(pathname) ||
   /^\/assignments\/[^/]+\/recovery$/.test(pathname);
 

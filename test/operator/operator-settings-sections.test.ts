@@ -121,7 +121,13 @@ test("Settings ancestry covers its sections and detail pages, nothing else", () 
     `/assignments/${id}/recovery`,
   ])
     assert.ok(isSettingsRoute(path), path);
-  for (const path of ["/", `/projects/${id}`, "/tasks", "/getting-started"])
+  for (const path of [
+    "/",
+    `/projects/${id}`,
+    "/tasks",
+    "/getting-started",
+    "/settings/nope",
+  ])
     assert.ok(!isSettingsRoute(path), path);
 });
 

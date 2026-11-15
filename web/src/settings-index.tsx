@@ -25,7 +25,13 @@ import {
   projectLabel,
   workspaceLabels,
 } from "../../src/operator/project-labels.js";
-import { ActionLink, Button, ProjectName, StatusBadge } from "./components.js";
+import {
+  ActionLink,
+  Button,
+  ProjectName,
+  ResourceStatus,
+  StatusBadge,
+} from "./components.js";
 import { GitLabCredentialsSection } from "./gitlab-credentials.js";
 import { DiscoveryCredentialRow } from "./discovery-credential.js";
 import { runtimeSummary } from "./execution-runtime.js";
@@ -209,23 +215,41 @@ export function SettingsLayout({
 
 /** The page for one section, mounting only that section's reads. */
 export function SettingsSectionPage(
-  p: SettingsProps & { section: SettingsSectionId },
+  p: SettingsProps & {
+    section: SettingsSectionId;
+    /** The workspace read failed; the shell shows its failure and Retry. */
+    workspaceFailed: boolean;
+  },
 ) {
-  const page = {
-    projects: ProjectsSettings,
-    runtime: RuntimeSettings,
-    profiles: AgentsSettings,
-    routing: RoutingSettings,
-    "github-discovery": DiscoverySettings,
-    "gitlab-credentials": GitLabSettings,
-    "cli-credentials": OperatorCredentialsSection,
-    notifications: NotificationsSection,
-    readiness: ReadinessSettings,
-  }[p.section];
-  const Page = page as (props: SettingsProps) => ReactNode;
+  const pages: Record<SettingsSectionId, (props: SettingsProps) => ReactNode> =
+    {
+      projects: ProjectsSettings,
+      runtime: RuntimeSettings,
+      profiles: AgentsSettings,
+      routing: RoutingSettings,
+      "github-discovery": DiscoverySettings,
+      "gitlab-credentials": GitLabSettings,
+      "cli-credentials": OperatorCredentialsSection,
+      notifications: NotificationsSection,
+      readiness: ReadinessSettings,
+    };
+  const Page = pages[p.section];
+  // Projects, Agents and Routing list the workspace: without it they show no counts or
+  // rows, so a loading or failed read never reads as an empty workspace.
+  const listsWorkspace = ["projects", "profiles", "routing"].includes(
+    p.section,
+  );
   return (
     <SettingsLayout current={p.section}>
-      <Page {...p} />
+      {listsWorkspace && !p.workspace ? (
+        !p.workspaceFailed && (
+          <p className="body muted" role="status">
+            Loading settings…
+          </p>
+        )
+      ) : (
+        <Page {...p} />
+      )}
     </SettingsLayout>
   );
 }
@@ -263,11 +287,9 @@ function ProjectsSettings(p: SettingsProps) {
   useHeaderRefresh(p.refreshNonce, () => {
     if (showArchived) void archivedWorkspace.refresh();
   });
-  const projects = visibleProjects(
-      (showArchived ? archivedWorkspace.state.data : p.workspace)?.data
-        .projects ?? [],
-      showArchived,
-    ),
+  // With Show archived, the list waits for its own read rather than showing none.
+  const listed = showArchived ? archivedWorkspace.state.data : p.workspace;
+  const projects = visibleProjects(listed?.data.projects ?? [], showArchived),
     profiles = p.workspace?.data.profiles ?? [],
     projectLabels = workspaceLabels(p.workspace);
   const { configs, retry } = useProjectConfigurations(
@@ -308,7 +330,11 @@ function ProjectsSettings(p: SettingsProps) {
     <Panel
       id="projects"
       title="Projects"
-      description={`${plural(projects.length, "project")} · ${paused} paused · repository access and GitHub discovery per project`}
+      description={
+        listed
+          ? `${plural(projects.length, "project")} · ${paused} paused · repository access and GitHub discovery per project`
+          : "Repository access and GitHub discovery per project"
+      }
       action={
         <ActionLink href="/settings/projects/new">Create project</ActionLink>
       }
@@ -321,6 +347,13 @@ function ProjectsSettings(p: SettingsProps) {
         />
         Show archived
       </label>
+      {!listed && (
+        <ResourceStatus
+          label="Archived projects"
+          state={archivedWorkspace.state}
+          retry={archivedWorkspace.refresh}
+        />
+      )}
       {projects.map((r) => {
         const label = projectLabel(projectLabels, r.id, r.name),
           name = label.text,
