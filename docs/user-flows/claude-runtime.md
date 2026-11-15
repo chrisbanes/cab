@@ -24,6 +24,9 @@ can use that native subscription login.
 3. Manage instructions, skills, plugins, MCP servers and hooks in Claude Code's
    normal configuration. Configured extensions are trusted and may act outside
    cab's tools; command restrictions do not confine every extension effect.
+4. Each turn checks native login again, then waits up to 30 seconds for cab's
+   reserved `cab` SDK MCP endpoint to report connected. Only then is the prompt
+   released.
 
 cab neither accepts a setup token nor edits the user's configuration. API billing
 and provider fallback are unavailable. See the
@@ -33,7 +36,12 @@ for the service environment and separately approved migration/rollback procedure
 ## Recovery
 
 - If native authentication expires, sign in again as the service user and restart
-  the runtime. Recover held work only through its existing recovery checks.
+  the runtime. Recover held work only through its existing recovery checks. A turn
+  refused with "native subscription login is unavailable" needs the same fix.
+- A turn refused with "the reserved cab MCP endpoint is not connected" found the
+  `cab` endpoint missing after the wait, duplicated, from another source, or
+  failed. Keep the `cab` MCP name free and remove inherited configuration that
+  replaces it, then start the turn again.
 - Disabling Claude keeps bound work waiting; enabling it again is explicit and
   never substitutes another harness.
 - Historical token references and old receipts remain retained. New token writes

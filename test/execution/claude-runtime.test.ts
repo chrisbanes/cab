@@ -78,6 +78,9 @@ function fixture(
     selfTest?: () => boolean;
     hangModels?: boolean;
     mcpSources?: string[];
+    mcpStatuses?: unknown[][];
+    turnAccountInfo?: () => Promise<unknown>;
+    admissionTimeoutMs?: number;
     apiProvider?: string;
     apiKeySource?: string | null;
     resolveExecutable?: () => Promise<string | null>;
@@ -91,12 +94,16 @@ function fixture(
   let origin: string | undefined;
   const log: string[] = [];
   const recorded: unknown[] = [];
-  const { sdk, sessions, queries, optionsSeen } = fakeSdk(
+  const { sdk, sessions, queries, optionsSeen, mcpReads } = fakeSdk(
     options.scripts ?? [],
     log,
     {
       hangModels: options.hangModels ?? false,
       ...(options.mcpSources ? { mcpSources: options.mcpSources } : {}),
+      ...(options.mcpStatuses ? { mcpStatuses: options.mcpStatuses } : {}),
+      ...(options.turnAccountInfo
+        ? { turnAccountInfo: options.turnAccountInfo }
+        : {}),
       ...(options.apiProvider ? { apiProvider: options.apiProvider } : {}),
       ...(options.apiKeySource !== undefined
         ? { apiKeySource: options.apiKeySource }
@@ -153,6 +160,9 @@ function fixture(
     exitTimeoutMs: 2000,
     sandboxSelfTest: async () => (options.selfTest ? options.selfTest() : true),
     probeRetryMs: 20,
+    ...(options.admissionTimeoutMs
+      ? { admissionTimeoutMs: options.admissionTimeoutMs }
+      : {}),
   });
   const emitted: RuntimeConversationEvent[] = [];
   const anomalies: Array<{
@@ -243,6 +253,7 @@ function fixture(
     turn,
     queries,
     optionsSeen,
+    mcpReads,
     cleanup: async () => {
       await releaseClaudeTemporaryBase(workspace);
       await runtime.stop();
@@ -2136,6 +2147,7 @@ for (const sources of [[], ["project"], ["sdk", "project"], ["sdk", "sdk"]])
   }, async () => {
     const f = fixture({
       mcpSources: sources,
+      admissionTimeoutMs: 500,
       scripts: [
         async function* (session) {
           yield init(sessionOf(session));
@@ -2146,12 +2158,152 @@ for (const sources of [[], ["project"], ["sdk", "project"], ["sdk", "sdk"]])
     try {
       await f.runtime.start();
       const id = await f.runtime.startThread(f.workspace, []);
-      await assert.rejects(f.turn(id), /Claude turn could not start/);
+      await assert.rejects(f.turn(id), mcpRefusal);
       assert.ok(!f.log.includes("prompt"));
     } finally {
       await f.cleanup();
     }
   });
+
+const mcpRefusal =
+  /^Error: Claude turn could not start: the reserved cab MCP endpoint is not connected$/;
+const subscriptionRefusal =
+  /^Error: Claude turn could not start: native subscription login is unavailable$/;
+const cabRow = (source: string, status = "connected") => ({
+  name: "cab",
+  source,
+  status,
+});
+const oneTurn: Script = async function* (session) {
+  yield init(sessionOf(session));
+  yield result(sessionOf(session));
+};
+const pollSettle = () => new Promise((resolve) => setTimeout(resolve, 300));
+
+for (const [label, mcpStatuses] of [
+  ["a delayed cab row", [[], [], [cabRow("sdk")]]],
+  ["a pending cab row", [[cabRow("sdk", "pending")], [cabRow("sdk")]]],
+] satisfies [string, unknown[][]][])
+  test(`Claude admission waits for ${label} before releasing the prompt`, {
+    skip: slashTmpDenied(),
+  }, async () => {
+    const f = fixture({
+      mcpStatuses,
+      admissionTimeoutMs: 5_000,
+      scripts: [oneTurn],
+    });
+    try {
+      await f.runtime.start();
+      const id = await f.runtime.startThread(f.workspace, []);
+      const turnId = await f.turn(id);
+      assert.equal(f.mcpReads(), mcpStatuses.length);
+      assert.equal(await f.runtime.waitForTurn(id, turnId), "completed");
+      assert.ok(f.log.includes("prompt"));
+    } finally {
+      await f.cleanup();
+    }
+  });
+
+test("Claude admission refuses with the MCP reason when the cab row never appears within the bound", {
+  skip: slashTmpDenied(),
+}, async () => {
+  const f = fixture({
+    mcpStatuses: [[]],
+    admissionTimeoutMs: 500,
+    scripts: [oneTurn],
+  });
+  try {
+    await f.runtime.start();
+    const id = await f.runtime.startThread(f.workspace, []);
+    const startedAt = Date.now();
+    await assert.rejects(f.turn(id), mcpRefusal);
+    assert.ok(Date.now() - startedAt >= 450);
+    assert.ok(f.mcpReads() > 1);
+    const reads = f.mcpReads();
+    await pollSettle();
+    assert.equal(f.mcpReads(), reads);
+    assert.ok(!f.log.includes("prompt"));
+  } finally {
+    await f.cleanup();
+  }
+});
+
+for (const [label, mcpStatuses] of [
+  ["a later duplicate cab row", [[], [cabRow("sdk"), cabRow("sdk")]]],
+  ["a non-SDK cab row", [[cabRow("project")]]],
+  ["a cab row without a source", [[{ name: "cab", status: "connected" }]]],
+  ["a failed cab row", [[cabRow("sdk", "failed")]]],
+  ["a cab row needing authentication", [[cabRow("sdk", "needs-auth")]]],
+] satisfies [string, unknown[][]][])
+  test(`Claude admission refuses at once on ${label}`, {
+    skip: slashTmpDenied(),
+  }, async () => {
+    const f = fixture({
+      mcpStatuses,
+      admissionTimeoutMs: 5_000,
+      scripts: [oneTurn],
+    });
+    try {
+      await f.runtime.start();
+      const id = await f.runtime.startThread(f.workspace, []);
+      await assert.rejects(f.turn(id), mcpRefusal);
+      await pollSettle();
+      assert.equal(f.mcpReads(), mcpStatuses.length);
+      assert.ok(!f.log.includes("prompt"));
+    } finally {
+      await f.cleanup();
+    }
+  });
+
+for (const [label, turnAccountInfo] of [
+  ["a failed account read", () => Promise.reject(new Error("account-canary"))],
+  [
+    "API-backed account metadata",
+    async () => ({ apiProvider: "bedrock", subscriptionType: "max" }),
+  ],
+] as const)
+  test(`Claude admission refuses with the subscription reason on ${label} without reading MCP status`, {
+    skip: slashTmpDenied(),
+  }, async () => {
+    const f = fixture({ turnAccountInfo, scripts: [oneTurn] });
+    try {
+      await f.runtime.start();
+      const id = await f.runtime.startThread(f.workspace, []);
+      await assert.rejects(f.turn(id), subscriptionRefusal);
+      assert.equal(f.mcpReads(), 0);
+      assert.ok(!f.log.includes("prompt"));
+    } finally {
+      await f.cleanup();
+    }
+  });
+
+test("stopping the runtime ends a pending Claude admission wait", {
+  skip: slashTmpDenied(),
+}, async () => {
+  const f = fixture({
+    mcpStatuses: [[]],
+    admissionTimeoutMs: 20_000,
+    scripts: [oneTurn],
+  });
+  try {
+    await f.runtime.start();
+    const id = await f.runtime.startThread(f.workspace, []);
+    const started = f.turn(id);
+    started.catch(() => {});
+    for (let waited = 0; f.mcpReads() < 2; waited++) {
+      assert.ok(waited < 500, "admission stopped polling");
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    }
+    await f.runtime.stop();
+    await assert.rejects(started, /^Error: Claude turn could not start$/);
+    const reads = f.mcpReads();
+    await pollSettle();
+    assert.equal(f.mcpReads(), reads);
+    assert.ok(!f.log.includes("prompt"));
+  } finally {
+    await f.cleanup();
+  }
+});
 
 test("Claude refuses legacy and unknown configuration origins before a resume query", async () => {
   const f = fixture();
