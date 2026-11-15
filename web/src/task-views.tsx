@@ -426,10 +426,6 @@ export function TaskBoard({
           </section>
         ))}
       </div>
-      <p className="metadata muted board-footer">
-        Columns describe cab work, not source issue state. Cards open the task;
-        nothing here changes state, and there is no drag and drop.
-      </p>
     </div>
   );
 }

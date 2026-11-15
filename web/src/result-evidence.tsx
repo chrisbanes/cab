@@ -43,7 +43,7 @@ export function Literal({ text }: { text: string | null | undefined }) {
   );
 }
 
-/** Supplied criteria as C1/C2 rows with the result's recorded outcome; no overall pass. */
+/** Acceptance criteria as C1/C2 rows with the result's recorded outcome; no overall pass. */
 export function CriteriaRows({
   data,
   resultId,
@@ -122,8 +122,8 @@ export function CriteriaRows({
     <div className="criteria-rows">
       <h4 className="small-heading">
         {!s || s.body === null
-          ? "Supplied criteria — coverage unavailable"
-          : "Supplied criteria"}
+          ? "Acceptance criteria — coverage unavailable"
+          : "Acceptance criteria"}
       </h4>
       <ChecklistCoverage source={s} />
       {s && s.body !== null && !s.criteria.length && (
@@ -148,7 +148,7 @@ export function CriteriaRows({
       {latest && s && latest.sourceId !== s.sourceId && (
         <div>
           <h4>
-            Current supplied criteria not covered by this historical result
+            Current acceptance criteria not covered by this historical result
           </h4>
           {latest.criteria.map((c) => (
             <p key={c.criterionId}>

@@ -87,7 +87,7 @@ async function open(
   await page.goto(`${web.origin}/tasks/${a.taskId}`);
   await page.getByLabel("Password").fill(web.password);
   await page.getByRole("button", { name: "Sign in", exact: true }).click();
-  await page.getByLabel("Editable reply").waitFor();
+  await page.getByLabel("Reply", { exact: true }).waitFor();
   return { f, a, web, page, commands, operations };
 }
 
@@ -107,7 +107,7 @@ for (const engine of ["chromium", "webkit"] as const)
     engine,
     async (_t, j) => {
       const { f, a, page, commands } = await open(j, engine);
-      const box = page.getByLabel("Editable reply");
+      const box = page.getByLabel("Reply", { exact: true });
 
       // The lead is a visible, removable recipient and the one sentence above the box says what the box does.
       const first = await chips(page).allInnerTexts();
@@ -118,9 +118,7 @@ for (const engine of ["chromium", "webkit"] as const)
         await page.locator("#reply p").first().innerText(),
         commentNote,
       );
-      await page
-        .getByText(/receives this as input on its next eligible turn/)
-        .waitFor();
+      await page.getByText(/receives this on its next turn/).waitFor();
       assert.equal(await sendButton(page).isDisabled(), true, "no text yet");
 
       // Removing it leaves an explicit empty set, which a refresh does not restore.
@@ -208,7 +206,7 @@ for (const engine of ["chromium", "webkit"] as const)
       // The mixed preview names input for a running or pending assignment and a resume for a completed one.
       await page.getByText(/resumes the same assignment/).waitFor();
       await page
-        .getByText(/receives this as input/)
+        .getByText(/receives this on its next turn/)
         .first()
         .waitFor();
       // The fuller rules sit behind a closed help disclosure that opens by keyboard.
@@ -273,7 +271,7 @@ for (const engine of ["chromium", "webkit"] as const)
 
 test("a lost response is checked against the stored receipt first, and a mismatched receipt stays frozen", async (_t, j) => {
   const { f, a, page, commands, operations } = await open(j, "chromium");
-  const box = page.getByLabel("Editable reply");
+  const box = page.getByLabel("Reply", { exact: true });
   let lose = true;
   await page.route("**/api/operator/commands", async (route) => {
     if (lose && route.request().postDataJSON().type === "task.comment.send") {
@@ -311,7 +309,7 @@ test("a lost response is checked against the stored receipt first, and a mismatc
     .click();
   await check.waitFor();
   assert.equal(
-    await page.getByLabel("Editable reply").inputValue(),
+    await page.getByLabel("Reply", { exact: true }).inputValue(),
     "Does this land?",
   );
 
@@ -334,7 +332,10 @@ test("a lost response is checked against the stored receipt first, and a mismatc
     "a mismatched receipt never triggers a retry",
   );
   await check.waitFor();
-  assert.equal(await page.getByLabel("Editable reply").isDisabled(), true);
+  assert.equal(
+    await page.getByLabel("Reply", { exact: true }).isDisabled(),
+    true,
+  );
 
   // The honest receipt settles it, without a second POST or a second wake.
   await page.unroute(operationsRead);
@@ -342,7 +343,10 @@ test("a lost response is checked against the stored receipt first, and a mismatc
   await page.getByText(/^Comment sent to /).waitFor();
   assert.equal(operations.length, 2);
   assert.equal(commands.length, 1, "a recorded receipt is not resent");
-  assert.equal(await page.getByLabel("Editable reply").inputValue(), "");
+  assert.equal(
+    await page.getByLabel("Reply", { exact: true }).inputValue(),
+    "",
+  );
   assert.equal(
     f.service.coordinationView().readTask(a.taskId).comments.length,
     1,
@@ -355,7 +359,7 @@ test("a lost response is checked against the stored receipt first, and a mismatc
 
 test("a not-recorded check retries the identical frozen command with its original key", async (_t, j) => {
   const { f, a, page, commands, operations } = await open(j, "chromium");
-  const box = page.getByLabel("Editable reply");
+  const box = page.getByLabel("Reply", { exact: true });
   await page.route("**/api/operator/commands", (route) => route.abort());
   await box.fill("Never arrived.");
   await sendButton(page).click();
@@ -376,7 +380,7 @@ test("a not-recorded check retries the identical frozen command with its origina
 
 test("a refused send keeps the whole draft and selection and says who cannot receive it", async (_t, j) => {
   const { f, a, page, commands } = await open(j, "chromium");
-  const box = page.getByLabel("Editable reply");
+  const box = page.getByLabel("Reply", { exact: true });
   const add = page.getByRole("button", { name: "Add recipient" });
   await add.click();
   await page
@@ -466,7 +470,7 @@ test("contextual feedback and the draft turn stay their own destinations, and as
 
 test("the recipient picker closes and stays closed while a send is unresolved, so the preview matches the frozen command", async (_t, j) => {
   const { page, commands } = await open(j, "chromium");
-  const box = page.getByLabel("Editable reply");
+  const box = page.getByLabel("Reply", { exact: true });
   let release!: () => void;
   const held = new Promise<void>((resolve) => {
     release = resolve;

@@ -701,7 +701,7 @@ for (const [label, viewport] of [
     await log.getByText("Fresh while at the bottom").waitFor();
     await reachesBottom(page, j, "stays at the bottom");
 
-    const reply = page.getByLabel("Editable reply");
+    const reply = page.getByLabel("Reply", { exact: true });
     await reply.fill("An unfinished reply");
     const anchor = log.getByRole("button", {
       name: "Ran 3 commands · 1 failed · 4s",
@@ -775,7 +775,7 @@ for (const [label, viewport] of [
     await page.goto(`${web.origin}/tasks/${s.taskId}?section=brief`);
     await page.locator("#brief > details[open]").waitFor();
     assert.equal(
-      await page.getByRole("heading", { name: "Shared brief" }).isVisible(),
+      await page.getByRole("heading", { name: "Issue brief" }).isVisible(),
       true,
     );
     await page.goto(
@@ -1163,7 +1163,7 @@ test("a delegate is replied to from its sub-conversation header through the shar
   assert.equal(await waiter.locator("form.assignment-message").count(), 0);
   await waiter.getByRole("button", { name: /^Reply to / }).click();
   // Reply selects exactly that assignment, replacing the default lead.
-  const box = page.getByLabel("Editable reply");
+  const box = page.getByLabel("Reply", { exact: true });
   assert.equal(await page.locator(".recipient-chip").count(), 1);
   assert.equal(
     await page
@@ -1844,7 +1844,7 @@ async function assertReplyUsable(page: Page) {
   const reply = page.locator("#reply");
   const remove = reply.getByRole("button", { name: /^Remove @/ });
   // A phone's docked Reply shows its recipients only once focus is inside it.
-  await reply.getByLabel("Editable reply", { exact: true }).focus();
+  await reply.getByLabel("Reply", { exact: true }).focus();
   while (await remove.count()) {
     await remove.first().click();
     // Removal returns focus to the trigger on the next frame; settle it before typing.
@@ -1852,7 +1852,7 @@ async function assertReplyUsable(page: Page) {
       document.activeElement?.textContent?.includes("Add recipient"),
     );
   }
-  const editor = page.getByLabel("Editable reply", { exact: true });
+  const editor = page.getByLabel("Reply", { exact: true });
   await editor.fill("Viewport reply");
   const typingState = await page.evaluate(() => ({
     documentFocused: document.hasFocus(),
@@ -2266,7 +2266,7 @@ for (const colorScheme of ["light", "dark"] as const)
       );
       await second.getByRole("button", { name: "Reasoning summary" }).click();
       await toggle.click();
-      const draft = page.getByLabel("Editable reply");
+      const draft = page.getByLabel("Reply", { exact: true });
       await draft.fill("Keep this unsent draft");
       await toggle.scrollIntoViewIfNeeded();
       const readingTop = (await toggle.boundingBox())!.y;
@@ -2380,7 +2380,7 @@ test("successful privacy reads erase older loaded summaries after a stale read",
   });
   await older.getByRole("button", { name: "Reasoning summary" }).click();
   await older.getByText("OLDER_LOADED_CANARY", { exact: true }).waitFor();
-  const draft = page.getByLabel("Editable reply");
+  const draft = page.getByLabel("Reply", { exact: true });
   await draft.fill("Draft survives summary deletion");
   const timeline = "**/api/operator/tasks/*/timeline?*";
   await page.route(timeline, (route) => route.abort());
@@ -2688,7 +2688,7 @@ for (const laterCount of [325, 575])
       .locator("article.conv-agent", { hasText: "Reasoned first answer" })
       .getByRole("button", { name: "Reasoning summary", exact: true });
     await other.click();
-    const draft = page.getByLabel("Editable reply");
+    const draft = page.getByLabel("Reply", { exact: true });
     await draft.fill("Keep retained unsent draft");
     const frames = () =>
       page.evaluate(
@@ -2707,6 +2707,7 @@ for (const laterCount of [325, 575])
       await frames();
       return (await read.json()).data;
     };
+    let knownRevision = initial.reasoningSummaryRevision as string;
     for (let batch = 0; batch < laterCount / 25; batch++) {
       for (let n = batch * 25; n < (batch + 1) * 25; n++)
         emit({
@@ -2716,6 +2717,7 @@ for (const laterCount of [325, 575])
         });
       const unchanged = await reread();
       assert.equal(unchanged.reasoningSummaryAnchors, undefined);
+      knownRevision = unchanged.reasoningSummaryRevision;
       await page
         .getByText(`LATE_ROW_${batch * 25 + 24}`, { exact: true })
         .waitFor();
@@ -2729,6 +2731,30 @@ for (const laterCount of [325, 575])
     await anchor.scrollIntoViewIfNeeded();
     await frames();
     const top = (await anchor.boundingBox())!.y;
+    const start = requests.length;
+    const changedResponse = page.waitForResponse(async (response) => {
+      const url = new URL(response.url());
+      if (
+        url.pathname !== `/api/operator/tasks/${a.taskId}/timeline` ||
+        url.searchParams.has("before") ||
+        url.searchParams.get("reasoningSummaryRevision") !== knownRevision ||
+        response.status() !== 200
+      )
+        return false;
+      try {
+        const data = (await response.json()).data;
+        return (
+          data.reasoningSummaryRevision !== knownRevision &&
+          Array.isArray(data.reasoningSummaryAnchors) &&
+          data.reasoningSummaryAnchors.some(
+            (value: { reasoningSummary: { text: string } }) =>
+              value.reasoningSummary.text === "TERMINAL_RETAINED_SUMMARY",
+          )
+        );
+      } catch {
+        return false;
+      }
+    });
     emit({
       kind: "reasoning-summary",
       itemId: "summary",
@@ -2740,9 +2766,15 @@ for (const laterCount of [325, 575])
         .list()
         .some((w) => w.workId === active.workId && w.state === "completed"),
     );
-    const start = requests.length;
-    const changed = await reread();
+    await refresh(page);
+    const changed = (await (await changedResponse).json()).data;
     await toggle.waitFor();
+    const applied = await reread();
+    assert.equal(
+      applied.reasoningSummaryRevision,
+      changed.reasoningSummaryRevision,
+    );
+    assert.equal(applied.reasoningSummaryAnchors, undefined);
     assert.ok(
       changed.reasoningSummaryAnchors.some(
         (value: { reasoningSummary: { text: string } }) =>
@@ -2878,7 +2910,7 @@ test("conditional summary reads keep newest ownership through ignored aborts, mi
   });
   await toggle.click();
   await anchor.getByText("OWNED_INITIAL", { exact: true }).waitFor();
-  const draft = page.getByLabel("Editable reply");
+  const draft = page.getByLabel("Reply", { exact: true });
   await draft.fill("OWNED_DRAFT");
   const url = "**/api/operator/tasks/*/timeline?*";
   const hold = async (select: (url: URL) => boolean, failure = false) => {

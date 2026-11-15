@@ -322,14 +322,14 @@ test("production workspace retains literal captured text, pending request, focus
   // The validated conversation stays shown while the read is held.
   assert.equal(await reading.count(), 1);
   // The operator moves to the reply while the conversation read is held.
-  await page.getByLabel("Editable reply").focus();
+  await page.getByLabel("Reply", { exact: true }).focus();
   const heldTimeline = page.waitForResponse(newestTimeline);
   releaseFocus();
   await heldTimeline;
   await reading.waitFor();
   assert.equal(
     await page
-      .getByLabel("Editable reply")
+      .getByLabel("Reply", { exact: true })
       .evaluate((el) => el === document.activeElement),
     true,
   );
@@ -364,7 +364,7 @@ test("production workspace retains literal captured text, pending request, focus
     true,
   );
   await page
-    .getByLabel("Editable reply")
+    .getByLabel("Reply", { exact: true })
     .fill("Navigation draft remains exact");
   // Each assignment's result is linked from its facts in the Overview's assignments card.
   await openOverviewCard(page, "assignments");
@@ -429,7 +429,7 @@ test("production workspace retains literal captured text, pending request, focus
     }),
   );
   assert.equal(
-    await page.getByLabel("Editable reply").inputValue(),
+    await page.getByLabel("Reply", { exact: true }).inputValue(),
     "Navigation draft remains exact",
   );
   assert.equal(
@@ -440,15 +440,17 @@ test("production workspace retains literal captured text, pending request, focus
   // The request is still pending after every update, read and navigation above.
   assert.ok(await question.isVisible());
   // The restored navigation draft has been checked; explicitly finish that intent.
-  await page.getByLabel("Editable reply").fill("");
+  await page.getByLabel("Reply", { exact: true }).fill("");
   await page.getByRole("button", { name: "Ask lead", exact: true }).click();
-  await page.getByLabel("Editable reply").fill("Unfinished contextual reply");
+  await page
+    .getByLabel("Reply", { exact: true })
+    .fill("Unfinished contextual reply");
   assert.equal(
-    await page.getByLabel("Editable reply").inputValue(),
+    await page.getByLabel("Reply", { exact: true }).inputValue(),
     "Unfinished contextual reply",
   );
   a.delegatedResult("Newer result must not replace selected historical result");
-  await page.getByLabel("Editable reply").focus();
+  await page.getByLabel("Reply", { exact: true }).focus();
   await page.evaluate(() =>
     window.dispatchEvent(new Event("cab-task-changed")),
   );
@@ -457,16 +459,16 @@ test("production workspace retains literal captured text, pending request, focus
     .getByText("Original source-faithful result", { exact: true })
     .waitFor();
   assert.equal(
-    await page.getByLabel("Editable reply").inputValue(),
+    await page.getByLabel("Reply", { exact: true }).inputValue(),
     "Unfinished contextual reply",
   );
   assert.equal(
     await page
-      .getByLabel("Editable reply")
+      .getByLabel("Reply", { exact: true })
       .evaluate((el) => document.activeElement === el),
     true,
   );
-  await page.getByLabel("Editable reply").focus();
+  await page.getByLabel("Reply", { exact: true }).focus();
   await page.route("**/api/operator/tasks/*", (route) =>
     route.fulfill({
       status: 503,
@@ -484,7 +486,7 @@ test("production workspace retains literal captured text, pending request, focus
     .first()
     .waitFor();
   assert.equal(
-    await page.getByLabel("Editable reply").inputValue(),
+    await page.getByLabel("Reply", { exact: true }).inputValue(),
     "Unfinished contextual reply",
   );
   assert.ok(
@@ -496,10 +498,10 @@ test("production workspace retains literal captured text, pending request, focus
   await captureBrowserEvidence(page, "1366-task-failed-refresh");
   await page.unroute("**/api/operator/tasks/*");
   await page.setViewportSize({ width: 390, height: 844 });
-  await page.getByLabel("Editable reply").scrollIntoViewIfNeeded();
+  await page.getByLabel("Reply", { exact: true }).scrollIntoViewIfNeeded();
   await captureBrowserEvidence(page, "390-reply-with-anchor");
   await page.setViewportSize({ width: 390, height: 480 });
-  await page.getByLabel("Editable reply").focus();
+  await page.getByLabel("Reply", { exact: true }).focus();
   assert.ok(
     await page
       .getByRole("button", { name: "Send to task lead", exact: true })
@@ -553,7 +555,10 @@ test("production workspace retains literal captured text, pending request, focus
     await page.getByRole("button", { name: "Send to task lead" }).count(),
     0,
   );
-  assert.equal(await page.getByLabel("Editable reply").isDisabled(), true);
+  assert.equal(
+    await page.getByLabel("Reply", { exact: true }).isDisabled(),
+    true,
+  );
   await outcome.getByText("Details", { exact: true }).click();
   const fields = await outcome.locator("dl").innerText();
   assert.match(fields, /Command\s+message/);
@@ -612,7 +617,7 @@ test("production workspace retains literal captured text, pending request, focus
       .getByRole("button", { name: "Check whether it saved", exact: true })
       .isEnabled(),
   );
-  await page.getByLabel("Editable reply").scrollIntoViewIfNeeded();
+  await page.getByLabel("Reply", { exact: true }).scrollIntoViewIfNeeded();
   await captureBrowserEvidence(page, "390-uncertain-reply", {
     fullPage: false,
   });
@@ -627,7 +632,10 @@ test("production workspace retains literal captured text, pending request, focus
   assert.equal(replyRequests.length, 2);
   assert.equal(replyRequests[0], replyRequests[1]);
   assert.equal(f.service.domain().task(a.taskId).version, taskBefore);
-  assert.equal(await page.getByLabel("Editable reply").inputValue(), "");
+  assert.equal(
+    await page.getByLabel("Reply", { exact: true }).inputValue(),
+    "",
+  );
   const local = f.service
     .coordinationView()
     .readTask(a.taskId)
@@ -737,7 +745,7 @@ test("production workspace retains literal captured text, pending request, focus
     0,
   );
   await page.getByRole("button", { name: "Ask lead", exact: true }).click();
-  assert.ok(await page.getByLabel("Editable reply").isEditable());
+  assert.ok(await page.getByLabel("Reply", { exact: true }).isEditable());
   assert.equal(
     await page
       .getByRole("button", { name: "Send to task lead", exact: true })

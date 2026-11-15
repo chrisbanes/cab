@@ -8,6 +8,20 @@ type ComparisonEntry = NonNullable<
   >["comparison"]["entries"][number]
 >;
 
+export function comparisonStatus(
+  state: ComparisonData["state"],
+  stale: boolean,
+) {
+  if (state === "available" && stale)
+    return { label: "Stale", tone: "warning" } as const;
+  if (state === "unsettled")
+    return { label: "Current turn unsettled", tone: "warning" } as const;
+  return {
+    label: state,
+    tone: state === "available" ? "success" : "neutral",
+  } as const;
+}
+
 export function comparisonReasonSentence(
   reason: string | undefined,
   target?: "branch" | "last-turn" | "uncommitted",

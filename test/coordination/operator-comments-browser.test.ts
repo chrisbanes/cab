@@ -251,12 +251,14 @@ async function approvalModeJourney(_t: TestContext, j: BrowserJourney) {
   await page
     .getByRole("radio", { name: "Post GitHub comment", exact: true })
     .click();
-  await page.getByLabel("Editable reply").fill("Exact operator comment body");
+  await page
+    .getByLabel("Reply", { exact: true })
+    .fill("Exact operator comment body");
   await page
     .getByRole("radio", { name: "Comment on task", exact: true })
     .click();
   await page
-    .getByLabel("Editable reply")
+    .getByLabel("Reply", { exact: true })
     .fill("Unfinished local message beside GitHub draft");
   await page
     .getByRole("radio", { name: "Post GitHub comment", exact: true })
@@ -267,13 +269,13 @@ async function approvalModeJourney(_t: TestContext, j: BrowserJourney) {
     .click();
   // The contextual ask is the lead's own draft; the shared comment's text is untouched beside it.
   assert.equal(
-    await page.getByLabel("Editable reply").inputValue(),
+    await page.getByLabel("Reply", { exact: true }).inputValue(),
     "Please review source revision 1.",
   );
   assert.equal(await page.getByText(/^Immutable reference:/).count(), 1);
   assert.equal(
     await page
-      .getByLabel("Editable reply")
+      .getByLabel("Reply", { exact: true })
       .evaluate((el) => el === document.activeElement),
     true,
   );
@@ -281,17 +283,17 @@ async function approvalModeJourney(_t: TestContext, j: BrowserJourney) {
     .getByRole("radio", { name: "Post GitHub comment", exact: true })
     .click();
   assert.equal(
-    await page.getByLabel("Editable reply").inputValue(),
+    await page.getByLabel("Reply", { exact: true }).inputValue(),
     "Exact operator comment body",
   );
   await page
     .getByRole("radio", { name: "Comment on task", exact: true })
     .click();
   assert.equal(
-    await page.getByLabel("Editable reply").inputValue(),
+    await page.getByLabel("Reply", { exact: true }).inputValue(),
     "Unfinished local message beside GitHub draft",
   );
-  await page.getByLabel("Editable reply").fill("");
+  await page.getByLabel("Reply", { exact: true }).fill("");
   await openOverviewCard(page, "brief");
   await page
     .getByRole("button", { name: "Ask lead about brief", exact: true })
@@ -315,7 +317,7 @@ async function approvalModeJourney(_t: TestContext, j: BrowserJourney) {
     .getByRole("radio", { name: "Post GitHub comment", exact: true })
     .click();
   assert.equal(
-    await page.getByLabel("Editable reply").inputValue(),
+    await page.getByLabel("Reply", { exact: true }).inputValue(),
     "Exact operator comment body",
   );
   assert.equal(
@@ -335,7 +337,7 @@ async function approvalModeJourney(_t: TestContext, j: BrowserJourney) {
   phase = "lost review and confirmation responses";
   // Lose actual committed review and confirmation responses, retaining normalized
   // immutable commands independently of the editable whitespace in the draft.
-  await page.getByLabel("Editable reply").fill("x".repeat(16001));
+  await page.getByLabel("Reply", { exact: true }).fill("x".repeat(16001));
   await page
     .getByRole("button", { name: "Review exact GitHub comment", exact: true })
     .click();
@@ -349,14 +351,17 @@ async function approvalModeJourney(_t: TestContext, j: BrowserJourney) {
   assert.doesNotMatch(await outcome.locator("p").innerText(), serviceWords);
   await outcome.getByText("Details", { exact: true }).click();
   assert.match(await outcome.locator("dl").innerText(), /Code\s+invalid-input/);
-  assert.equal(await page.getByLabel("Editable reply").isEnabled(), true);
   assert.equal(
-    await page.getByLabel("Editable reply").inputValue(),
+    await page.getByLabel("Reply", { exact: true }).isEnabled(),
+    true,
+  );
+  assert.equal(
+    await page.getByLabel("Reply", { exact: true }).inputValue(),
     "x".repeat(16001),
   );
   assert.equal(effects, 0);
   await page
-    .getByLabel("Editable reply")
+    .getByLabel("Reply", { exact: true })
     .fill("  Exact operator comment body  ");
   const reviewCommands: Record<string, unknown>[] = [];
   const confirmCommands: Record<string, unknown>[] = [];
@@ -424,7 +429,7 @@ async function approvalModeJourney(_t: TestContext, j: BrowserJourney) {
   );
   assert.equal(effects, 0);
   assert.equal(
-    await page.getByLabel("Editable reply").inputValue(),
+    await page.getByLabel("Reply", { exact: true }).inputValue(),
     "  Exact operator comment body  ",
   );
   assert.equal(
@@ -444,7 +449,7 @@ async function approvalModeJourney(_t: TestContext, j: BrowserJourney) {
     .getByRole("button", { name: "Check whether it saved", exact: true })
     .waitFor();
   assert.equal(
-    await page.getByLabel("Editable reply").inputValue(),
+    await page.getByLabel("Reply", { exact: true }).inputValue(),
     "  Exact operator comment body  ",
   );
   holdReplay();
@@ -537,7 +542,7 @@ async function approvalModeJourney(_t: TestContext, j: BrowserJourney) {
     confirmed,
   );
   assert.equal(
-    await page.getByLabel("Editable reply").inputValue(),
+    await page.getByLabel("Reply", { exact: true }).inputValue(),
     "  Exact operator comment body  ",
   );
   await page.unroute("**/api/operator/commands");
@@ -582,7 +587,7 @@ async function approvalModeJourney(_t: TestContext, j: BrowserJourney) {
   await openTaskTab(page, "Overview");
   assert.equal(effects, 1);
   assert.equal(
-    await page.getByLabel("Editable reply").inputValue(),
+    await page.getByLabel("Reply", { exact: true }).inputValue(),
     "  Exact operator comment body  ",
   );
   await page
@@ -601,7 +606,10 @@ async function approvalModeJourney(_t: TestContext, j: BrowserJourney) {
     f.service.delivery().actions()[0]?.operationId,
     operation.operationId,
   );
-  assert.equal(await page.getByLabel("Editable reply").inputValue(), "");
+  assert.equal(
+    await page.getByLabel("Reply", { exact: true }).inputValue(),
+    "",
+  );
   await openTaskTab(page, "Review");
   await page
     .getByText(/source unchanged/)
@@ -1214,7 +1222,7 @@ async function approvalModeJourney(_t: TestContext, j: BrowserJourney) {
   });
   await openTaskTab(page, "Overview");
   await page
-    .getByLabel("Editable reply")
+    .getByLabel("Reply", { exact: true })
     .fill("Private old-session source draft");
   await page
     .getByRole("button", {
@@ -1228,10 +1236,15 @@ async function approvalModeJourney(_t: TestContext, j: BrowserJourney) {
   await page.getByLabel("Password").waitFor();
   await page.getByLabel("Password").fill(web.password);
   await page.getByRole("button", { name: "Sign in", exact: true }).click();
-  await page.getByLabel("Editable reply").waitFor({ state: "attached" });
+  await page
+    .getByLabel("Reply", { exact: true })
+    .waitFor({ state: "attached" });
   releaseLateSource();
   await page.unroute("**/api/operator/source-refresh");
-  assert.equal(await page.getByLabel("Editable reply").inputValue(), "");
+  assert.equal(
+    await page.getByLabel("Reply", { exact: true }).inputValue(),
+    "",
+  );
   assert.equal(await page.getByText(/source comparison pending/).count(), 0);
 }
 test("approval-mode exact operator review and unknown remote comment retain original intent through viewing and provider read reconciliation", async (t, j) => {

@@ -363,7 +363,7 @@ test("exact S1 R2 R3 S2 review retains scoped outcomes, captured context, compar
   await captureBrowserEvidence(page, "390-visible-comparison", {
     fullPage: false,
   });
-  const reply = page.getByLabel("Editable reply");
+  const reply = page.getByLabel("Reply", { exact: true });
   await page
     .getByLabel("Ask lead about", { exact: true })
     .selectOption(a.source.criteria[0]!.criterionId);
@@ -439,7 +439,7 @@ test("exact S1 R2 R3 S2 review retains scoped outcomes, captured context, compar
   );
 
   await page
-    .getByLabel("Editable reply")
+    .getByLabel("Reply", { exact: true })
     .fill("Check this exact before artifact");
   await page.route("**/api/operator/commands", async (route) => {
     const input = route.request().postDataJSON();
@@ -464,7 +464,7 @@ test("exact S1 R2 R3 S2 review retains scoped outcomes, captured context, compar
     })
     .waitFor();
   assert.equal(await page.locator("[data-slot=action-outcome]").count(), 1);
-  assert.ok(await page.getByLabel("Editable reply").isEditable());
+  assert.ok(await page.getByLabel("Reply", { exact: true }).isEditable());
   assert.equal(
     f.service
       .coordinationView()
@@ -678,7 +678,7 @@ for (const [limitCase, sourceBody] of [
     );
     await page
       .getByRole("heading", {
-        name: "Supplied criteria — coverage unavailable",
+        name: "Acceptance criteria — coverage unavailable",
         exact: true,
       })
       .waitFor({ state: "attached" });
@@ -908,7 +908,7 @@ test("every lead composer shows the same resume line for a completed lead and ke
 
   const expected = leadResumeNotice("Task lead");
   const line = page.getByText(expected, { exact: true });
-  const reply = page.getByLabel("Editable reply");
+  const reply = page.getByLabel("Reply", { exact: true });
   const sendButton = page.getByRole("button", {
     name: "Send to task lead",
     exact: true,
@@ -1010,7 +1010,7 @@ test("every lead composer shows the same resume line for a completed lead and ke
   assert.deepEqual(pageErrors, []);
 });
 
-test("an imported task's issue brief shows as its own Overview section beside the shared brief", async (_t, j) => {
+test("an imported task's current issue brief shows beside the retained source brief", async (_t, j) => {
   const f = await j.start("fixture.create", () =>
     createOperatorFixture(null, undefined, undefined, j.fixtureOptions),
   );
@@ -1097,7 +1097,7 @@ test("an imported task's issue brief shows as its own Overview section beside th
     .getByRole("heading", { name: "Issue brief", exact: true })
     .waitFor();
   await section.getByText("The settled contract").waitFor();
-  // The current brief, whatever source revision the shared brief shows.
+  // The current brief, whatever source revision the retained brief shows.
   await section.getByText(/^Current · .*Truncated to 32 KB$/).waitFor();
   assert.equal(
     await page.locator("#brief").getByText("The settled contract").count(),

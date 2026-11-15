@@ -462,7 +462,7 @@ for (const viewport of [desktop, phone]) {
     await s.page.waitForFunction(
       () => document.activeElement?.id === "workspace-reply",
     );
-    const reply = s.page.getByLabel("Editable reply");
+    const reply = s.page.getByLabel("Reply", { exact: true });
     await reply.fill("Keep this exact criterion draft");
     const reference = s.page.getByText(/^Immutable reference:/);
     const original = await reference.textContent();

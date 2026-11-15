@@ -20,6 +20,9 @@ When a lead reports a result, the operator reads the summary against the task's
 criteria, opens the supplied evidence, and decides what
 to say to the lead.
 
+
+Current workspace comparisons stay fixed until refreshed; Last turn is a separate historical capture and refreshing does not create one. Refreshing delivery reads provider state without posting, approving, merging or clearing a hold.
+
 ## Entry points
 
 - Home Completed work.

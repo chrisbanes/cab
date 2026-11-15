@@ -126,7 +126,7 @@ const answerDetails: Record<string, string> = {
   "source-held":
     "Source review or hold is unresolved. Answering does not clear it.",
   dependency: "Dependency hold. Answering does not clear it.",
-  paused: "Task paused. Recording answers does not resume execution.",
+  paused: "Answering does not resume work.",
 };
 
 /**

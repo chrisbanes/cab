@@ -23,6 +23,7 @@ import {
   comparisonEntryLimitSentence,
   comparisonObservationTimes,
   comparisonReasonSentence,
+  comparisonStatus,
   isWorkspaceComparisonStale,
 } from "./inspection-changes-presentation.js";
 import { OutcomeDetails } from "./action-feedback.js";
@@ -752,23 +753,15 @@ export function TaskWorkspaceChanges({
       {current && (
         <div className="changes-observation">
           <StatusBadge
-            tone={
-              current.state === "available"
-                ? "success"
-                : current.state === "unsettled"
-                  ? "warning"
-                  : "neutral"
-            }
+            tone={comparisonStatus(current.state, staleWorkspaceSnapshot).tone}
           >
-            {current.state === "unsettled"
-              ? "Current turn unsettled"
-              : current.state}
+            {comparisonStatus(current.state, staleWorkspaceSnapshot).label}
           </StatusBadge>
           {snapshot && <span>As of {dateLabel(snapshot.observedAt)}</span>}
           {staleWorkspaceSnapshot && (
             <span role="status">
-              Stale. A newer workspace observation or turn capture is already
-              known. These results stay fixed until Refresh.
+              A newer workspace observation is known. Refresh comparison to
+              update.
             </span>
           )}
           {snapshot && snapshot.target !== "turn" && snapshot.baseline && (
@@ -786,12 +779,6 @@ export function TaskWorkspaceChanges({
             </span>
           )}
           {reasonSentence && <span>{reasonSentence}</span>}
-          {snapshot &&
-            snapshot.target !== "turn" &&
-            !notReadYet &&
-            !unavailableEmptySnapshot && (
-              <span>Current workspace snapshots stay fixed until Refresh.</span>
-            )}
           {snapshot?.truncated && (
             <span>Comparison output is bounded and truncated.</span>
           )}

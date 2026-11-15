@@ -19,6 +19,7 @@ import { CircleDot, History, Search as SearchIcon } from "lucide-react";
 import { Button, ResourceStatus, StatusBadge } from "./components.js";
 import { Badge } from "./ui/badge.js";
 import { Input } from "./ui/input.js";
+import { searchOmissionText } from "./presentation.js";
 import { NativeSelect } from "./ui/native-select.js";
 import "./search.css";
 const typeLabel: Record<string, string> = {
@@ -27,9 +28,9 @@ const typeLabel: Record<string, string> = {
   result: "Result",
 };
 const destination = {
-  task: "matching requirement",
-  decision: "matching decision",
-  result: "matching result",
+  task: "Open task",
+  decision: "Open decision",
+  result: "Open result",
 };
 /** One line of plain text: list, checklist and heading markers dropped, lines joined with " · ". */
 const plainExcerpt = (text: string) =>
@@ -269,12 +270,6 @@ export function Search({
           </Button>
         </div>
       </form>
-      <p
-        className="metadata search-coverage"
-        title="Covers permitted retained task, decision and result excerpts, up to 16,000 characters each. Long source coverage is partial. It does not generate summaries."
-      >
-        Searches saved excerpts, not full agent transcripts.
-      </p>
       {query && (
         <ResourceStatus
           state={resource.state}
@@ -300,10 +295,11 @@ export function Search({
               <h2 id="search-count" className="small-heading">
                 {data.data.matches.length}{" "}
                 {data.data.matches.length === 1 ? "match" : "matches"}{" "}
-                <span className="metadata">
-                  · retained records only · {data.data.omittedCount} omitted or
-                  inaccessible
-                </span>
+                {data.data.omittedCount > 0 && (
+                  <span className="metadata">
+                    · {searchOmissionText(data.data.omittedCount)}
+                  </span>
+                )}
               </h2>
             )}
             <div className="search-filters">
@@ -448,7 +444,7 @@ export function Search({
                         state.scrollY = scrollY;
                       }}
                     >
-                      Open task → {destination[m.type]}
+                      {destination[m.type]}
                     </a>
                   </li>
                 ))}

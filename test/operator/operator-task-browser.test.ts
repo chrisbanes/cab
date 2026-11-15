@@ -102,12 +102,7 @@ test("hidden-draft controls preserve provider identities and source facts in Lis
           .count(),
         0,
       );
-      await page
-        .getByText(
-          "3 tasks share this readiness/dependency reason: Draft: not Ready.",
-          { exact: true },
-        )
-        .waitFor();
+      await page.getByText("3 tasks are not Ready.", { exact: true }).waitFor();
       if (surface === ".board-columns") {
         assert.equal(
           await card
@@ -2340,12 +2335,7 @@ test("List and Board name an imported Draft task's unmet readiness condition", a
       await card.getByText("Draft: not Ready", { exact: true }).count(),
       0,
     );
-    await page
-      .getByText(
-        "2 tasks share this readiness/dependency reason: Draft: not Ready.",
-        { exact: true },
-      )
-      .waitFor();
+    await page.getByText("2 tasks are not Ready.", { exact: true }).waitFor();
     for (const localDraft of [ids.blocker, ids.draft])
       assert.equal(
         await page

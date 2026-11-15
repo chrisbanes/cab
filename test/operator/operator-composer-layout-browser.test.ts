@@ -175,7 +175,7 @@ test("Composer shows the inherited panel, one Optional settings panel and the st
   await page.getByLabel("Task title").fill("Publish a keyboard guide");
   assert.equal(
     await page.getByLabel("Task title").getAttribute("placeholder"),
-    "Where to?",
+    "Describe the task",
   );
   await page.getByLabel("Desired outcome").fill("Publish the guide.");
   await summary.focus();

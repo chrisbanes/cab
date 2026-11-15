@@ -579,20 +579,186 @@ test("production Files keeps scoped previews stable, inert and navigable across 
   await page.waitForFunction(() =>
     document.activeElement?.getAttribute("aria-label")?.includes("child.txt"),
   );
-  await page.keyboard.press("ArrowLeft");
-  await docsButton.waitFor();
-  await page.waitForFunction(() =>
-    document.activeElement
-      ?.getAttribute("aria-label")
-      ?.includes("docs, directory"),
-  );
-  await page.keyboard.press("ArrowLeft");
-  await alphaRootButton.waitFor();
-  await page.waitForFunction(() =>
-    document.activeElement
-      ?.getAttribute("aria-label")
-      ?.includes("full path Repository alpha"),
-  );
+  const directoryEvents: object[] = [];
+  const recordDirectory = (phase: string, urlText: string, status?: number) => {
+    const url = new URL(urlText);
+    if (!url.pathname.endsWith("/files")) return;
+    const path = url.searchParams.get("path") ?? "";
+    const scope = url.searchParams.get("scope");
+    const repository = url.searchParams.get("repositoryId");
+    if (
+      (path !== "" && path !== "docs") ||
+      (repository && repository !== "alpha")
+    )
+      return;
+    if (directoryEvents.length < 80)
+      directoryEvents.push({
+        at: Date.now(),
+        phase,
+        path,
+        scope,
+        repository,
+        status,
+      });
+  };
+  const onRequest = (request: import("playwright").Request) =>
+    recordDirectory("pending", request.url());
+  const onResponse = (response: Response) =>
+    recordDirectory("settled", response.url(), response.status());
+  const onFailure = (request: import("playwright").Request) =>
+    recordDirectory("error", request.url());
+  page.on("request", onRequest);
+  page.on("response", onResponse);
+  page.on("requestfailed", onFailure);
+  await page.evaluate(() => {
+    const events: object[] = [];
+    const push = (event: object) => {
+      if (events.length < 100) events.push({ at: Date.now(), ...event });
+    };
+    const describe = (element: Element | null) => {
+      const label = element?.getAttribute("aria-label") ?? "";
+      const name =
+        label.includes("full path Repository alpha") &&
+        label.startsWith("alpha, repository,")
+          ? "alpha-root"
+          : label.includes("docs, directory")
+            ? "docs"
+            : label.includes("child.txt")
+              ? "child"
+              : "other";
+      const rect = element?.getBoundingClientRect();
+      return {
+        name,
+        tag: element?.tagName ?? null,
+        connected: element?.isConnected ?? false,
+        rect: rect
+          ? { x: rect.x, y: rect.y, width: rect.width, height: rect.height }
+          : null,
+      };
+    };
+    const focus = HTMLElement.prototype.focus;
+    const frame = window.requestAnimationFrame;
+    let sequence = 0;
+    HTMLElement.prototype.focus = function (...args) {
+      push({
+        kind: "focus-call",
+        target: describe(this),
+        active: describe(document.activeElement),
+      });
+      const result = focus.apply(this, args);
+      push({
+        kind: "focus-result",
+        target: describe(this),
+        active: describe(document.activeElement),
+      });
+      return result;
+    };
+    window.requestAnimationFrame = (callback) => {
+      const id = ++sequence;
+      push({ kind: "frame-schedule", id });
+      return frame.call(window, (time) => {
+        push({
+          kind: "frame-fire",
+          id,
+          active: describe(document.activeElement),
+        });
+        callback(time);
+      });
+    };
+    const key = (event: KeyboardEvent) => {
+      if (event.key === "ArrowLeft")
+        push({
+          kind: "key",
+          key: event.key,
+          active: describe(document.activeElement),
+        });
+    };
+    const scroll = () => push({ kind: "scroll", y: window.scrollY });
+    document.addEventListener("keydown", key, true);
+    window.addEventListener("scroll", scroll, true);
+    const trace = {
+      events,
+      mark(phase: string) {
+        const buttons = [...document.querySelectorAll("button[aria-label]")];
+        const target =
+          buttons.find((element) => describe(element).name === "alpha-root") ??
+          null;
+        push({
+          kind: "phase",
+          phase,
+          active: describe(document.activeElement),
+          target: describe(target),
+          scrollY: window.scrollY,
+        });
+      },
+      restore() {
+        HTMLElement.prototype.focus = focus;
+        window.requestAnimationFrame = frame;
+        document.removeEventListener("keydown", key, true);
+        window.removeEventListener("scroll", scroll, true);
+      },
+    };
+    (window as unknown as { fileFocusTrace: typeof trace }).fileFocusTrace =
+      trace;
+  });
+  const markFocus = (phase: string) =>
+    page.evaluate((name) => {
+      (
+        window as unknown as {
+          fileFocusTrace: { mark: (phase: string) => void };
+        }
+      ).fileFocusTrace.mark(name);
+    }, phase);
+  try {
+    await markFocus("before-docs-left");
+    await page.keyboard.press("ArrowLeft");
+    await docsButton.waitFor();
+    await page.waitForFunction(() =>
+      document.activeElement
+        ?.getAttribute("aria-label")
+        ?.includes("docs, directory"),
+    );
+    await markFocus("before-root-left");
+    await page.keyboard.press("ArrowLeft");
+    await markFocus("after-root-key");
+    await alphaRootButton.waitFor();
+    await page.waitForFunction(() =>
+      document.activeElement
+        ?.getAttribute("aria-label")
+        ?.includes("full path Repository alpha"),
+    );
+    await markFocus("after-root-left");
+  } catch (error) {
+    try {
+      await markFocus("failure");
+      const events = await page.evaluate(
+        () =>
+          (window as unknown as { fileFocusTrace: { events: object[] } })
+            .fileFocusTrace.events,
+      );
+      j.diagnostics.push(
+        JSON.stringify({ kind: "files-focus", directoryEvents, events }),
+      );
+      await j.capture(page, "files-focus-failure", false);
+    } catch {
+      /* Diagnostic failure must not mask the assertion. */
+    }
+    throw error;
+  } finally {
+    page.off("request", onRequest);
+    page.off("response", onResponse);
+    page.off("requestfailed", onFailure);
+    await page
+      .evaluate(() => {
+        const trace = (
+          window as unknown as { fileFocusTrace: { restore: () => void } }
+        ).fileFocusTrace;
+        trace.restore();
+        delete (window as unknown as { fileFocusTrace?: unknown })
+          .fileFocusTrace;
+      })
+      .catch(() => {});
+  }
   await page.keyboard.press("ArrowRight");
   await guideButton.waitFor();
   assert.equal(

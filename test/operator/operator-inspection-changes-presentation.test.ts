@@ -5,6 +5,7 @@ import {
   comparisonEntryLimitSentence,
   comparisonObservationTimes,
   comparisonReasonSentence,
+  comparisonStatus,
   isWorkspaceComparisonStale,
 } from "../../web/src/inspection-changes-presentation.js";
 
@@ -134,4 +135,23 @@ test("pending and finished turn observations contribute to staleness only when n
   assert.deepEqual(observations, [12, 13, 15, 11]);
   assert.equal(isWorkspaceComparisonStale(10, observations), true);
   assert.equal(isWorkspaceComparisonStale(15, observations), false);
+});
+
+test("comparison status preserves unavailable and unsettled precedence", () => {
+  assert.deepEqual(comparisonStatus("available", false), {
+    label: "available",
+    tone: "success",
+  });
+  assert.deepEqual(comparisonStatus("available", true), {
+    label: "Stale",
+    tone: "warning",
+  });
+  assert.deepEqual(comparisonStatus("unsettled", true), {
+    label: "Current turn unsettled",
+    tone: "warning",
+  });
+  assert.deepEqual(comparisonStatus("gap", true), {
+    label: "gap",
+    tone: "neutral",
+  });
 });

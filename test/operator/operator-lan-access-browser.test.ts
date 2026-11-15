@@ -172,7 +172,7 @@ for (const engine of ["chromium", "webkit"] as const) {
         )
           commands.push(request.postDataJSON());
       });
-      const box = lanPage.getByLabel("Editable reply");
+      const box = lanPage.getByLabel("Reply", { exact: true });
       await box.waitFor();
       await lanPage.getByRole("button", { name: /^Remove @lead/ }).click();
       const add = lanPage.getByRole("button", { name: "Add recipient" });

@@ -1496,7 +1496,9 @@ test("question background sits behind a keyboard Details disclosure while option
   assert.ok(await form.getByText("Ships to every user today").isVisible());
   assert.ok(await form.getByText("Ships to testers first").isVisible());
   assert.ok(await form.getByText("Recommended").first().isVisible());
-  const summary = form.locator("summary", { hasText: "Details" });
+  const summary = form.locator(".question-details > summary", {
+    hasText: "Details",
+  });
   await summary.focus();
   await page.keyboard.press("Enter");
   await text.waitFor();
@@ -1540,7 +1542,9 @@ test("question background sits behind a keyboard Details disclosure while option
   });
   await nativeForm.getByText(background, { exact: true }).waitFor();
   assert.equal(
-    await nativeForm.locator("summary", { hasText: "Details" }).count(),
+    await nativeForm
+      .locator(".question-details > summary", { hasText: "Details" })
+      .count(),
     0,
   );
 });

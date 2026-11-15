@@ -117,7 +117,7 @@ test("input and resume are worded differently, and a record-only send reports no
     [input, resume],
     [input.assignmentId, resume.assignmentId],
   );
-  assert.match(lines[0]?.effect ?? "", /input on its next eligible turn/);
+  assert.match(lines[0]?.effect ?? "", /receives this on its next turn/);
   assert.match(lines[1]?.effect ?? "", /resumes the same assignment/);
   assert.equal(
     sentText([], [input]),
