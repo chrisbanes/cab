@@ -818,6 +818,7 @@ export const executionSchema = z
         "runtime-unconfirmed",
         "turn-release-pending",
         "held-turn-released",
+        "allowance-held",
       ]),
     ),
     holds: z
@@ -2171,6 +2172,24 @@ export const taskSchema = envelope(
         .object({
           available: z.boolean(),
           reason: resetReasonSchema.optional(),
+        })
+        .strict()
+        .optional(),
+      /**
+       * The optional execution allowance (ADR-1037) on net charged admitted generations;
+       * optional so older services still parse. `version` fences `task.allowance.set`.
+       */
+      executionAllowance: z
+        .object({
+          state: z.enum(["off", "on", "history-unavailable", "inconsistent"]),
+          total: count.nullable(),
+          version: count,
+          charged: count,
+          corrected: count,
+          remaining: count.nullable(),
+          provisional: count,
+          heldWorkIds: z.array(z.string().min(1).max(512)),
+          overBy: count.nullable(),
         })
         .strict()
         .optional(),
@@ -3856,6 +3875,17 @@ export const operatorCommandSchema = z.discriminatedUnion("type", [
       expectedVersion: revision,
     })
     .strict(),
+  // Sets the task's absolute execution allowance; null removes it. Fenced on the
+  // allowance version, which 'task get' reads, not the task version.
+  z
+    .object({
+      ...base,
+      type: z.literal("task.allowance.set"),
+      taskId: uuid,
+      expectedAllowanceVersion: z.number().int().nonnegative().safe(),
+      total: z.number().int().nonnegative().safe().nullable(),
+    })
+    .strict(),
   z
     .object({
       ...base,
@@ -5010,6 +5040,20 @@ export const commandReceiptSchema = z.discriminatedUnion("kind", [
       assignmentId: uuid,
       refusedWorkId: z.string().min(1).max(512),
       workId: z.string().min(1).max(512),
+    })
+    .strict(),
+  z
+    .object({
+      kind: z.literal("task-allowance"),
+      key: uuid,
+      recorded: z.literal(true),
+      taskId: uuid,
+      previousTotal: z.number().int().nonnegative().safe().nullable(),
+      total: z.number().int().nonnegative().safe().nullable(),
+      version: revision,
+      charged: z.number().int().nonnegative().safe(),
+      remaining: z.number().int().nonnegative().safe().nullable(),
+      overBy: z.number().int().nonnegative().safe().nullable(),
     })
     .strict(),
   z

@@ -1111,6 +1111,26 @@ export function deletionOwnedSeedRows(i: DeletionSeedIdentity) {
     },
     {
       shared: false,
+      table: "task_execution_allowances",
+      values: { taskId: i.taskId, total: 3, version: 1 },
+    },
+    {
+      shared: false,
+      table: "task_execution_allowance_unprovable",
+      values: { taskId: i.taskId },
+    },
+    {
+      shared: false,
+      table: "task_execution_charges",
+      values: {
+        workId: i.workId,
+        taskId: i.taskId,
+        chargedAt: 1,
+        correctedAt: null,
+      },
+    },
+    {
+      shared: false,
       table: "status_mappings",
       values: { projectId: i.projectId, version: 1, mappingJson: "{}" },
     },

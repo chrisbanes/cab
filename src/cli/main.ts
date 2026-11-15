@@ -56,6 +56,10 @@ import {
 import { RequestJournal } from "./request-journal.js";
 import { closureSuffix, waitLines } from "./task-write.js";
 import { unmetReason } from "../operator/readiness-text.js";
+import {
+  allowanceExcludedText,
+  allowanceSummary,
+} from "../operator/execution-allowance-copy.js";
 import { taskColumnOf } from "../operator/task-presentation.js";
 import { connectionOrigin, ServiceClient } from "./transport.js";
 import type { CliDeps, Result, Values } from "./types.js";
@@ -184,7 +188,8 @@ const TASK_NOTE = `Task operations: task create, task message, task follow-up, t
 and approval decide cannot be undone. task start-again queues a refused request
 again and keeps the refusal in the history; task reset replaces every
 assignment's conversation, starts the lead fresh in the same workspace and
-cannot be undone. Reverse pairs: task stop/resume (Stop is
+cannot be undone. task allowance sets a task's execution allowance total (it
+gates only new admissions); task allowance --remove turns it off. Reverse pairs: task stop/resume (Stop is
 best-effort cancellation of an open task; Resume clears only the operator
 Stop),
 add-dependency/remove-dependency and task configure --ready true/false.`;
@@ -366,6 +371,8 @@ export const OPTIONS = {
   file: { type: "string" },
   "request-id": { type: "string" },
   "expected-version": { type: "string" },
+  total: { type: "string" },
+  remove: { type: "boolean" },
   name: { type: "string" },
   summary: { type: "string" },
   instructions: { type: "string" },
@@ -925,6 +932,11 @@ async function run(
             ]
           : []),
         `Execution: ${read.data.execution.state}${held.length ? `; held: ${held.join(", ")}` : ""}`,
+        ...(read.data.executionAllowance
+          ? [
+              `Allowance: ${allowanceSummary(read.data.executionAllowance)} (version ${read.data.executionAllowance.version}; ${allowanceExcludedText})`,
+            ]
+          : []),
         `Next:    ${next.text}${next.operator ? ` (cab inbox list --project ${task.projectId})` : ""}`,
         ...(readiness ? [`Readiness: ${readiness}`] : []),
         ...waitLines(read.data.waits, task.id),

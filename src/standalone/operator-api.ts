@@ -301,7 +301,10 @@ import {
   WorkspaceRecheckRefusedError,
   withoutWithdrawn,
 } from "./service.js";
-import { refusedRevisionPrefix } from "./state.js";
+import {
+  AllowanceHistoryUnavailableError,
+  refusedRevisionPrefix,
+} from "./state.js";
 import {
   ArtifactUnavailable,
   artifactBytesMatch,
@@ -2236,6 +2239,17 @@ export class OperatorApi {
     } else if (!this.domain().admission(String(task.id)).eligible) {
       state = "waiting";
       reasonCodes.push("admission-blocked");
+    } else if (
+      selections.some(
+        (s) =>
+          s.request?.state === "queued" &&
+          this.service
+            .taskAllowance(String(task.id))
+            .heldWorkIds.includes(s.request.workId),
+      )
+    ) {
+      state = "waiting";
+      reasonCodes.push("allowance-held");
     } else if (selections.some((s) => s.request?.state === "queued"))
       state = "queued";
     else if (
@@ -3178,6 +3192,13 @@ export class OperatorApi {
       "not-started",
       task.state === "open" &&
         assignments.some((a) => this.notStarted(this.selection(a)))
+        ? 1
+        : 0,
+    );
+    add(
+      "allowance-exhausted",
+      task.state === "open" &&
+        this.service.taskAllowance(taskId).heldWorkIds.length > 0
         ? 1
         : 0,
     );
@@ -4456,6 +4477,7 @@ export class OperatorApi {
       draftTurn: this.service.draftTurnAvailability(taskId),
       startAgain: this.service.startAgainAvailability(taskId),
       reset: this.service.resetAvailability(taskId),
+      executionAllowance: this.service.taskAllowance(taskId),
       assignments: assignments.map((a) => {
         const s = this.selection(a),
           request = s.request;
@@ -10913,6 +10935,22 @@ export class OperatorApi {
           return commandReceiptSchema.parse(this.service.withdrawDelegate(c));
         } catch (error) {
           if (error instanceof DelegateWithdrawalRefusedError)
+            throw new OperatorApiError(
+              409,
+              "conflict",
+              undefined,
+              undefined,
+              error.message,
+            );
+          throw error;
+        }
+      }
+      if (c.type === "task.allowance.set") {
+        this.requireTask(c.taskId);
+        try {
+          return commandReceiptSchema.parse(this.service.setTaskAllowance(c));
+        } catch (error) {
+          if (error instanceof AllowanceHistoryUnavailableError)
             throw new OperatorApiError(
               409,
               "conflict",

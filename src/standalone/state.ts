@@ -81,6 +81,20 @@ export type StartAgainReceipt = Extract<
   { kind: "start-again" }
 >;
 export type TaskResetReceipt = Extract<CommandReceipt, { kind: "task-reset" }>;
+export type TaskAllowanceReceipt = Extract<
+  CommandReceipt,
+  { kind: "task-allowance" }
+>;
+/** Every `begin` reason the execution allowance sets starts with this. */
+export const allowanceWaitPrefix = "Allowance waiting:";
+/** Activation needs every admission of the task in the charge ledger. */
+export class AllowanceHistoryUnavailableError extends Error {
+  constructor() {
+    super(
+      "This task has admissions from before cab recorded execution charges, so its allowance cannot be turned on",
+    );
+  }
+}
 export type AssignmentWithdrawReceipt = Extract<
   CommandReceipt,
   { kind: "assignment-withdraw" }
@@ -550,6 +564,7 @@ export class ExecutionState {
   constructor(private readonly db: Database) {
     // Harness lookups join it, so it exists even before the drafting store opens.
     createDraftingTable(this.db);
+    const allowanceLedgerNew = !this.hasTable("task_execution_charges");
     this.db.exec(`CREATE TABLE IF NOT EXISTS assignment_conversations (
       assignmentId TEXT PRIMARY KEY, revision INTEGER NOT NULL CHECK(revision > 0)
     );
@@ -1012,6 +1027,31 @@ export class ExecutionState {
       FROM execution_intents e
       JOIN task_writer_admissions admitted ON admitted.workId = e.workId
       WHERE e.state IN ('held','submitting','running')`);
+    // Level 37: the charge ledger starts empty, so a task admitted before it cannot prove
+    // its history; the same transaction records those tasks.
+    if (allowanceLedgerNew)
+      transaction(this.db, () =>
+        this.db.exec(`CREATE TABLE task_execution_charges (
+          workId TEXT PRIMARY KEY REFERENCES execution_intents(workId),
+          taskId TEXT NOT NULL, chargedAt INTEGER NOT NULL, correctedAt INTEGER
+        );
+        CREATE INDEX task_execution_charges_task ON task_execution_charges(taskId);
+        CREATE TABLE task_execution_allowances (
+          taskId TEXT PRIMARY KEY,
+          total INTEGER CHECK(total IS NULL OR total >= 0),
+          version INTEGER NOT NULL CHECK(version > 0)
+        );
+        CREATE TABLE task_execution_allowance_unprovable (taskId TEXT PRIMARY KEY);
+        INSERT OR IGNORE INTO task_execution_allowance_unprovable (taskId)
+          SELECT DISTINCT b.taskId FROM task_execution_bindings b
+          LEFT JOIN execution_intents e ON e.workId = b.workId
+          WHERE e.workId IS NULL
+            OR e.state NOT IN ('ready', 'capacity-waiting')
+            OR EXISTS (SELECT 1 FROM task_work_revisions r WHERE r.workId = b.workId)
+            OR EXISTS (
+              SELECT 1 FROM task_work_revision_ambiguities a WHERE a.workId = b.workId
+            );`),
+      );
     initializeReasoningSummaryStorage(this.db);
     this.hasTurnRequests =
       this.db
@@ -1400,6 +1440,152 @@ export class ExecutionState {
       command.key,
       (base) => ({ kind: "task-reset" as const, ...base, ...record() }),
     );
+  }
+
+  /**
+   * Sets or removes (`total: null`) the task's absolute execution allowance. It is fenced on
+   * the allowance's own version, so unrelated task edits never conflict with it, and it
+   * revokes nothing that is already admitted.
+   */
+  setTaskAllowance(command: {
+    key: string;
+    taskId: string;
+    expectedAllowanceVersion: number;
+    total: number | null;
+  }): { receipt: TaskAllowanceReceipt; replayed: boolean } {
+    const total =
+      command.total === null
+        ? null
+        : z.number().int().nonnegative().safe().parse(command.total);
+    const expected = z
+      .number()
+      .int()
+      .nonnegative()
+      .safe()
+      .parse(command.expectedAllowanceVersion);
+    return this.recordReceipted(
+      {
+        type: "task.allowance.set",
+        taskId: command.taskId,
+        expectedAllowanceVersion: expected,
+        total,
+      },
+      command.key,
+      (base) => {
+        const before = this.allowanceFacts(command.taskId);
+        if (before.version !== expected)
+          throw new DomainConflictError("Allowance version conflict");
+        if (total !== null && before.total === null && !before.provable)
+          throw new AllowanceHistoryUnavailableError();
+        const { version } = this.db
+          .prepare(`INSERT INTO task_execution_allowances (taskId, total, version)
+            VALUES (?, ?, 1) ON CONFLICT(taskId)
+            DO UPDATE SET total = excluded.total, version = version + 1
+            RETURNING version`)
+          .get(command.taskId, total) as { version: number };
+        return {
+          kind: "task-allowance" as const,
+          ...base,
+          previousTotal: before.total,
+          total,
+          version,
+          charged: before.charged,
+          remaining:
+            total === null ? null : Math.max(0, total - before.charged),
+          overBy: total === null ? null : Math.max(0, before.charged - total),
+        };
+      },
+      false,
+    );
+  }
+
+  /** The task's allowance as the operator surfaces read it. */
+  taskAllowance(taskId: string) {
+    const facts = this.allowanceFacts(taskId);
+    const on = facts.total !== null;
+    const state = on
+      ? facts.provable
+        ? ("on" as const)
+        : ("inconsistent" as const)
+      : facts.provable
+        ? ("off" as const)
+        : ("history-unavailable" as const);
+    const remaining =
+      facts.total === null ? null : Math.max(0, facts.total - facts.charged);
+    const gating = state === "inconsistent" || remaining === 0;
+    return {
+      state,
+      total: facts.total,
+      version: facts.version,
+      charged: facts.charged,
+      corrected: facts.corrected,
+      remaining,
+      provisional: (
+        this.db
+          .prepare(`SELECT COUNT(*) AS n FROM task_execution_charges c
+            JOIN execution_intents e ON e.workId = c.workId
+            WHERE c.taskId = ? AND c.correctedAt IS NULL
+              AND e.state = 'submitting' AND e.turnId IS NULL`)
+          .get(taskId) as { n: number }
+      ).n,
+      heldWorkIds: gating
+        ? (
+            this.db
+              .prepare(`SELECT e.workId FROM execution_intents e
+                JOIN task_execution_bindings b ON b.workId = e.workId
+                WHERE b.taskId = ? AND e.state IN ('ready','capacity-waiting')
+                  AND e.reason LIKE '${allowanceWaitPrefix}%'
+                ORDER BY e.rowid`)
+              .all(taskId) as { workId: string }[]
+          ).map(({ workId }) => workId)
+        : [],
+      overBy:
+        facts.total === null ? null : Math.max(0, facts.charged - facts.total),
+    };
+  }
+
+  /** Why `begin` must not admit this bound generation, if the allowance holds it. */
+  private allowanceWaitReason(workId: string): string | undefined {
+    const binding = this.taskBinding(workId);
+    if (!binding) return undefined;
+    const facts = this.allowanceFacts(binding.taskId);
+    if (facts.total === null) return undefined;
+    if (!facts.provable) return `${allowanceWaitPrefix} accounting unavailable`;
+    return facts.charged >= facts.total
+      ? `${allowanceWaitPrefix} the task's execution allowance is used`
+      : undefined;
+  }
+
+  private allowanceFacts(taskId: string) {
+    const row = this.db
+      .prepare(
+        "SELECT total, version FROM task_execution_allowances WHERE taskId = ?",
+      )
+      .get(taskId) as { total: number | null; version: number } | undefined;
+    const counts = this.db
+      .prepare(`SELECT COUNT(*) AS charges,
+          COALESCE(SUM(correctedAt IS NOT NULL), 0) AS corrected
+        FROM task_execution_charges WHERE taskId = ?`)
+      .get(taskId) as { charges: number; corrected: number };
+    // Every bound admission writes its work revision and charge together, so a revision
+    // without a charge means the ledger cannot account for that admission.
+    const unprovable =
+      this.db
+        .prepare(`SELECT 1 FROM task_execution_allowance_unprovable WHERE taskId = ?
+          UNION ALL
+          SELECT 1 FROM task_execution_bindings b
+          JOIN task_work_revisions r ON r.workId = b.workId
+          WHERE b.taskId = ? AND NOT EXISTS (
+            SELECT 1 FROM task_execution_charges c WHERE c.workId = b.workId
+          ) LIMIT 1`)
+        .get(taskId, taskId) !== undefined;
+    return {
+      total: row?.total ?? null,
+      version: row?.version ?? 0,
+      charged: counts.charges - counts.corrected,
+      corrected: counts.corrected,
+      provable: !unprovable,
+    };
   }
 
   /**
@@ -5834,6 +6020,21 @@ export class ExecutionState {
             .run(capacityReason, pending.workId);
         return false;
       }
+      const allowanceReason = this.allowanceWaitReason(pending.workId);
+      if (allowanceReason) {
+        this.db
+          .prepare(
+            "UPDATE execution_intents SET state = 'ready', reason = ? WHERE id = ? AND state IN ('ready','capacity-waiting')",
+          )
+          .run(allowanceReason, id);
+        if (this.hasTurnRequests)
+          this.db
+            .prepare(
+              "UPDATE turn_requests SET reason = ? WHERE workId = ? AND state = 'queued'",
+            )
+            .run(allowanceReason, pending.workId);
+        return false;
+      }
       const admitted =
         this.db
           .prepare(
@@ -5960,6 +6161,11 @@ export class ExecutionState {
           .run(workId, options.projectId);
         const taskBinding = this.taskBinding(workId);
         if (taskBinding) {
+          // Plain INSERT: a second charge for one generation is a defect and rolls back.
+          this.db
+            .prepare(`INSERT INTO task_execution_charges (workId, taskId, chargedAt)
+              VALUES (?, ?, ?)`)
+            .run(workId, taskBinding.taskId, Date.now());
           // A draft turn only checks the lead is still pending: it never activates it.
           const draftTurn =
             this.hasTurnRequests &&
@@ -6318,6 +6524,11 @@ export class ExecutionState {
           origin: "runtime",
           ...refusal,
         });
+        // The only refund: proof that startTurn was never called, rolled back with it.
+        this.db
+          .prepare(`UPDATE task_execution_charges SET correctedAt = ?
+            WHERE workId = ? AND correctedAt IS NULL`)
+          .run(Date.now(), workId);
         // Checked with the same proof Start again reads; anything else rolls back to a hold.
         if (!this.refusedBeforeStart(workId))
           throw new PreTurnRefusalUnprovenError();

@@ -79,6 +79,8 @@ export type Values = {
   file?: string | undefined;
   "request-id"?: string | undefined;
   "expected-version"?: string | undefined;
+  total?: string | undefined;
+  remove?: boolean | undefined;
   name?: string | undefined;
   summary?: string | undefined;
   "instructions-file"?: string | undefined;

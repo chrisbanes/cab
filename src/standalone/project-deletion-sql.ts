@@ -630,6 +630,21 @@ export const projectDeletionStatements = [
     sql: "DELETE FROM task_dependency_records WHERE taskId IN (SELECT value FROM json_each(:tasks)) OR blockerTaskId IN (SELECT value FROM json_each(:tasks))",
   },
   {
+    table: "task_execution_allowance_unprovable",
+    where: "taskId IN (SELECT value FROM json_each(:tasks))",
+    sql: "DELETE FROM task_execution_allowance_unprovable WHERE taskId IN (SELECT value FROM json_each(:tasks))",
+  },
+  {
+    table: "task_execution_allowances",
+    where: "taskId IN (SELECT value FROM json_each(:tasks))",
+    sql: "DELETE FROM task_execution_allowances WHERE taskId IN (SELECT value FROM json_each(:tasks))",
+  },
+  {
+    table: "task_execution_charges",
+    where: "workId IN (SELECT value FROM json_each(:work))",
+    sql: "DELETE FROM task_execution_charges WHERE workId IN (SELECT value FROM json_each(:work))",
+  },
+  {
     table: "task_execution_results",
     where: "workId IN (SELECT value FROM json_each(:work))",
     sql: "DELETE FROM task_execution_results WHERE workId IN (SELECT value FROM json_each(:work))",
