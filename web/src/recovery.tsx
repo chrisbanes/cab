@@ -62,7 +62,7 @@ import {
   capacityUsage,
   type Values,
 } from "./settings-changes.js";
-import { useFragmentLanding } from "./settings-sections.js";
+import { useTargetLanding } from "./settings-sections.js";
 import { holdPills, plural, recoveryRecordRuns } from "./settings-view.js";
 import {
   evidenceWarning,
@@ -307,8 +307,8 @@ export function RuntimeSettings(p: SettingsProps) {
       }
     : null;
   useLoadedDraft(d, initial, resource.state.fetchedAt);
-  // `/settings/runtime#add-claude` lands once the panel exists.
-  useFragmentLanding(Boolean(data));
+  // `/settings/runtime#add-claude` lands once this read is fresh and the panel exists.
+  useTargetLanding(resource.state);
   const labels = workspaceLabels(p.workspace);
   type ProjectRow = NonNullable<typeof data>["projects"][number];
   const labelOf = (r: ProjectRow) =>

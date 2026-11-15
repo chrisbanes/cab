@@ -23,6 +23,12 @@ import type {
   Workspace,
 } from "../../src/operator/contracts.js";
 import type { ProjectConfigurationData } from "./settings-changes.js";
+import {
+  sectionForPath,
+  type SettingsSectionId,
+  settingsSection,
+  settingsSectionHref,
+} from "./settings-sections.js";
 import type { SavedRecord } from "./settings-state.js";
 
 export interface Crumb {
@@ -32,6 +38,8 @@ export interface Crumb {
 export interface SettingsHeader {
   title: string;
   trail: Crumb[];
+  /** The page's description under its title. */
+  subtitle?: string;
   shortTitle?: string;
   /** Static label for the tab and history: saved names stay out of it. */
   documentTitle?: string;
@@ -54,6 +62,40 @@ export function projectTab(query: string): ProjectTab {
 }
 
 const settings: Crumb = { label: "Settings", href: "/settings" };
+const sectionCrumb = (id: SettingsSectionId, label: string): Crumb => ({
+  label,
+  href: settingsSectionHref(id),
+});
+const projectsCrumb = sectionCrumb("projects", "Projects"),
+  agentsCrumb = sectionCrumb("profiles", "Agents"),
+  runtimeCrumb = sectionCrumb("runtime", "Runtime");
+
+/** Each section page's title, final crumb and description. */
+const sectionPages: Record<
+  SettingsSectionId,
+  { title?: string; crumb?: string; subtitle: string }
+> = {
+  projects: { subtitle: "Manage projects and their configuration." },
+  runtime: {
+    title: "Runtime capacity and recovery",
+    crumb: "Runtime",
+    subtitle: "Execution runtimes, capacity and recorded holds.",
+  },
+  profiles: { subtitle: "Reusable agents and the runtime each one uses." },
+  routing: {
+    subtitle:
+      "Routing for each project; its controls are in the project's Routing tab.",
+  },
+  "github-discovery": {
+    subtitle: "The read-only credential for listing GitHub repositories.",
+  },
+  "gitlab-credentials": { subtitle: "The credential for each GitLab host." },
+  "cli-credentials": {
+    subtitle: "Credentials for the cab command-line client.",
+  },
+  notifications: { subtitle: "Browser notifications and registered devices." },
+  readiness: { subtitle: "What the running service can use." },
+};
 
 /** Title and breadcrumb trail of a settings route, or null for other routes. */
 export function settingsHeader(
@@ -64,6 +106,16 @@ export function settingsHeader(
   firstRunOverride?: boolean,
 ): SettingsHeader | null {
   if (pathname === "/settings") return { title: "Settings", trail: [] };
+  const section = sectionForPath(pathname);
+  if (section) {
+    const { label } = settingsSection(section),
+      page = sectionPages[section];
+    return {
+      title: page.title ?? label,
+      trail: [settings, { label: page.crumb ?? label }],
+      subtitle: page.subtitle,
+    };
+  }
   if (pathname === "/settings/projects/new")
     return (firstRunOverride ?? workspace?.data.projects.length === 0)
       ? {
@@ -72,27 +124,18 @@ export function settingsHeader(
         }
       : {
           title: "Create project",
-          trail: [settings, { label: "Projects" }, { label: "Create project" }],
+          trail: [settings, projectsCrumb, { label: "Create project" }],
         };
-  if (pathname === "/settings/runtime")
-    return {
-      title: "Runtime capacity and recovery",
-      trail: [settings, { label: "Runtime" }],
-    };
   if (pathname === "/settings/profiles/new")
     return {
       title: "Create agent",
-      trail: [settings, { label: "Agents" }, { label: "Create agent" }],
+      trail: [settings, agentsCrumb, { label: "Create agent" }],
     };
   if (/^\/assignments\/[^/]+\/recovery$/.test(pathname))
     return {
       title: "Assignment recovery evidence",
       shortTitle: "Recovery",
-      trail: [
-        settings,
-        { label: "Runtime", href: "/settings/runtime" },
-        { label: "Assignment recovery" },
-      ],
+      trail: [settings, runtimeCrumb, { label: "Assignment recovery" }],
     };
   const profile = /^\/profiles\/([^/]+)\/settings$/.exec(pathname)?.[1];
   if (profile) {
@@ -101,7 +144,7 @@ export function settingsHeader(
     return {
       title: `${name} · agent configuration`,
       documentTitle: "Agent configuration",
-      trail: [settings, { label: "Agents" }, { label: name }],
+      trail: [settings, agentsCrumb, { label: name }],
     };
   }
   const project = /^\/projects\/([^/]+)\/settings$/.exec(pathname)?.[1];
@@ -115,7 +158,7 @@ export function settingsHeader(
       documentTitle: "Project configuration",
       trail: [
         settings,
-        { label: "Projects" },
+        projectsCrumb,
         tab === "general" ? { label: name } : { label: name, href: page },
         ...(tab === "general"
           ? []

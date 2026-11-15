@@ -509,7 +509,7 @@ export class OperatorPush {
         plaintext: JSON.stringify({
           v: 1,
           title: "Test notification from cab",
-          url: "/settings#notifications",
+          url: "/settings/notifications",
           tag: "test:notification",
         } satisfies PushPayload),
         attempt: 1,

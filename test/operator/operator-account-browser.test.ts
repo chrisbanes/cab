@@ -1008,7 +1008,7 @@ for (const viewport of viewports)
       await github
         .getByRole("link", { name: "Set discovery credential" })
         .getAttribute("href"),
-      "/settings#github-discovery",
+      "/settings/github-discovery",
     );
     await page.goto(`${web.origin}/getting-started`);
     await page

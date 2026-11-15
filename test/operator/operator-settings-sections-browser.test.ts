@@ -102,7 +102,7 @@ test("a Settings fragment lands after the reads load and again on reload", async
     width: 1366,
     height: 500,
   });
-  await coldGoto(page, `${web.origin}/settings#cli-credentials`);
+  await coldGoto(page, `${web.origin}/settings/cli-credentials`);
   onScreen(await landed(page, "H2", "CLI credentials"));
   // Let the reads above the target finish growing; the heading stays where it landed.
   await page.getByRole("article", { name: "GitHub discovery" }).waitFor();
@@ -123,7 +123,7 @@ test("a landed section holds while the content above it grows, until the reader 
       document.head.append(style);
     });
   });
-  await coldGoto(page, `${web.origin}/settings#profiles`);
+  await coldGoto(page, `${web.origin}/settings/agents`);
   // Grow as soon as the heading has focus: the settle window is a few seconds, so the
   // first growth must not wait on anything else.
   await page.waitForFunction(
@@ -336,11 +336,14 @@ test("Settings section navigation is reachable by keyboard in order", async (_t,
 
 test("a check anchor marks Readiness current and a hash-only change lands with focus", async (_t, journey) => {
   const { page, web } = await startSettings(journey, "/settings");
-  await coldGoto(page, `${web.origin}/settings#readiness-codex-login`);
+  await coldGoto(
+    page,
+    `${web.origin}/settings/readiness#readiness-codex-login`,
+  );
   onScreen(await landed(page, "H3", "Codex login"));
   assert.deepEqual(await current(page), ["Readiness"]);
   // Typing a new fragment into the address bar is a hash-only navigation.
-  await page.goto(`${web.origin}/settings#profiles`);
+  await page.goto(`${web.origin}/settings/agents`);
   onScreen(await landed(page, "H2", "Agents"));
   assert.deepEqual(await current(page), ["Agents"]);
 });
@@ -393,11 +396,11 @@ test("Back or Forward into a Settings fragment skips the top restore only for a 
   await nav(page).waitFor();
   await page.getByRole("article", { name: "Codex login" }).waitFor();
   // A section on this page: the page lands on it and the shell leaves the scroll alone.
-  assert.deepEqual(await forwardInto(page, "/settings#profiles"), []);
+  assert.deepEqual(await forwardInto(page, "/settings/agents"), []);
   assert.equal(await focusedHeading(page), "Agents");
   // A check anchor whose article is drawn is a target too.
   assert.deepEqual(
-    await forwardInto(page, "/settings#readiness-codex-login"),
+    await forwardInto(page, "/settings/readiness#readiness-codex-login"),
     [],
   );
   assert.equal(await focusedHeading(page), "Codex login");
@@ -431,9 +434,10 @@ test("Back or Forward into a check anchor restores the top while its read has fa
   await nav(page).waitFor();
   await page.getByRole("button", { name: "Run again" }).waitFor();
   await page.getByText("Readiness checks are unavailable").waitFor();
-  assert.deepEqual(await forwardInto(page, "/settings#readiness-codex-login"), [
-    [0, 0],
-  ]);
+  assert.deepEqual(
+    await forwardInto(page, "/settings/readiness#readiness-codex-login"),
+    [[0, 0]],
+  );
   assert.equal(await focusedHeading(page), null);
   // The read recovers: the article appears and the page lands on it.
   await page.unroute("**/api/operator/readiness");
@@ -550,7 +554,7 @@ test("leaving Settings and coming back to the same entry lands again, and a re-r
     history.pushState(
       { ...state, navKey: crypto.randomUUID() },
       "",
-      "/settings#profiles",
+      "/settings/agents",
     );
     history.back();
   });
@@ -584,7 +588,7 @@ test("a second hook becoming ready later does not land again or take focus from 
     await new Promise((resolve) => setTimeout(resolve, 1500));
     await route.continue();
   });
-  await coldGoto(page, `${web.origin}/settings#profiles`);
+  await coldGoto(page, `${web.origin}/settings/agents`);
   onScreen(await landed(page, "H2", "Agents"));
   await page.getByRole("link", { name: "Create agent" }).focus();
   await page.getByRole("article", { name: "Codex login" }).waitFor();
@@ -816,7 +820,7 @@ test("a state without this load's scope is not adopted as an owned entry", async
   await nav(page).waitFor();
   // A foreign state with a saved position, as an old build or another script could leave.
   await page.evaluate(() => {
-    history.replaceState({ scrollY: 500 }, "", "/settings#profiles");
+    history.replaceState({ scrollY: 500 }, "", "/settings/agents");
   });
   await page.reload();
   onScreen(await landed(page, "H2", "Agents"));
@@ -867,7 +871,7 @@ test("Settings section select chooses and Go lands on a phone", async (_t, journ
   assert.equal(await select.inputValue(), "github-discovery");
   await go.click();
   onScreen(await landed(page, "H2", "GitHub discovery"));
-  assert.ok(page.url().endsWith("/settings#github-discovery"), page.url());
+  assert.ok(page.url().endsWith("/settings/github-discovery"), page.url());
   assert.equal(await select.inputValue(), "github-discovery");
   await noPageOverflow(page);
   // From the keyboard: the select, then Go, then Enter; the same section again lands again.
@@ -902,12 +906,12 @@ test("Home checklist Settings actions land on their sections", async (_t, journe
 
   await action("Runtime", "Open readiness check").click();
   onScreen(await landed(page, "H2", "Readiness"));
-  assert.ok(page.url().endsWith("/settings#readiness"), page.url());
+  assert.ok(page.url().endsWith("/settings/readiness"), page.url());
   await page.goBack();
 
   await action("GitHub", "Set discovery credential").click();
   onScreen(await landed(page, "H2", "GitHub discovery"));
-  assert.ok(page.url().endsWith("/settings#github-discovery"), page.url());
+  assert.ok(page.url().endsWith("/settings/github-discovery"), page.url());
   await page.goBack();
 
   await action("Claude (optional)", "Add Claude").click();
@@ -932,7 +936,7 @@ test("Home checklist Settings actions land on their sections", async (_t, journe
   await action("Claude (optional)", "Open readiness check").click();
   onScreen(await landed(page, "H3", "Claude executable"));
   assert.ok(
-    page.url().endsWith("/settings#readiness-claude-executable"),
+    page.url().endsWith("/settings/readiness#readiness-claude-executable"),
     page.url(),
   );
 });

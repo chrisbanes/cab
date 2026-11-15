@@ -1,45 +1,64 @@
 import { useEffect, useRef } from "react";
 import { readinessCheckIds } from "../../src/operator/readiness.js";
+import type { ResourceState } from "./resource.js";
 
-/** The Settings index sections, in the designed order, with their stable fragments. */
+/**
+ * The Settings sections in the designed order. `id` is the stable internal name (it was
+ * the index fragment); `slug` is the section's route, `/settings/<slug>`.
+ */
 export const SETTINGS_SECTIONS = [
-  { id: "projects", label: "Projects" },
-  { id: "runtime", label: "Runtime & recovery" },
-  { id: "profiles", label: "Agents" },
-  { id: "routing", label: "Routing" },
-  { id: "github-discovery", label: "GitHub discovery" },
-  { id: "gitlab-credentials", label: "GitLab credentials" },
-  { id: "cli-credentials", label: "CLI credentials" },
-  { id: "notifications", label: "Notifications" },
-  { id: "readiness", label: "Readiness" },
+  { id: "projects", slug: "projects", label: "Projects" },
+  { id: "runtime", slug: "runtime", label: "Runtime & recovery" },
+  { id: "profiles", slug: "agents", label: "Agents" },
+  { id: "routing", slug: "routing", label: "Routing" },
+  {
+    id: "github-discovery",
+    slug: "github-discovery",
+    label: "GitHub discovery",
+  },
+  {
+    id: "gitlab-credentials",
+    slug: "gitlab-credentials",
+    label: "GitLab credentials",
+  },
+  { id: "cli-credentials", slug: "cli-credentials", label: "CLI credentials" },
+  { id: "notifications", slug: "notifications", label: "Notifications" },
+  { id: "readiness", slug: "readiness", label: "Readiness" },
 ] as const;
 
 export type SettingsSectionId = (typeof SETTINGS_SECTIONS)[number]["id"];
 
-/**
- * Section order for the page and its navigation. Until a task starts a turn Readiness
- * comes first; an unknown start state keeps the designed order.
- */
-export function settingsSectionOrder(
-  turnStarted: boolean | undefined,
-): SettingsSectionId[] {
-  const ids = SETTINGS_SECTIONS.map((s) => s.id);
-  return turnStarted === false
-    ? ["readiness", ...ids.filter((id) => id !== "readiness")]
-    : ids;
-}
+export const settingsSection = (id: SettingsSectionId) =>
+  SETTINGS_SECTIONS.find((s) => s.id === id) ?? SETTINGS_SECTIONS[0];
 
-export const settingsSectionHref = (id: SettingsSectionId) => `/settings#${id}`;
+export const settingsSectionHref = (id: SettingsSectionId) =>
+  `/settings/${settingsSection(id).slug}`;
+
+/** The section a path is the page of, or null. */
+export const sectionForPath = (pathname: string): SettingsSectionId | null =>
+  SETTINGS_SECTIONS.find((s) => pathname === `/settings/${s.slug}`)?.id ?? null;
+
+/** Whether a path is Settings or one of its pages, for the account menu's Settings link. */
+export const isSettingsRoute = (pathname: string) =>
+  pathname === "/settings" ||
+  pathname.startsWith("/settings/") ||
+  /^\/(?:projects|profiles)\/[^/]+\/settings$/.test(pathname) ||
+  /^\/assignments\/[^/]+\/recovery$/.test(pathname);
+
+/** Where `/settings` lands: Readiness until a task starts a turn, otherwise Projects. */
+export const settingsLanding = (
+  turnStarted: boolean | undefined,
+): SettingsSectionId => (turnStarted === false ? "readiness" : "projects");
 
 /** Add Claude, the panel at the top of the Runtime page. */
 export const addClaudeHref = "/settings/runtime#add-claude";
 
 /** A Readiness check's own article, by its public check id. */
 export const readinessCheckHref = (checkId: string) =>
-  `/settings#readiness-${checkId}`;
+  `/settings/readiness#readiness-${checkId}`;
 
 /** A fragment as an element id, or null when it is empty or not decodable. */
-function fragmentId(hash = location.hash) {
+function fragmentId(hash: string) {
   try {
     return decodeURIComponent(hash.slice(1)) || null;
   } catch {
@@ -47,152 +66,96 @@ function fragmentId(hash = location.hash) {
   }
 }
 
+const knownCheck = (id: string | null): id is string =>
+  id?.startsWith("readiness-") === true &&
+  readinessCheckIds.some((c) => `readiness-${c}` === id);
+
 /**
- * The one answer to "does this page land on this fragment right now": the element a
- * fragment names on a Settings route, or null. The route decides which ids are targets
- * (a section or a check's own anchor on `/settings`, `add-claude` on the Runtime
- * page), and the element must be on the page, so a page that has not rendered its target
- * yet (reads or the workspace still loading, a failed readiness read) answers null.
- * `useFragmentLanding` lands on it and the shell's popstate restore skips scrolling
- * only for it, so the two cannot disagree.
+ * The canonical URL for a `/settings#…` address made before Settings had section pages,
+ * or null when nothing needs rewriting. A section fragment opens its page, a check's
+ * fragment opens Readiness at that check, and any other fragment is dropped so the root
+ * landing applies. The query is kept.
  */
-export function landingElement(
+export function legacySettingsUrl(
   pathname: string,
+  search: string,
   hash: string,
-): HTMLElement | null {
+): string | null {
+  if (pathname !== "/settings" || hash.length <= 1) return null;
   const id = fragmentId(hash);
-  if (!id) return null;
-  const supported =
-    pathname === "/settings"
-      ? SETTINGS_SECTIONS.some((s) => s.id === id) ||
-        readinessCheckIds.some((c) => `readiness-${c}` === id)
-      : pathname === "/settings/runtime" && id === "add-claude";
-  return supported ? document.getElementById(id) : null;
+  const known = SETTINGS_SECTIONS.find((s) => s.id === id);
+  if (known) return `${settingsSectionHref(known.id)}${search}`;
+  if (knownCheck(id)) return `/settings/readiness${search}#${id}`;
+  return `/settings${search}`;
 }
 
 /**
- * The section the fragment names, or null (an unknown fragment names none). A check's own
- * anchor (`#readiness-<check id>`) names the Readiness section it sits in.
+ * The element id a Settings page lands on for this address, or null. Only a known check
+ * on Readiness and Add Claude on Runtime are targets.
  */
-export function fragmentSection(): SettingsSectionId | null {
-  const id = fragmentId();
-  if (
-    id?.startsWith("readiness-") &&
-    readinessCheckIds.some((c) => `readiness-${c}` === id)
-  )
-    return "readiness";
-  return SETTINGS_SECTIONS.find((s) => s.id === id)?.id ?? null;
+export function landingTargetId(pathname: string, hash: string) {
+  const id = fragmentId(hash);
+  if (pathname === "/settings/readiness" && knownCheck(id)) return id;
+  if (pathname === "/settings/runtime" && id === "add-claude") return id;
+  return null;
 }
 
-/** How long a landing re-asserts itself while the page above it settles. */
-const SETTLE_MS = 3000;
-
-/**
- * Scroll `target` into view and focus its heading. Reads above it can still be growing
- * (Safari has no scroll anchoring), so a layout change re-scrolls until the first user
- * input, a focus move elsewhere, or `SETTLE_MS`.
- */
-function land(target: HTMLElement) {
-  target.scrollIntoView();
-  const heading = target.querySelector<HTMLElement>("h2,h3");
-  if (heading) {
-    heading.tabIndex = -1;
-    heading.focus({ preventScroll: true });
-  }
-  const settle = new ResizeObserver(() => {
-    const active = document.activeElement;
-    if (target.isConnected && (active === document.body || active === heading))
-      target.scrollIntoView();
-  });
-  settle.observe(document.body);
-  // Chromium clears focus after a browser-made hash change lands, so give it back.
-  const refocus = () => {
-    if (
-      document.activeElement === document.body &&
-      landingElement(location.pathname, location.hash) === target
-    )
-      heading?.focus({ preventScroll: true });
-  };
-  addEventListener("hashchange", refocus);
-  const events = ["wheel", "touchstart", "pointerdown", "keydown", "pagehide"];
-  const stop = () => {
-    clearTimeout(timer);
-    settle.disconnect();
-    removeEventListener("hashchange", refocus);
-    for (const e of events) removeEventListener(e, stop);
-  };
-  const timer = setTimeout(stop, SETTLE_MS);
-  for (const e of events) addEventListener(e, stop, { passive: true });
-  return stop;
-}
-
-/** The landing that was last done; every hook of a page shares it. */
-let landedIdentity: string | null = null;
-
-/**
- * What a page does for the entry it is now on. The shell guarantees that a saved scroll
- * position in the state belongs to the entry itself (it starts any entry reached by a
- * fragment change from clean state), so it is a restoration to keep; otherwise the page
- * lands on its fragment target, or the shell restores the top.
- */
-export type LandingDecision =
-  | { action: "restore"; y: number }
-  | { action: "land"; target: HTMLElement }
-  | { action: "top" };
-
-export function landingDecision(
-  state: { scrollY?: number } | null,
-  pathname: string,
-  hash: string,
-): LandingDecision {
-  if (typeof state?.scrollY === "number")
-    return { action: "restore", y: state.scrollY };
-  const target = landingElement(pathname, hash);
-  return target ? { action: "land", target } : { action: "top" };
-}
-
-/**
- * A landing is a history entry and the fragment it names, not the entry alone: the entry
- * key can stay while the fragment changes.
- */
+/** The landing last settled, so a page lands at most once per history entry and URL. */
+let settledIdentity: string | null = null;
 const landingIdentity = () =>
   `${(history.state as { navKey?: string } | null)?.navKey ?? ""}|${location.pathname}${location.hash}`;
 
+/** Reader input that keeps their position: landing after it would move them. */
+const readerInput = ["wheel", "touchstart", "pointerdown", "keydown"] as const;
+
 /**
- * Land where `landingDecision` says, once per landing identity (a restoration also counts
- * as done, so a target drawn later does not land on a restored entry). `ready` holds the
- * landing until the page can no longer reorder or grow its target. Several hooks on one
- * page may call this: the first whose target is on the page lands, and a target that
- * appears later (a check's article after its read) is landed on by whichever hook sees it.
- * The identity is read on every render, the shell re-renders on each popstate, and a
- * changed identity ends the previous landing (its settle observer and refocus) before the
- * next begins.
+ * Focus and scroll to the address's target once the page's own read is fresh. It lands
+ * at most once per landing identity, and not at all when the entry has a saved position
+ * (Back/Forward restores it), the reader has acted or moved focus since the entry began,
+ * or the fresh read has no such target (the page heading stays). A failed or stale read
+ * keeps the landing pending, so a successful Retry can still complete it.
  */
-export function useFragmentLanding(ready: boolean) {
+export function useTargetLanding(state: ResourceState<unknown>) {
   const identity = landingIdentity();
-  const landedHere = useRef(false);
-  // Leaving the page forgets its landing, so coming back to the same entry lands again.
-  useEffect(
-    () => () => {
-      if (landedHere.current) landedIdentity = null;
-    },
-    [],
-  );
+  const interacted = useRef({ identity, yes: false });
+  if (interacted.current.identity !== identity)
+    interacted.current = { identity, yes: false };
   useEffect(() => {
-    if (!ready || landedIdentity === identity) return;
-    const decision = landingDecision(
-      history.state,
-      location.pathname,
-      location.hash,
-    );
-    // Nothing to land on here: forget an earlier landing, so coming back to its entry
-    // (Forward after Back through this one) lands again.
-    if (decision.action === "top") {
-      landedIdentity = null;
+    const mark = () => {
+      interacted.current.yes = true;
+    };
+    for (const e of readerInput)
+      addEventListener(e, mark, { passive: true, capture: true });
+    return () => {
+      for (const e of readerInput)
+        removeEventListener(e, mark, { capture: true });
+      // Leaving the page forgets its landing, so a later visit lands again.
+      settledIdentity = null;
+    };
+  }, []);
+  const fresh = state.status === "fresh";
+  useEffect(() => {
+    if (!fresh || settledIdentity === identity) return;
+    settledIdentity = identity;
+    const restoring =
+      typeof (history.state as { scrollY?: unknown } | null)?.scrollY ===
+      "number";
+    const id = landingTargetId(location.pathname, location.hash);
+    if (restoring || !id || interacted.current.yes) return;
+    // Focus the shell put on the page heading is not the reader's.
+    const active = document.activeElement;
+    if (active && active !== document.body && !active.matches("main h1"))
       return;
-    }
-    landedIdentity = identity;
-    landedHere.current = true;
-    if (decision.action === "land") return land(decision.target);
-  }, [identity, ready]);
+    // After the shell's own scroll for this entry, which runs in the next frame.
+    requestAnimationFrame(() => {
+      const target = document.getElementById(id);
+      if (!target || interacted.current.yes) return;
+      target.scrollIntoView();
+      const heading = target.querySelector<HTMLElement>("h2,h3");
+      if (heading) {
+        heading.tabIndex = -1;
+        heading.focus({ preventScroll: true });
+      }
+    });
+  }, [fresh, identity]);
 }

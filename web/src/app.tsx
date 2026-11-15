@@ -66,12 +66,19 @@ import {
 } from "./tasks.js";
 import { useDraftReleases } from "./composer-drafting.js";
 import { TaskComposer } from "./task-composer.js";
-import { RuntimeSettings, AssignmentRecovery } from "./recovery.js";
+import { AssignmentRecovery } from "./recovery.js";
 import { unavailableAlert } from "./execution-runtime.js";
 import { ConfigurationDrafts } from "./settings-state.js";
 import { ProjectSetup, type SetupHeader } from "./project-setup.js";
-import { SettingsWorkspace } from "./settings-index.js";
-import { landingDecision } from "./settings-sections.js";
+import { SettingsLayout, SettingsSectionPage } from "./settings-index.js";
+import {
+  isSettingsRoute,
+  landingTargetId,
+  legacySettingsUrl,
+  sectionForPath,
+  settingsLanding,
+  settingsSectionHref,
+} from "./settings-sections.js";
 import { ProfileConfiguration, ProfileCreate } from "./profile-config.js";
 import { ProjectConfiguration } from "./project-config.js";
 import { settingsHeader } from "./settings-view.js";
@@ -389,7 +396,7 @@ function AccountRows({
       <p className="metadata muted">Signed in as {OPERATOR_LABEL}</p>
       <RouteLink
         href="/settings"
-        current={pathname === "/settings"}
+        current={isSettingsRoute(pathname ?? "") && "true"}
         navigate={navigate}
         icon={<Settings {...navIcon} />}
         row
@@ -464,12 +471,18 @@ function parentRoute(
   if (/^\/tasks\/[^/]+$/.test(pathname))
     return { href: "/tasks", label: "Tasks" };
   if (/^\/assignments\/[^/]+\/recovery$/.test(pathname))
-    return { href: "/settings/runtime", label: "Runtime" };
+    return { href: settingsSectionHref("runtime"), label: "Runtime" };
   if (
-    pathname.startsWith("/settings/") ||
-    /^\/(projects|profiles)\/[^/]+\/settings$/.test(pathname)
+    pathname === "/settings/projects/new" ||
+    /^\/projects\/[^/]+\/settings$/.test(pathname)
   )
-    return { href: "/settings", label: "Settings" };
+    return { href: settingsSectionHref("projects"), label: "Projects" };
+  if (
+    pathname === "/settings/profiles/new" ||
+    /^\/profiles\/[^/]+\/settings$/.test(pathname)
+  )
+    return { href: settingsSectionHref("profiles"), label: "Agents" };
+  if (sectionForPath(pathname)) return { href: "/settings", label: "Settings" };
   return null;
 }
 /** A same-origin root path the client router handles: not another origin, the API or its assets. */
@@ -496,10 +509,10 @@ function knownRoute(pathname: string) {
       "/search",
       "/getting-started",
       "/settings",
-      "/settings/runtime",
       "/settings/projects/new",
       "/settings/profiles/new",
     ].includes(pathname) ||
+    sectionForPath(pathname) !== null ||
     /^\/tasks\/[^/]+$/.test(pathname) ||
     new RegExp(`^/projects/${id}$`).test(pathname) ||
     new RegExp(`^/assignments/${id}/recovery$`).test(pathname) ||
@@ -518,7 +531,27 @@ const ownsState = () => {
   const stamp = (history.state as { entryUrl?: unknown } | null)?.entryUrl;
   return typeof stamp === "string" && stamp === location.href;
 };
+/**
+ * The address an in-app link or entry opens: a legacy `/settings#…` address becomes its
+ * section page, before anything is recorded or mounted for it.
+ */
+function canonicalHref(href: string) {
+  const url = new URL(href, location.href);
+  return legacySettingsUrl(url.pathname, url.search, url.hash) ?? href;
+}
+/** Rewrites the current legacy Settings address in place; true when it did. */
+function rewriteLegacyEntry() {
+  const next = legacySettingsUrl(
+    location.pathname,
+    location.search,
+    location.hash,
+  );
+  if (next) history.replaceState(history.state, "", next);
+  return next !== null;
+}
+/** Records a new entry for `href` and returns the address it was recorded at. */
 function pushAppEntry(href: string, navigationScope: string) {
+  href = canonicalHref(href);
   const fromSearch = location.pathname === "/search";
   history.pushState(
     {
@@ -537,6 +570,7 @@ function pushAppEntry(href: string, navigationScope: string) {
     "",
     href,
   );
+  return href;
 }
 /** Names the tab and history entry by route; task and project names stay out of the title. */
 function DocumentTitle({ title }: { title: string }) {
@@ -573,7 +607,11 @@ export function App() {
   const [session, setSession] = useState<Session | null>(null),
     [bootstrapError, setBootstrapError] = useState(false),
     [bootstrap, setBootstrap] = useState(0),
-    [path, setPath] = useState(location.pathname + location.search),
+    // A legacy Settings address is rewritten before any page mounts for it.
+    [path, setPath] = useState(() => {
+      rewriteLegacyEntry();
+      return location.pathname + location.search;
+    }),
     [navigationVersion, setNavigationVersion] = useState(0),
     [drawer, setDrawer] = useState(false),
     [logoutPending, setLogoutPending] = useState(false),
@@ -689,12 +727,11 @@ export function App() {
   // biome-ignore lint/correctness/useExhaustiveDependencies: current scope ref guards browser Back/Forward entries across authentication expiry.
   useEffect(() => {
     const pop = () => {
-      // A Settings entry reached at a URL it was not recorded for (a fragment changed
-      // natively, with the state copied or dropped) is a new entry: it starts clean, so
-      // no saved position or focus of another entry can be mistaken for its own.
-      const copied =
-        ["/settings", "/settings/runtime"].includes(location.pathname) &&
-        !ownsState();
+      rewriteLegacyEntry();
+      // An entry reached at a URL it was not recorded for (a fragment changed natively,
+      // with the state copied or dropped) is a new entry: it starts clean, so no saved
+      // position or focus of another entry can be mistaken for its own.
+      const copied = !ownsState();
       if (
         history.state?.navigationScope !== navigationScope.current ||
         copied
@@ -707,16 +744,23 @@ export function App() {
       setNavigationVersion((n) => n + 1);
       const state = history.state as { scrollY?: number } | null;
       const { pathname, hash } = location;
-      // Decided when the frame runs, with the page rendered, by the same function the
-      // Settings page lands with.
+      // Once the page has rendered: a saved position is restored, otherwise the entry
+      // starts at the top unless its page lands on a target.
       requestAnimationFrame(() => {
-        const decision = landingDecision(state, pathname, hash);
-        if (decision.action === "restore") scrollTo(0, decision.y);
-        else if (decision.action === "top") scrollTo(0, 0);
+        if (typeof state?.scrollY === "number") scrollTo(0, state.scrollY);
+        else if (!landingTargetId(pathname, hash)) scrollTo(0, 0);
       });
     };
+    // A fragment set without a history traversal still gets its section page.
+    const hashchange = () => {
+      if (rewriteLegacyEntry()) setPath(location.pathname + location.search);
+    };
     addEventListener("popstate", pop);
-    return () => removeEventListener("popstate", pop);
+    addEventListener("hashchange", hashchange);
+    return () => {
+      removeEventListener("popstate", pop);
+      removeEventListener("hashchange", hashchange);
+    };
   }, []);
   const loader = useCallback(
     (signal: AbortSignal) =>
@@ -812,8 +856,8 @@ export function App() {
           { ...history.state, scrollY, focusedHref: href },
           "",
         );
-        pushAppEntry(href, navigationScope.current);
-        setPath(href);
+        setPath(pushAppEntry(href, navigationScope.current));
+        focusHeading.current = true;
         setNavigationVersion((n) => n + 1);
         setDrawer(false);
       }
@@ -835,6 +879,32 @@ export function App() {
       setPath("/");
     }
   }, [pathname, addressPath]);
+  // `/settings` is a landing, not a page: once the workspace read answers, the entry is
+  // replaced by Readiness before the first turn and Projects otherwise.
+  const turnStarted = workspace.state.data?.data.gettingStarted.turnStarted;
+  const landingKnown = workspace.state.data !== null;
+  // biome-ignore lint/correctness/useExhaustiveDependencies: navigate is recreated each render.
+  useEffect(() => {
+    if (pathname !== "/settings" || !landingKnown) return;
+    navigate(
+      `${settingsSectionHref(settingsLanding(turnStarted))}${location.search}`,
+      { replace: true },
+    );
+  }, [pathname, landingKnown, turnStarted]);
+  // New navigation to a section page starts at its top with the page heading focused;
+  // Back and Forward keep their own restoration.
+  const focusHeading = useRef(false);
+  // biome-ignore lint/correctness/useExhaustiveDependencies: runs once the pushed entry renders.
+  useEffect(() => {
+    if (!focusHeading.current) return;
+    focusHeading.current = false;
+    if (!sectionForPath(location.pathname)) return;
+    const heading = document.querySelector<HTMLElement>("main h1");
+    if (!heading) return;
+    heading.tabIndex = -1;
+    heading.focus({ preventScroll: true });
+    scrollTo(0, 0);
+  }, [path, navigationVersion]);
   // Until a task starts a turn Home shows only the getting-started card, so a turn started
   // elsewhere (task page, CLI, another session) is picked up when Home is entered again.
   // biome-ignore lint/correctness/useExhaustiveDependencies: re-read on entering Home, not on every refresh of the reads it inspects.
@@ -860,8 +930,8 @@ export function App() {
       return;
     }
     history.replaceState({ ...history.state, scrollY }, "");
-    pushAppEntry(next, navigationScope.current);
-    setPath(next);
+    setPath(pushAppEntry(next, navigationScope.current));
+    focusHeading.current = true;
     setNavigationVersion((n) => n + 1);
     setDrawer(false);
   };
@@ -984,7 +1054,7 @@ export function App() {
                 workspace.state.data?.data.projects.length === 0)
               ? "No projects yet. A project groups tasks with a lead, instructions and explicit repository access."
               : "Three short steps. Saving creates a paused project; nothing runs until you resume it."
-          : undefined;
+          : settingsPage?.subtitle;
   // The Inbox route refreshes its own list (and so the count) when the workspace read changes.
   const refreshAll = () => {
     workspace.refresh();
@@ -1191,9 +1261,11 @@ export function App() {
                     ? `${inboxCount} unresolved`
                     : undefined
                 }
-                {...(parent
-                  ? { back: parent }
-                  : {
+                {...(parent ? { back: parent } : {})}
+                // A Settings section's parent resolves to a section again, so its pages
+                // keep the global drawer beside Back.
+                {...(!parent || sectionForPath(pathname)
+                  ? {
                       menu: (
                         <MobileNavigation
                           open={drawer}
@@ -1202,7 +1274,8 @@ export function App() {
                           {navigation(true)}
                         </MobileNavigation>
                       ),
-                    })}
+                    }
+                  : {})}
                 action={
                   taskRoute ? (
                     // The top bar carries New task on desktop; this one serves the drawer shell.
@@ -1251,8 +1324,10 @@ export function App() {
             )}
             {unknownRoute ? (
               <NotFound />
-            ) : pathname === "/settings/runtime" ? (
-              <RuntimeSettings
+            ) : sectionForPath(pathname) ? (
+              <SettingsSectionPage
+                key={pathname}
+                section={sectionForPath(pathname) ?? "projects"}
                 client={client}
                 session={session}
                 drafts={drafts.current}
@@ -1271,18 +1346,15 @@ export function App() {
                 assignmentId={pathname.split("/")[2] ?? ""}
               />
             ) : pathname === "/settings" ? (
-              <SettingsWorkspace
-                client={client}
-                session={session}
-                drafts={drafts.current}
-                workspace={workspace.state.data}
-                workspaceSettled={
-                  workspace.state.data !== null ||
-                  workspace.state.status === "error"
-                }
-                refresh={workspace.refresh}
-                refreshNonce={refreshNonce}
-              />
+              // The landing resolves once the workspace answers; a failed read keeps its
+              // Retry above and the section links here.
+              <SettingsLayout current={null}>
+                {workspace.state.status !== "error" && (
+                  <p className="body muted" role="status">
+                    Loading settings…
+                  </p>
+                )}
+              </SettingsLayout>
             ) : pathname === "/settings/projects/new" ? (
               <ProjectSetup
                 // Choosing New project again remounts, so a recorded create starts clean.

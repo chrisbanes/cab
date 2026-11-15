@@ -29,7 +29,7 @@ for (const engine of ["chromium", "webkit"] as const) {
       journey.observe(page);
       page.setDefaultTimeout(5000);
       const settings = `${web.origin}/projects/${f.projectId}/settings`;
-      await signIn(page, web, "/settings#projects");
+      await signIn(page, web, "/settings/projects");
       const projects = page.locator("section#projects");
       assert.equal(
         await projects

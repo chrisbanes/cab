@@ -283,7 +283,7 @@ test("Runtime passes on any enabled runtime and sends a missing one to Settings 
     {
       kind: "link",
       label: "Open readiness check",
-      href: "/settings#readiness",
+      href: "/settings/readiness",
     },
   );
 });
@@ -301,7 +301,7 @@ test("GitHub never offers a one-click login", () => {
   assert.deepEqual(signedIn?.action, {
     kind: "link",
     label: "Set discovery credential",
-    href: "/settings#github-discovery",
+    href: "/settings/github-discovery",
   });
   assert.match(signedIn?.detail ?? "", /@fixture-user/);
   assert.match(signedIn?.detail ?? "", /Project setup/);
@@ -317,7 +317,7 @@ test("GitHub never offers a one-click login", () => {
   assert.deepEqual(done?.action, {
     kind: "link",
     label: "Discovery settings",
-    href: "/settings#github-discovery",
+    href: "/settings/github-discovery",
   });
   // Configured but unreadable stays optional and points at the credential setting.
   assert.equal(
@@ -373,7 +373,7 @@ test("a claude that is not runnable needs attention even when the token is reada
   assert.deepEqual(failing?.action, {
     kind: "link",
     label: "Open readiness check",
-    href: "/settings#readiness-claude-executable",
+    href: "/settings/readiness#readiness-claude-executable",
   });
   assert.equal(failing?.primary, false);
   // Claude unused: no token and no claude is still optional; both passing is done.

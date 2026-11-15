@@ -161,7 +161,7 @@ try {
     }
   };
   const goSettings = async () => {
-    await page.goto(`${web.origin}/settings#notifications`);
+    await page.goto(`${web.origin}/settings/notifications`);
   };
 
   await step("sign in to a fresh profile", async () => {
@@ -180,7 +180,7 @@ try {
       },
     );
     assert.equal(login.status(), 200);
-    await page.goto(`${web.origin}/settings#notifications`);
+    await page.goto(`${web.origin}/settings/notifications`);
     await page.locator("main.page h1").waitFor();
     browserVersion = (await page.evaluate(() => navigator.userAgent)).match(
       /Chrome\/([\d.]+)/,

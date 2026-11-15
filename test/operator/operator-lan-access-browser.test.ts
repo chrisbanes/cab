@@ -198,7 +198,7 @@ for (const engine of ["chromium", "webkit"] as const) {
         .getByRole("log", { name: "Task conversation" })
         .getByText("LAN fixture comment é")
         .waitFor();
-      await lanPage.goto(`${web.lanOrigin}/settings#notifications`);
+      await lanPage.goto(`${web.lanOrigin}/settings/notifications`);
       const notifications = lanPage.locator("section.settings-panel").filter({
         has: lanPage.getByRole("heading", {
           name: "Notifications",

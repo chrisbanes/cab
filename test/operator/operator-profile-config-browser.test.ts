@@ -40,7 +40,7 @@ test("Create agent saves with one message, a breadcrumb, boundary aside and Canc
     await page
       .getByRole("link", { name: "Cancel", exact: true })
       .getAttribute("href"),
-    "/settings#profiles",
+    "/settings/agents",
   );
   await page.getByLabel("Agent name", { exact: true }).fill("Tester");
   await page.getByLabel("Summary", { exact: true }).fill("Testing");

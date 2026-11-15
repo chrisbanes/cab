@@ -124,7 +124,7 @@ async function signInAgain(page: Page, password: string) {
 test("notifications: turn on, test, deep links through sign-in, turn off and revoke", async (_t, journey) => {
   const { f, fake, push, web, page, device, exhaustion, context } =
     await start(journey);
-  await signIn(page, web, "/settings#notifications");
+  await signIn(page, web, "/settings/notifications");
   const panel = section(page);
   await panel.waitFor();
 
@@ -182,7 +182,7 @@ test("notifications: turn on, test, deep links through sign-in, turn off and rev
     {
       v: 1,
       title: "Test notification from cab",
-      url: "/settings#notifications",
+      url: "/settings/notifications",
       tag: "test:notification",
     },
   ]);
@@ -251,7 +251,7 @@ test("notifications: turn on, test, deep links through sign-in, turn off and rev
   );
 
   // 8. Turn off: the row reads Revoked, the browser unsubscribed and nothing more is sent.
-  await page.goto(`${web.origin}/settings#notifications`);
+  await page.goto(`${web.origin}/settings/notifications`);
   await section(page)
     .getByRole("button", { name: "Turn off for this browser" })
     .click();
@@ -305,7 +305,7 @@ test("notifications: turn on, test, deep links through sign-in, turn off and rev
 
   // 10. On a phone the section keeps 44 px controls.
   await page.setViewportSize({ width: 375, height: 812 });
-  await page.goto(`${web.origin}/settings#notifications`);
+  await page.goto(`${web.origin}/settings/notifications`);
   const turnOn = section(page).getByRole("button", {
     name: "Turn on notifications",
   });
@@ -514,7 +514,7 @@ async function startLegacyInstall(journey: BrowserJourney) {
 
 test("notifications: a browser set up at /app/ moves to the root registration on sign-in", async (_t, journey) => {
   const { web, page, registrations, rows } = await startLegacyInstall(journey);
-  await signIn(page, web, "/settings#notifications");
+  await signIn(page, web, "/settings/notifications");
   await section(page)
     .getByText("Notifications are on in this browser")
     .waitFor();
@@ -535,7 +535,7 @@ test("notifications: a move the service does not confirm keeps the old registrat
       ? route.abort()
       : route.continue(),
   );
-  await signIn(page, web, "/settings#notifications");
+  await signIn(page, web, "/settings/notifications");
   const panel = section(page);
   await panel
     .getByText("This browser is still set up at cab's old address")

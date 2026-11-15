@@ -534,7 +534,7 @@ nav {
 
 .account-menu-item:hover,
 .account-menu-item:focus-visible,
-.account-menu-item[aria-current="page"] {
+.account-menu-item[aria-current] {
   background: var(--sidebar-accent);
 }
 
