@@ -140,7 +140,9 @@ export async function clearScratch(
   await assertRealDirectory(scratch);
   for (const name of await readdir(scratch)) {
     cancelled();
+    await assertRealDirectory(scratch);
     // `rm` lstats each entry, so a link is unlinked rather than followed.
+    // shortcut: `rm` walks a child directory by path, so a directory swapped for a link inside it mid-walk is not detected; settled ownership excludes cab writers.
     await rm(join(scratch, name), { recursive: true });
   }
   await assertRealDirectory(scratch);
@@ -148,13 +150,14 @@ export async function clearScratch(
     throw new TrimPathError("Scratch contents remained after trimming");
 }
 
+/** The scratch path must be a real directory, never a link or another entry. */
 export async function assertRealDirectory(path: string): Promise<void> {
   const info = await lstat(path);
   if (info.isSymbolicLink() || !info.isDirectory())
     throw new TrimPathError("Task scratch path is not a real directory");
 }
 
-async function lstatIfExists(path: string) {
+export async function lstatIfExists(path: string) {
   try {
     return await lstat(path);
   } catch (error) {

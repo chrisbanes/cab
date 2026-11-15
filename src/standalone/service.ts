@@ -5954,7 +5954,7 @@ export class StandaloneService {
 
   /**
    * Service-internal: trims under the archival lease, at any task status. Releases the lease
-   * only when the workspace is still ready and no Git outcome is uncertain.
+   * unless the workspace is left Git-uncertain, whatever the outcome or a thrown error.
    */
   async trimTaskWorkspace(
     taskId: string,
@@ -5972,19 +5972,18 @@ export class StandaloneService {
             binding: workspaceBindings.get(taskId),
             reason: "Task execution is not settled or its workspace is held",
           };
-        let release = false;
         try {
-          const result = await workspaces.trim(
+          return await workspaces.trim(
             taskId,
             trigger,
             new WorkspaceLifecycleStore(this.cache!),
             () => state.confirmArchive(taskId),
           );
-          release =
-            result.binding?.state === "ready" && !result.binding.gitUncertain;
-          return result;
         } finally {
-          if (release) state.endArchive(taskId);
+          // Trim effects are awaited before it returns or throws, so only Git uncertainty
+          // recorded on the workspace can mean an unsettled child; that keeps the lease.
+          if (!workspaceBindings.get(taskId)?.gitUncertain)
+            state.endArchive(taskId);
           await this.wakeScheduler();
         }
       },

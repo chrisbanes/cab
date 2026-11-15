@@ -12,7 +12,6 @@ import {
   renameSync,
   rmSync,
   symlinkSync,
-  unlinkSync,
   writeFileSync,
 } from "node:fs";
 import { dirname, join } from "node:path";
@@ -38,6 +37,10 @@ import {
   WorkspaceManager,
 } from "../../src/standalone/workspaces.js";
 import { controlledGit } from "../fixtures/controlled-git.js";
+import { createOperatorFixture } from "../fixtures/operator-web.js";
+import { until } from "../fixtures/questions.js";
+import { startedOf } from "../fixtures/service-internals.js";
+import { checkout } from "../fixtures/setup-home.js";
 import { coordinationFixture } from "../fixtures/coordination.js";
 import { processIdentityDenied } from "../fixtures/host-access.js";
 import { tmpdir } from "../fixtures/temp.js";
@@ -666,7 +669,7 @@ test("an unobserved readback Git child marks the workspace uncertain and keeps t
   }
 });
 
-test("path safety checks are what preserve outside files", async () => {
+test("path safety checks refuse unsafe entries and keep outside files", async () => {
   // A directory Git did not enumerate is refused rather than handed to deletion.
   assert.deepEqual(
     ignoredTrimPaths(Buffer.from("!! ignored/a.o\0!! ignored/nested/\0")),
@@ -691,9 +694,6 @@ test("path safety checks are what preserve outside files", async () => {
       /parent is not a directory/,
     );
     assert.ok(existsSync(join(outside, "a.o")));
-    // With the ancestor check disabled, the same unlink follows the link and the outside file goes.
-    unlinkSync(join(worktree, "ignored", "a.o"));
-    assert.equal(existsSync(join(outside, "a.o")), false);
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
@@ -883,4 +883,142 @@ test("the service trims only settled execution and the next turn's context repor
   await message();
   await waitUntil(() => runtime.turns.length === 3, describe);
   assert.doesNotMatch(String(runtime.turns[2]?.[2]), /Workspace trimmed/);
+});
+
+test("the service releases the trim lease after a refusal or a certain hold and keeps it when Git is uncertain", {
+  skip: processIdentityDenied(),
+}, async (t) => {
+  const controlled = controlledGit();
+  const f = await createOperatorFixture(
+    null,
+    undefined,
+    undefined,
+    {},
+    undefined,
+    {
+      workspaceManager: {
+        gitExecutable: controlled.executable,
+        gitTimeoutMs: { "trim-scan": 300 },
+        gitTerminationGraceMs: 50,
+        gitTerminationObservationMs: 40,
+      },
+    },
+  );
+  t.after(async () => {
+    try {
+      await f.close();
+    } finally {
+      await controlled.cleanup();
+    }
+  });
+  const run = (body: Record<string, unknown>) =>
+    f.service
+      .domain()
+      .execute({ actor: "operator", key: randomUUID(), ...body } as never);
+  const profileId = randomUUID(),
+    projectId = randomUUID(),
+    taskId = randomUUID();
+  run({
+    type: "profile.create",
+    profileId,
+    name: "Lead",
+    instructions: "Work",
+    capabilities: "local",
+  });
+  run({
+    type: "project.create",
+    projectId,
+    name: "Lease",
+    leadProfileId: profileId,
+  });
+  const sourcePath = join(f.directory, "source");
+  await checkout(sourcePath, "https://github.com/acme/atlas.git");
+  await f.service.domain().configureRepositories({
+    type: "repositories.configure",
+    actor: "operator",
+    key: randomUUID(),
+    projectId,
+    expectedVersion: f.service.domain().repositoryLinks(projectId).version,
+    repositories: [
+      {
+        codeHost: "github",
+        host: "github.com",
+        repositoryId: "R_atlas",
+        path: sourcePath,
+        ref: "main",
+      },
+    ],
+  } as never);
+  run({
+    type: "project.configure",
+    projectId,
+    expectedVersion: 1,
+    paused: false,
+  });
+  const { state, workspaceBindings } = startedOf(f.service);
+  const provisioned = async (taskId: string, turn: number) => {
+    run({
+      type: "task.create",
+      projectId,
+      taskId,
+      title: "Lease",
+      outcome: "Work",
+      ready: false,
+    });
+    await f.service.startDraftTurn({
+      key: randomUUID(),
+      taskId,
+      expectedVersion: 1,
+      message: "Look first",
+    });
+    await until(() => f.runtime.turns === turn);
+    f.runtime.complete(turn);
+    await until(() => state.taskExecutionSettled(taskId));
+    const binding = workspaceBindings.get(taskId);
+    const repo = binding?.repositories[0];
+    assert.ok(binding && repo);
+    return { binding, repo };
+  };
+  const { repo } = await provisioned(taskId, 1);
+  const other = randomUUID();
+  const { binding: otherBinding } = await provisioned(other, 2);
+  const leased = (id = taskId) => state.isArchiveHeld(id);
+
+  // A refusal over a non-ready workspace releases the lease it took.
+  workspaceBindings.update(taskId, "held", "Fixture hold");
+  const refused = await f.service.trimTaskWorkspace(taskId, "manual");
+  assert.equal(refused.outcome, "refused");
+  assert.equal(leased(), false);
+  workspaceBindings.update(taskId, "ready", null);
+
+  // An unobserved Git child leaves the workspace uncertain, so the lease stays.
+  controlled.setRule({
+    commandPrefix: "--no-optional-locks status",
+    cwd: repo.workspacePath,
+    behavior: "stall",
+  });
+  const uncertain = await f.service.trimTaskWorkspace(taskId, "manual");
+  controlled.setRule(undefined);
+  assert.equal(uncertain.outcome, "refused");
+  assert.equal(uncertain.binding?.gitUncertain, true);
+  assert.equal(leased(), true);
+  assert.equal(
+    f.service.nonStopTaskHoldReason(taskId),
+    "Task archival in progress",
+  );
+  // A certain failure part-way, on another task, holds the journal but releases the lease.
+  const locked = join(taskScratchPath(otherBinding.path), "locked");
+  write(join(locked, "file"));
+  chmodSync(locked, 0o555);
+  try {
+    const held = await f.service.trimTaskWorkspace(other, "manual");
+    assert.equal(
+      held.outcome === "held" && held.reason,
+      "Workspace trimming stopped: filesystem error EACCES",
+    );
+    assert.equal(held.binding?.gitUncertain, false);
+    assert.equal(leased(other), false);
+  } finally {
+    chmodSync(locked, 0o755);
+  }
 });

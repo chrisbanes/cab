@@ -4,7 +4,9 @@ import {
   type WorkspaceOperation,
 } from "../core/workspace-lifecycle.js";
 import {
+  assertRealDirectory,
   clearScratch,
+  lstatIfExists,
   hasGitlink,
   ignoredTrimPaths,
   pruneEmptyParents,
@@ -1095,7 +1097,7 @@ export class WorkspaceManager implements TaskWorkspaceLifecycle {
         try {
           scan = await this.trimScan(repository);
         } catch (error) {
-          if (isUncertainGitError(error) && error.kind !== "output-limit") {
+          if (isUncertainGitError(error)) {
             const held = this.store.markGitUncertain(id, error.message);
             return refused(held, error.message);
           }
@@ -1199,6 +1201,10 @@ export class WorkspaceManager implements TaskWorkspaceLifecycle {
           error instanceof WorkspaceManagerCancelledError || this.cancelled
             ? "Workspace trimming was cancelled; some ignored files or scratch contents may already be deleted"
             : `Workspace trimming stopped: ${trimReason(error)}`;
+        // Recorded first, so a failing journal write cannot hide the uncertainty from the lease.
+        const held = isUncertainGitError(error)
+          ? this.store.markGitUncertain(id, error.message)
+          : this.store.get(id)!;
         if (running)
           lifecycle.settleEffect(
             owner,
@@ -1208,9 +1214,6 @@ export class WorkspaceManager implements TaskWorkspaceLifecycle {
             Date.now(),
           );
         lifecycle.holdOperation(owner, operationId, reason);
-        const held = isUncertainGitError(error)
-          ? this.store.markGitUncertain(id, error.message)
-          : this.store.get(id)!;
         return { outcome: "held", binding: held, operationId, reason };
       }
     });
@@ -2513,18 +2516,7 @@ async function ensureTaskScratch(workspace: string): Promise<void> {
   await mkdir(scratch, { mode: 0o700 }).catch((error: unknown) => {
     if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
   });
-  const info = await lstat(scratch);
-  if (info.isSymbolicLink() || !info.isDirectory())
-    throw new Error("Task scratch path is not a real directory");
-}
-
-async function lstatIfExists(path: string) {
-  try {
-    return await lstat(path);
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === "ENOENT") return undefined;
-    throw error;
-  }
+  await assertRealDirectory(scratch);
 }
 
 /** A trim reason without filesystem paths: fixed messages and error codes only. */

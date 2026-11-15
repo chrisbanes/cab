@@ -1190,10 +1190,12 @@ files under ignored parents, non-ignored untracked files, root `evidence/`, lega
 root `tmp/` and `npm-cache/`, and other workspace-root files survive. Scratch contents
 are deleted and the scratch directory is kept. Settled ownership and the workspace
 binding are rechecked before each repository and the scratch directory. Each effect
-is journaled before it runs and settled after a readback; the trim's time and trigger
-are recorded only when every effect succeeded. A cancellation, error, ownership change
-or unobserved Git child leaves the journal held with its reason, which blocks later
-maintenance of that workspace, and an unobserved Git child also holds the workspace.
+is journaled before it runs and settled after a readback. The trim's trigger and start
+time are journaled when it begins; its completion time is recorded only when every
+effect succeeded. A cancellation, error or ownership change leaves the journal held
+with its reason, which blocks later maintenance of that workspace. Any uncertain Git
+outcome also holds the workspace and keeps the archival lease; every other outcome,
+including a refusal, releases the lease.
 Until a turn of the task ends after a trim, each turn's context carries one line with
 the trim time and guidance to rebuild ignored and scratch files; a trim that stopped
 part-way says those files may be missing instead.
