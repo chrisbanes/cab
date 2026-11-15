@@ -183,7 +183,9 @@ test("Assignment recovery shows the uncertainty alert and five independent holds
     .getByText(/Effects may continue while an execution is stopping/)
     .waitFor();
   await page
-    .getByText(/they do not prove that a process has terminated/)
+    .getByText(
+      /Recovery records do not confirm that execution has ended or released its holds/,
+    )
     .waitFor();
   await page.getByText(/through the CLI recovery-options read/).waitFor();
   assert.doesNotMatch(
