@@ -269,6 +269,8 @@ Archive freezes a paused, drained project without cancelling work or removing it
 open tasks, configuration, source memberships or history. Refuse while assignments,
 executions, ownership/recovery holds, pending effects, reservations, drafting/routing,
 agent requests or provider writes remain unresolved. Unknown inspection is a refusal.
+A read-only workspace inspection is not in-flight work and does not refuse archive; a
+hold it would record after archive is refused instead.
 Check durable and in-flight service facts again inside the archive transaction; do
 not hold that transaction across network or filesystem operations.
 
