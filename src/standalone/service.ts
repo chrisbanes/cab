@@ -412,6 +412,7 @@ import {
   type TaskWorkspaceBinding,
   type TaskWorkspaceRepositoryInput,
   type WorkspaceCleanupEvidence,
+  type WorkspaceTrimResult,
   WorkspaceManager,
   taskRepositoryBase,
   type WorkspaceManagerOptions,
@@ -5951,6 +5952,45 @@ export class StandaloneService {
     );
   }
 
+  /**
+   * Service-internal: trims under the archival lease, at any task status. Releases the lease
+   * only when the workspace is still ready and no Git outcome is uncertain.
+   */
+  async trimTaskWorkspace(
+    taskId: string,
+    trigger: "manual" | "idle" | "disk",
+  ): Promise<WorkspaceTrimResult> {
+    return this.withProjectWrite(
+      this.taskProject(taskId),
+      "callback",
+      async () => {
+        this.domain().task(taskId);
+        const { state, workspaces, workspaceBindings } = this.started();
+        if (!state.beginArchive(taskId))
+          return {
+            outcome: "refused",
+            binding: workspaceBindings.get(taskId),
+            reason: "Task execution is not settled or its workspace is held",
+          };
+        let release = false;
+        try {
+          const result = await workspaces.trim(
+            taskId,
+            trigger,
+            new WorkspaceLifecycleStore(this.cache!),
+            () => state.confirmArchive(taskId),
+          );
+          release =
+            result.binding?.state === "ready" && !result.binding.gitUncertain;
+          return result;
+        } finally {
+          if (release) state.endArchive(taskId);
+          await this.wakeScheduler();
+        }
+      },
+    );
+  }
+
   /** A replacement keeps the durable assignment and its captured revisions. */
   replaceConversation(assignmentId: string): number {
     this.domain().assignment(assignmentId);
@@ -9632,6 +9672,7 @@ export class StandaloneService {
     const source = capture?.sourceId
       ? this.taskReview().source(binding.taskId, capture.sourceId)
       : undefined;
+    const trimNotice = this.workspaceTrimNotice(binding.taskId);
     const reviewReferences = source
       ? JSON.stringify({
           sourceId: source.sourceId,
@@ -9652,7 +9693,9 @@ export class StandaloneService {
         : []),
       {
         name: "role",
-        text: `${roleContext}\nCurrent cab coordination context (JSON): ${coordinationContext}\nProfile summaries describe suitability, not authority. cab tools enforce current permissions. Ask operator questions through cab_ask_question, never native asynchronous input tools. For a decision with known alternatives, pass a form with one question per decision, concrete options and a recommended option; use a plain question only for open-ended input. Write each question for a person: one plain sentence without identifiers, background in context, and what each option causes. Do not ask the operator to diagnose cab refusals; fix the input from the refusal message.${
+        text: `${roleContext}\nCurrent cab coordination context (JSON): ${coordinationContext}${
+          trimNotice ? `\n${trimNotice}` : ""
+        }\nProfile summaries describe suitability, not authority. cab tools enforce current permissions. Ask operator questions through cab_ask_question, never native asynchronous input tools. For a decision with known alternatives, pass a form with one question per decision, concrete options and a recommended option; use a plain question only for open-ended input. Write each question for a person: one plain sentence without identifiers, background in context, and what each option causes. Do not ask the operator to diagnose cab refusals; fix the input from the refusal message.${
           leadBinding
             ? `\n${leadDeliveryGuidance(
                 deliveryPolicy,
@@ -9680,6 +9723,31 @@ export class StandaloneService {
         seen?.profile,
       ),
     ];
+  }
+
+  /**
+   * One line for turns until a turn ends after the latest trim of the current workspace.
+   * A trim that stopped part-way says what may be gone; neither claims contents came back.
+   */
+  private workspaceTrimNotice(taskId: string): string | undefined {
+    const lifecycle = new WorkspaceLifecycleStore(this.cache!);
+    const generation = lifecycle.current(taskId);
+    if (!generation) return undefined;
+    const trim = lifecycle
+      .operations(generation)
+      .filter(
+        (o) =>
+          o.kind === "trim" && (o.state === "completed" || o.effects.length),
+      )
+      .sort((a, b) => a.startedAt - b.startedAt)
+      .at(-1);
+    const at = trim?.completedAt ?? trim?.startedAt;
+    if (at === undefined || (generation.lastTurnEndedAt ?? -1) >= at)
+      return undefined;
+    const time = new Date(at).toISOString();
+    return trim?.state === "completed"
+      ? `Workspace trimmed ${time}: cab deleted the Git-ignored files in this task's repositories and everything in its scratch directory. Rebuild any ignored or scratch files you need, such as dependencies, build output and caches.`
+      : `Workspace trimming started ${time} and did not finish: some Git-ignored files and scratch contents may have been deleted. Rebuild any you need.`;
   }
 
   /**

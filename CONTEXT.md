@@ -367,8 +367,9 @@ temporary files and caches; cab never treats its contents as work.
 _Avoid_: Temporary base, which is Claude's per-workspace directory outside the workspace
 
 **Workspace trimming**:
-The planned operation that deletes Git-reported ignored worktree files and scratch
-contents, keeping worktrees, tracked and non-ignored work, and other workspace-root files.
+The service-internal operation that deletes Git-reported ignored worktree files and
+scratch contents, keeping worktrees, tracked and non-ignored work, the scratch directory
+itself and other workspace-root files. Nothing schedules it yet.
 _Avoid_: Archive; Project archive is restorable
 
 **Workspace removal**:

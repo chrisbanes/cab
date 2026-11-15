@@ -1,4 +1,17 @@
-import { initializedWorkspaceLifecycle } from "../core/workspace-lifecycle.js";
+import {
+  initializedWorkspaceLifecycle,
+  type WorkspaceLifecycleStore,
+  type WorkspaceOperation,
+} from "../core/workspace-lifecycle.js";
+import {
+  clearScratch,
+  hasGitlink,
+  ignoredTrimPaths,
+  pruneEmptyParents,
+  TrimPathError,
+  trimStatusArguments,
+  unlinkIgnored,
+} from "./workspace-trim.js";
 import { assertCapturedWorkspaceAvailable } from "./project-cleanup-reservations.js";
 import {
   capturedFilesystemState,
@@ -39,6 +52,8 @@ import { maxErrorMessageBytes } from "./service-log.js";
 import { capBytesOutsideRedaction } from "./conversation-history.js";
 
 const maxGitOutputBytes = 1024 * 1024;
+/** Ignored build output can name many files; past this the trim refuses rather than guess. */
+const maxTrimScanBytes = 64 * 1024 * 1024;
 const maxTimerMs = 2_147_483_647;
 
 const gitOperations = [
@@ -51,6 +66,7 @@ const gitOperations = [
   "worktree-remove",
   "result-observe",
   "result-read",
+  "trim-scan",
 ] as const;
 
 type GitOperation = (typeof gitOperations)[number];
@@ -66,6 +82,7 @@ const gitOperationTimeouts: Record<GitOperation, number> = {
   "worktree-remove": 120_000,
   "result-observe": 30_000,
   "result-read": 30_000,
+  "trim-scan": 120_000,
 };
 
 const workspaceStateSchema = z.enum([
@@ -240,6 +257,25 @@ export interface PendingResultWork {
 export type WorkspaceCleanupResult =
   | { outcome: "cleaned"; binding: TaskWorkspaceBinding }
   | { outcome: "retained"; binding: TaskWorkspaceBinding; reason: string };
+
+/** Trimmed: every effect settled after readback. Held: effects may have run; the journal says which. */
+export type WorkspaceTrimResult =
+  | {
+      outcome: "trimmed";
+      binding: TaskWorkspaceBinding;
+      operation: WorkspaceOperation;
+    }
+  | {
+      outcome: "refused";
+      binding: TaskWorkspaceBinding | undefined;
+      reason: string;
+    }
+  | {
+      outcome: "held";
+      binding: TaskWorkspaceBinding;
+      operationId: string;
+      reason: string;
+    };
 
 export type WorkspaceManagerOptions = {
   /**
@@ -1004,6 +1040,203 @@ export class WorkspaceManager implements TaskWorkspaceLifecycle {
         );
       }
     });
+  }
+
+  /**
+   * Deletes Git-reported ignored files in each worktree and scratch contents, keeping scratch.
+   * `ownership` must confirm the caller's settled lease; it is rechecked before each
+   * destructive phase. Every effect is journaled before it runs and settled after readback.
+   */
+  trim(
+    taskId: string,
+    trigger: "manual" | "idle" | "disk",
+    lifecycle: WorkspaceLifecycleStore,
+    ownership: () => boolean,
+  ): Promise<WorkspaceTrimResult> {
+    const id = z.string().trim().min(1).max(512).parse(taskId);
+    return this.withTaskLock(id, async () => {
+      const refused = (
+        binding: TaskWorkspaceBinding | undefined,
+        reason: string,
+      ): WorkspaceTrimResult => ({ outcome: "refused", binding, reason });
+      const binding = this.store.get(id);
+      if (!binding) return refused(undefined, "Task has no workspace");
+      if (binding.state !== "ready")
+        return refused(
+          binding,
+          binding.reason ?? `Workspace is ${binding.state}`,
+        );
+      const generation = lifecycle.current(id);
+      if (
+        generation?.workspaceId !== binding.workspaceId ||
+        generation.path !== binding.path
+      )
+        return refused(binding, "Workspace generation is not recorded");
+      if (lifecycle.operations(generation).some((o) => o.state !== "completed"))
+        return refused(binding, "Workspace has unfinished maintenance");
+      if (!ownership())
+        return refused(binding, "Task execution is not settled");
+      const checked = await this.validateReady(binding);
+      if (checked.state !== "ready")
+        return refused(checked, checked.reason ?? "Workspace is not available");
+      const scratch = taskScratchPath(checked.path);
+      try {
+        await ensureTaskScratch(checked.path);
+      } catch (error) {
+        return refused(checked, trimReason(error));
+      }
+
+      const plans: Array<{
+        repository: TaskWorkspaceRepository;
+        paths: string[];
+      }> = [];
+      for (const repository of checked.repositories) {
+        let scan: Awaited<ReturnType<WorkspaceManager["trimScan"]>>;
+        try {
+          scan = await this.trimScan(repository);
+        } catch (error) {
+          if (isUncertainGitError(error) && error.kind !== "output-limit") {
+            const held = this.store.markGitUncertain(id, error.message);
+            return refused(held, error.message);
+          }
+          scan = { ok: false, reason: "Git could not list its ignored files" };
+        }
+        if (!scan.ok)
+          return refused(
+            checked,
+            `Trimming ${repository.repositoryId} is refused: ${scan.reason}`,
+          );
+        plans.push({ repository, paths: scan.ignored });
+      }
+      if (!ownership())
+        return refused(checked, "Task execution is not settled");
+
+      const owner = { taskId: id, workspaceId: checked.workspaceId };
+      const operationId = randomUUID();
+      lifecycle.beginOperation(owner, {
+        operationId,
+        kind: "trim",
+        trigger,
+        startedAt: Date.now(),
+      });
+      const revision = lifecycle.get(checked.workspaceId)!.revision;
+      let running: string | undefined;
+      const effect = async (
+        target:
+          | { kind: "repository"; repositoryId: string }
+          | { kind: "scratch" },
+        run: () => Promise<void>,
+      ) => {
+        const current = this.store.get(id);
+        if (
+          !ownership() ||
+          current?.workspaceId !== checked.workspaceId ||
+          current.path !== checked.path ||
+          current.state !== "ready" ||
+          current.gitUncertain
+        )
+          throw new TrimPathError("Task ownership changed during trimming");
+        await this.assertManagedRoot(current);
+        const repository =
+          target.kind === "repository"
+            ? current.repositories.find(
+                (r) => r.repositoryId === target.repositoryId,
+              )
+            : undefined;
+        if (
+          target.kind === "repository" &&
+          !(repository && (await this.isExistingWorktree(repository)))
+        )
+          throw new TrimPathError(`Worktree ${target.repositoryId} is missing`);
+        running = randomUUID();
+        lifecycle.startEffect(owner, operationId, {
+          effectId: running,
+          target,
+          startedAt: Date.now(),
+        });
+        await run();
+        lifecycle.settleEffect(
+          owner,
+          operationId,
+          running,
+          "succeeded",
+          Date.now(),
+        );
+        running = undefined;
+      };
+      try {
+        for (const { repository, paths } of plans)
+          await effect(
+            { kind: "repository", repositoryId: repository.repositoryId },
+            async () => {
+              const root = repository.workspacePath;
+              const removed: string[] = [];
+              for (const path of paths) {
+                this.assertNotCancelled();
+                if (await unlinkIgnored(root, path)) removed.push(path);
+              }
+              await pruneEmptyParents(root, removed);
+              const readback = await this.trimScan(repository);
+              if (!readback.ok || readback.ignored.length > 0)
+                throw new TrimPathError(
+                  `Ignored files remained in ${repository.repositoryId} after trimming`,
+                );
+            },
+          );
+        await effect({ kind: "scratch" }, () =>
+          clearScratch(scratch, () => this.assertNotCancelled()),
+        );
+        const operation = lifecycle.completeOperation(
+          owner,
+          operationId,
+          revision,
+          Date.now(),
+          null,
+        );
+        return { outcome: "trimmed", binding: this.store.get(id)!, operation };
+      } catch (error) {
+        const reason =
+          error instanceof WorkspaceManagerCancelledError || this.cancelled
+            ? "Workspace trimming was cancelled; some ignored files or scratch contents may already be deleted"
+            : `Workspace trimming stopped: ${trimReason(error)}`;
+        if (running)
+          lifecycle.settleEffect(
+            owner,
+            operationId,
+            running,
+            "failed",
+            Date.now(),
+          );
+        lifecycle.holdOperation(owner, operationId, reason);
+        const held = isUncertainGitError(error)
+          ? this.store.markGitUncertain(id, error.message)
+          : this.store.get(id)!;
+        return { outcome: "held", binding: held, operationId, reason };
+      }
+    });
+  }
+
+  private async trimScan(repository: TaskWorkspaceRepository) {
+    const root = repository.workspacePath;
+    // A submodule's ignored files are invisible to its parent's status; never trim around one.
+    const modes = await this.gitBytes(
+      root,
+      "trim-scan",
+      maxTrimScanBytes,
+      "ls-files",
+      "-z",
+      "--format=%(objectmode)",
+    );
+    if (hasGitlink(modes))
+      return { ok: false as const, reason: "it contains a Git submodule" };
+    return ignoredTrimPaths(
+      await this.gitBytes(
+        root,
+        "trim-scan",
+        maxTrimScanBytes,
+        ...trimStatusArguments,
+      ),
+    );
   }
 
   /** Committed: HEAD moved to a proved descendant. Delivered: the last push is a proved descendant. */
@@ -2292,6 +2525,16 @@ async function lstatIfExists(path: string) {
     if ((error as NodeJS.ErrnoException).code === "ENOENT") return undefined;
     throw error;
   }
+}
+
+/** A trim reason without filesystem paths: fixed messages and error codes only. */
+function trimReason(error: unknown): string {
+  if (error instanceof TrimPathError || error instanceof WorkspaceGitError)
+    return error.message;
+  const code = (error as NodeJS.ErrnoException | undefined)?.code;
+  return typeof code === "string"
+    ? `filesystem error ${code}`
+    : "an unexpected error occurred";
 }
 
 function messageOf(error: unknown): string {

@@ -1174,8 +1174,31 @@ verified exit of its exact process or its 30-minute quiet period, once no indepe
 hold remains. Otherwise a timer, expired lease, quiet interval, empty terminal list,
 acknowledged Stop or operator acknowledgement cannot release them. Conversation replacement and archival
 do not automatically delete
-workspaces. Workspaces are currently retained: manual removal, trimming and the
-automatic maintenance pass are not implemented. Generation metadata and attributable
+workspaces. Workspaces are currently retained: manual removal and the automatic
+maintenance pass are not implemented, and nothing schedules trimming yet.
+
+Trimming is implemented as a service-internal operation with no CLI, API or UI
+entry point. It takes the archival lease at any task status, so it refuses while
+execution is unsettled or the workspace is held. For each repository it lists Git's
+ignored untracked files with `git status --ignored=traditional --untracked-files=all`,
+which names each ignored file and reports a directory only when Git did not enumerate
+it. A nested Git repository, a submodule, an unsafe or non-UTF-8 path, or a listing
+Git cannot complete refuses the trim before anything is deleted. Each listed file or
+link is unlinked without following it, only after every parent below the worktree is
+checked to be a real directory, and only directories left empty are removed. Tracked
+files under ignored parents, non-ignored untracked files, root `evidence/`, legacy
+root `tmp/` and `npm-cache/`, and other workspace-root files survive. Scratch contents
+are deleted and the scratch directory is kept. Settled ownership and the workspace
+binding are rechecked before each repository and the scratch directory. Each effect
+is journaled before it runs and settled after a readback; the trim's time and trigger
+are recorded only when every effect succeeded. A cancellation, error, ownership change
+or unobserved Git child leaves the journal held with its reason, which blocks later
+maintenance of that workspace, and an unobserved Git child also holds the workspace.
+Until a turn of the task ends after a trim, each turn's context carries one line with
+the trim time and guidance to rebuild ignored and scratch files; a trim that stopped
+part-way says those files may be missing instead.
+
+Generation metadata and attributable
 terminal, turn-end, confirmed-push and merge observations are stored independently
 of the current binding. Legacy facts without an attributable timestamp stay unknown;
 mutable update times and migration time do not establish age. Duplicate observations

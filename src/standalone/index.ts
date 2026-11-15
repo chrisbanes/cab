@@ -77,6 +77,7 @@ export type {
   WorkspaceBindingStore,
   WorkspaceCleanupEvidence,
   WorkspaceCleanupResult,
+  WorkspaceTrimResult,
 } from "./workspaces.js";
 
 export type {
