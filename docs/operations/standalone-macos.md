@@ -954,9 +954,13 @@ API billing and provider fallback are unavailable. Readiness checks native login
 without sending a model prompt. A missing login is a fixed, value-free failure.
 
 Restart Codex after changing its configuration; Claude loads native settings per
-query. Keep cab's reserved `cab` MCP name available: if inherited configuration
-replaces the SDK endpoint, Claude refuses the turn. Native hooks/MCP servers are
-trusted and can act outside cab tools. Command restrictions do not undo those effects.
+query. Before releasing a prompt, each Claude turn waits up to 30 seconds for
+cab's reserved `cab` SDK MCP endpoint to report connected. Keep the `cab` MCP name
+available: a missing, duplicated, non-SDK or failed endpoint refuses the turn with
+"the reserved cab MCP endpoint is not connected", and a failed native login check
+refuses it with "native subscription login is unavailable". Native hooks/MCP
+servers are trusted and can act outside cab tools. Command restrictions do not undo
+those effects.
 
 Legacy token references and skill revisions are retained for redaction/history and
 receipt replay. They no longer configure execution and cannot be edited. Retain old
