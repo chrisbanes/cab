@@ -1089,7 +1089,9 @@ generations shared by its lead and every cab delegate, including task draft turn
   is and revokes nothing. No coordination tool reaches it, so an agent cannot extend its
   own task's allowance.
 - **History.** A task admitted before the charge ledger existed cannot prove its history:
-  the allowance reads `history-unavailable` and activation is refused with a conflict. An
+  the allowance reads `history-unavailable` and activation is refused with a conflict.
+  The upgrade marks every task with any execution record other than a queued request,
+  so a few tasks that never ran are also refused; nothing makes such a task provable later. An
   enabled task whose admissions lack charges reads `inconsistent` and holds new admissions
   with `Allowance waiting: accounting unavailable`.
 - **Surfaces.** The task read's `executionAllowance` gives the state, total, version,

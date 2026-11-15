@@ -22,6 +22,10 @@ import {
   AllowanceHistoryUnavailableError,
   ExecutionState,
 } from "../../src/standalone/state.js";
+import {
+  generationRuntime,
+  holdGeneration,
+} from "../fixtures/recovery-generations.js";
 import { tmpdir } from "../fixtures/temp.js";
 
 type WithoutKey<T> = T extends unknown ? Omit<T, "key"> : never;
@@ -165,6 +169,9 @@ test("charges are recorded while the allowance is off, and toggling never resets
     ),
     0,
   );
+  assert.deepEqual(f.state.taskAllowance(f.taskId).heldWorkIds, [held.workId]);
+  // Another wait recorded over the reason, such as a preflight failure, still leaves it held.
+  f.state.wait(held.id, "runtime unavailable: preflight failed");
   assert.deepEqual(f.state.taskAllowance(f.taskId).heldWorkIds, [held.workId]);
 
   f.set(null);
@@ -688,7 +695,7 @@ test("exhaustion holds the next turn visibly until the total is raised", async (
     .filter((c) => c.code === "allowance-exhausted");
   assert.deepEqual(
     conditions.map((c) => c.key),
-    [`allowance-exhausted:${f.taskId}:2`],
+    [`allowance-exhausted:${f.taskId}:2:${next}`],
   );
 
   await f.set(2);
@@ -734,4 +741,38 @@ test("the operator API refuses a stale version and unprovable history with 409 a
   const read = (await f.api.readTask(f.taskId)).data.executionAllowance;
   assert.equal(read?.state, "history-unavailable");
   assert.equal(read?.total, null);
+});
+
+test("releasing a held generation that never bound a thread keeps its charge", async (t) => {
+  const root = mkdtempSync(join(tmpdir(), "cab-allowance-release-"));
+  const runtime = generationRuntime("no-turn");
+  const service = new StandaloneService(
+    join(root, "data"),
+    () => runtime,
+    undefined,
+    { power: { enabled: false }, routingClient: null },
+  );
+  t.after(async () => {
+    await service.stop().catch(() => {});
+    rmSync(root, { recursive: true, force: true });
+  });
+  await service.start();
+  const g = await holdGeneration(service, runtime, "no-turn");
+  const taskId = String(service.domain().assignment(g.assignmentId).taskId);
+  const before = service.taskAllowance(taskId);
+  assert.ok(before.charged >= 1);
+  service.releaseUnboundHold({
+    key: randomUUID(),
+    assignmentId: g.assignmentId,
+    workId: g.workId,
+    workRevision: g.workRevision,
+    requestSequence: g.requestSequence,
+  });
+  assert.equal(service.startAgainAvailability(taskId).available, true);
+  const after = service.taskAllowance(taskId);
+  assert.deepEqual(
+    [after.charged, after.corrected],
+    [before.charged, before.corrected],
+    "an operator release is not a proved pre-turn refusal",
+  );
 });

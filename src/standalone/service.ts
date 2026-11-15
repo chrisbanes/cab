@@ -5434,7 +5434,8 @@ export class StandaloneService {
     if (allowance.heldWorkIds.length)
       conditions.push({
         code: "allowance-exhausted",
-        key: `allowance-exhausted:${taskId}:${allowance.version}`,
+        // A new held generation is a new episode, so one resolved earlier cannot hide it.
+        key: `allowance-exhausted:${taskId}:${allowance.version}:${allowance.heldWorkIds[0]}`,
         reason: attentionNext["allowance-exhausted"].reason,
       });
     if (this.hasNonStopTaskHold(taskId))

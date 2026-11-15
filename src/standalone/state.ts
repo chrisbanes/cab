@@ -1528,13 +1528,14 @@ export class ExecutionState {
               AND e.state = 'submitting' AND e.turnId IS NULL`)
           .get(taskId) as { n: number }
       ).n,
+      // Every queued bound generation waits on the gate while it applies, whatever reason
+      // another check last recorded, so a capacity or preflight wait never hides it.
       heldWorkIds: gating
         ? (
             this.db
               .prepare(`SELECT e.workId FROM execution_intents e
                 JOIN task_execution_bindings b ON b.workId = e.workId
                 WHERE b.taskId = ? AND e.state IN ('ready','capacity-waiting')
-                  AND e.reason LIKE '${allowanceWaitPrefix}%'
                 ORDER BY e.rowid`)
               .all(taskId) as { workId: string }[]
           ).map(({ workId }) => workId)
@@ -1547,7 +1548,15 @@ export class ExecutionState {
   /** Why `begin` must not admit this bound generation, if the allowance holds it. */
   private allowanceWaitReason(workId: string): string | undefined {
     const binding = this.taskBinding(workId);
-    if (!binding) return undefined;
+    if (
+      !binding ||
+      !this.db
+        .prepare(
+          "SELECT 1 FROM task_execution_allowances WHERE taskId = ? AND total IS NOT NULL",
+        )
+        .get(binding.taskId)
+    )
+      return undefined;
     const facts = this.allowanceFacts(binding.taskId);
     if (facts.total === null) return undefined;
     if (!facts.provable) return `${allowanceWaitPrefix} accounting unavailable`;
@@ -6524,14 +6533,14 @@ export class ExecutionState {
           origin: "runtime",
           ...refusal,
         });
-        // The only refund: proof that startTurn was never called, rolled back with it.
+        // Checked with the same proof Start again reads; anything else rolls back to a hold.
+        if (!this.refusedBeforeStart(workId))
+          throw new PreTurnRefusalUnprovenError();
+        // The only refund, and only once that proof holds: startTurn was never called.
         this.db
           .prepare(`UPDATE task_execution_charges SET correctedAt = ?
             WHERE workId = ? AND correctedAt IS NULL`)
           .run(Date.now(), workId);
-        // Checked with the same proof Start again reads; anything else rolls back to a hold.
-        if (!this.refusedBeforeStart(workId))
-          throw new PreTurnRefusalUnprovenError();
         return true;
       });
     } catch (error) {

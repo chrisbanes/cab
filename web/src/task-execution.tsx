@@ -269,7 +269,7 @@ function ExecutionAllowance({
   );
   if (!allowance) return null;
   const section = allowanceSection(allowance);
-  const total = /^\d+$/.test(draft.trim()) ? Number(draft.trim()) : null;
+  const total = /^\d{1,9}$/.test(draft.trim()) ? Number(draft.trim()) : null;
   const busy = readOnly || Boolean(sending) || uncertain;
   const set = (value: number | null) =>
     void send(
