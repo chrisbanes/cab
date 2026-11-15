@@ -1,4 +1,3 @@
-import type { Request } from "playwright";
 import { until } from "../fixtures/until.js";
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
@@ -6,6 +5,9 @@ import { browserSuite, killBrowser } from "../fixtures/browser-diagnostics.js";
 import { deletedCleanupFixture } from "../fixtures/deleted-project-cleanup.js";
 import { routeTurnStarted, signIn } from "../fixtures/operator-settings.js";
 import { OperatorApi } from "../../src/standalone/operator-api.js";
+import { projectArchiveBlockedMessage } from "../../src/operator/project-lifecycle-copy.js";
+import { outcomeCopy } from "../../web/src/settings-state.js";
+import type { Request, Response, Route } from "playwright";
 
 const test = browserSuite("operator-project-lifecycle-browser");
 
@@ -226,25 +228,51 @@ for (const engine of ["chromium", "webkit"] as const) {
           name: "Archive project",
           exact: true,
         });
-        // Restore's callbacks can be queued after a drained check, so re-read until
-        // the page itself allows archiving.
         await until(
-          async () => {
-            if (f.service.projectLifecycleStatus(f.projectId).length !== 0)
-              return false;
-            const read = page.waitForResponse(
-              (r) =>
-                new URL(r.url()).pathname ===
-                `/api/operator/projects/${f.projectId}`,
-            );
-            await page
-              .getByRole("button", { name: "Refresh", exact: true })
-              .click();
-            await read;
-            return archive.isEnabled();
-          },
+          () => archive.isEnabled(),
           "archiving allowed after the restored project drained",
           15_000,
+        );
+        // A refusal for active work reads as a blocker and re-reads the project status.
+        let reread: Promise<Response> | undefined;
+        const blockArchive = async (route: Route) => {
+          if (
+            reread ||
+            route.request().postDataJSON().type !== "project.archive"
+          )
+            return route.continue();
+          reread = page.waitForResponse(
+            (r) =>
+              r.request().method() === "GET" &&
+              new URL(r.url()).pathname ===
+                `/api/operator/projects/${f.projectId}`,
+          );
+          await route.fulfill({
+            status: 409,
+            json: {
+              error: {
+                code: "conflict",
+                message: projectArchiveBlockedMessage,
+              },
+            },
+          });
+        };
+        await page.route("**/api/operator/commands", blockArchive);
+        clicks.push({ phase: "blocked-archive-click", live: snapshot() });
+        await archive.click();
+        await panel
+          .getByText(outcomeCopy.archiveBlocked, { exact: true })
+          .waitFor();
+        assert.ok(reread);
+        await reread;
+        assert.equal(
+          await panel.getByText(outcomeCopy.conflict, { exact: true }).count(),
+          0,
+        );
+        await page.unroute("**/api/operator/commands", blockArchive);
+        await until(
+          () => archive.isEnabled(),
+          "archiving allowed after the blocked refusal",
         );
         clicks.push({ phase: "archive-click", live: snapshot() });
         await archive.click();

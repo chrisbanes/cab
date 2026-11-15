@@ -13,6 +13,7 @@ import { sameText } from "./settings-changes.js";
 import { sourceCredentialCopy } from "./settings-view.js";
 import { CommandLifecycle } from "./command-lifecycle.js";
 import type { ReceiptDetails } from "./outcome-copy.js";
+import { projectArchiveBlockedMessage } from "../../src/operator/project-lifecycle-copy.js";
 /** The plain outcome copy of a configuration save. Details, not these lines, carry the codes. */
 export const outcomeCopy = {
   saved: "Saved.",
@@ -25,6 +26,8 @@ export const outcomeCopy = {
   rejected: "Couldn't save. Your changes are still here.",
   kept: "Your changes are still here.",
   conflict: "A newer version was saved elsewhere.",
+  archiveBlocked:
+    "Couldn't archive: work is still active. Check the status above and try again.",
   unknown: "We couldn't confirm the save.",
   adopted: "Loaded the latest version. Your changes are still here.",
 };
@@ -278,6 +281,12 @@ export class ConfigurationDraft {
   details: ReceiptDetails = {};
   /** A source credential refusal is a failure to fix, not a newer version to review. */
   credentialRefusal = false;
+  /** An archive refused for active work is a blocker to resolve, not a newer version to review. */
+  get archiveBlocked() {
+    return (
+      this.phase === "conflict" && this.notice === outcomeCopy.archiveBlocked
+    );
+  }
   /** The save was refused for named fields in the service's own words; the outcome offers to go to one. */
   fieldRefusal = false;
   errors: Record<string, string> = {};
@@ -881,7 +890,11 @@ export class ConfigurationDraft {
         result.state !== "recorded" && this.credentialRefusal
           ? `${sourceCredentialCopy(result.credentialReason)} Your changes are still here.`
           : disposition === "conflict"
-            ? outcomeCopy.conflict
+            ? c.type === "project.archive" &&
+              result.state === "conflict" &&
+              result.message === projectArchiveBlockedMessage
+              ? outcomeCopy.archiveBlocked
+              : outcomeCopy.conflict
             : this.fieldRefusal && refusal
               ? `${refusal.replace(/\.?$/, ".")} ${outcomeCopy.kept}`
               : Object.keys(this.errors).length

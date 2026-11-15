@@ -9,6 +9,7 @@ import {
   ProjectArchivedError,
 } from "../core/project-lifecycle.js";
 import { ProjectDeletionUnavailableError } from "./project-deletion.js";
+import { projectArchiveBlockedMessage } from "../operator/project-lifecycle-copy.js";
 import type { ReadinessResult } from "../operator/readiness.js";
 import type { RecoveryRecord } from "./recovery-types.js";
 import { createHash, randomUUID } from "node:crypto";
@@ -475,6 +476,14 @@ function domainApiError(error: unknown): OperatorApiError | undefined {
     return new OperatorApiError(503, "command-outcome-unknown");
   if (error instanceof DomainOperationError)
     return new OperatorApiError(503, "command-outcome-unknown");
+  if (error instanceof ProjectArchiveBlockedError)
+    return new OperatorApiError(
+      409,
+      "conflict",
+      undefined,
+      undefined,
+      projectArchiveBlockedMessage,
+    );
   if (error instanceof DomainConflictError)
     return new OperatorApiError(409, "conflict");
   if (error instanceof DomainNotFoundError)
@@ -11164,14 +11173,6 @@ export class OperatorApi {
         throw new OperatorApiError(400, "local-review-batch-too-large");
       if (error instanceof LocalReviewRecipientUnavailableError)
         throw new OperatorApiError(409, "local-review-recipient-unavailable");
-      if (error instanceof ProjectArchiveBlockedError)
-        throw new OperatorApiError(
-          409,
-          "conflict",
-          undefined,
-          undefined,
-          "Pause the project and resolve active work before archiving. Refresh project status for details.",
-        );
       if (error instanceof ProjectArchivedError)
         throw new OperatorApiError(
           409,

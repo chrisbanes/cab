@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { randomUUID } from "node:crypto";
 import { genericInvalidInputMessage } from "../../src/operator/contracts.js";
+import { projectArchiveBlockedMessage } from "../../src/operator/project-lifecycle-copy.js";
 import { OperatorClient } from "../../web/src/api.js";
 import {
   ConfigurationDraft,
@@ -798,6 +799,74 @@ test("source credential refusal is actionable only after a definite lifecycle di
   assert.equal(unrelated.notice, outcomeCopy.conflict);
   assert.equal(unrelated.credentialRefusal, false);
   assert.equal(definite.credentialRefusal, true);
+});
+
+test("a blocked archive refusal names active work, not a newer version", async () => {
+  const projectId = randomUUID();
+  const refuse = (message: string) =>
+    new OperatorClient(async () =>
+      Response.json({ error: { code: "conflict", message } }, { status: 409 }),
+    );
+  const archive = () => ({
+    type: "project.archive" as const,
+    key: randomUUID(),
+    projectId,
+    expectedVersion: 2,
+  });
+  const blocked = new ConfigurationDraft();
+  await blocked.submit(refuse(projectArchiveBlockedMessage), archive(), "csrf");
+  assert.equal(blocked.phase, "conflict");
+  assert.equal(blocked.archiveBlocked, true);
+  assert.equal(blocked.notice, outcomeCopy.archiveBlocked);
+  const configure = new ConfigurationDraft();
+  await configure.submit(
+    refuse(projectArchiveBlockedMessage),
+    {
+      type: "project.configure",
+      key: randomUUID(),
+      projectId,
+      expectedVersion: 2,
+      name: "Atlas",
+    },
+    "csrf",
+  );
+  assert.equal(configure.notice, outcomeCopy.conflict);
+  assert.equal(configure.archiveBlocked, false);
+  const stale = new ConfigurationDraft();
+  await stale.submit(
+    refuse("Saved state conflicts with this request. Review before retrying."),
+    archive(),
+    "csrf",
+  );
+  assert.equal(stale.notice, outcomeCopy.conflict);
+  assert.equal(stale.archiveBlocked, false);
+  await blocked.submit(
+    new OperatorClient(async (_url, init) =>
+      Response.json({
+        kind: "configuration",
+        key: JSON.parse(String(init?.body)).key,
+        recorded: true,
+        result: {
+          commandType: "project.configure",
+          resourceId: projectId,
+          version: 3,
+          paused: true,
+          leadProfileId: null,
+          instructionsRevision: 1,
+        },
+      }),
+    ),
+    {
+      type: "project.configure",
+      key: randomUUID(),
+      projectId,
+      expectedVersion: 2,
+      name: "Atlas",
+    },
+    "csrf",
+  );
+  assert.equal(blocked.phase, "recorded");
+  assert.equal(blocked.archiveBlocked, false);
 });
 
 test("every outcome reads in plain words and keeps the receipt fields for Details", async () => {

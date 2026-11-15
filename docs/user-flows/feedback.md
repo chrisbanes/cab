@@ -38,14 +38,15 @@ The operator CLI keeps its receipt output.
 
 ## Outcomes
 
-| Outcome              | Shown as                                                                | Example                                                                                  |
-| -------------------- | ----------------------------------------------------------------------- | ---------------------------------------------------------------------------------------- |
-| In progress          | The action's label only                                                 | "Saving…"                                                                                |
-| Succeeded            | One quiet inline line by the action, then the panel's saved time        | "Saved. Routing now uses Ada and Eli."                                                   |
-| Rejected             | One error alert naming the cause; field errors name the fix             | "Couldn't save: ref mian doesn't exist in fixture-org/app. Your changes are still here." |
-| Changed elsewhere    | One warning alert with one action                                       | "A newer version was saved elsewhere. **Review changes**"                                |
-| Unknown              | One warning alert with one action; other edits stay blocked             | "We couldn't confirm the save. **Check whether it saved**"                               |
-| Succeeded, will wait | The success line plus the wait reason and its Fix, never a second alert | "Task created. It will wait: fixture-app is Paused. **Resume project**"                  |
+| Outcome                | Shown as                                                                | Example                                                                                  |
+| ---------------------- | ----------------------------------------------------------------------- | ---------------------------------------------------------------------------------------- |
+| In progress            | The action's label only                                                 | "Saving…"                                                                                |
+| Succeeded              | One quiet inline line by the action, then the panel's saved time        | "Saved. Routing now uses Ada and Eli."                                                   |
+| Rejected               | One error alert naming the cause; field errors name the fix             | "Couldn't save: ref mian doesn't exist in fixture-org/app. Your changes are still here." |
+| Changed elsewhere      | One warning alert with one action                                       | "A newer version was saved elsewhere. **Review changes**"                                |
+| Blocked by active work | One error alert; the project status above refreshes with its blockers   | "Couldn't archive: work is still active. Check the status above and try again."          |
+| Unknown                | One warning alert with one action; other edits stay blocked             | "We couldn't confirm the save. **Check whether it saved**"                               |
+| Succeeded, will wait   | The success line plus the wait reason and its Fix, never a second alert | "Task created. It will wait: fixture-app is Paused. **Resume project**"                  |
 
 - One message per action. The shared save control owns it; pages and panels do not
   add their own copy of the same outcome.
