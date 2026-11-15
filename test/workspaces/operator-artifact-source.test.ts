@@ -193,3 +193,62 @@ test("artifact reads apply current repository links and path exclusions on the w
   await writeFile(excluded.artifactPath!, flipped());
   assert.deepEqual(await statuses(excludedPath), both(503, null));
 });
+
+test("a removed workspace's artifact is read from its own generation after a new workspace is provisioned", async (t) => {
+  const s = await startCliService(t);
+  const { token } = await s.issue("read");
+  const native = await captureNativeResult(s.f, {
+    withArtifact: true,
+    repository: true,
+    beforeReport: (worktree) => {
+      worktreeGit(worktree, "add", "-A");
+      worktreeGit(worktree, "commit", "--quiet", "-m", "artifact");
+    },
+  });
+  const { taskId, projectId } = native.seeded;
+  const path = `/api/operator/tasks/${taskId}/artifacts/${native.artifactId}`;
+  const read = async () => {
+    const r = await s.bearer(token, path);
+    return [
+      r.status,
+      r.headers.get("x-cab-evidence-source"),
+      r.status === 200 ? Buffer.from(await r.arrayBuffer()) : null,
+    ];
+  };
+  assert.deepEqual(await read(), [200, "recorded-workspace", png]);
+
+  await recordDeliveredHeads(s.f, taskId);
+  finishTask(s.f.service, taskId);
+  const removed = await s.f.service.removeTaskWorkspace(taskId, "manual");
+  assert.equal(removed.outcome, "cleaned");
+  assert.deepEqual(await read(), [200, "recorded-commit", png]);
+
+  const [old] = native.workspace.repositories;
+  const again = await s.f.service.provisionTask(taskId, [
+    { repositoryId: "R1", path: old!.sourcePath, ref: old!.ref },
+  ]);
+  assert.equal(again.state, "ready", again.reason ?? "");
+  assert.notEqual(again.workspaceId, native.workspace.workspaceId);
+  // The new generation's file at the result's relative path is never served for the old result.
+  const replaced = join(
+    again.repositories[0]!.workspacePath,
+    "retained-proof.png",
+  );
+  await writeFile(replaced, flipped());
+  worktreeGit(
+    again.repositories[0]!.workspacePath,
+    "commit",
+    "--quiet",
+    "-am",
+    "new",
+  );
+  assert.deepEqual(await read(), [200, "recorded-commit", png]);
+  await writeFile(replaced, png);
+  assert.deepEqual(await read(), [200, "recorded-commit", png]);
+
+  await s.restart();
+  assert.deepEqual(await read(), [200, "recorded-commit", png]);
+  // The current policy still applies to a retained generation's read.
+  linkRepositories(s.f, projectId, []);
+  assert.deepEqual(await read(), [503, null, null]);
+});

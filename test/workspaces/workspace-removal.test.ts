@@ -6,6 +6,7 @@ import {
   existsSync,
   mkdirSync,
   mkdtempSync,
+  readdirSync,
   renameSync,
   rmSync,
   symlinkSync,
@@ -150,10 +151,18 @@ async function world(t: TestContext, repositoryCount = 1) {
     );
     return "pushed";
   };
-  // Each repository's target branch is its source checkout's `main`.
+  // Each repository's target branch is its source checkout's `main`; a task branch is read
+  // from the bare remote it was pushed to.
   const targets = new Map(
-    repositories.map((r) => [r.name, localBranchFetch(r.source).fetchBranch]),
+    repositories.map((r) => [
+      r.name,
+      {
+        source: localBranchFetch(r.source).fetchBranch,
+        remote: localBranchFetch(r.remote).fetchBranch,
+      },
+    ]),
   );
+  const taskBranchFetches: Array<{ repository: string; branch: string }> = [];
   const provider = new GitHubHttpDeliveryProvider(
     "token",
     fetcher,
@@ -161,7 +170,15 @@ async function world(t: TestContext, repositoryCount = 1) {
     undefined,
     "github.com",
     undefined,
-    (request) => targets.get(request.nameWithOwner)!(request),
+    (request) => {
+      const target = targets.get(request.nameWithOwner)!;
+      if (!request.branch?.startsWith("cab/")) return target.source(request);
+      taskBranchFetches.push({
+        repository: request.nameWithOwner,
+        branch: request.branch,
+      });
+      return target.remote(request);
+    },
   );
   const f = await createOperatorFixture(null, undefined, {
     providerFactories: { github: () => provider },
@@ -256,6 +273,7 @@ async function world(t: TestContext, repositoryCount = 1) {
     projectId,
     repositories,
     pushes,
+    taskBranchFetches,
     setPushHook: (next: PushHook | undefined) => {
       hook = next;
     },
@@ -852,4 +870,152 @@ test("a repository whose status Git cannot read refuses removal and deletes noth
   assert.equal(existsSync(worktree()), true);
   assert.equal(existsSync(join(worktree(), "README.md")), true);
   assert.equal(w.operations(binding).length, 0);
+});
+
+/** The task's repositories as `world` provisioned them, optionally in reverse order. */
+const inputs = (w: Awaited<ReturnType<typeof world>>, reversed = false) => {
+  const all = w.repositories.map((r) => ({
+    repositoryId: r.id,
+    path: r.source,
+    ref: "main",
+  }));
+  return reversed ? all.reverse() : all;
+};
+
+/** Deletes a loose object, as if it had been lost from the managed repository. */
+const loseObject = (repository: string, commit: string) =>
+  rmSync(join(repository, "objects", commit.slice(0, 2), commit.slice(2)));
+
+test("a removed workspace is provisioned again at each repository's last push or base", async (t) => {
+  const w = await world(t, 2);
+  const { taskId, binding, worktree } = await w.task();
+  const pushed = commitFile(worktree(0), "work.txt");
+  const base = binding.repositories[1]!.commit!;
+  w.finish(taskId);
+  const removed = await w.remove(taskId);
+  assert.equal(removed.outcome, "cleaned", JSON.stringify(removed));
+  gone(binding);
+  // Automatic GC is off, so the managed repository still holds the removed worktree's commit.
+  const managed = binding.repositories[0]!.gitCommonDir!;
+  assert.equal(git(managed, "config", "gc.auto"), "0");
+  assert.equal(git(managed, "cat-file", "-t", pushed), "commit");
+
+  // Inputs in another order bind the same repositories to the same repo-N paths.
+  const again = await w.f.service.provisionTask(taskId, inputs(w, true));
+  assert.equal(again.state, "ready", again.reason ?? "");
+  assert.notEqual(again.workspaceId, binding.workspaceId);
+  assert.notEqual(again.path, binding.path);
+  assert.deepEqual(
+    again.repositories.map((r) => [
+      r.repositoryId,
+      r.workspacePath,
+      git(r.workspacePath, "rev-parse", "HEAD"),
+    ]),
+    [
+      ["R1", join(again.path, "repo-1"), pushed],
+      ["R2", join(again.path, "repo-2"), base],
+    ],
+  );
+  assert.equal(existsSync(join(again.path, "scratch")), true);
+  assert.equal(w.taskBranchFetches.length, 0);
+  // The old generation and its removal record are kept beside the new one.
+  assert.deepEqual(
+    w.lifecycle().removal(binding)?.repositories,
+    removed.outcome === "cleaned" ? removed.operation.repositories : null,
+  );
+  assert.deepEqual(
+    w
+      .lifecycle()
+      .forTask(taskId)
+      .map((g) => g.workspaceId)
+      .sort(),
+    [binding.workspaceId, again.workspaceId].sort(),
+  );
+  assert.equal(w.lifecycle().current(taskId)?.workspaceId, again.workspaceId);
+  assert.equal(existsSync(binding.path), false);
+});
+
+test("concurrent provisioning after removal creates exactly one new workspace", async (t) => {
+  const w = await world(t);
+  const { taskId, binding } = await w.task();
+  w.finish(taskId);
+  assert.equal((await w.remove(taskId)).outcome, "cleaned");
+  const results = await Promise.all([
+    w.f.service.provisionTask(taskId, inputs(w)),
+    w.f.service.provisionTask(taskId, inputs(w)),
+    w.f.service.provisionTask(taskId, inputs(w)),
+  ]);
+  assert.equal(new Set(results.map((r) => r.workspaceId)).size, 1);
+  assert.notEqual(results[0]!.workspaceId, binding.workspaceId);
+  assert.equal(w.lifecycle().forTask(taskId).length, 2);
+  assert.deepEqual(readdirSync(join(binding.path, "..")).sort(), [
+    results[0]!.workspaceId,
+  ]);
+});
+
+test("a missing, held or unrecorded archived workspace is never provisioned again", async (t) => {
+  const w = await world(t);
+  const missing = await w.task();
+  rmSync(missing.binding.path, { recursive: true, force: true });
+  const kept = await w.f.service.provisionTask(missing.taskId, inputs(w));
+  assert.equal(kept.workspaceId, missing.binding.workspaceId);
+  assert.equal(kept.state, "held");
+
+  for (const state of ["held", "archived"] as const) {
+    const { taskId, binding } = await w.task();
+    w.f.seedPersistedState((db) =>
+      db
+        .prepare(
+          "UPDATE task_workspace_bindings SET state=?, reason='kept' WHERE taskId=?",
+        )
+        .run(state, taskId),
+    );
+    const same = await w.f.service.provisionTask(taskId, inputs(w));
+    assert.equal(same.workspaceId, binding.workspaceId);
+    assert.equal(same.state, state);
+    assert.equal(w.lifecycle().forTask(taskId).length, 1);
+  }
+});
+
+test("a commit lost from the managed repository is fetched from its task branch only at the recorded commit", async (t) => {
+  const w = await world(t);
+  const fetched = await w.task();
+  const head = commitFile(fetched.worktree(), "work.txt");
+  w.finish(fetched.taskId);
+  assert.equal((await w.remove(fetched.taskId)).outcome, "cleaned");
+  loseObject(fetched.binding.repositories[0]!.gitCommonDir!, head);
+  const again = await w.f.service.provisionTask(fetched.taskId, inputs(w));
+  assert.equal(again.state, "ready", again.reason ?? "");
+  assert.equal(
+    git(again.repositories[0]!.workspacePath, "rev-parse", "HEAD"),
+    head,
+  );
+  const branch = w.branchOf(fetched.taskId)!.branch;
+  assert.deepEqual(w.taskBranchFetches, [{ repository: "org/r1", branch }]);
+
+  // The task branch moved after removal: the fetch does not return the recorded commit.
+  const moved = await w.task();
+  const recorded = commitFile(moved.worktree(), "work.txt");
+  w.finish(moved.taskId);
+  assert.equal((await w.remove(moved.taskId)).outcome, "cleaned");
+  const remote = w.repositories[0]!.remote;
+  const movedBranch = w.branchOf(moved.taskId)!.branch;
+  const outside = git(w.repositories[0]!.source, "rev-parse", "HEAD");
+  git(
+    w.repositories[0]!.source,
+    "push",
+    "--quiet",
+    "--force",
+    remote,
+    `${outside}:refs/heads/${movedBranch}`,
+  );
+  loseObject(moved.binding.repositories[0]!.gitCommonDir!, recorded);
+  await assert.rejects(
+    w.f.service.provisionTask(moved.taskId, inputs(w)),
+    /is no longer at its recorded commit/,
+  );
+  const waiting = (await w.f.service.taskWorkspace(moved.taskId))!;
+  assert.equal(waiting.state, "archived");
+  assert.equal(waiting.workspaceId, moved.binding.workspaceId);
+  assert.equal(w.lifecycle().forTask(moved.taskId).length, 1);
 });

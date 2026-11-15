@@ -7096,11 +7096,14 @@ export class OperatorApi {
   }
   /** The repository (null for the task root) and repository-relative path an artifact names. */
   private async artifactLocation(taskId: string, artifactId: string) {
-    const file = this.service
-      .taskReview()
-      .artifactOwner(taskId, artifactId)
-      ?.metadata.artifacts.find((a) => a.artifactId === artifactId)?.file;
-    const workspace = await this.service.taskWorkspace(taskId);
+    const record = this.service.taskReview().artifactOwner(taskId, artifactId);
+    const file = record?.metadata.artifacts.find(
+      (a) => a.artifactId === artifactId,
+    )?.file;
+    // The result's own generation: a later workspace's repo-N may hold another repository.
+    const workspace = record
+      ? this.service.resultWorkspace(taskId, record.workId)
+      : undefined;
     if (!file || !workspace) return undefined;
     const target = resolve(workspace.path, file.relativePath);
     const repository = workspace.repositories.find(
@@ -7138,6 +7141,9 @@ export class OperatorApi {
           !workspace ||
           workspace.state !== "ready" ||
           !record ||
+          // Only the workspace the result was recorded in can hold its live copy.
+          this.service.resultWorkspace(taskId, record.workId)?.workspaceId !==
+            workspace.workspaceId ||
           !artifact ||
           excluded === undefined ||
           !this.disclosable(artifact.label, excluded)
@@ -7195,7 +7201,9 @@ export class OperatorApi {
       ),
       file = artifact?.availability === "available" ? artifact.file : undefined,
       excluded = await this.exclusions(String(task.projectId), taskId),
-      workspace = await this.service.taskWorkspace(taskId);
+      workspace = record
+        ? this.service.resultWorkspace(taskId, record.workId)
+        : undefined;
     if (
       !record ||
       !artifact ||
@@ -7216,6 +7224,7 @@ export class OperatorApi {
         continue;
       const body = await this.service.readCommittedFile(
         taskId,
+        record.workId,
         recorded.repositoryId,
         recorded.headCommit,
         relative(resolve(root), target).split(sep).join("/"),

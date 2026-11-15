@@ -518,10 +518,8 @@ export class WorkspaceLifecycleStore {
     });
   }
 
-  private forWork(
-    taskId: string,
-    workId: string,
-  ): WorkspaceGeneration | undefined {
+  /** The one generation of `taskId` whose path the work ran in, if any. */
+  forWork(taskId: string, workId: string): WorkspaceGeneration | undefined {
     if (
       !this.hasTable("execution_intents") ||
       !this.hasTable("task_execution_bindings")
@@ -761,6 +759,13 @@ export class WorkspaceLifecycleStore {
         );
       return operation;
     });
+  }
+
+  /** The generation's completed removal record, if it was removed. */
+  removal(owner: GenerationIdentity): WorkspaceOperation | undefined {
+    return this.operations(owner).find(
+      (o) => o.kind === "remove" && o.state === "completed",
+    );
   }
 
   operations(owner: GenerationIdentity): WorkspaceOperation[] {

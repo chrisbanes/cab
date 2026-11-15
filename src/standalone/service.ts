@@ -5666,9 +5666,80 @@ export class StandaloneService {
               "Imported task repository grant changed during verification",
             );
         }
+        this.assertRemovedWorkspaceGranted(taskId);
         return this.started().workspaces.provision(taskId, repositories);
       },
     );
+  }
+
+  /**
+   * A new workspace for a task whose workspace was removed, with its established repositories
+   * at their recorded commits. A binding that is not removed is returned as it is.
+   */
+  private reprovisionTaskWorkspace(taskId: string) {
+    return this.withProjectWrite(
+      this.taskProject(taskId),
+      "callback",
+      async () => {
+        this.domain().task(taskId);
+        this.assertRemovedWorkspaceGranted(taskId);
+        return this.started().workspaces.reprovision(taskId);
+      },
+    );
+  }
+
+  /**
+   * Whether `workspace` is a removed, replaced generation of the task: the one other place a
+   * task's continued conversation may have run. Its resume moves to the current workspace.
+   */
+  private removedPredecessor(taskId: string, workspace: string): boolean {
+    const lifecycle = new WorkspaceLifecycleStore(this.cache!);
+    const current = this.started().workspaceBindings.get(taskId);
+    return lifecycle
+      .forTask(taskId)
+      .some(
+        (g) =>
+          g.path === workspace &&
+          g.workspaceId !== current?.workspaceId &&
+          lifecycle.removal(g) !== undefined,
+      );
+  }
+
+  /** A removed workspace is provisioned again only with repositories the project still grants. */
+  private assertRemovedWorkspaceGranted(taskId: string): void {
+    const binding = this.started().workspaceBindings.get(taskId);
+    if (
+      binding?.state === "archived" &&
+      this.repositoryAccessRevoked(taskId, binding.repositories)
+    )
+      throw new Error(
+        "The project no longer links every repository of this task's removed workspace",
+      );
+  }
+
+  /**
+   * The workspace generation a task's work ran in: the current binding, or a removed
+   * generation retained after the binding was replaced. Undefined when it cannot be
+   * attributed, so a historical read never resolves a path in a later generation.
+   */
+  resultWorkspace(
+    taskId: string,
+    workId: string | null,
+  ):
+    | Pick<
+        TaskWorkspaceBinding,
+        "workspaceId" | "path" | "repositories" | "state"
+      >
+    | undefined {
+    const current = this.started().workspaceBindings.get(taskId);
+    const lifecycle = new WorkspaceLifecycleStore(this.cache!);
+    const generation = workId ? lifecycle.forWork(taskId, workId) : undefined;
+    if (!generation)
+      return lifecycle.forTask(taskId).length <= 1 ? current : undefined;
+    if (generation.workspaceId === current?.workspaceId) return current;
+    return lifecycle.removal(generation)
+      ? { ...generation, state: "archived" }
+      : undefined;
   }
 
   taskWorkspaceVisibility(taskId: string) {
@@ -5727,17 +5798,23 @@ export class StandaloneService {
     return this.started().coordination.resultWorkspaces(taskId);
   }
 
-  readCommittedFile(
+  /** Reads from the repository of the generation `workId` ran in, if the project still grants it. */
+  async readCommittedFile(
     taskId: string,
+    workId: string | null,
     repositoryId: string,
     commit: string,
     path: string,
     maxBytes: number,
   ) {
     this.domain().task(taskId);
+    const repository = this.resultWorkspace(taskId, workId)?.repositories.find(
+      (r) => r.repositoryId === repositoryId,
+    );
+    if (!repository || this.repositoryAccessRevoked(taskId, [repository]))
+      return undefined;
     return this.started().workspaces.readCommittedFile(
-      taskId,
-      repositoryId,
+      repository,
       commit,
       path,
       maxBytes,
@@ -6012,9 +6089,7 @@ export class StandaloneService {
         });
         if (binding.state === "archived") {
           const record = lifecycle.get(binding.workspaceId)
-            ? lifecycle
-                .operations(binding)
-                .find((o) => o.kind === "remove" && o.state === "completed")
+            ? lifecycle.removal(binding)
             : undefined;
           return record
             ? { outcome: "cleaned", binding, operation: record }
@@ -10295,16 +10370,17 @@ export class StandaloneService {
       } else if (request.taskId && request.assignmentId && request.projectId) {
         // A first workspace holds the project's links (an imported task's, its source
         // repository). Existing bindings, including held/missing workspaces, remain
-        // the recovery authority.
-        if (
-          !this.current?.workspaceBindings.get(request.taskId) &&
-          !state.taskHold(request.taskId) &&
-          !state.hasTaskWorkspaceEvidence(request.taskId)
-        )
-          await this.provisionTaskWorkspace(
-            request.taskId,
-            await this.firstWorkspaceRepositories(request),
-          );
+        // the recovery authority; only a removed one is provisioned again.
+        const existing = this.current?.workspaceBindings.get(request.taskId);
+        if (!state.taskHold(request.taskId)) {
+          if (existing?.state === "archived")
+            await this.reprovisionTaskWorkspace(request.taskId);
+          else if (!existing && !state.hasTaskWorkspaceEvidence(request.taskId))
+            await this.provisionTaskWorkspace(
+              request.taskId,
+              await this.firstWorkspaceRepositories(request),
+            );
+        }
         const binding = await this.started().workspaces.forExecution(
           request.taskId,
         );
@@ -10445,7 +10521,11 @@ export class StandaloneService {
         (!waitsForPredecessor &&
           ((previous.state !== "completed" && !shutdownRequeued) ||
             !previous.threadId ||
-            previous.workspace !== workspaceKey ||
+            (previous.workspace !== workspaceKey &&
+              !(
+                context &&
+                this.removedPredecessor(context.taskId, previous.workspace)
+              )) ||
             (context &&
               (priorBinding?.taskId !== context.taskId ||
                 priorBinding.assignmentId !== context.assignmentId))))

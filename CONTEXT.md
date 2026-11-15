@@ -376,7 +376,9 @@ _Avoid_: Archive; Project archive is restorable
 The irreversible deletion of a done or cancelled task's whole workspace and its owned
 Claude temporary base, once cab has proved every repository delivered or still at its
 provisioned base. Task branches, change requests, results and conversations remain.
-It is service-internal; no command reaches it yet.
+It is service-internal; no command reaches it yet. Work admitted afterwards gets a new
+workspace generation, with a new workspace ID, starting at each repository's recorded
+commit; the removed generation's record and its results' commits stay readable.
 _Avoid_: Archive; removed files have no restore operation
 
 **Task branch**:

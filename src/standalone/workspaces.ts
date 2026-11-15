@@ -393,6 +393,18 @@ export interface WorkspaceBindingStore {
   markGitUncertain(taskId: string, reason: string): TaskWorkspaceBinding;
   /** Holds the binding as releasable: only a failed worktree identity read caused it. */
   holdForIdentityRead(taskId: string, reason: string): TaskWorkspaceBinding;
+  /** Each repository's proof when the archived binding has a completed removal record. */
+  removalRecord?(taskId: string): WorkspaceRemovalProof[] | undefined;
+  /**
+   * Replaces a removed generation with a new one to provision, keeping the old generation's
+   * lifecycle record. Refuses unless `workspaceId` is still the archived, removed binding.
+   */
+  replaceRemoved?(
+    taskId: string,
+    workspaceId: string,
+    next: { workspaceId: string; path: string },
+    repositories: TaskWorkspaceRepository[],
+  ): TaskWorkspaceBinding;
 }
 
 export type WorkspaceRecheckOutcome = {
@@ -723,6 +735,54 @@ export class SqliteWorkspaceBindingStore implements WorkspaceBindingStore {
     return this.get(taskId) ?? this.invalidRow();
   }
 
+  removalRecord(taskId: string): WorkspaceRemovalProof[] | undefined {
+    if (this.table !== "task_workspace_bindings") return undefined;
+    const binding = this.get(taskId);
+    const lifecycle = initializedWorkspaceLifecycle(this.db);
+    if (binding?.state !== "archived" || !lifecycle?.get(binding.workspaceId))
+      return undefined;
+    return lifecycle.removal(binding)?.repositories ?? undefined;
+  }
+
+  replaceRemoved(
+    taskId: string,
+    workspaceId: string,
+    next: { workspaceId: string; path: string },
+    repositories: TaskWorkspaceRepository[],
+  ): TaskWorkspaceBinding {
+    return transaction(this.db, () => {
+      assertOwnedTaskWritable(this.db, taskId);
+      if (
+        this.get(taskId)?.workspaceId !== workspaceId ||
+        !this.removalRecord(taskId)
+      )
+        throw new Error("Only a removed workspace can be replaced");
+      assertCapturedWorkspaceAvailable(this.db, {
+        taskId,
+        ...next,
+        repositories,
+      });
+      const now = new Date().toISOString();
+      // The old generation's lifecycle row is keyed by its own workspace ID and stays.
+      this.db
+        .prepare(
+          `UPDATE ${this.table} SET workspaceId = ?, path = ?, repositories = ?, state = 'provisioning',
+            reason = NULL, gitUncertain = 0, holdReleasable = 0, createdAt = ?, updatedAt = ?
+           WHERE taskId = ? AND workspaceId = ? AND state = 'archived'`,
+        )
+        .run(
+          next.workspaceId,
+          next.path,
+          JSON.stringify(repositories),
+          now,
+          now,
+          taskId,
+          workspaceId,
+        );
+      return this.get(taskId) ?? this.invalidRow();
+    });
+  }
+
   private parseRow(row: unknown): TaskWorkspaceBinding {
     const stored = storedWorkspaceSchema.parse(row);
     return taskWorkspaceSchema.parse({
@@ -842,11 +902,96 @@ export class WorkspaceManager implements TaskWorkspaceLifecycle {
         binding = this.store.createOrGet(id, workspaceId, path, allocated);
       }
       this.assertSameRepositories(binding, requested);
+      if (binding.state === "archived")
+        binding = (await this.replaceRemoved(binding)) ?? binding;
 
       if (binding.state === "ready") return this.validateReady(binding);
       if (binding.state !== "provisioning") return binding;
       return this.provisionBinding(binding);
     });
+  }
+
+  /**
+   * Provisions a new generation for a task whose workspace was removed, with its established
+   * repositories. Any other binding, including one another caller already replaced, is
+   * returned unchanged.
+   */
+  reprovision(taskId: string): Promise<TaskWorkspaceBinding | undefined> {
+    const id = z.string().trim().min(1).max(512).parse(taskId);
+    return this.withTaskLock(id, async () => {
+      const binding = this.store.get(id);
+      const next =
+        binding?.state === "archived"
+          ? await this.replaceRemoved(binding)
+          : undefined;
+      return next ? this.provisionBinding(next) : binding;
+    });
+  }
+
+  /**
+   * Call under the task lock. Replaces a removed generation with a new ID and path whose
+   * repositories start at their recorded pushed commit or provisioned base, never another
+   * branch's tip. Each source must still match its recorded identity, and a commit missing
+   * from the repository is fetched from its task branch only when that fetch is configured
+   * and returns exactly the recorded commit. Otherwise it throws, leaving the old binding.
+   * Undefined when the binding has no completed removal record.
+   */
+  private async replaceRemoved(
+    binding: TaskWorkspaceBinding,
+  ): Promise<TaskWorkspaceBinding | undefined> {
+    const proofs = this.store.removalRecord?.(binding.taskId);
+    if (!proofs || !this.store.replaceRemoved) return undefined;
+    for (const repository of binding.repositories) {
+      const proof = proofs.find(
+        (p) => p.repositoryId === repository.repositoryId,
+      );
+      if (!proof || !repository.gitCommonDir)
+        throw new Error(
+          `The removal record has no commit for ${repository.repositoryId}`,
+        );
+      await this.ensureSourceStillMatches(binding.taskId, repository);
+      const present = () =>
+        this.resolveCommit(worktreeOwner(repository), proof.commit).then(
+          (commit) => commit === proof.commit,
+          rethrowUncertain(() => false),
+        );
+      if (await present()) continue;
+      if (!managedRepositoryOf(repository) || !this.options.remoteBase)
+        throw new Error(
+          `The recorded commit of ${repository.repositoryId} is missing and cannot be fetched`,
+        );
+      const fetched = await this.options.remoteBase(
+        binding.taskId,
+        repository.repositoryId,
+        {
+          commonDirectory: repository.gitCommonDir,
+          branch: proof.branch,
+          retainPrefix: "refs/cab/remote",
+          have: null,
+        },
+      );
+      if (fetched.kind !== "fetched")
+        throw new Error(
+          `The recorded commit of ${repository.repositoryId} is missing and ${proof.branch} could not be fetched (${fetched.kind})`,
+        );
+      if (fetched.commit !== proof.commit || !(await present()))
+        throw new Error(
+          `${proof.branch} of ${repository.repositoryId} is no longer at its recorded commit`,
+        );
+    }
+    const workspaceId = randomUUID();
+    const path = join(this.workspaceRoot, workspaceId);
+    return this.store.replaceRemoved(
+      binding.taskId,
+      binding.workspaceId,
+      { workspaceId, path },
+      binding.repositories.map(({ gitDirectory: _, ...repository }, index) => ({
+        ...repository,
+        workspacePath: join(path, `repo-${index + 1}`),
+        commit: proofs.find((p) => p.repositoryId === repository.repositoryId)!
+          .commit,
+      })),
+    );
   }
 
   async get(
@@ -1532,23 +1677,17 @@ export class WorkspaceManager implements TaskWorkspaceLifecycle {
   }
 
   /**
-   * A file's bytes at `commit`, read from the repository that owns the worktree so it still works
-   * after cleanup. Undefined when the commit or path does not exist or exceeds `maxBytes`.
+   * A file's bytes at `commit`, read from the repository that owns the worktree of the stored
+   * `repository` binding, current or retained, so it still works after removal. Undefined when
+   * the commit or path does not exist or exceeds `maxBytes`.
    */
   async readCommittedFile(
-    taskId: string,
-    repositoryId: string,
+    repository: TaskWorkspaceRepository,
     commit: string,
     path: string,
     maxBytes: number,
   ): Promise<Buffer | undefined> {
-    const repository = this.store
-      .get(taskId)
-      ?.repositories.find(
-        (candidate) => candidate.repositoryId === repositoryId,
-      );
     if (
-      !repository ||
       !/^[0-9a-f]{40}$/.test(commit) ||
       path.split("/").some((part) => !part || part === "." || part === "..")
     )
