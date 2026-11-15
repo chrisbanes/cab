@@ -319,7 +319,12 @@ export function NotificationsSection(p: SettingsProps) {
     "notifications:test",
     null,
   );
-  const [revoking, setRevoking] = useState<PushSubscriptionRecord | null>(null);
+  const [revoking, setRevoking] =
+    useSessionState<PushSubscriptionRecord | null>(
+      csrf,
+      "notifications:revoking",
+      null,
+    );
   const [revokeOutcome, setRevokeOutcome] = useSessionState<Outcome | null>(
     csrf,
     "notifications:revoke-outcome",

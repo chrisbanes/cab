@@ -44,8 +44,11 @@ const subscribeSessionStates = (listener: () => void) => {
   sessionListeners.add(listener);
   return () => sessionListeners.delete(listener);
 };
+/** Bumped by each purge, so a request that outlived its sign-in cannot write back. */
+let sessionGeneration = 0;
 /** Forgets every page's session state, such as a one-time token; called when sign-in ends. */
 export function purgeSessionStates() {
+  sessionGeneration++;
   sessionStates.clear();
   for (const listener of sessionListeners) listener();
 }
@@ -60,17 +63,13 @@ export function useSessionState<T>(scope: string, key: string, initial: T) {
   const value = useSyncExternalStore(subscribeSessionStates, () =>
     sessionStates.has(id) ? (sessionStates.get(id) as T) : first.current,
   );
+  // The setter keeps the generation it was made in: every purge ends that sign-in, and
+  // the next one brings a new scope and so a new setter.
+  const generation = sessionGeneration;
   const set = useCallback(
-    (next: T | ((previous: T) => T)) => {
-      const previous = sessionStates.has(id)
-        ? (sessionStates.get(id) as T)
-        : first.current;
-      sessionStates.set(
-        id,
-        typeof next === "function"
-          ? (next as (previous: T) => T)(previous)
-          : next,
-      );
+    (next: T) => {
+      if (generation !== sessionGeneration) return;
+      sessionStates.set(id, next);
       for (const listener of sessionListeners) listener();
     },
     [id],

@@ -351,7 +351,7 @@ test("notifications: a test sent before leaving the page reports when the reader
   assert.equal(await send.isDisabled(), true);
   await held.shift()?.continue();
   await panel.getByText("Test notification sent.").waitFor();
-  assert.equal(await send.isDisabled(), false);
+  await until(async () => !(await send.isDisabled()), "Send test enabled");
   await page.unroute(
     "**/api/operator/notifications/subscriptions/*/test",
     hold,

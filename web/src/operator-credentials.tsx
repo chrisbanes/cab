@@ -127,7 +127,11 @@ export function OperatorCredentialsSection(p: SettingsProps) {
     name: string;
     token: string;
   } | null>(csrf, "cli:revealed", null);
-  const [revoking, setRevoking] = useState<OperatorCredential | null>(null);
+  const [revoking, setRevoking] = useSessionState<OperatorCredential | null>(
+    csrf,
+    "cli:revoking",
+    null,
+  );
   const [revokeOutcome, setRevokeOutcome] = useSessionState<Outcome | null>(
     csrf,
     "cli:revoke-outcome",

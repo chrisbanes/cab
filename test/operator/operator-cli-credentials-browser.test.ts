@@ -303,6 +303,23 @@ test("a create or rotate still in flight shows its one-time token after leaving 
   await dialog.getByRole("button", { name: "Copy" }).waitFor();
   await dialog.getByRole("button", { name: "Done" }).click();
   await panel.getByText(/^Rotated Laptop\./).waitFor();
+  // Revoke: its confirmation stays open across the visit and closes on its success.
+  await panel
+    .getByRole("button", { name: /^Revoke Laptop/ })
+    .first()
+    .click();
+  await dialog.getByRole("button", { name: "Revoke" }).click();
+  await until(() => held.length === 1);
+  // The open confirmation is modal, so the reader leaves with browser Back and returns.
+  await page.goBack();
+  await page
+    .getByRole("heading", { level: 1, name: "Notifications" })
+    .waitFor();
+  await page.goForward();
+  await dialog.getByText(/^Revoke Laptop/).waitFor();
+  await held.shift()?.continue();
+  await panel.getByText(/^Revoked Laptop\./).waitFor();
+  assert.equal(await dialog.count(), 0);
   await page.unroute("**/api/operator/credentials**", hold);
   // Signing out forgets the session's outcomes.
   await page.getByRole("button", { name: /account$/ }).click();
@@ -314,6 +331,6 @@ test("a create or rotate still in flight shows its one-time token after leaving 
     .getByRole("button", { name: /^Rotate Laptop/ })
     .first()
     .waitFor();
-  assert.equal(await panel.getByText(/^Rotated Laptop\./).count(), 0);
+  assert.equal(await panel.getByText(/^Revoked Laptop\./).count(), 0);
   assert.equal(await page.getByRole("dialog").count(), 0);
 });
