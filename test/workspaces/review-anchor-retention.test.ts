@@ -907,3 +907,59 @@ test("a workspace-file anchor is never compared with a later workspace generatio
   await f.reopen();
   assert.equal(await read(), "unknown");
 });
+
+test("a gap anchor reads as a gap only in the generation it was captured in", async (t) => {
+  const f = await createOperatorFixture();
+  t.after(() => f.close());
+  const task = await seedReviewTask(f, "Gap rebind", "Keep bounded context");
+  const bytes = Buffer.alloc(
+    retainedEvidenceLimits.maxReviewAnchorBytes + 1,
+    0x61,
+  );
+  /** Stages a quota-gap anchor of `large.txt` in the task's current workspace. */
+  const gap = async () => {
+    const workspace = (await f.service.taskWorkspace(task.taskId))!;
+    await writeFile(join(workspace.path, "large.txt"), bytes);
+    const staged = await f.service.stageReviewAnchorDraft({
+      taskId: task.taskId,
+      operationId: randomUUID(),
+      anchors: [
+        {
+          taskId: task.taskId,
+          repositoryId: null,
+          path: "large.txt",
+          sourceKind: "workspace-file",
+          context: "workspace",
+          side: "file",
+          startLine: 1,
+          endLine: 1,
+          contentSha256: digest(bytes),
+        },
+      ],
+    });
+    assert.equal(staged.anchorStates[0]?.state, "gap");
+    return staged.anchorIds[0]!;
+  };
+  const state = async (anchorId: string) => {
+    const { data } = await new OperatorApi(f.service, [
+      f.directory,
+    ]).readRetainedReviewAnchor(task.taskId, anchorId);
+    return data.state;
+  };
+  const old = await gap();
+  assert.equal(await state(old), "gap");
+  finishTask(f.service, task.taskId);
+  assert.equal(
+    (await f.service.removeTaskWorkspace(task.taskId, "manual")).outcome,
+    "cleaned",
+  );
+  const again = await f.service.provisionTask(task.taskId);
+  assert.equal(again.state, "ready", again.reason ?? "");
+  const fresh = await gap();
+  // The old anchor's root is not the new workspace's; the new one's is.
+  assert.equal(await state(old), "unavailable");
+  assert.equal(await state(fresh), "gap");
+  await f.reopen();
+  assert.equal(await state(old), "unavailable");
+  assert.equal(await state(fresh), "gap");
+});

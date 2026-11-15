@@ -5614,14 +5614,9 @@ export class StandaloneService {
       this.taskProject(taskId),
       "callback",
       async () => {
-        const task = this.domain().task(taskId);
-        const imported = this.domain().importedTask(taskId);
-        if (imported) {
-          const config = this.domain().githubConfiguration(
-            String(task.projectId),
-          );
-          const links = this.domain().repositoryLinks(String(task.projectId));
-          const linked = links.links;
+        const grant = this.importedGrant(taskId);
+        if (grant) {
+          const linked = grant.links;
           for (const repository of repositories) {
             const match = linked.find(
               (candidate) => candidate.repositoryId === repository.repositoryId,
@@ -5646,31 +5641,47 @@ export class StandaloneService {
             )
               throw new Error("Linked repository identity changed");
           }
-          const latestTask = this.domain().task(taskId);
-          const latestImported = this.domain().importedTask(taskId);
-          const latestConfig = this.domain().githubConfiguration(
-            String(task.projectId),
-          );
-          const latestLinks = this.domain().repositoryLinks(
-            String(task.projectId),
-          );
-          if (
-            latestTask.version !== task.version ||
-            latestTask.projectId !== task.projectId ||
-            latestImported?.nodeId !== imported.nodeId ||
-            latestImported?.repositoryId !== imported.repositoryId ||
-            latestConfig.version !== config.version ||
-            latestLinks.version !== links.version ||
-            JSON.stringify(latestLinks.links) !== JSON.stringify(linked)
-          )
-            throw new Error(
-              "Imported task repository grant changed during verification",
-            );
+          grant.assertUnchanged();
         }
         await this.assertRemovedWorkspaceLinked(taskId);
         return this.started().workspaces.provision(taskId, repositories);
       },
     );
+  }
+
+  /**
+   * An imported task's source identity, GitHub configuration and links as verification began;
+   * `assertUnchanged` refuses once any changed across its awaits. Undefined for a local task.
+   */
+  private importedGrant(taskId: string) {
+    const domain = this.domain();
+    const task = domain.task(taskId);
+    const imported = domain.importedTask(taskId);
+    if (!imported) return undefined;
+    const projectId = String(task.projectId);
+    const config = domain.githubConfiguration(projectId);
+    const links = domain.repositoryLinks(projectId);
+    return {
+      links: links.links,
+      assertUnchanged: () => {
+        const latestTask = this.domain().task(taskId);
+        const latestImported = this.domain().importedTask(taskId);
+        const latestLinks = this.domain().repositoryLinks(projectId);
+        if (
+          latestTask.version !== task.version ||
+          latestTask.projectId !== task.projectId ||
+          latestImported?.nodeId !== imported.nodeId ||
+          latestImported?.repositoryId !== imported.repositoryId ||
+          this.domain().githubConfiguration(projectId).version !==
+            config.version ||
+          latestLinks.version !== links.version ||
+          JSON.stringify(latestLinks.links) !== JSON.stringify(links.links)
+        )
+          throw new Error(
+            "Imported task repository grant changed during verification",
+          );
+      },
+    };
   }
 
   /**
@@ -5682,8 +5693,9 @@ export class StandaloneService {
       this.taskProject(taskId),
       "callback",
       async () => {
-        this.domain().task(taskId);
+        const grant = this.importedGrant(taskId);
         await this.assertRemovedWorkspaceLinked(taskId);
+        grant?.assertUnchanged();
         return this.started().workspaces.reprovision(taskId);
       },
     );
@@ -5695,14 +5707,6 @@ export class StandaloneService {
    */
   private removedPredecessor(taskId: string, workspace: string): boolean {
     return this.replacedGenerations(taskId).some((g) => g.path === workspace);
-  }
-
-  /**
-   * Whether a removed workspace of the task was replaced by a later binding, so an
-   * unattributed path or root can no longer be assumed to be the current binding's.
-   */
-  hasReplacedWorkspace(taskId: string): boolean {
-    return this.replacedGenerations(taskId).length > 0;
   }
 
   /** Removed generations of the task that a later binding has replaced. */
@@ -5773,6 +5777,8 @@ export class StandaloneService {
   resultWorkspace(
     taskId: string,
     workId: string | null,
+    /** When the material was captured, for work without a recorded execution. */
+    at?: number,
   ):
     | Pick<
         TaskWorkspaceBinding,
@@ -5781,14 +5787,48 @@ export class StandaloneService {
     | undefined {
     const current = this.started().workspaceBindings.get(taskId);
     const lifecycle = new WorkspaceLifecycleStore(this.cache!);
-    const generation = workId ? lifecycle.forWork(taskId, workId) : undefined;
-    // Unattributed work is the current binding's only while no earlier generation was replaced.
+    const generation =
+      (workId ? lifecycle.forWork(taskId, workId) : undefined) ??
+      (at === undefined ? undefined : this.generationAt(taskId, at));
+    // Otherwise it is the current binding's only while no earlier generation was replaced.
     if (!generation)
-      return this.hasReplacedWorkspace(taskId) ? undefined : current;
+      return this.replacedGenerations(taskId).length ? undefined : current;
     if (generation.workspaceId === current?.workspaceId) return current;
     return lifecycle.removal(generation)
       ? { ...generation, state: "archived" }
       : undefined;
+  }
+
+  /**
+   * The one generation whose lifetime holds `at`: from its binding's creation until its
+   * removal completed, or still open for the current binding. Undefined when none or
+   * several do, or a creation time is unknown.
+   */
+  private generationAt(taskId: string, at: number) {
+    const lifecycle = new WorkspaceLifecycleStore(this.cache!);
+    const current = this.started().workspaceBindings.get(taskId);
+    const spans = lifecycle.forTask(taskId).map((g) => ({
+      generation: { workspaceId: g.workspaceId },
+      from: g.createdAt === null ? Number.NaN : Date.parse(g.createdAt),
+      until: lifecycle.removal(g)?.completedAt ?? Number.POSITIVE_INFINITY,
+    }));
+    // A replacement still provisioning has no lifecycle row yet.
+    if (
+      current &&
+      !spans.some((s) => s.generation.workspaceId === current.workspaceId)
+    )
+      spans.push({
+        generation: { workspaceId: current.workspaceId },
+        from: Date.parse(current.createdAt),
+        until: Number.POSITIVE_INFINITY,
+      });
+    if (spans.some((s) => Number.isNaN(s.from))) return undefined;
+    const matches = spans.filter((s) => s.from <= at && at < s.until);
+    if (matches.length !== 1) return undefined;
+    const workspaceId = matches[0]!.generation.workspaceId;
+    return workspaceId === current?.workspaceId
+      ? current
+      : lifecycle.get(workspaceId);
   }
 
   taskWorkspaceVisibility(taskId: string) {
@@ -10265,13 +10305,6 @@ export class StandaloneService {
       );
   }
 
-  /**
-   * Startup's provider re-observation revises imported tasks. A planned-shutdown requeue
-   * captured at the version read just before that invalidation holds a one-time allowance:
-   * once the task is admissible again its capture takes the re-observed version; while the
-   * provider read is incomplete it waits; any other change holds it (see `validate` below).
-   * Draft turns, local tasks, inbox requests and first turns keep their own rules.
-   */
   /** The domain's admission refusals for a task turn at its captured revisions. */
   private assignmentRefusals(request: TurnRequest): string[] {
     const {
@@ -10313,6 +10346,78 @@ export class StandaloneService {
       );
   }
 
+  /**
+   * Why admission would refuse a turn for a task whose workspace was removed, checked before a
+   * new workspace is provisioned for it: the domain and draft-text refusals, an unresolved
+   * recovery continuation, the previous-work and previous-harness-home checks, and a stored
+   * workspace other than the removed one. Capacity, writer and submission checks run later,
+   * after provisioning, as for any turn; a refusal there keeps the new workspace.
+   */
+  private removedWorkspaceRefusals(
+    request: TurnRequest,
+    removed: TaskWorkspaceBinding,
+  ): string[] {
+    const { state } = this.started();
+    const taskId = removed.taskId;
+    const reasons = this.assignmentRefusals(request).filter(
+      (reason) =>
+        !(
+          reason === "task-revision-changed" &&
+          this.reobservedAllowance(request)
+        ),
+    );
+    if (
+      this.draftTextChanged(request) &&
+      !reasons.includes("task-revision-changed")
+    )
+      reasons.push("task-revision-changed");
+    if (
+      this.recoveryContinuationUnresolved(
+        String(request.assignmentId),
+        request.workId,
+      )
+    )
+      reasons.push("recovery-continuation-unresolved");
+    const ranThere = (workspace: string) =>
+      // Workspace roots are canonical, so an admitted path equals its binding's.
+      workspace === removed.path || this.removedPredecessor(taskId, workspace);
+    if (request.previousWorkId) {
+      const previous = state.byWorkId(request.previousWorkId);
+      const prior = state.taskBinding(request.previousWorkId);
+      const shutdownRequeued =
+        state.shutdownRequeue(request.workId)?.interruptedWorkId ===
+        request.previousWorkId;
+      if (
+        !previous ||
+        (previous.state !== "completed" && !shutdownRequeued) ||
+        !previous.threadId ||
+        !ranThere(previous.workspace) ||
+        prior?.taskId !== taskId ||
+        prior.assignmentId !== request.assignmentId
+      )
+        reasons.push(
+          "Previous work is not a completed binding in this workspace",
+        );
+      else if (
+        this.startedUnderPreviousHarnessHome(
+          request.previousWorkId,
+          previous.threadId,
+        )
+      )
+        reasons.push(previousHarnessHomeMessage);
+    }
+    if (request.workspace !== null && !ranThere(request.workspace))
+      reasons.push("Turn request workspace identity changed");
+    return reasons;
+  }
+
+  /**
+   * Startup's provider re-observation revises imported tasks. A planned-shutdown requeue
+   * captured at the version read just before that invalidation holds a one-time allowance:
+   * once the task is admissible again its capture takes the re-observed version; while the
+   * provider read is incomplete it waits; any other change holds it (see `validate` below).
+   * Draft turns, local tasks, inbox requests and first turns keep their own rules.
+   */
   private reobservedAllowance(request: TurnRequest): boolean {
     const { state, reobservedTaskVersions } = this.started();
     if (
@@ -10384,7 +10489,7 @@ export class StandaloneService {
     );
   }
 
-  /** Whether a resumed conversation predates native configuration ownership. */
+  /** Whether a resumed conversation, on `workId`'s harness, predates native configuration ownership. */
   private startedUnderPreviousHarnessHome(
     workId: string,
     threadId: string,
@@ -10463,13 +10568,7 @@ export class StandaloneService {
         if (!state.taskHold(request.taskId)) {
           if (existing?.state === "archived") {
             // New worktrees are created only for a turn admission would now accept.
-            const refusals = this.assignmentRefusals(request).filter(
-              (reason) =>
-                !(
-                  reason === "task-revision-changed" &&
-                  this.reobservedAllowance(request)
-                ),
-            );
+            const refusals = this.removedWorkspaceRefusals(request, existing);
             if (refusals.length)
               throw new Error(
                 `The removed workspace is provisioned again only for an admissible turn: ${refusals.join(", ")}`,

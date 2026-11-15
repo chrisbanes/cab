@@ -12,6 +12,7 @@ import { ProjectDeletionUnavailableError } from "./project-deletion.js";
 import { projectArchiveBlockedMessage } from "../operator/project-lifecycle-copy.js";
 import type { ReadinessResult } from "../operator/readiness.js";
 import type { RecoveryRecord } from "./recovery-types.js";
+import type { TaskWorkspaceBinding } from "./workspaces.js";
 import { createHash, randomUUID } from "node:crypto";
 import {
   issueBodyLimit,
@@ -441,6 +442,17 @@ const escalationMaterialSchema = z.object({
     dirty: z.boolean().nullable(),
   }),
 });
+
+/** The root an anchor or artifact path is relative to: the workspace, or one repository's worktree. */
+function bindingRoot(
+  binding: Pick<TaskWorkspaceBinding, "path" | "repositories">,
+  repositoryId: string | null,
+): string | undefined {
+  return repositoryId
+    ? binding.repositories.find((r) => r.repositoryId === repositoryId)
+        ?.workspacePath
+    : binding.path;
+}
 
 export class OperatorApiError extends Error {
   constructor(
@@ -1301,20 +1313,31 @@ export class OperatorApi {
       return this.workspaceInspectionFailure(error);
     }
   }
+  /**
+   * A gap anchor records no root: it takes the current binding's only when its work or capture
+   * time places it in that generation, never a removed one's successor.
+   */
   private async retainedAnchorOriginRoot(
-    taskId: string,
-    repositoryId: string | null,
+    anchor: {
+      taskId: string;
+      repositoryId: string | null;
+      workId?: string | undefined;
+      capturedAt: number;
+    },
     retainedRoot?: string,
   ) {
     if (retainedRoot) return retainedRoot;
-    // A gap anchor records no root; after a rebind it may belong to a removed generation.
-    if (this.service.hasReplacedWorkspace(taskId)) return undefined;
-    const binding = await this.service.taskWorkspace(taskId);
-    if (!binding) return undefined;
-    if (!repositoryId) return binding.path;
-    return binding.repositories.find(
-      (repository) => repository.repositoryId === repositoryId,
-    )?.workspacePath;
+    const binding = await this.service.taskWorkspace(anchor.taskId);
+    if (
+      !binding ||
+      this.service.resultWorkspace(
+        anchor.taskId,
+        anchor.workId ?? null,
+        anchor.capturedAt,
+      )?.workspaceId !== binding.workspaceId
+    )
+      return undefined;
+    return bindingRoot(binding, anchor.repositoryId);
   }
   private async retainedAnchorStatus(
     anchor: NonNullable<
@@ -1334,12 +1357,8 @@ export class OperatorApi {
       )
         return "unknown";
       // An anchor captured in a removed generation is never compared with a later workspace.
-      const root = anchor.repositoryId
-        ? current.binding.repositories.find(
-            (repository) => repository.repositoryId === anchor.repositoryId,
-          )?.workspacePath
-        : current.binding.path;
-      if (root !== originRoot) return "unknown";
+      if (bindingRoot(current.binding, anchor.repositoryId) !== originRoot)
+        return "unknown";
       const path = relativePolicySegments(anchor.path);
       if (!path) return "unknown";
       const scope = anchor.repositoryId
@@ -1487,8 +1506,7 @@ export class OperatorApi {
     if (!retained) throw new OperatorApiError(404, "not-found");
     const { anchor, bytes } = retained;
     const originRoot = await this.retainedAnchorOriginRoot(
-      taskId,
-      anchor.repositoryId,
+      anchor,
       retained.originRoot,
     );
     if (!originRoot) return unavailable("unavailable");

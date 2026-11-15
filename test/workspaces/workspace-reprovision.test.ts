@@ -294,3 +294,31 @@ test("a request that recorded the removed workspace runs in its replacement", as
   assert.equal(w.runtime.resumes[0]?.cwd, current.path);
   assert.equal(w.runtime.starts.length, 1);
 });
+
+test("a request whose stored workspace is not the removed one provisions nothing", async (t) => {
+  const w = await removedTask(t);
+  const [initial] = w.service.list();
+  w.configure({ state: "open" });
+  w.pause(true);
+  await w.message();
+  const scheduler = startedOf(w.service).schedulerStore;
+  const pending = () =>
+    scheduler.list().find((r) => r.workId !== initial?.workId);
+  // biome-ignore lint/complexity/useLiteralKeys: the service's own database
+  w.service["cache"]!.prepare(
+    "UPDATE turn_requests SET workspace=? WHERE workId=?",
+  ).run(join(w.old.path, "..", "elsewhere"), pending()!.workId);
+  w.pause(false);
+  await waitUntil(
+    () =>
+      /admissible turn: Turn request workspace identity changed/.test(
+        pending()?.reason ?? "",
+      ),
+    w.describe,
+  );
+  const kept = (await w.service.taskWorkspace(w.taskId))!;
+  assert.equal(kept.state, "archived");
+  assert.equal(kept.workspaceId, w.old.workspaceId);
+  assert.equal(w.lifecycle.forTask(w.taskId).length, 1);
+  assert.equal(w.runtime.resumes.length, 0);
+});

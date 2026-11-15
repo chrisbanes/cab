@@ -1237,7 +1237,10 @@ after an effect started holds the workspace and the journal, keeps the lease and
 never reported as removal; after a restart it stays held with nothing more deleted.
 A task whose workspace was removed gets a new one, under a new workspace ID and path,
 when it is provisioned again or for a turn that admission would accept, as after the
-task is reopened; a turn admission refuses provisions nothing. Each repository starts at its removal record's commit: the task branch's last
+task is reopened. Before provisioning, admission checks the turn's task and assignment
+revisions and state, draft text, recovery continuation, previous work and its harness
+home, and any workspace the request already recorded; a turn refused there provisions
+nothing. Capacity, writer and submission checks follow provisioning, as for any turn. Each repository starts at its removal record's commit: the task branch's last
 confirmed push, or the provisioned base when it had no task commits, never a branch's
 current tip. The task keeps its repositories, each source must still match its
 recorded Git identity, and the project must still link each repository exactly, verified
@@ -2808,7 +2811,10 @@ never from the new workspace or from whichever repository a later workspace plac
 the same relative path, and once a workspace has been replaced, a result whose
 generation cannot be attributed is not read from a commit. A workspace-file review
 anchor captured in a removed generation keeps its retained excerpt and reports an
-unknown status rather than being compared with the new workspace. Managed repositories keep automatic garbage collection off, so a
+unknown status rather than being compared with the new workspace. A gap anchor, which
+records no root, is attributed by its work or, failing that, by its capture time against
+each generation's creation and completed removal: it reads as a gap in the current
+generation and as unavailable when it belongs to a removed one or cannot be attributed. Managed repositories keep automatic garbage collection off, so a
 removed workspace's commits stay readable. A file that was
 never committed and has changed since is not served. Both reads apply the current
 policy first and again after reading: a repository the project no longer links
