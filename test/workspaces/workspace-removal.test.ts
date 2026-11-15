@@ -23,8 +23,10 @@ import {
 } from "../../src/standalone/github-delivery.js";
 import type { TaskWorkspaceBinding } from "../../src/standalone/workspaces.js";
 import { localBranchFetch } from "../fixtures/branch-fetch.js";
+import { linkBindingRepositories } from "../fixtures/workspace-removal.js";
 import { captureNativeResult } from "../fixtures/native-result.js";
 import { createOperatorFixture } from "../fixtures/operator-web.js";
+import { startedOf } from "../fixtures/service-internals.js";
 import { tmpdir } from "../fixtures/temp.js";
 
 const git = (cwd: string, ...args: string[]) =>
@@ -284,6 +286,9 @@ async function world(t: TestContext, repositoryCount = 1) {
     lifecycle,
     operations,
     archivalHeld,
+    /** Links the project to exactly `binding`'s repositories (or none). */
+    link: (binding: Pick<TaskWorkspaceBinding, "repositories">) =>
+      linkBindingRepositories(f, projectId, binding),
     remove: (taskId: string, trigger: "manual" | "delivered" = "manual") =>
       f.service.removeTaskWorkspace(taskId, trigger),
   };
@@ -900,6 +905,7 @@ test("a removed workspace is provisioned again at each repository's last push or
   assert.equal(git(managed, "config", "gc.auto"), "0");
   assert.equal(git(managed, "cat-file", "-t", pushed), "commit");
 
+  w.link(binding);
   // Inputs in another order bind the same repositories to the same repo-N paths.
   const again = await w.f.service.provisionTask(taskId, inputs(w, true));
   assert.equal(again.state, "ready", again.reason ?? "");
@@ -940,6 +946,7 @@ test("concurrent provisioning after removal creates exactly one new workspace", 
   const { taskId, binding } = await w.task();
   w.finish(taskId);
   assert.equal((await w.remove(taskId)).outcome, "cleaned");
+  w.link(binding);
   const results = await Promise.all([
     w.f.service.provisionTask(taskId, inputs(w)),
     w.f.service.provisionTask(taskId, inputs(w)),
@@ -984,6 +991,7 @@ test("a commit lost from the managed repository is fetched from its task branch 
   w.finish(fetched.taskId);
   assert.equal((await w.remove(fetched.taskId)).outcome, "cleaned");
   loseObject(fetched.binding.repositories[0]!.gitCommonDir!, head);
+  w.link(fetched.binding);
   const again = await w.f.service.provisionTask(fetched.taskId, inputs(w));
   assert.equal(again.state, "ready", again.reason ?? "");
   assert.equal(
@@ -1010,6 +1018,7 @@ test("a commit lost from the managed repository is fetched from its task branch 
     `${outside}:refs/heads/${movedBranch}`,
   );
   loseObject(moved.binding.repositories[0]!.gitCommonDir!, recorded);
+  w.link(moved.binding);
   await assert.rejects(
     w.f.service.provisionTask(moved.taskId, inputs(w)),
     /is no longer at its recorded commit/,
@@ -1018,4 +1027,63 @@ test("a commit lost from the managed repository is fetched from its task branch 
   assert.equal(waiting.state, "archived");
   assert.equal(waiting.workspaceId, moved.binding.workspaceId);
   assert.equal(w.lifecycle().forTask(moved.taskId).length, 1);
+});
+
+test("a removed workspace is provisioned again only from repositories the project still links", async (t) => {
+  const w = await world(t);
+  const reprovision = (taskId: string) =>
+    // biome-ignore lint/complexity/useLiteralKeys: the admission route's own entry point
+    w.f.service["reprovisionTaskWorkspace"](taskId);
+  for (const imported of [false, true]) {
+    const { taskId, binding } = await w.task();
+    if (imported) w.domain.markImportedTask(taskId, `I_${randomUUID()}`, "R1");
+    w.finish(taskId);
+    assert.equal((await w.remove(taskId)).outcome, "cleaned");
+    // The project unlinked the repository after removal.
+    w.link({ repositories: [] });
+    if (!imported)
+      await assert.rejects(
+        w.f.service.provisionTask(taskId, inputs(w)),
+        /The project no longer links R1/,
+      );
+    await assert.rejects(reprovision(taskId), /The project no longer links R1/);
+    const kept = (await w.f.service.taskWorkspace(taskId))!;
+    assert.equal(kept.state, "archived");
+    assert.equal(kept.workspaceId, binding.workspaceId);
+    assert.equal(w.lifecycle().forTask(taskId).length, 1);
+    // Linked again exactly, the same removed workspace is provisioned.
+    w.link(binding);
+    const again = (await reprovision(taskId))!;
+    assert.equal(again.state, "ready", again.reason ?? "");
+    assert.notEqual(again.workspaceId, binding.workspaceId);
+  }
+});
+
+test("an unattributed result never resolves to a replacement that is still provisioning", async (t) => {
+  const w = await world(t);
+  const { taskId, binding } = await w.task();
+  w.finish(taskId);
+  assert.equal((await w.remove(taskId)).outcome, "cleaned");
+  assert.equal(
+    w.f.service.resultWorkspace(taskId, null)?.workspaceId,
+    binding.workspaceId,
+  );
+  // The window between replacing the binding and the new generation being ready.
+  const next = randomUUID();
+  const path = join(binding.path, "..", next);
+  startedOf(w.f.service).workspaceBindings.replaceRemoved(
+    taskId,
+    binding.workspaceId,
+    { workspaceId: next, path },
+    binding.repositories.map(({ gitDirectory: _, ...r }) => ({
+      ...r,
+      workspacePath: join(path, "repo-1"),
+    })),
+  );
+  assert.equal(
+    (await w.f.service.taskWorkspace(taskId))?.state,
+    "provisioning",
+  );
+  assert.equal(w.f.service.resultWorkspace(taskId, null), undefined);
+  assert.equal(w.f.service.resultWorkspace(taskId, randomUUID()), undefined);
 });

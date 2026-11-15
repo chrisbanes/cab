@@ -1307,6 +1307,8 @@ export class OperatorApi {
     retainedRoot?: string,
   ) {
     if (retainedRoot) return retainedRoot;
+    // A gap anchor records no root; after a rebind it may belong to a removed generation.
+    if (this.service.hasReplacedWorkspace(taskId)) return undefined;
     const binding = await this.service.taskWorkspace(taskId);
     if (!binding) return undefined;
     if (!repositoryId) return binding.path;
@@ -1331,6 +1333,13 @@ export class OperatorApi {
         current.taskVersion !== policy.taskVersion
       )
         return "unknown";
+      // An anchor captured in a removed generation is never compared with a later workspace.
+      const root = anchor.repositoryId
+        ? current.binding.repositories.find(
+            (repository) => repository.repositoryId === anchor.repositoryId,
+          )?.workspacePath
+        : current.binding.path;
+      if (root !== originRoot) return "unknown";
       const path = relativePolicySegments(anchor.path);
       if (!path) return "unknown";
       const scope = anchor.repositoryId
@@ -7217,15 +7226,20 @@ export class OperatorApi {
     for (const recorded of this.service
       .resultWorkspaces(taskId)
       .get(record.resultId) ?? []) {
-      const root = workspace.repositories.find(
-        (repository) => repository.repositoryId === recorded.repositoryId,
-      )?.workspacePath;
-      if (!root || target === resolve(root) || !isWithin(resolve(root), target))
+      const repository = workspace.repositories.find(
+        (candidate) => candidate.repositoryId === recorded.repositoryId,
+      );
+      const root = repository?.workspacePath;
+      if (
+        !repository ||
+        !root ||
+        target === resolve(root) ||
+        !isWithin(resolve(root), target)
+      )
         continue;
       const body = await this.service.readCommittedFile(
         taskId,
-        record.workId,
-        recorded.repositoryId,
+        repository,
         recorded.headCommit,
         relative(resolve(root), target).split(sep).join("/"),
         file.size + 1,

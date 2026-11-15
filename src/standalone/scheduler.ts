@@ -462,10 +462,15 @@ export class SchedulerStore {
     );
   }
 
-  setWorkspace(workId: string, workspace: string): void {
+  /** `replacing` names the one earlier workspace, a removed generation, the request may move from. */
+  setWorkspace(workId: string, workspace: string, replacing?: string): void {
     assertOwnedWorkWritable(this.db, workId);
     const current = this.byWorkId(workId);
-    if (current.workspace !== null && current.workspace !== workspace)
+    if (
+      current.workspace !== null &&
+      current.workspace !== workspace &&
+      current.workspace !== replacing
+    )
       throw new Error("Turn request workspace identity changed");
     this.db
       .prepare("UPDATE turn_requests SET workspace = ? WHERE workId = ?")

@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import { existsSync, mkdtempSync, rmSync } from "node:fs";
 import { join } from "node:path";
-import { test } from "node:test";
+import { type TestContext, test } from "node:test";
 import { WorkspaceLifecycleStore } from "../../src/core/workspace-lifecycle.js";
 import type {
   Runtime,
@@ -14,6 +14,7 @@ import {
   StandaloneService,
 } from "../../src/standalone/service.js";
 import { taskScratchPath } from "../../src/standalone/workspaces.js";
+import { startedOf } from "../fixtures/service-internals.js";
 import { tmpdir } from "../fixtures/temp.js";
 
 /** A Codex-shaped fake that records each thread start, resume and turn with its workspace. */
@@ -84,7 +85,8 @@ async function waitUntil(predicate: () => boolean, describe: () => unknown) {
   }
 }
 
-test("a turn after removal resumes the same conversation in one new workspace", async (t) => {
+/** A started service whose Ready task ran one turn and then had its workspace removed. */
+async function removedTask(t: TestContext) {
   const root = mkdtempSync(join(tmpdir(), "cab-reprovision-service-"));
   const runtime = new ResumeRuntime();
   const service = new StandaloneService(
@@ -136,35 +138,34 @@ test("a turn after removal resumes the same conversation in one new workspace", 
     outcome: "Resume after removal",
     ready: true,
   });
-  const describe = () =>
-    service.list().map((i) => [i.workId, i.state, i.reason]);
+  const describe = () => [
+    service.list().map((i) => [i.workId, i.state, i.reason]),
+    startedOf(service)
+      .schedulerStore.list()
+      .map((r) => [r.workId, r.state, r.reason]),
+  ];
   await waitUntil(
     () => service.list().some((i) => i.state === "completed"),
     describe,
   );
   const old = (await service.taskWorkspace(taskId))!;
   assert.equal(runtime.turns[0]?.cwd, old.path);
-  const configure = (state: "done" | "open") =>
+  const configure = (change: Record<string, unknown>) =>
     execute({
       type: "task.configure",
       projectId,
       taskId,
       expectedVersion: Number(service.domain().task(taskId).version),
-      state,
+      ...change,
     });
-  configure("done");
+  configure({ state: "done" });
   const removed = await service.removeTaskWorkspace(taskId, "manual");
   assert.equal(removed.outcome, "cleaned", JSON.stringify(removed));
   assert.equal(existsSync(old.path), false);
-
-  configure("open");
   const assignmentId =
     service.recoveryForTask(taskId)[0]?.binding?.assignmentId;
   assert.ok(assignmentId);
-  // Two manual provisions race the turn's admission; all three see one new workspace.
-  const [first, second] = await Promise.all([
-    service.provisionTask(taskId),
-    service.provisionTask(taskId),
+  const message = () =>
     service.coordinationView().postOperatorMessage({
       key: randomUUID(),
       taskId,
@@ -173,7 +174,48 @@ test("a turn after removal resumes the same conversation in one new workspace", 
         service.domain().assignment(assignmentId).version,
       ),
       message: "Continue",
-    }),
+    });
+  const lifecycle = new WorkspaceLifecycleStore(
+    // biome-ignore lint/complexity/useLiteralKeys: the service's own database
+    service["cache"]!,
+  );
+  const pause = (paused: boolean) =>
+    execute({
+      type: "project.configure",
+      projectId,
+      expectedVersion: Number(service.domain().project(projectId).version),
+      paused,
+    });
+  return {
+    service,
+    runtime,
+    taskId,
+    pause,
+    old,
+    describe,
+    configure,
+    message,
+    lifecycle,
+  };
+}
+
+test("a turn after removal resumes the same conversation in one new workspace", async (t) => {
+  const {
+    service,
+    runtime,
+    taskId,
+    old,
+    describe,
+    configure,
+    message,
+    lifecycle,
+  } = await removedTask(t);
+  configure({ state: "open" });
+  // Two manual provisions race the turn's admission; all three see one new workspace.
+  const [first, second] = await Promise.all([
+    service.provisionTask(taskId),
+    service.provisionTask(taskId),
+    message(),
   ]);
   await waitUntil(
     () => service.list().filter((i) => i.state === "completed").length === 2,
@@ -183,10 +225,6 @@ test("a turn after removal resumes the same conversation in one new workspace", 
   assert.equal(first.workspaceId, current.workspaceId);
   assert.equal(second.workspaceId, current.workspaceId);
   assert.notEqual(current.workspaceId, old.workspaceId);
-  const lifecycle = new WorkspaceLifecycleStore(
-    // biome-ignore lint/complexity/useLiteralKeys: the service's own database
-    service["cache"]!,
-  );
   assert.equal(lifecycle.forTask(taskId).length, 2);
   assert.ok(lifecycle.removal(old));
 
@@ -205,4 +243,54 @@ test("a turn after removal resumes the same conversation in one new workspace", 
     cwd: current.path,
   });
   assert.equal(service.taskHold(taskId), undefined);
+});
+
+test("a turn admission refuses creates no workspace, and the removed one stays archived", async (t) => {
+  const w = await removedTask(t);
+  const [initial] = w.service.list();
+  w.configure({ state: "open" });
+  // Queued while paused, then made stale by a task edit before it is attempted.
+  w.pause(true);
+  await w.message();
+  const scheduler = startedOf(w.service).schedulerStore;
+  const pending = () =>
+    scheduler.list().find((r) => r.workId !== initial?.workId);
+  assert.ok(pending());
+  w.configure({ title: "Edited after the turn was queued" });
+  w.pause(false);
+  await waitUntil(() => !!pending()?.reason, w.describe);
+  assert.equal(pending()?.state, "held");
+  assert.match(pending()?.reason ?? "", /older task or assignment revisions/);
+  const kept = (await w.service.taskWorkspace(w.taskId))!;
+  assert.equal(kept.state, "archived");
+  assert.equal(kept.workspaceId, w.old.workspaceId);
+  assert.equal(w.lifecycle.forTask(w.taskId).length, 1);
+  assert.equal(w.runtime.resumes.length, 0);
+});
+
+test("a request that recorded the removed workspace runs in its replacement", async (t) => {
+  const w = await removedTask(t);
+  const [initial] = w.service.list();
+  w.configure({ state: "open" });
+  w.pause(true);
+  await w.message();
+  const scheduler = startedOf(w.service).schedulerStore;
+  const workId = scheduler
+    .list()
+    .find((r) => r.workId !== initial?.workId)!.workId;
+  // As a request first attempted before the removal would have recorded it.
+  // biome-ignore lint/complexity/useLiteralKeys: the service's own database
+  w.service["cache"]!.prepare(
+    "UPDATE turn_requests SET workspace=? WHERE workId=?",
+  ).run(w.old.path, workId);
+  w.pause(false);
+  await waitUntil(
+    () => w.service.list().filter((i) => i.state === "completed").length === 2,
+    w.describe,
+  );
+  const current = (await w.service.taskWorkspace(w.taskId))!;
+  assert.notEqual(current.workspaceId, w.old.workspaceId);
+  assert.equal(scheduler.byWorkId(workId).workspace, current.path);
+  assert.equal(w.runtime.resumes[0]?.cwd, current.path);
+  assert.equal(w.runtime.starts.length, 1);
 });

@@ -14,6 +14,7 @@ import {
 import { seedReviewTask } from "../fixtures/task-review.js";
 import {
   finishTask,
+  linkBindingRepositories,
   recordDeliveredHeads,
 } from "../fixtures/workspace-removal.js";
 
@@ -224,6 +225,7 @@ test("a removed workspace's artifact is read from its own generation after a new
   assert.deepEqual(await read(), [200, "recorded-commit", png]);
 
   const [old] = native.workspace.repositories;
+  linkBindingRepositories(s.f, projectId, native.workspace);
   const again = await s.f.service.provisionTask(taskId, [
     { repositoryId: "R1", path: old!.sourcePath, ref: old!.ref },
   ]);

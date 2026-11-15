@@ -2,6 +2,7 @@ import { execFileSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import type { DatabaseSync } from "node:sqlite";
 import type { StandaloneService } from "../../src/standalone/service.js";
+import type { TaskWorkspaceBinding } from "../../src/standalone/workspaces.js";
 
 /** Ends (or reopens) the task as the operator would, so its workspace may be removed. */
 export function finishTask(
@@ -49,4 +50,31 @@ export async function recordDeliveredHeads(
         .run(taskId, repository.repositoryId, `cab/${taskId}`, head),
     );
   }
+}
+
+/** Links the project to exactly `binding`'s repositories, as they were provisioned. */
+export function linkBindingRepositories(
+  f: { seedPersistedState(seed: (db: DatabaseSync) => void): void },
+  projectId: string,
+  binding: Pick<TaskWorkspaceBinding, "repositories">,
+): void {
+  f.seedPersistedState((db) =>
+    db
+      .prepare(
+        "UPDATE project_repository_links SET version=version+1, links=? WHERE projectId=?",
+      )
+      .run(
+        JSON.stringify(
+          binding.repositories.map((r) => ({
+            codeHost: "github",
+            host: "github.com",
+            repositoryId: r.repositoryId,
+            path: r.sourcePath,
+            ref: r.ref,
+            gitCommonDirectory: r.sourceGitCommonDir ?? r.gitCommonDir,
+          })),
+        ),
+        projectId,
+      ),
+  );
 }

@@ -6,6 +6,7 @@ import type { DatabaseSync } from "node:sqlite";
 import { test } from "node:test";
 import { retainedEvidenceLimits } from "../../src/core/retained-evidence.js";
 import { SqliteWorkspaceComparisonStore } from "../../src/standalone/comparison-store.js";
+import { OperatorApi } from "../../src/standalone/operator-api.js";
 import type {
   WorkspaceComparisonContent,
   WorkspaceComparisonEntry,
@@ -846,4 +847,63 @@ test("stored anchor rows in today's shape still read back through the derived sc
     originRoot,
   });
   assert.deepEqual(store.reviewAnchor(task.taskId, gapId), { anchor: gap });
+});
+
+test("a workspace-file anchor is never compared with a later workspace generation", async (t) => {
+  const f = await createOperatorFixture();
+  t.after(() => f.close());
+  const task = await seedReviewTask(f, "Anchor rebind", "Review exact lines");
+  const workspace = (await f.service.taskWorkspace(task.taskId))!;
+  assert.equal(workspace.state, "ready");
+  const original = Buffer.from("first\nsecond\nthird\n");
+  await writeFile(join(workspace.path, "notes.txt"), original);
+  const staged = await f.service.stageReviewAnchorDraft({
+    taskId: task.taskId,
+    operationId: randomUUID(),
+    anchors: [
+      {
+        taskId: task.taskId,
+        repositoryId: null,
+        path: "notes.txt",
+        sourceKind: "workspace-file" as const,
+        context: "workspace" as const,
+        side: "file" as const,
+        startLine: 1,
+        endLine: 2,
+        contentSha256: digest(original),
+      },
+    ],
+  });
+  const [anchorId] = staged.anchorIds;
+  assert.ok(anchorId);
+  const excerpt = Buffer.from("first\nsecond\n");
+  const read = async () => {
+    const { data } = await new OperatorApi(f.service, [
+      f.directory,
+    ]).readRetainedReviewAnchor(task.taskId, anchorId);
+    assert.equal(data.state, "available");
+    assert.deepEqual(
+      f.service.retainedEvidence().reviewAnchor(task.taskId, anchorId)?.bytes,
+      excerpt,
+    );
+    return data.state === "available" ? data.status : undefined;
+  };
+  assert.equal(await read(), "current");
+
+  finishTask(f.service, task.taskId);
+  const removed = await f.service.removeTaskWorkspace(task.taskId, "manual");
+  assert.equal(removed.outcome, "cleaned");
+  assert.equal(await read(), "unknown");
+
+  const again = await f.service.provisionTask(task.taskId);
+  assert.equal(again.state, "ready", again.reason ?? "");
+  assert.notEqual(again.workspaceId, workspace.workspaceId);
+  // The new generation's file at the same path decides nothing about the old anchor.
+  await writeFile(join(again.path, "notes.txt"), original);
+  assert.equal(await read(), "unknown");
+  await writeFile(join(again.path, "notes.txt"), "different\n");
+  assert.equal(await read(), "unknown");
+
+  await f.reopen();
+  assert.equal(await read(), "unknown");
 });

@@ -1236,11 +1236,12 @@ together, and asking again returns that record. A failure or uncertain Git outco
 after an effect started holds the workspace and the journal, keeps the lease and is
 never reported as removal; after a restart it stays held with nothing more deleted.
 A task whose workspace was removed gets a new one, under a new workspace ID and path,
-when it is provisioned again or a turn is admitted for it, as after the task is
-reopened. Each repository starts at its removal record's commit: the task branch's last
+when it is provisioned again or for a turn that admission would accept, as after the
+task is reopened; a turn admission refuses provisions nothing. Each repository starts at its removal record's commit: the task branch's last
 confirmed push, or the provisioned base when it had no task commits, never a branch's
 current tip. The task keeps its repositories, each source must still match its
-recorded Git identity, and an imported task's repositories must still be linked. A
+recorded Git identity, and the project must still link each repository exactly, verified
+as a first workspace's links are, for a local or imported task. A
 commit missing from the managed repository is fetched from the recorded branch through
 the code host's isolated branch fetch where one is configured, and only exactly the
 recorded commit is accepted; otherwise the removed binding stays and admission waits
@@ -1248,7 +1249,8 @@ with the reason. Concurrent provisioning and admissions create one workspace. On
 workspace with a completed removal record is replaced; a missing, held or interrupted
 workspace is not. The removed generation and its record are retained. A conversation
 that ran there resumes in the new workspace, with its working directory and scratch,
-rather than starting again; a continuation from any other workspace is still held.
+rather than starting again, and a queued request that recorded the removed workspace
+runs in the new one; a continuation from any other workspace is still held.
 Missing workspaces hold affected execution visibly.
 Each task workspace root has a `scratch` directory, created when the workspace is
 provisioned or, for an older workspace, before its next turn. An occupied scratch path
@@ -2803,8 +2805,10 @@ the commit its result recorded, in the repository that owns the worktree
 the workspace generation its work ran in: after a removed workspace is replaced, its
 artifacts are read only from that generation's repositories at the recorded commit,
 never from the new workspace or from whichever repository a later workspace places at
-the same relative path, and a result whose generation cannot be attributed is not
-read from a commit. Managed repositories keep automatic garbage collection off, so a
+the same relative path, and once a workspace has been replaced, a result whose
+generation cannot be attributed is not read from a commit. A workspace-file review
+anchor captured in a removed generation keeps its retained excerpt and reports an
+unknown status rather than being compared with the new workspace. Managed repositories keep automatic garbage collection off, so a
 removed workspace's commits stay readable. A file that was
 never committed and has changed since is not served. Both reads apply the current
 policy first and again after reading: a repository the project no longer links

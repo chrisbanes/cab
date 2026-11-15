@@ -945,9 +945,13 @@ export class WorkspaceManager implements TaskWorkspaceLifecycle {
       const proof = proofs.find(
         (p) => p.repositoryId === repository.repositoryId,
       );
-      if (!proof || !repository.gitCommonDir)
+      if (!proof)
         throw new Error(
-          `The removal record has no commit for ${repository.repositoryId}`,
+          `The removal record does not cover ${repository.repositoryId}`,
+        );
+      if (!repository.gitCommonDir)
+        throw new Error(
+          `${repository.repositoryId} has no recorded repository identity`,
         );
       await this.ensureSourceStillMatches(binding.taskId, repository);
       const present = () =>

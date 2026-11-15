@@ -416,6 +416,7 @@ import {
   taskGitWritableRoots,
   taskScratchPath,
   type TaskWorkspaceBinding,
+  type TaskWorkspaceRepository,
   type TaskWorkspaceRepositoryInput,
   type WorkspaceCleanupResult,
   type WorkspaceTrimResult,
@@ -5666,7 +5667,7 @@ export class StandaloneService {
               "Imported task repository grant changed during verification",
             );
         }
-        this.assertRemovedWorkspaceGranted(taskId);
+        await this.assertRemovedWorkspaceLinked(taskId);
         return this.started().workspaces.provision(taskId, repositories);
       },
     );
@@ -5682,7 +5683,7 @@ export class StandaloneService {
       "callback",
       async () => {
         this.domain().task(taskId);
-        this.assertRemovedWorkspaceGranted(taskId);
+        await this.assertRemovedWorkspaceLinked(taskId);
         return this.started().workspaces.reprovision(taskId);
       },
     );
@@ -5693,28 +5694,75 @@ export class StandaloneService {
    * task's continued conversation may have run. Its resume moves to the current workspace.
    */
   private removedPredecessor(taskId: string, workspace: string): boolean {
+    return this.replacedGenerations(taskId).some((g) => g.path === workspace);
+  }
+
+  /**
+   * Whether a removed workspace of the task was replaced by a later binding, so an
+   * unattributed path or root can no longer be assumed to be the current binding's.
+   */
+  hasReplacedWorkspace(taskId: string): boolean {
+    return this.replacedGenerations(taskId).length > 0;
+  }
+
+  /** Removed generations of the task that a later binding has replaced. */
+  private replacedGenerations(taskId: string) {
     const lifecycle = new WorkspaceLifecycleStore(this.cache!);
     const current = this.started().workspaceBindings.get(taskId);
     return lifecycle
       .forTask(taskId)
-      .some(
+      .filter(
         (g) =>
-          g.path === workspace &&
           g.workspaceId !== current?.workspaceId &&
           lifecycle.removal(g) !== undefined,
       );
   }
 
-  /** A removed workspace is provisioned again only with repositories the project still grants. */
-  private assertRemovedWorkspaceGranted(taskId: string): void {
-    const binding = this.started().workspaceBindings.get(taskId);
+  /**
+   * A removed workspace is provisioned again only from repositories the project still links
+   * exactly, verified as a first workspace's are, for a local or imported task alike.
+   */
+  private async assertRemovedWorkspaceLinked(taskId: string): Promise<void> {
+    const { workspaceBindings } = this.started();
+    const binding = workspaceBindings.get(taskId);
     if (
-      binding?.state === "archived" &&
-      this.repositoryAccessRevoked(taskId, binding.repositories)
+      binding?.state !== "archived" ||
+      !binding.repositories.length ||
+      !workspaceBindings.removalRecord(taskId)
     )
-      throw new Error(
-        "The project no longer links every repository of this task's removed workspace",
+      return;
+    const projectId = String(this.domain().task(taskId).projectId);
+    const links = this.domain().repositoryLinks(projectId);
+    for (const repository of binding.repositories) {
+      const link = links.links.find(
+        (candidate) =>
+          candidate.repositoryId === repository.repositoryId &&
+          candidate.path === repository.sourcePath &&
+          candidate.ref === repository.ref &&
+          candidate.gitCommonDirectory ===
+            (repository.sourceGitCommonDir ?? repository.gitCommonDir),
       );
+      if (!link)
+        throw new Error(
+          `The project no longer links ${repository.repositoryId} as this task's removed workspace used it`,
+        );
+      const current = await verifiedRepository({
+        repositoryId: link.repositoryId,
+        path: link.path,
+        ref: link.ref,
+        ...linkBaseFields(link),
+      });
+      if (
+        current.gitCommonDirectory !== link.gitCommonDirectory ||
+        current.path !== link.path
+      )
+        throw new Error("Linked repository identity changed");
+    }
+    if (
+      StandaloneService.grantOf(this.domain().repositoryLinks(projectId)) !==
+      StandaloneService.grantOf(links)
+    )
+      throw new Error("Linked repository access changed");
   }
 
   /**
@@ -5734,8 +5782,9 @@ export class StandaloneService {
     const current = this.started().workspaceBindings.get(taskId);
     const lifecycle = new WorkspaceLifecycleStore(this.cache!);
     const generation = workId ? lifecycle.forWork(taskId, workId) : undefined;
+    // Unattributed work is the current binding's only while no earlier generation was replaced.
     if (!generation)
-      return lifecycle.forTask(taskId).length <= 1 ? current : undefined;
+      return this.hasReplacedWorkspace(taskId) ? undefined : current;
     if (generation.workspaceId === current?.workspaceId) return current;
     return lifecycle.removal(generation)
       ? { ...generation, state: "archived" }
@@ -5798,21 +5847,19 @@ export class StandaloneService {
     return this.started().coordination.resultWorkspaces(taskId);
   }
 
-  /** Reads from the repository of the generation `workId` ran in, if the project still grants it. */
+  /**
+   * Reads from a stored repository binding, as `resultWorkspace` resolved it, if an imported
+   * task's project still links it; the operator read applies the rest of the current policy.
+   */
   async readCommittedFile(
     taskId: string,
-    workId: string | null,
-    repositoryId: string,
+    repository: TaskWorkspaceRepository,
     commit: string,
     path: string,
     maxBytes: number,
   ) {
     this.domain().task(taskId);
-    const repository = this.resultWorkspace(taskId, workId)?.repositories.find(
-      (r) => r.repositoryId === repositoryId,
-    );
-    if (!repository || this.repositoryAccessRevoked(taskId, [repository]))
-      return undefined;
+    if (this.repositoryAccessRevoked(taskId, [repository])) return undefined;
     return this.started().workspaces.readCommittedFile(
       repository,
       commit,
@@ -10225,6 +10272,47 @@ export class StandaloneService {
    * provider read is incomplete it waits; any other change holds it (see `validate` below).
    * Draft turns, local tasks, inbox requests and first turns keep their own rules.
    */
+  /** The domain's admission refusals for a task turn at its captured revisions. */
+  private assignmentRefusals(request: TurnRequest): string[] {
+    const {
+      taskId,
+      assignmentId,
+      taskVersion,
+      assignmentVersion,
+      instructionsRevision,
+      profileRevision,
+    } = request;
+    if (
+      taskId === null ||
+      assignmentId === null ||
+      taskVersion === null ||
+      assignmentVersion === null ||
+      instructionsRevision === null ||
+      profileRevision === null
+    )
+      throw new Error("Task request is missing captured revisions");
+    const domain = this.domain();
+    return domain
+      .assignmentAdmission(assignmentId, {
+        taskVersion,
+        assignmentVersion,
+        instructionsRevision,
+        profileRevision,
+      })
+      .reasons.filter(
+        // A draft turn runs while the task is not Ready. Making the task Ready since
+        // it was queued does not make it stale, but editing its title or outcome does.
+        (reason) =>
+          !(
+            request.draftTurn &&
+            (reason === "task-unready" ||
+              (reason === "task-revision-changed" &&
+                request.draftTaskDigest ===
+                  draftTaskDigest(domain.task(taskId))))
+          ),
+      );
+  }
+
   private reobservedAllowance(request: TurnRequest): boolean {
     const { state, reobservedTaskVersions } = this.started();
     if (
@@ -10373,9 +10461,24 @@ export class StandaloneService {
         // the recovery authority; only a removed one is provisioned again.
         const existing = this.current?.workspaceBindings.get(request.taskId);
         if (!state.taskHold(request.taskId)) {
-          if (existing?.state === "archived")
+          if (existing?.state === "archived") {
+            // New worktrees are created only for a turn admission would now accept.
+            const refusals = this.assignmentRefusals(request).filter(
+              (reason) =>
+                !(
+                  reason === "task-revision-changed" &&
+                  this.reobservedAllowance(request)
+                ),
+            );
+            if (refusals.length)
+              throw new Error(
+                `The removed workspace is provisioned again only for an admissible turn: ${refusals.join(", ")}`,
+              );
             await this.reprovisionTaskWorkspace(request.taskId);
-          else if (!existing && !state.hasTaskWorkspaceEvidence(request.taskId))
+          } else if (
+            !existing &&
+            !state.hasTaskWorkspaceEvidence(request.taskId)
+          )
             await this.provisionTaskWorkspace(
               request.taskId,
               await this.firstWorkspaceRepositories(request),
@@ -10415,26 +10518,7 @@ export class StandaloneService {
         )
           throw new Error("Task request is missing captured revisions");
         validateAssignment = () => {
-          const domain = this.domain();
-          const reasons = domain
-            .assignmentAdmission(assignmentId, {
-              taskVersion,
-              assignmentVersion,
-              instructionsRevision,
-              profileRevision,
-            })
-            .reasons.filter(
-              // A draft turn runs while the task is not Ready. Making the task Ready since
-              // it was queued does not make it stale, but editing its title or outcome does.
-              (reason) =>
-                !(
-                  request.draftTurn &&
-                  (reason === "task-unready" ||
-                    (reason === "task-revision-changed" &&
-                      request.draftTaskDigest ===
-                        draftTaskDigest(domain.task(binding.taskId))))
-                ),
-            );
+          const reasons = this.assignmentRefusals(request);
           if (this.reobservedAllowance(request)) {
             // Hold with the structural reasons, not the revision the re-observation caused.
             // Only an incomplete provider read keeps waiting. If nothing else remains the
@@ -10482,7 +10566,16 @@ export class StandaloneService {
       } else throw new Error("Turn request has no workspace or task binding");
       if (!isAbsolute(workspaceKey) || !lstatSync(workspaceKey).isDirectory())
         throw new Error("Workspace must be an existing real directory");
-      store.setWorkspace(request.workId, workspaceKey);
+      store.setWorkspace(
+        request.workId,
+        workspaceKey,
+        // A request that recorded a since-removed workspace runs in its replacement.
+        context &&
+          request.workspace &&
+          this.removedPredecessor(context.taskId, request.workspace)
+          ? request.workspace
+          : undefined,
+      );
     } catch (error) {
       if (
         !this.started().supervisor.hasKnownRisk(request.workId) &&
@@ -10953,7 +11046,8 @@ export class StandaloneService {
               previous.threadId,
             ),
           );
-        // Resume keeps the workspace and the bound model settings.
+        // Resume runs in the current workspace, with the bound model settings; a conversation
+        // from a removed predecessor generation moves there.
         await guard(
           runtime.resumeThread(
             previous.threadId,
