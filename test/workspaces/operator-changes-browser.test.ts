@@ -351,7 +351,7 @@ test("Changes opens on the Branch comparison against the configured ref", async 
   assert.equal(
     await changes
       .getByText(
-        "Newer workspace changes are available. Refresh comparison to update.",
+        "A newer workspace observation is known. Refresh comparison to update.",
         { exact: true },
       )
       .count(),
@@ -676,7 +676,7 @@ test("Files observations arriving after navigation stay stale after closing the 
   assert.equal(
     await changes
       .getByText(
-        "Newer workspace changes are available. Refresh comparison to update.",
+        "A newer workspace observation is known. Refresh comparison to update.",
         { exact: true },
       )
       .count(),
@@ -750,7 +750,7 @@ test("Files observations arriving after navigation stay stale after closing the 
   assert.equal(
     await changes
       .getByText(
-        "Newer workspace changes are available. Refresh comparison to update.",
+        "A newer workspace observation is known. Refresh comparison to update.",
         { exact: true },
       )
       .count(),
@@ -770,13 +770,13 @@ test("Files observations arriving after navigation stay stale after closing the 
   releasePreviewRead();
   await changes
     .getByText(
-      "Newer workspace changes are available. Refresh comparison to update.",
+      "A newer workspace observation is known. Refresh comparison to update.",
       { exact: true },
     )
     .waitFor();
   await changes
     .getByText(
-      "Newer workspace changes are available. Refresh comparison to update.",
+      "A newer workspace observation is known. Refresh comparison to update.",
       { exact: true },
     )
     .waitFor();
@@ -791,7 +791,7 @@ test("Files observations arriving after navigation stay stale after closing the 
   await openTaskTab(page, "Changes");
   await changes
     .getByText(
-      "Newer workspace changes are available. Refresh comparison to update.",
+      "A newer workspace observation is known. Refresh comparison to update.",
       { exact: true },
     )
     .waitFor();
@@ -2082,7 +2082,7 @@ test("production Changes retains pending and latest-finished Last-turn provenanc
   assert.equal(
     await changes
       .getByText(
-        "Newer workspace changes are available. Refresh comparison to update.",
+        "A newer workspace observation is known. Refresh comparison to update.",
         { exact: true },
       )
       .count(),
@@ -2259,7 +2259,7 @@ test("production Changes retains pending and latest-finished Last-turn provenanc
   await comparisonTargetControl.selectOption("branch");
   await changes
     .getByText(
-      "Newer workspace changes are available. Refresh comparison to update.",
+      "A newer workspace observation is known. Refresh comparison to update.",
       { exact: true },
     )
     .waitFor();
@@ -2286,7 +2286,7 @@ test("production Changes retains pending and latest-finished Last-turn provenanc
   assert.equal(
     await changes
       .getByText(
-        "Newer workspace changes are available. Refresh comparison to update.",
+        "A newer workspace observation is known. Refresh comparison to update.",
         { exact: true },
       )
       .count(),
@@ -2370,7 +2370,7 @@ test("production Changes retains pending and latest-finished Last-turn provenanc
     await comparisonTargetControl.selectOption(targetName);
     await changes
       .getByText(
-        "Newer workspace changes are available. Refresh comparison to update.",
+        "A newer workspace observation is known. Refresh comparison to update.",
         { exact: true },
       )
       .waitFor();

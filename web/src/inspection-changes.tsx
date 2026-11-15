@@ -760,7 +760,7 @@ export function TaskWorkspaceChanges({
           {snapshot && <span>As of {dateLabel(snapshot.observedAt)}</span>}
           {staleWorkspaceSnapshot && (
             <span role="status">
-              Newer workspace changes are available. Refresh comparison to
+              A newer workspace observation is known. Refresh comparison to
               update.
             </span>
           )}
