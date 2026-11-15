@@ -50,8 +50,9 @@ const fakeGrant = () => ({
         binary: `/FAKE-NOT-AUTHORIZED/${harness}`,
         sha256: "0".repeat(64),
         version: "fake",
-        model: "fake",
-        effort: "low",
+        // Claude covers the installed-default selection a live grant uses.
+        model: harness === "claude" ? null : "fake",
+        effort: harness === "claude" ? null : "low",
         configHome: join(fakeRoot, `${harness}-home`),
       },
     ]),

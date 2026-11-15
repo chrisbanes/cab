@@ -9,6 +9,7 @@ import {
   renameSync,
   writeFileSync,
 } from "node:fs";
+import { userInfo } from "node:os";
 import { basename, dirname, isAbsolute, join, resolve } from "node:path";
 import { performance } from "node:perf_hooks";
 import { fileURLToPath } from "node:url";
@@ -50,7 +51,8 @@ export function validateGrant(input, grant, authorizedDigest) {
   );
   assert.equal(grant.schema, "cab.workspace-environment-grant/v1");
   assert.equal(grant.planDigest, planDigest);
-  assert.match(grant.grantId, /^[0-9a-f-]{36}$/);
+  // Controller grant identifiers are opaque short slugs, such as `1727-t1-20261115-a`.
+  assert.match(grant.grantId, /^[0-9a-z][0-9a-z-]{0,63}$/);
   assert.equal(grant.maxTurns, 8);
   assert.equal(grant.deadlineMs, 900_000);
   assert.ok(
@@ -81,8 +83,11 @@ export function validateGrant(input, grant, authorizedDigest) {
     assert.ok(
       typeof runtime.version === "string" && runtime.version.length > 0,
     );
-    assert.ok(typeof runtime.model === "string" && runtime.model.length > 0);
-    assert.ok(typeof runtime.effort === "string" && runtime.effort.length > 0);
+    // null selects the installed runtime's own default, as a profile without overrides does.
+    for (const value of [runtime.model, runtime.effort])
+      assert.ok(
+        value === null || (typeof value === "string" && value.length > 0),
+      );
     assert.equal(runtime.configHome, join(grant.root, `${harness}-home`));
   }
   return grant;
@@ -404,7 +409,13 @@ export async function initializeProduction(grant, overrides = {}) {
         TMPDIR: join(grant.root, "native-tmp"),
       };
       if (harness === "codex") env.CODEX_HOME = grant.runtimes.codex.configHome;
-      else env.CLAUDE_CONFIG_DIR = grant.runtimes.claude.configHome;
+      else {
+        env.CLAUDE_CONFIG_DIR = grant.runtimes.claude.configHome;
+        // Claude Code 2.1.325 suffixes its Keychain item with a hash of CLAUDE_CONFIG_DIR unless
+        // this is empty, which selects the native login; HOME stays the service user's, as in cab.
+        env.CLAUDE_SECURESTORAGE_CONFIG_DIR = "";
+        env.HOME = userInfo().homedir;
+      }
       return env;
     };
     const safety = (harness) => ({
