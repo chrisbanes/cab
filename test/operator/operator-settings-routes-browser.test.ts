@@ -249,6 +249,66 @@ test("section links push entries, focus the heading at the top, and Back and For
   assert.deepEqual(await current(page), ["Agents"]);
 });
 
+test("Back to a section restores its saved position once its reads have grown the page", async (_t, journey) => {
+  const { page } = await startSettings(journey, "/settings/projects", {
+    width: 1366,
+    height: 400,
+  });
+  await page.getByText("Lead: Mira").waitFor();
+  await page.waitForLoadState("networkidle");
+  // The bottom of the loaded page: unreachable while its rows are still loading.
+  const saved = await page.evaluate(() => {
+    scrollTo(0, document.documentElement.scrollHeight);
+    return scrollY;
+  });
+  assert.ok(saved > 100, String(saved));
+  const held: Route[] = [];
+  const hold = (r: Route) => {
+    held.push(r);
+  };
+  const back = async (act?: () => Promise<void>) => {
+    // Clicked in script, so the page leaves from the position it was scrolled to.
+    await nav(page)
+      .getByRole("link", { name: "Agents", exact: true })
+      .evaluate((a) => (a as HTMLElement).click());
+    await h1(page, "Agents");
+    await page.route("**/api/operator/projects/*/configuration", hold);
+    await page.goBack();
+    await h1(page, "Projects");
+    await page.getByText("Loading configuration…").first().waitFor();
+    await page.evaluate(
+      () =>
+        new Promise((done) =>
+          requestAnimationFrame(() => requestAnimationFrame(done)),
+        ),
+    );
+    // Still loading: the shorter page cannot hold the saved position yet.
+    assert.ok((await page.evaluate(() => scrollY)) < saved);
+    await act?.();
+    for (const r of held.splice(0)) await r.continue();
+    await page.unroute("**/api/operator/projects/*/configuration", hold);
+    await page.getByText("Lead: Mira").waitFor();
+  };
+  await back();
+  await page
+    .waitForFunction((y) => scrollY === y, saved, { timeout: 3000 })
+    .catch(async () =>
+      assert.fail(
+        `restored to ${await page.evaluate(() => scrollY)} of ${saved}`,
+      ),
+    );
+  // Reader input while it loads keeps the reader's position instead.
+  await back(() => page.mouse.wheel(0, -40));
+  await page.waitForLoadState("networkidle");
+  await page.evaluate(
+    () =>
+      new Promise((done) =>
+        requestAnimationFrame(() => requestAnimationFrame(done)),
+      ),
+  );
+  assert.ok((await page.evaluate(() => scrollY)) < saved);
+});
+
 test("both account menus mark Settings current on section and detail pages", async (_t, journey) => {
   const { page, web, ids } = await startSettings(
     journey,

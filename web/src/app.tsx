@@ -550,8 +550,41 @@ function rewriteLegacyEntry() {
   if (next) history.replaceState(history.state, "", next);
   return next !== null;
 }
+/** Ends a pending Settings restoration; replaced while one is running. */
+let stopRestore = () => {};
+/** How long a remounted Settings page may take to grow back to its saved position. */
+const RESTORE_MS = 5000;
+/**
+ * Restores a saved position on a Settings section page, which remounts and reads again
+ * on Back/Forward: while its content is still loading the page is too short and the
+ * position clamps, so it is retried as the page grows, until reached, the reader acts,
+ * another navigation starts or `RESTORE_MS` passes.
+ */
+function restoreAsPageGrows(y: number) {
+  stopRestore();
+  const events = ["wheel", "touchstart", "pointerdown", "keydown"] as const;
+  const observer = new ResizeObserver(() => attempt());
+  const timer = setTimeout(() => stop(), RESTORE_MS);
+  const stop = () => {
+    observer.disconnect();
+    clearTimeout(timer);
+    for (const e of events) removeEventListener(e, stop, { capture: true });
+    stopRestore = () => {};
+  };
+  const attempt = () => {
+    scrollTo(0, y);
+    if (Math.abs(scrollY - y) < 1) stop();
+  };
+  stopRestore = stop;
+  for (const e of events)
+    addEventListener(e, stop, { capture: true, passive: true });
+  // The page content grows as its reads arrive; the body keeps the viewport height.
+  observer.observe(document.querySelector("main") ?? document.body);
+  attempt();
+}
 /** Records a new entry for `href` and returns the address it was recorded at. */
 function pushAppEntry(href: string, navigationScope: string) {
+  stopRestore();
   href = canonicalHref(href);
   const fromSearch = location.pathname === "/search";
   history.pushState(
@@ -728,6 +761,7 @@ export function App() {
   // biome-ignore lint/correctness/useExhaustiveDependencies: current scope ref guards browser Back/Forward entries across authentication expiry.
   useEffect(() => {
     const pop = () => {
+      stopRestore();
       rewriteLegacyEntry();
       // An entry reached at a URL it was not recorded for (a fragment changed natively,
       // with the state copied or dropped) is a new entry: it starts clean, so no saved
@@ -748,8 +782,10 @@ export function App() {
       // Once the page has rendered: a saved position is restored, otherwise the entry
       // starts at the top unless its page lands on a target.
       requestAnimationFrame(() => {
-        if (typeof state?.scrollY === "number") scrollTo(0, state.scrollY);
-        else if (!landingTargetId(pathname, hash)) scrollTo(0, 0);
+        if (typeof state?.scrollY !== "number") {
+          if (!landingTargetId(pathname, hash)) scrollTo(0, 0);
+        } else if (sectionForPath(pathname)) restoreAsPageGrows(state.scrollY);
+        else scrollTo(0, state.scrollY);
       });
     };
     // A fragment set without a history traversal still gets its section page.
