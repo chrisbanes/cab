@@ -6,9 +6,9 @@ defined by the web app (`web/src/`) and its browser journey tests; this document
 holds the rules that apply across them. Explore new screens in any tool; those
 artboards are throwaway and are not maintained once a screen ships.
 
-The [Settings section-page proposal](settings-pages/proposal.md) explores persistent
-route-based section navigation and an inline Sections disclosure on phones. This
-is a proposed navigation foundation for review, not shipped behaviour; its artboard
+The [Settings section-page design](settings-pages/proposal.md) is the accepted persistent
+route-based section navigation and inline Sections disclosure on phones. It is not
+implemented, so it is not yet shipped behaviour; its artboard
 keeps the existing tokens, typography and shell. User flows and SPEC continue to
 describe the current application until the design is implemented.
 

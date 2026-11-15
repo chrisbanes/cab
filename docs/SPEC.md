@@ -1063,6 +1063,16 @@ settle external effects, or qualify a final operational cutover. See the
 [macOS operations procedure](operations/standalone-macos.md) and its
 [bounded evidence](evidence/s08a-operations-2026-09-30.md).
 
+### Task execution allowance (planned)
+
+Accepted by [ADR-1037](adr/1037-task-execution-allowance.md); not implemented. A task
+may carry an optional allowance, off by default with no default number, on net charged
+execution generations shared by its lead and every cab delegate. It is checked and
+charged in the admission transaction, corrected once for a proved pre-turn refusal, and
+holds only new admissions at exhaustion while admitted work finishes. Only the operator
+can set its absolute total. It does not bound a turn's duration, runtime steps, native
+subagents, tool work, tokens, cost or host load, and is not a deadline or spend cap.
+
 ## Workspaces and execution access
 
 cab owns task workspace creation, identity, retention and cleanup. Use one

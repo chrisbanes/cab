@@ -1,26 +1,26 @@
 # Settings as section pages
 
-Unaccepted design proposal for maintainer review, reusing [PR #1613](https://github.com/chrisbanes/cab/pull/1613). No production routes, reads or behaviour
-change in this PR. Proposal publication or merge is not design acceptance; later implementation requires explicit acceptance and authorization. [Open the six artboards](index.html) in a browser; their fixture
+Accepted design for [#1581](https://github.com/chrisbanes/cab/issues/1581), reusing [PR #1613](https://github.com/chrisbanes/cab/pull/1613). The section routes, reads and
+behaviour described here are not implemented; production still serves the long index, and implementation needs its own authorization. [Open the six artboards](index.html) in a browser; their fixture
 data is illustrative and their controls do not save. The gallery has fixed desktop
 and phone viewports; [the prototype](artboard.html) responds to your browser width.
 
 ## Current source and scope
 
-The audit uses [main at a1ab52f5](https://github.com/chrisbanes/cab/tree/a1ab52f5729317a6b0cc552e99aed96d1d90c01f), not the artboards as evidence of shipped behaviour. The [design-only brief](https://github.com/chrisbanes/cab/issues/1581#issuecomment-6746154794) and [r1 plan](https://github.com/chrisbanes/cab/issues/1581#issuecomment-6876502974) govern this delivery. The brief's “no artboard” statement is stale; the existing proposal remains unaccepted.
+The audit uses [main at a1ab52f5](https://github.com/chrisbanes/cab/tree/a1ab52f5729317a6b0cc552e99aed96d1d90c01f), not the artboards as evidence of shipped behaviour.
 
 Today `/settings` mounts the long index; only Runtime already has its section page. The following owners must agree in any later implementation:
 
 | Current source | Verified responsibility; later change |
 | --- | --- |
-| [`app.tsx`](../../web/src/app.tsx) | `knownRoute` allow-list and pathname dispatch are separate; both need the exact proposed sections. `parentRoute` owns phone Back. `AccountRows` currently marks Settings current only at `/settings`; section and existing detail descendants need consistent Settings ancestry. `account-menu.tsx` also opens the root. |
-| [`operator-web.ts`](../../src/standalone/operator-web.ts) | `OperatorWebBoundary.shell` separately permits index, Runtime, create and UUID detail/recovery paths. Register only the proposed concrete section paths; no wildcard `/settings/*` contract. |
+| [`app.tsx`](../../web/src/app.tsx) | `knownRoute` allow-list and pathname dispatch are separate; both need the exact sections. `parentRoute` owns phone Back. `AccountRows` currently marks Settings current only at `/settings`; section and existing detail descendants need consistent Settings ancestry. `account-menu.tsx` also opens the root. |
+| [`operator-web.ts`](../../src/standalone/operator-web.ts) | `OperatorWebBoundary.shell` separately permits index, Runtime, create and UUID detail/recovery paths. Register only the concrete section paths; no wildcard `/settings/*` contract. |
 | [`operator.ts`](../../src/standalone/operator.ts) | GET/HEAD `/app/...` returns 308 to the root path with query, without a new cookie; leading slashes are collapsed. The browser owns the fragment. |
 | [`settings-view.ts`](../../web/src/settings-view.ts) | `settingsHeader` owns titles and crumbs; intermediate Projects/Agents crumbs currently have no href. Keep first-project setup's latched Overview/New project exception and the `?tab=github` → Task source alias. |
 | [`settings-sections.ts`](../../web/src/settings-sections.ts) | Safe fragment decode, section order/selection and `useFragmentLanding` share landing decisions with App. Saved scroll wins; entry URL, nav key and authentication scope distinguish history entries. |
 | [`settings-index.tsx`](../../web/src/settings-index.tsx) | All panels mount, Readiness moves first when turnStarted is false, select-plus-Go uses max-width 759px and an effect corrects focused content after reordering. Page separation can retire these index-only mechanics. |
 
-The source audit includes all href helpers and literal Settings callers, push payloads, Recovery/Readiness landing, create/detail headers, shell history, sign-in and page loaders. The route/read tables below allocate existing behaviour; they do not authorize changes to provider access, credentials, holds, approvals or recovery. Concurrent #1666 recovery work is not a dependency or an assumed shipped capability. No production, accepted SPEC, DESIGN or user-flow file changes here.
+The source audit includes all href helpers and literal Settings callers, push payloads, Recovery/Readiness landing, create/detail headers, shell history, sign-in and page loaders. The route/read tables below allocate existing behaviour; they do not authorize changes to provider access, credentials, holds, approvals or recovery. Concurrent #1666 recovery work is not a dependency or an assumed shipped capability. The SPEC, user flows and production code describe the current application until implementation.
 
 ## Recommendation
 
@@ -99,7 +99,7 @@ This is prototype evidence, not production qualification. Production route/legac
 
 ## Route table
 
-All destinations below are proposed. Existing detail URLs remain supported.
+The destinations below are planned. Existing detail URLs remain supported.
 Legacy rewrites use client-side `replaceState`, before section resources mount:
 URL fragments never reach the server, so an HTTP redirect alone cannot do this.
 Preserve unrelated query parameters. A rewrite must not add a Back-button loop.
@@ -177,7 +177,7 @@ when visited. No hidden pages subscribe to header refresh or start background re
 ## Implementation slices and evidence
 
 These are estimates of reviewable slices, not elapsed-time promises. They belong
-to a subsequent implementation task; merging this proposal does not perform that work.
+to a subsequent implementation task.
 
 1. **Route and entry contract (medium):** central section-id → route mapping;
    `/settings` resolver and legacy rewrites; register all nine routes in the
@@ -211,20 +211,20 @@ to a subsequent implementation task; merging this proposal does not perform that
    checks and affected operator suites; final `check` CI must pass before merge.
    Review desktop, phone, tablet, short phone, light/dark, long lists and failures.
 
-No current-tense user-flow or SPEC changes accompany this design-only proposal;
-those documents must describe the shipped application until implementation.
+User-flow and SPEC documents describe the shipped application and change only
+with the implementation.
 
-## Proposed foundation wording
+## Foundation wording
 
-Proposed addition to `design/DESIGN.md`, **only after explicit acceptance and later implementation**:
+Accepted foundation wording, to be added to the foundations in `design/DESIGN.md` when implemented:
 
 > Global Settings uses a stable nine-link section navigation. Desktop content retains the 176px local column within the existing 232px/48px shell. Through 759px a house Button exposes the same ordinary links inline, reports expanded state, and keeps the current section visible while closed. At 760px local links remain visible; the global drawer threshold stays 1120px. Phone controls retain 44px targets. Section route, page title, current link, ancestor crumbs and parent Back agree. New navigation focuses its heading; saved browser-history restoration and reader interaction take precedence over delayed target landing.
 
-This changes navigation composition, not tokens, typography, colour, global drawer or density foundations. It is proposed text, not a change to the accepted foundations. Fixtures keep compact panels, 13px body text and visible state words; no form redesign or unrelated copy programme is included. Throwaway artboards can be discarded or reverted if the recommendation is rejected, with no production records affected.
+This changes navigation composition, not tokens, typography, colour, global drawer or density foundations. It is not yet part of the shipped foundations. Fixtures keep compact panels, 13px body text and visible state words; no form redesign or unrelated copy programme is included.
 
-## Maintainer decisions
+## Decisions
 
-The recommendation remains open for explicit design acceptance:
+Each choice below states the adopted design and its alternative:
 
 | Choice | Recommendation and credible alternative | Consequence for later work |
 | --- | --- | --- |
@@ -234,6 +234,6 @@ The recommendation remains open for explicit design acceptance:
 | Phone | House Button plus inline ordinary links. Always-visible wrapped links remove the reveal tap but push content down; a house Sheet/drawer saves vertical space but adds overlay/focus/Back interactions alongside global navigation. Native details/summary is simpler HTML but navigation announcements vary across browser/AT combinations. | A drawer materially expands focus and history validation; inline disclosure is bounded. |
 | Order | Stable Projects → Runtime → Agents → Routing → GitHub discovery → GitLab credentials → CLI credentials → Notifications → Readiness. Readiness first is a landing choice, not a reorder. | Dynamic order recreates displacement/focus work; keep the medium slice bounded. |
 | Crumbs and Back | Link concrete ancestor sections; final crumb is text. Parent Back follows that hierarchy; browser Back restores its own entry. An alternative generic Settings parent is simpler but may resolve to a different section before first turn. | Concrete parents need focused header/Back tests; no existing create/detail URL rename. |
-| Foundations | Accept the proposed wording above only with the navigation choices. Alternative: retain current long-index foundation and reject these artifacts. | No accepted DESIGN/SPEC/user-flow edit until later authorized implementation. |
+| Foundations | Adopt the wording above with the navigation choices. Alternative: retain the current long-index foundation. | No shipped DESIGN/SPEC/user-flow edit until implementation. |
 
-The four later increments require explicit design acceptance and a separately authorized implementation contract. They are not four mandated PRs, new issues or elapsed-time promises. This proposal can be revised or rejected; merging its artifacts does not record a choice, close #1581 or start production work.
+The four increments require a separately authorized implementation contract. They are not four mandated PRs, new issues or elapsed-time promises.

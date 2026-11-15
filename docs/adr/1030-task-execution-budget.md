@@ -1,12 +1,13 @@
 ---
-status: proposed
+status: superseded
+superseded_by: [ADR-1037]
 ---
 
 # Bound task work by cab-admitted turns
 
-Proposal for [#1573](https://github.com/chrisbanes/cab/issues/1573).
-This document requests a product decision. It changes no accepted contract and
-authorises no implementation, configuration changes, billing or runtime runs.
+Superseded by [ADR-1037](1037-task-execution-allowance.md), which records the accepted
+contract for [#1573](https://github.com/chrisbanes/cab/issues/1573). The text below is
+the earlier proposal, kept for its evidence.
 
 ## Recommendation
 
