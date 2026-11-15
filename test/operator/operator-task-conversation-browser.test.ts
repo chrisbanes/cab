@@ -2719,7 +2719,7 @@ for (const laterCount of [325, 575])
             try {
               const body = await response.json();
               if (!accept(url, body)) return false;
-              found = body;
+              found ??= body;
               return true;
             } catch {
               return false;
