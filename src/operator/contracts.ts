@@ -818,6 +818,7 @@ export const executionSchema = z
         "runtime-unconfirmed",
         "turn-release-pending",
         "held-turn-released",
+        "allowance-held",
       ]),
     ),
     holds: z
@@ -2174,6 +2175,24 @@ export const taskSchema = envelope(
         })
         .strict()
         .optional(),
+      /**
+       * The optional execution allowance (ADR-1037) on net charged admitted generations;
+       * optional so older services still parse. `version` fences `task.allowance.set`.
+       */
+      executionAllowance: z
+        .object({
+          state: z.enum(["off", "on", "history-unavailable", "inconsistent"]),
+          total: count.nullable(),
+          version: count,
+          charged: count,
+          corrected: count,
+          remaining: count.nullable(),
+          provisional: count,
+          heldWorkIds: z.array(z.string().min(1).max(512)),
+          overBy: count.nullable(),
+        })
+        .strict()
+        .optional(),
       assignments: z.array(assignmentSchema),
       admission: z
         .object({
@@ -2460,6 +2479,26 @@ export const taskTimelineSchema = envelope(
   z
     .object({
       visibilityRevision: hash,
+      reasoningSummaryRevision: hash,
+      reasoningSummaryAnchors: z
+        .array(
+          z
+            .object({
+              entryId: timelineEntryBase.entryId,
+              turnKey: hash,
+              reasoningSummary: reasoningSummarySchema,
+            })
+            .strict(),
+        )
+        .max(128)
+        .refine(
+          (anchors) =>
+            new Set(anchors.map((anchor) => anchor.entryId)).size ===
+              anchors.length &&
+            new Set(anchors.map((anchor) => anchor.turnKey)).size ===
+              anchors.length,
+        )
+        .optional(),
       olderCursor: timelineKey.nullable(),
       entries: z
         .array(
@@ -2641,7 +2680,19 @@ export const taskTimelineSchema = envelope(
         )
         .max(200),
     })
-    .strict(),
+    .strict()
+    .refine(
+      (page) =>
+        !page.reasoningSummaryAnchors?.some((anchor) =>
+          page.entries.some(
+            (entry) =>
+              entry.entryId === anchor.entryId ||
+              (entry.kind === "assistant" &&
+                entry.reasoningSummary !== undefined &&
+                entry.turnKey === anchor.turnKey),
+          ),
+        ),
+    ),
 );
 /** The bounded, redacted output of one completed command in a task's timeline. */
 export const taskToolOutputSchema = envelope(
@@ -3824,6 +3875,17 @@ export const operatorCommandSchema = z.discriminatedUnion("type", [
       expectedVersion: revision,
     })
     .strict(),
+  // Sets the task's absolute execution allowance; null removes it. Fenced on the
+  // allowance version, which 'task get' reads, not the task version.
+  z
+    .object({
+      ...base,
+      type: z.literal("task.allowance.set"),
+      taskId: uuid,
+      expectedAllowanceVersion: z.number().int().nonnegative().safe(),
+      total: z.number().int().nonnegative().safe().nullable(),
+    })
+    .strict(),
   z
     .object({
       ...base,
@@ -4978,6 +5040,20 @@ export const commandReceiptSchema = z.discriminatedUnion("kind", [
       assignmentId: uuid,
       refusedWorkId: z.string().min(1).max(512),
       workId: z.string().min(1).max(512),
+    })
+    .strict(),
+  z
+    .object({
+      kind: z.literal("task-allowance"),
+      key: uuid,
+      recorded: z.literal(true),
+      taskId: uuid,
+      previousTotal: z.number().int().nonnegative().safe().nullable(),
+      total: z.number().int().nonnegative().safe().nullable(),
+      version: revision,
+      charged: z.number().int().nonnegative().safe(),
+      remaining: z.number().int().nonnegative().safe().nullable(),
+      overBy: z.number().int().nonnegative().safe().nullable(),
     })
     .strict(),
   z

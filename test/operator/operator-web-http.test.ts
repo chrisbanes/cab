@@ -677,6 +677,8 @@ test("old /app addresses redirect permanently to the root path with their query"
     ["/app/inbox?task=T&request=Q", "/inbox?task=T&request=Q"],
     [`/app/tasks/${id}?section=execution`, `/tasks/${id}?section=execution`],
     ["/app/settings/runtime", "/settings/runtime"],
+    ["/app/settings/notifications?x=1", "/settings/notifications?x=1"],
+    ["/app/settings?from=mail", "/settings?from=mail"],
     [
       `/app/projects/${id}/settings?tab=delivery`,
       `/projects/${id}/settings?tab=delivery`,
@@ -731,7 +733,15 @@ test("every app view is served at its root path", async (t) => {
     "/search",
     "/getting-started",
     "/settings",
+    "/settings/projects",
     "/settings/runtime",
+    "/settings/agents",
+    "/settings/routing",
+    "/settings/github-discovery",
+    "/settings/gitlab-credentials",
+    "/settings/cli-credentials",
+    "/settings/notifications",
+    "/settings/readiness",
     "/settings/projects/new",
     "/settings/profiles/new",
     `/projects/${id}`,
@@ -745,6 +755,25 @@ test("every app view is served at its root path", async (t) => {
     });
     assert.equal(response.status, 200, path);
     assert.equal(await response.text(), shell, path);
+  }
+});
+
+test("only the nine Settings section pages are served under Settings", async (t) => {
+  const f = await createOperatorFixture();
+  t.after(() => f.close());
+  const web = await f.startWeb();
+  // The old Agents id, a misspelling and a path below a section are not pages.
+  for (const path of [
+    "/settings/profiles",
+    "/settings/nope",
+    "/settings/projects/x",
+    "/settings/",
+  ]) {
+    const response = await fetch(`${web.origin}${path}`, {
+      redirect: "manual",
+    });
+    assert.equal(response.status, 404, path);
+    await response.text();
   }
 });
 

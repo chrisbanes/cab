@@ -68,6 +68,7 @@ const documentedWrites = [
   "task create",
   "task configure",
   "task add-dependency",
+  "task allowance",
   "task remove-dependency",
   "task message",
   "task follow-up",

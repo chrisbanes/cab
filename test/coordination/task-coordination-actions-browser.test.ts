@@ -101,7 +101,7 @@ test("the task view delivers an undelivered result and messages a delegated assi
   const assignment = page.locator(`[data-record-id="delegation:${pendingId}"]`);
   await assignment.getByRole("button").first().click();
   await assignment.getByRole("button", { name: /^Reply to / }).click();
-  const box = page.getByLabel("Editable reply");
+  const box = page.getByLabel("Reply", { exact: true });
   const send = page.getByRole("button", { name: "Send comment" });
   assert.equal(await send.isDisabled(), true, "nothing to send yet");
   assert.equal(
@@ -325,7 +325,7 @@ test("a check settles as refused only on a definite refusal, and a new session s
   const assignment = page.locator(`[data-record-id="delegation:${pendingId}"]`);
   await assignment.getByRole("button").first().click();
   await assignment.getByRole("button", { name: /^Reply to / }).click();
-  const box = page.getByLabel("Editable reply");
+  const box = page.getByLabel("Reply", { exact: true });
   const comments = () =>
     f.service
       .coordinationView()

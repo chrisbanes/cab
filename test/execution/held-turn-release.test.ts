@@ -275,96 +275,170 @@ for (const hold of ["stop", "task-hold", "pending-effect", "callback"] as const)
     assert.equal(w.runtime.interrupts.length, hold === "stop" ? 2 : 1);
   });
 
-test("Start again continues a released turn's conversation; later activity for it holds the task", async (t) => {
-  const w = await heldWorld(t, { seedConversation: true });
-  await settle(() => w.rows().release !== null);
-  await w.advance(30 * minute);
-  await w.released();
-  const service = w.s.f.service;
-  const api = new OperatorApi(service);
-  const read = (await api.readTask(w.g.taskId)).data;
-  assert.equal(read.execution.state, "not-started");
-  assert.deepEqual(read.execution.reasonCodes, ["held-turn-released"]);
-  assert.deepEqual(read.startAgain, {
-    available: true,
-    assignmentId: w.g.assignmentId,
-    workId: w.g.workId,
-  });
-  assert.ok(
-    service
-      .inboxConditions(w.g.taskId)
-      .some(
-        (c) =>
-          c.code === "not-started" && /Start again continues/.test(c.reason),
-      ),
-  );
-  const conversation = () =>
-    w
-      .db()
-      .prepare(
-        "SELECT revision FROM assignment_conversations WHERE assignmentId=?",
-      )
-      .get(w.g.assignmentId);
-  const before = conversation();
-  const resumed = w.runtime.resumed.length;
-  const key = randomUUID();
-  const command = {
-    key,
-    taskId: w.g.taskId,
-    expectedVersion: Number(service.domain().task(w.g.taskId).version),
-    workId: w.g.workId,
-  };
-  const receipt = await service.startAgain(command);
-  assert.deepEqual(await service.startAgain(command), receipt);
-  await settle(() =>
-    service.list().some((i) => i.workId === receipt.workId && i.turnId),
-  );
-  // It resumes the conversation's thread; no replacement, receipt or message.
-  assert.deepEqual(w.runtime.resumed.slice(resumed), [w.g.threadId]);
-  assert.deepEqual(conversation(), before);
-  assert.equal(
-    w
-      .db()
-      .prepare("SELECT COUNT(*) AS n FROM execution_recovery_receipts")
-      .get()?.n,
-    0,
-  );
+for (const harness of ["codex", "claude"] as const)
+  for (const restart of [false, true])
+    for (const activity of ["conversation", "raw"] as const)
+      test(`${harness}: Start again continues a released turn; ${activity} activity holds its successor${restart ? " after SQLite restoration" : ""}`, async (t) => {
+        const foreign = new HeldTurnRuntime();
+        const w = await heldWorld(t, {
+          harness,
+          seedConversation: true,
+          foreign,
+        });
+        t.after(() => w.runtime.finish());
+        await settle(() => w.rows().release !== null);
+        await w.advance(30 * minute);
+        await w.released();
+        const service = w.s.f.service;
+        const release = w.rows().release;
+        assert.deepEqual(release, {
+          harness,
+          threadId: w.g.threadId,
+          turnId: w.g.turnId,
+          interruptState: "acknowledged",
+          basis: "quiet-period",
+        });
+        assert.deepEqual(w.rows().request, { state: "held" });
+        assert.equal(w.rows().intent?.state, "resolved-failed");
+        assert.equal(w.rows().capacity, null);
+        assert.equal(w.rows().writer, null);
+        if (restart) {
+          const previous = startedOf(service);
+          const database = w.db();
+          const listener = w.runtime.activity;
+          const turns = w.runtime.turnInvocations.length;
+          await service.stop();
+          await service.start();
+          assert.notEqual(startedOf(service), previous);
+          assert.notEqual(startedOf(service).state, previous.state);
+          assert.notEqual(w.db(), database);
+          assert.notEqual(w.runtime.activity, listener);
+          assert.deepEqual(w.rows().release, release);
+          assert.equal(w.runtime.turnInvocations.length, turns);
+        }
+        const api = new OperatorApi(service);
+        const read = (await api.readTask(w.g.taskId)).data;
+        assert.equal(read.execution.state, "not-started");
+        assert.deepEqual(read.execution.reasonCodes, ["held-turn-released"]);
+        assert.deepEqual(read.startAgain, {
+          available: true,
+          assignmentId: w.g.assignmentId,
+          workId: w.g.workId,
+        });
+        assert.ok(
+          service
+            .inboxConditions(w.g.taskId)
+            .some(
+              (c) =>
+                c.code === "not-started" &&
+                /Start again continues/.test(c.reason),
+            ),
+        );
+        const conversation = () =>
+          w
+            .db()
+            .prepare(
+              "SELECT revision FROM assignment_conversations WHERE assignmentId=?",
+            )
+            .get(w.g.assignmentId);
+        const before = conversation();
+        const resumed = w.runtime.resumed.length;
+        const key = randomUUID();
+        const command = {
+          key,
+          taskId: w.g.taskId,
+          expectedVersion: Number(service.domain().task(w.g.taskId).version),
+          workId: w.g.workId,
+        };
+        const receipt = await service.startAgain(command);
+        assert.deepEqual(await service.startAgain(command), receipt);
+        await settle(() =>
+          service.list().some((i) => i.workId === receipt.workId && i.turnId),
+        );
+        // It resumes the conversation's thread; no replacement, receipt or message.
+        assert.deepEqual(w.runtime.resumed.slice(resumed), [w.g.threadId]);
+        assert.deepEqual(conversation(), before);
+        assert.equal(
+          w
+            .db()
+            .prepare("SELECT COUNT(*) AS n FROM execution_recovery_receipts")
+            .get()?.n,
+          0,
+        );
 
-  // The released turn shows activity after its successor started.
-  w.runtime.conversation?.({
-    threadId: w.g.threadId,
-    turnId: w.g.turnId,
-  } as RuntimeConversationEvent);
-  const successor = () =>
-    service.list().find((i) => i.workId === receipt.workId)?.state;
-  await settle(() => successor() === "held");
-  assert.ok(
-    w
-      .db()
-      .prepare("SELECT 1 FROM task_writer_ambiguity_holds WHERE taskId=?")
-      .get(w.g.taskId),
-  );
-  assert.equal(
-    w
-      .db()
-      .prepare(
-        "SELECT state FROM execution_pending_effects WHERE workId=? AND effectKey='known-survivor'",
-      )
-      .get(w.g.workId)?.state,
-    "pending",
-  );
-  assert.equal(service.startAgainAvailability(w.g.taskId).available, false);
-  w.runtime.finish();
-  await service.stop();
-  await service.start();
-  assert.ok(
-    w
-      .db()
-      .prepare("SELECT 1 FROM task_writer_ambiguity_holds WHERE taskId=?")
-      .get(w.g.taskId),
-  );
-  assert.equal(service.startAgainAvailability(w.g.taskId).available, false);
-});
+        const event = { threadId: w.g.threadId, turnId: w.g.turnId };
+        const emit = (runtime: HeldTurnRuntime, identity = event) => {
+          if (activity === "raw") runtime.activity?.(identity);
+          else runtime.conversation?.(identity as RuntimeConversationEvent);
+        };
+        assert.ok(w.runtime.conversation && w.runtime.activity);
+        assert.ok(foreign.conversation && foreign.activity);
+        // Exact turn identity and the listener's harness must both match the persisted release.
+        emit(foreign);
+        emit(w.runtime, { ...event, turnId: "unrelated-turn" });
+        emit(w.runtime, { ...event, threadId: "unrelated-thread" });
+        await w.advance(minute);
+        assert.equal(
+          service.list().find((i) => i.workId === receipt.workId)?.state,
+          "running",
+        );
+        assert.equal(
+          w
+            .db()
+            .prepare("SELECT 1 FROM task_writer_ambiguity_holds WHERE taskId=?")
+            .get(w.g.taskId),
+          undefined,
+        );
+        emit(w.runtime);
+        const successor = () =>
+          service.list().find((i) => i.workId === receipt.workId)?.state;
+        await settle(() => successor() === "held");
+        assert.ok(
+          w
+            .db()
+            .prepare("SELECT 1 FROM task_writer_ambiguity_holds WHERE taskId=?")
+            .get(w.g.taskId),
+        );
+        assert.equal(
+          w
+            .db()
+            .prepare(
+              "SELECT state FROM execution_pending_effects WHERE workId=? AND effectKey='known-survivor'",
+            )
+            .get(w.g.workId)?.state,
+          "pending",
+        );
+        assert.equal(
+          service.startAgainAvailability(w.g.taskId).available,
+          false,
+        );
+        const turns = w.runtime.turnInvocations.length;
+        emit(w.runtime);
+        assert.equal(w.runtime.turnInvocations.length, turns);
+        w.runtime.finish();
+        await service.stop();
+        await service.start();
+        assert.ok(
+          w
+            .db()
+            .prepare("SELECT 1 FROM task_writer_ambiguity_holds WHERE taskId=?")
+            .get(w.g.taskId),
+        );
+        assert.equal(
+          service.startAgainAvailability(w.g.taskId).available,
+          false,
+        );
+        assert.equal(successor(), "held");
+        assert.equal(
+          w
+            .db()
+            .prepare(
+              "SELECT state FROM execution_pending_effects WHERE workId=? AND effectKey='known-survivor'",
+            )
+            .get(w.g.workId)?.state,
+          "pending",
+        );
+      });
 
 test("activity another harness's runtime reports for a turn changes nothing", async (t) => {
   const foreign = new HeldTurnRuntime();
@@ -395,40 +469,45 @@ test("activity another harness's runtime reports for a turn changes nothing", as
   assert.ok(w.s.f.service.heldTurnReleased(w.g.workId));
 });
 
-test("a held turn streaming only raw deltas stays held past 30 minutes; a delta after release holds the task again", async (t) => {
-  const w = await heldWorld(t);
-  await settle(() => w.rows().release !== null);
-  assert.ok(w.runtime.activity, "the runtime exposes raw turn activity");
-  const delta = () =>
-    w.runtime.activity?.({ threadId: w.g.threadId, turnId: w.g.turnId });
-  // Output or reasoning deltas that no conversation event presents still count as activity.
-  for (let elapsed = 0; elapsed < 50; elapsed += 20) {
-    await w.advance(20 * minute);
-    delta();
-  }
-  await w.advance(29 * minute);
-  assert.equal(w.rows().release?.basis, null, "still running past 30 minutes");
-  assert.ok(w.rows().capacity);
-  await w.advance(minute);
-  await w.released();
-  assert.equal(w.rows().release?.basis, "quiet-period");
+for (const harness of ["codex", "claude"] as const)
+  test(`${harness}: a held turn streaming only raw deltas stays held past 30 minutes; a delta after release holds the task again`, async (t) => {
+    const w = await heldWorld(t, { harness });
+    await settle(() => w.rows().release !== null);
+    assert.ok(w.runtime.activity, "the runtime exposes raw turn activity");
+    const delta = () =>
+      w.runtime.activity?.({ threadId: w.g.threadId, turnId: w.g.turnId });
+    // Output or reasoning deltas that no conversation event presents still count as activity.
+    for (let elapsed = 0; elapsed < 50; elapsed += 20) {
+      await w.advance(20 * minute);
+      delta();
+    }
+    await w.advance(29 * minute);
+    assert.equal(
+      w.rows().release?.basis,
+      null,
+      "still running past 30 minutes",
+    );
+    assert.ok(w.rows().capacity);
+    await w.advance(minute);
+    await w.released();
+    assert.equal(w.rows().release?.basis, "quiet-period");
 
-  // A delta after the release is a survivor: the task is held again.
-  delta();
-  await settle(
-    () =>
+    // A delta after the release is a survivor: the task is held again.
+    delta();
+    await settle(
+      () =>
+        w
+          .db()
+          .prepare("SELECT 1 FROM task_writer_ambiguity_holds WHERE taskId=?")
+          .get(w.g.taskId) !== undefined,
+    );
+    assert.equal(
       w
         .db()
-        .prepare("SELECT 1 FROM task_writer_ambiguity_holds WHERE taskId=?")
-        .get(w.g.taskId) !== undefined,
-  );
-  assert.equal(
-    w
-      .db()
-      .prepare(
-        "SELECT state FROM execution_pending_effects WHERE workId=? AND effectKey='known-survivor'",
-      )
-      .get(w.g.workId)?.state,
-    "pending",
-  );
-});
+        .prepare(
+          "SELECT state FROM execution_pending_effects WHERE workId=? AND effectKey='known-survivor'",
+        )
+        .get(w.g.workId)?.state,
+      "pending",
+    );
+  });

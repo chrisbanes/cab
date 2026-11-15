@@ -16,6 +16,9 @@ Recovery that releases a generation needs the evidence-bearing operations whose
 "evidence and attestations the operator states explicitly"
 ([specification](../SPEC.md#execution-and-recovery)).
 
+
+Recorded identities, observations, receipts and dispositions are evidence; they do not prove that execution has ended or released its holds.
+
 ## Entry points
 
 - Home "Needs you" card (execution uncertainty first).

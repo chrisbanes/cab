@@ -12,7 +12,13 @@ import { Button, StatusBadge, TextField } from "./components.js";
 import { failureCause, type ReceiptDetails } from "./outcome-copy.js";
 import { shortId } from "./presentation.js";
 import { useOperatorResource } from "./resource.js";
-import { Panel, useHeaderRefresh, type SettingsProps } from "./settings.js";
+import {
+  Panel,
+  useHeaderRefresh,
+  useRereadWhenSettled,
+  useSessionState,
+  type SettingsProps,
+} from "./settings.js";
 import {
   Dialog,
   DialogClose,
@@ -104,18 +110,33 @@ export function OperatorCredentialsSection(p: SettingsProps) {
   );
   const list = useOperatorResource(csrf, loader);
   useHeaderRefresh(p.refreshNonce, list.refresh);
-  const [name, setName] = useState("");
-  const [scope, setScope] = useState<Scope>("read");
-  const [days, setDays] = useState(90);
+  // Session state survives leaving the page: a create or rotate still in flight shows its
+  // one-time token, and any outcome, when the reader comes back.
+  const [name, setName] = useSessionState(csrf, "cli:name", "");
+  const [scope, setScope] = useSessionState<Scope>(csrf, "cli:scope", "read");
+  const [days, setDays] = useSessionState(csrf, "cli:days", 90);
   const [nameError, setNameError] = useState<string | null>(null);
-  const [outcome, setOutcome] = useState<Outcome | null>(null);
-  const [busy, setBusy] = useState(false);
-  const [revealed, setRevealed] = useState<{
+  const [outcome, setOutcome] = useSessionState<Outcome | null>(
+    csrf,
+    "cli:outcome",
+    null,
+  );
+  const [busy, setBusy] = useSessionState(csrf, "cli:busy", false);
+  useRereadWhenSettled(busy, list.refresh);
+  const [revealed, setRevealed] = useSessionState<{
     name: string;
     token: string;
-  } | null>(null);
-  const [revoking, setRevoking] = useState<OperatorCredential | null>(null);
-  const [revokeOutcome, setRevokeOutcome] = useState<Outcome | null>(null);
+  } | null>(csrf, "cli:revealed", null);
+  const [revoking, setRevoking] = useSessionState<OperatorCredential | null>(
+    csrf,
+    "cli:revoking",
+    null,
+  );
+  const [revokeOutcome, setRevokeOutcome] = useSessionState<Outcome | null>(
+    csrf,
+    "cli:revoke-outcome",
+    null,
+  );
   const id = useId();
   const credentials = list.state.data?.data.credentials ?? [];
   const nameOf = (credentialId: string) =>

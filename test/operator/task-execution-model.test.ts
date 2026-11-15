@@ -3,7 +3,9 @@ import { test } from "node:test";
 import type { Execution, TaskRead } from "../../src/operator/contracts.js";
 import {
   admissionLine,
+  allowanceSection,
   evidenceNotice,
+  evidenceWarning,
   executionHoldLines,
   executionStatus,
   partitionRecoveryRecords,
@@ -84,6 +86,10 @@ test("every execution state has a status, and stopping and uncertain always need
   assert.equal(
     executionStatus(execution("waiting", {}, ["admission-blocked"])).label,
     "Waiting; blocked from admission",
+  );
+  assert.equal(
+    executionStatus(execution("waiting", {}, ["allowance-held"])).label,
+    "Waiting; held by the execution allowance",
   );
   assert.equal(
     executionStatus(
@@ -289,4 +295,78 @@ test("recovery distinguishes absent and withheld lead and task hold facts", () =
     ),
     { lead: "Lead", taskHold: "Review" },
   );
+});
+
+test("recovery warning preserves the termination and holds limit", () => {
+  assert.equal(
+    evidenceWarning,
+    "Recovery records do not confirm that execution has ended or released its holds.",
+  );
+});
+
+type Allowance = NonNullable<TaskRead["data"]["executionAllowance"]>;
+const allowance = (a: Partial<Allowance>): Allowance => ({
+  state: "on",
+  total: 3,
+  version: 1,
+  charged: 1,
+  corrected: 0,
+  remaining: 2,
+  provisional: 0,
+  heldWorkIds: [],
+  overBy: null,
+  ...a,
+});
+
+test("the allowance section says its state, held work and exclusions without budget wording", () => {
+  const cases: Array<[Partial<Allowance>, string, boolean, boolean]> = [
+    [
+      { state: "off", total: null, remaining: null, charged: 2 },
+      "Off; 2 charged",
+      true,
+      false,
+    ],
+    [
+      { provisional: 1 },
+      "1 of 3 charged, 2 remaining, 1 provisional",
+      true,
+      true,
+    ],
+    [
+      { charged: 3, remaining: 0, heldWorkIds: ["w"] },
+      "3 of 3 charged, 0 remaining; new turns are held, admitted work may continue",
+      true,
+      true,
+    ],
+    [
+      { total: 1, charged: 3, remaining: 0, overBy: 2 },
+      "3 of 1 charged, 0 remaining; 2 over the total",
+      true,
+      true,
+    ],
+    [
+      { state: "history-unavailable", total: null, remaining: null },
+      "Off; it cannot be turned on because this task has admissions from before cab recorded charges",
+      false,
+      false,
+    ],
+    [
+      { state: "inconsistent", heldWorkIds: ["w"] },
+      "On, total 3; accounting unavailable; new turns are held, admitted work may continue",
+      true,
+      true,
+    ],
+  ];
+  for (const [input, summary, canSet, canRemove] of cases) {
+    const section = allowanceSection(allowance(input));
+    assert.deepEqual(section, {
+      summary,
+      excluded:
+        "Direct work and project drafting runs are not charged to a task.",
+      canSet,
+      canRemove,
+    });
+    for (const line of [section.summary, section.excluded])
+      assert.doesNotMatch(line, /\b(budget|spend|token|deadline|cap)\b/i);
+  }
 });

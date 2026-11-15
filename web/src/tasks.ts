@@ -318,7 +318,9 @@ export function sharedTaskReasons(tasks: readonly TaskListSummary[]) {
 export const taskVisibilityText = (visible: number, eligible: number) =>
   `${visible} Ready of ${eligible} eligible tasks`;
 export const sharedTaskReasonText = (count: number, reason: string) =>
-  `${count} tasks share this readiness/dependency reason: ${reason}.`;
+  reason === "Draft: not Ready"
+    ? `${count} tasks are not Ready.`
+    : `${count} tasks: ${reason}.`;
 /**
  * Capacity is stated once for the visible work, not on every task it holds: a sentence when an open
  * task waits on the global limit, or else on a project's, otherwise null.
@@ -361,8 +363,7 @@ export function taskRouteSubtitle(
   } | null,
   projectId?: string,
 ) {
-  if (kind === "overview")
-    return "Decisions first. Work and completed results stay separate.";
+  if (kind === "overview") return undefined;
   if (!tasks) return undefined;
   const count = `${plural(tasks.length, "task")} shown`;
   if (kind === "tasks")

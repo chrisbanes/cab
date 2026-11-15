@@ -1,3 +1,8 @@
+import { randomUUID } from "node:crypto";
+import {
+  ProposalJournal,
+  proposalStorageKey,
+} from "../../web/src/instruction-proposal-model.js";
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import {
@@ -107,4 +112,154 @@ test("restore and saved lines name the existing workflow and the new revision", 
     /cab profile prepare --restore-revision N/,
   );
   assert.equal(savedLine(5), "Saved as instructions revision 5.");
+});
+
+const memoryStorage = () => {
+  const values = new Map<string, string>();
+  return {
+    values,
+    getItem: (k: string) => values.get(k) ?? null,
+    setItem: (k: string, v: string) => {
+      values.set(k, v);
+    },
+    removeItem: (k: string) => {
+      values.delete(k);
+    },
+  };
+};
+test("proposal journal keeps a reviewed run and its edit until the exact replacement settles", () => {
+  const storage = memoryStorage(),
+    projectId = randomUUID(),
+    oldId = randomUUID(),
+    nextId = randomUUID();
+  const journal = new ProposalJournal(projectId, storage);
+  journal.change({ runId: oldId });
+  const oldRun = {
+    projectId,
+    runId: oldId,
+    instructionTarget: run.instructionTarget,
+  };
+  journal.recovery(oldRun).write({
+    values: { key: randomUUID(), instructions: "Edited old proposal" },
+    command: null,
+    receipt: null,
+  });
+  const previous = { ...journal.snapshot() };
+  const pendingStart = {
+    type: "instruction.draft.start" as const,
+    key: randomUUID(),
+    runId: nextId,
+    projectId,
+    expectedProjectVersion: 3,
+    target: { kind: "project" as const },
+    feedback: [{ kind: "message" as const, id: randomUUID() }],
+    note: "Frozen request",
+  };
+  journal.change({
+    runId: nextId,
+    startKey: pendingStart.key,
+    expectedProjectVersion: 3,
+    pendingStart,
+    previous: {
+      runId: oldId,
+      refs: previous.refs,
+      target: previous.target,
+      note: previous.note,
+    },
+  });
+  const restored = new ProposalJournal(projectId, storage);
+  assert.deepEqual(restored.snapshot().pendingStart, pendingStart);
+  restored.refused(randomUUID());
+  assert.equal(restored.snapshot().runId, nextId);
+  restored.refused(nextId);
+  assert.equal(restored.snapshot().runId, oldId);
+  assert.equal(
+    restored.recovery(oldRun).read()?.values.instructions,
+    "Edited old proposal",
+  );
+  restored.change({
+    runId: nextId,
+    previous: { runId: oldId, refs: [], target: { kind: "project" }, note: "" },
+  });
+  restored.started(nextId);
+  assert.deepEqual(restored.snapshot().drafts, {});
+  restored.clear();
+  restored.refused(nextId);
+  assert.equal(restored.snapshot().runId, undefined);
+});
+test("proposal storage accepts legacy selection but rejects corrupt, oversized and foreign recovery identities", () => {
+  const projectId = randomUUID(),
+    storage = memoryStorage();
+  const legacy = {
+    refs: [],
+    target: { kind: "project" },
+    note: "Kept selection",
+  };
+  storage.setItem(proposalStorageKey(projectId), JSON.stringify(legacy));
+  assert.equal(
+    new ProposalJournal(projectId, storage).snapshot().note,
+    "Kept selection",
+  );
+  for (const value of [
+    "{",
+    JSON.stringify({ ...legacy, note: "x".repeat(16001) }),
+    JSON.stringify({
+      ...legacy,
+      drafts: {
+        [randomUUID()]: {
+          values: { instructions: "x" },
+          command: null,
+          receipt: null,
+        },
+      },
+    }),
+    JSON.stringify({ ...legacy, unknown: "private" }),
+  ]) {
+    storage.setItem(proposalStorageKey(projectId), value);
+    assert.deepEqual(
+      new ProposalJournal(projectId, storage).snapshot().refs,
+      [],
+    );
+    assert.equal(new ProposalJournal(projectId, storage).snapshot().note, "");
+  }
+});
+test("blocked storage keeps page state and purge prevents late draft writers recreating private data", () => {
+  const projectId = randomUUID(),
+    runId = randomUUID();
+  const journal = new ProposalJournal(projectId, {
+    getItem() {
+      throw Error("blocked");
+    },
+    setItem() {
+      throw Error("blocked");
+    },
+    removeItem() {
+      throw Error("blocked");
+    },
+  });
+  journal.change({ runId, note: "In memory" });
+  const writer = journal.recovery({
+    projectId,
+    runId,
+    instructionTarget: run.instructionTarget,
+  });
+  writer.write({
+    values: { instructions: "Private edited text" },
+    command: null,
+    receipt: null,
+  });
+  assert.equal(journal.available, false);
+  assert.equal(
+    journal.snapshot().drafts[runId]?.values.instructions,
+    "Private edited text",
+  );
+  journal.purge();
+  writer.write({
+    values: { instructions: "Late private text" },
+    command: null,
+    receipt: null,
+  });
+  journal.change({ runId, note: "Late callback" });
+  assert.deepEqual(journal.snapshot().drafts, {});
+  assert.equal(journal.snapshot().note, "");
 });

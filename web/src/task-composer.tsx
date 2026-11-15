@@ -405,7 +405,7 @@ export function TaskComposer({
                   <Input
                     id="composer-title"
                     aria-label="Task title"
-                    placeholder="Where to?"
+                    placeholder="Describe the task"
                     className="control"
                     value={input.title}
                     onChange={(e) => edit({ title: e.target.value })}
@@ -477,8 +477,7 @@ export function TaskComposer({
                     }}
                   />
                   <span className="metadata muted">
-                    One HTTP or HTTPS link per line. References are passive
-                    context and grant no repository access.
+                    One HTTP or HTTPS link per line.
                   </span>
                   {error("links")}
                 </label>
@@ -503,8 +502,7 @@ export function TaskComposer({
                     ))}
                   </NativeSelect>
                   <span className="metadata muted">
-                    An explicit assignee skips routing, but every hold still
-                    applies. The project lead remains accountable.
+                    Overrides project routing.
                   </span>
                   {error("profileId")}
                 </label>

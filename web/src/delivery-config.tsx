@@ -81,6 +81,7 @@ import {
   DialogTitle,
   DialogDescription,
 } from "./ui/dialog.js";
+import { settingsSectionHref } from "./settings-sections.js";
 /** A grant row the operator can edit; an unavailable saved row is kept as it is. */
 type VisibleGrant = Exclude<GrantRow, { savedRow: unknown }>;
 type Preset = Exclude<RepositoryDeliveryLevel, "not-set-up" | "custom">;
@@ -671,7 +672,9 @@ function DeliveryPolicyForm(p: TabProps) {
                           {need.met ? "Met" : "Needs attention"}: {need.text}{" "}
                           {!need.met &&
                             (need.fix === "settings" ? (
-                              <a href="/settings#gitlab-credentials">
+                              <a
+                                href={settingsSectionHref("gitlab-credentials")}
+                              >
                                 Open GitLab Settings
                               </a>
                             ) : (

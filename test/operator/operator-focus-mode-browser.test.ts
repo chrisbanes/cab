@@ -170,7 +170,7 @@ test("the backslash key toggles outside fields and not with a modifier", async (
 test("editable fields keep the backslash", async (_t, j) => {
   const { page } = await start(j);
   await readyPage(page);
-  const reply = page.getByLabel("Editable reply");
+  const reply = page.getByLabel("Reply", { exact: true });
   await reply.click();
   await page.keyboard.press("\\");
   assert.equal(await reply.inputValue(), "\\");

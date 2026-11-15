@@ -296,6 +296,7 @@ for (const [name, engine] of engines) {
         await page.locator(".inbox-summary").textContent(),
         "1 unresolved across 1 project",
       );
+      await form.locator(".question-context-foot summary").click();
       await form.getByText(/^Requester: assignment /).waitFor();
       await form
         .getByRole("link", { name: "Requesting conversation" })

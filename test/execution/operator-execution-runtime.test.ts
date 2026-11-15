@@ -592,7 +592,7 @@ test("an unauthorized Claude failure points to native login and Settings", () =>
   assert.match(notice?.message ?? "", /Claude rejected its native login/);
   assert.deepEqual(
     notice?.routes.map((r) => r.href),
-    ["/settings#runtime", "/assignments/a1/recovery"],
+    ["/settings/runtime", "/assignments/a1/recovery"],
   );
   assert.deepEqual(
     waitRoute(
@@ -601,7 +601,7 @@ test("an unauthorized Claude failure points to native login and Settings", () =>
           "Claude runtime unavailable: subscription token is unavailable",
       }),
     )?.routes.map((r) => r.href),
-    ["/settings/runtime", "/settings#runtime"],
+    ["/settings/runtime", "/settings/runtime"],
   );
 });
 

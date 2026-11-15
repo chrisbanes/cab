@@ -296,12 +296,9 @@ test("default readiness discloses hidden drafts in List and Board and Show prese
       url.searchParams.get("view") === null,
   );
   await page
-    .getByText(
-      "2 tasks share this readiness/dependency reason: Draft: not Ready.",
-      {
-        exact: true,
-      },
-    )
+    .getByText("2 tasks are not Ready.", {
+      exact: true,
+    })
     .waitFor();
   assert.equal(
     await page
@@ -339,23 +336,13 @@ test("default readiness discloses hidden drafts in List and Board and Show prese
       url.searchParams.get("view") === "board",
   );
   assert.equal(await page.locator("#column-Draft .task-card").count(), 2);
-  await page
-    .getByText(
-      "2 tasks share this readiness/dependency reason: Draft: not Ready.",
-      { exact: true },
-    )
-    .waitFor();
+  await page.getByText("2 tasks are not Ready.", { exact: true }).waitFor();
   for (const route of [
     `/?state=all&source=local&ready=any&view=board`,
     `/projects/${ids.projectId}?state=all&source=local&ready=any&view=board`,
   ]) {
     await page.goto(`${web.origin}${route}`);
-    await page
-      .getByText(
-        "2 tasks share this readiness/dependency reason: Draft: not Ready.",
-        { exact: true },
-      )
-      .waitFor();
+    await page.getByText("2 tasks are not Ready.", { exact: true }).waitFor();
   }
 });
 
@@ -1777,7 +1764,7 @@ test("a single-choice question is answered in its card with the Inbox's command 
       exact: true,
     })
     .waitFor();
-  await inline.getByText(/does not resume execution/).waitFor();
+  await inline.getByText(/Answering does not resume work/).waitFor();
   assert.ok(
     [null, a.interactionId].includes(
       await page.evaluate(
@@ -2571,10 +2558,7 @@ test("board columns keep a readable width and scroll inside the board", async (_
     targets.every((h) => h >= 44),
     `${targets}`,
   );
-  assert.equal(
-    squash(await page.locator(".board-footer").innerText()),
-    "Columns describe cab work, not source issue state. Cards open the task; nothing here changes state, and there is no drag and drop.",
-  );
+  assert.equal(await page.locator(".board-footer").count(), 0);
   assert.ok(await noPageOverflow(page));
   await shot(page, "390-board-waiting-tabs");
   await bar.getByRole("button", { name: /^Uncertain · 1$/ }).click();

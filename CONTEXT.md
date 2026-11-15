@@ -172,7 +172,11 @@ _Avoid_: Source configuration when referring to external task identity
 
 **Issue brief**:
 The comment on an external item that states the work's contract, with the trusted notes that follow it.
+The operator UI also uses Issue brief for the corresponding retained contract of a local task.
 _Avoid_: agent brief, brief (alone), when not meaning an assignment brief
+
+**Decisions and holds**:
+The operator-attention grouping for decisions and unusual holds requiring attention. Ordinary live writer and capacity ownership remains on Execution.
 
 **Task publication**:
 The operator creating an external item from a local task, so that the same task
@@ -215,6 +219,12 @@ _Avoid_: Coordination turn as a separate kind
 The installation-wide number of global active-turn slots held for lead turns. Other
 turns cannot take a held slot; lead turns can also use any free slot.
 _Avoid_: Lead reserve per project
+
+**Task execution allowance**:
+An optional, operator-set total on net charged execution generations for one
+task, shared by its lead and cab delegates. At exhaustion only new admissions are held.
+It is not a time, spend, token or host-wide limit.
+_Avoid_: Budget, task cap
 
 **Agent cap**:
 An optional limit on how many active turns one agent runs at once, across projects

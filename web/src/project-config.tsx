@@ -182,11 +182,16 @@ export function ProjectConfiguration(
   return (
     <div className="settings-page">
       <ResourceStatus
+        label="Project lifecycle"
+        state={lifecycle.state}
+        retry={lifecycle.refresh}
+      />
+      <ResourceStatus
         label="Project configuration"
         state={resource.state}
         retry={resource.refresh}
       />
-      {data && (
+      {data && lifecycle.state.data?.data.state === "live" && (
         <>
           <p className="settings-status body muted">
             <StatusBadge

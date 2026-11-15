@@ -9,6 +9,7 @@ import {
   ProjectArchivedError,
 } from "../core/project-lifecycle.js";
 import { ProjectDeletionUnavailableError } from "./project-deletion.js";
+import { projectArchiveBlockedMessage } from "../operator/project-lifecycle-copy.js";
 import type { ReadinessResult } from "../operator/readiness.js";
 import type { RecoveryRecord } from "./recovery-types.js";
 import { createHash, randomUUID } from "node:crypto";
@@ -301,7 +302,10 @@ import {
   WorkspaceRecheckRefusedError,
   withoutWithdrawn,
 } from "./service.js";
-import { refusedRevisionPrefix } from "./state.js";
+import {
+  AllowanceHistoryUnavailableError,
+  refusedRevisionPrefix,
+} from "./state.js";
 import {
   ArtifactUnavailable,
   artifactBytesMatch,
@@ -472,6 +476,14 @@ function domainApiError(error: unknown): OperatorApiError | undefined {
     return new OperatorApiError(503, "command-outcome-unknown");
   if (error instanceof DomainOperationError)
     return new OperatorApiError(503, "command-outcome-unknown");
+  if (error instanceof ProjectArchiveBlockedError)
+    return new OperatorApiError(
+      409,
+      "conflict",
+      undefined,
+      undefined,
+      projectArchiveBlockedMessage,
+    );
   if (error instanceof DomainConflictError)
     return new OperatorApiError(409, "conflict");
   if (error instanceof DomainNotFoundError)
@@ -2236,6 +2248,17 @@ export class OperatorApi {
     } else if (!this.domain().admission(String(task.id)).eligible) {
       state = "waiting";
       reasonCodes.push("admission-blocked");
+    } else if (
+      selections.some(
+        (s) =>
+          s.request?.state === "queued" &&
+          this.service
+            .taskAllowance(String(task.id))
+            .heldWorkIds.includes(s.request.workId),
+      )
+    ) {
+      state = "waiting";
+      reasonCodes.push("allowance-held");
     } else if (selections.some((s) => s.request?.state === "queued"))
       state = "queued";
     else if (
@@ -3182,6 +3205,13 @@ export class OperatorApi {
         : 0,
     );
     add(
+      "allowance-exhausted",
+      task.state === "open" &&
+        this.service.taskAllowance(taskId).heldWorkIds.length > 0
+        ? 1
+        : 0,
+    );
+    add(
       "lead-review",
       assignments.length === 0 &&
         view.routing.attempts.some(
@@ -3962,7 +3992,7 @@ export class OperatorApi {
               excluded,
             ),
             attentionCode: code,
-            destination: `/tasks/${taskId}?section=decisions`,
+            destination: `/tasks/${taskId}?section=${code === "allowance-exhausted" ? "execution-allowance" : "decisions"}`,
             conversation: null,
             headline: null,
             lifecycle,
@@ -4456,6 +4486,7 @@ export class OperatorApi {
       draftTurn: this.service.draftTurnAvailability(taskId),
       startAgain: this.service.startAgainAvailability(taskId),
       reset: this.service.resetAvailability(taskId),
+      executionAllowance: this.service.taskAllowance(taskId),
       assignments: assignments.map((a) => {
         const s = this.selection(a),
           request = s.request;
@@ -5715,7 +5746,14 @@ export class OperatorApi {
    * the curated tool projection under one key order; see `task-timeline.ts`.
    */
   async readTaskTimeline(taskId: string, query: URLSearchParams) {
-    this.exactQuery(query, ["before", "limit"]);
+    this.exactQuery(query, ["before", "limit", "reasoningSummaryRevision"]);
+    const knownSummary = query.get("reasoningSummaryRevision");
+    if (
+      knownSummary !== null &&
+      (query.has("before") ||
+        (knownSummary !== "unknown" && !/^[a-f0-9]{64}$/.test(knownSummary)))
+    )
+      throw new OperatorApiError(400, "invalid-input");
     const limit = this.boundedInt(query.get("limit"), 1, 100) ?? 50;
     const cursor = query.get("before");
     const before = cursor === null ? undefined : parseTimelineCursor(cursor);
@@ -5777,6 +5815,40 @@ export class OperatorApi {
           return summary ? [[turnKey(turn), { turn, summary }] as const] : [];
         }),
       );
+      const summaryAnchors = [...summaries]
+        .map(([key, { turn, summary }]) => ({
+          entryId:
+            turn.anchorSequence === null
+              ? `summary-${key}`
+              : `item-${turn.anchorSequence}`,
+          turnKey: key,
+          reasoningSummary: summary,
+        }))
+        .sort((a, b) =>
+          a.entryId < b.entryId
+            ? -1
+            : a.entryId > b.entryId
+              ? 1
+              : a.turnKey < b.turnKey
+                ? -1
+                : a.turnKey > b.turnKey
+                  ? 1
+                  : 0,
+        );
+      const reasoningSummaryRevision = createHash("sha256")
+        .update(
+          JSON.stringify([
+            "task-reasoning-summaries-v1",
+            taskId,
+            summaryAnchors.map(({ entryId, turnKey, reasoningSummary }) => [
+              entryId,
+              turnKey,
+              reasoningSummary.text,
+              reasoningSummary.truncated,
+            ]),
+          ]),
+        )
+        .digest("hex");
       const detail = (workId: string, turnId?: string, itemId?: string) => ({
         workId: this.safe(workId, excluded),
         turnId: turnId === undefined ? null : this.safe(turnId, excluded),
@@ -6131,6 +6203,15 @@ export class OperatorApi {
       );
       return taskTimelineSchema.parse({
         data: {
+          reasoningSummaryRevision,
+          ...(knownSummary !== null && knownSummary !== reasoningSummaryRevision
+            ? {
+                reasoningSummaryAnchors: summaryAnchors.filter(
+                  (anchor) =>
+                    !page.some((entry) => entry.key.id === anchor.entryId),
+                ),
+              }
+            : {}),
           visibilityRevision: createHash("sha256")
             .update(`${visibility}:${task.version}:${workspaceVisibility}`)
             .digest("hex"),
@@ -10873,6 +10954,22 @@ export class OperatorApi {
           throw error;
         }
       }
+      if (c.type === "task.allowance.set") {
+        this.requireTask(c.taskId);
+        try {
+          return commandReceiptSchema.parse(this.service.setTaskAllowance(c));
+        } catch (error) {
+          if (error instanceof AllowanceHistoryUnavailableError)
+            throw new OperatorApiError(
+              409,
+              "conflict",
+              undefined,
+              undefined,
+              error.message,
+            );
+          throw error;
+        }
+      }
       if (c.type === "task.start-again" || c.type === "task.reset") {
         this.requireTask(c.taskId);
         try {
@@ -11076,14 +11173,6 @@ export class OperatorApi {
         throw new OperatorApiError(400, "local-review-batch-too-large");
       if (error instanceof LocalReviewRecipientUnavailableError)
         throw new OperatorApiError(409, "local-review-recipient-unavailable");
-      if (error instanceof ProjectArchiveBlockedError)
-        throw new OperatorApiError(
-          409,
-          "conflict",
-          undefined,
-          undefined,
-          "Pause the project and resolve active work before archiving. Refresh project status for details.",
-        );
       if (error instanceof ProjectArchivedError)
         throw new OperatorApiError(
           409,

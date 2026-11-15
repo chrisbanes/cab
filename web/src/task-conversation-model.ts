@@ -31,6 +31,8 @@ export interface TimelineWindow {
 export interface ConversationCache {
   window: TimelineWindow;
   cursor: string | null;
+  /** Null until every retained row's summary presentation belongs to one snapshot. */
+  reasoningSummaryRevision: string | null;
 }
 
 const keyOf = (entry: TimelineEntry) => {
@@ -49,7 +51,14 @@ const byKey = (a: TimelineEntry, b: TimelineEntry) =>
  */
 export function mergeTimeline(
   window: TimelineWindow | null,
-  page: Pick<Page, "visibilityRevision" | "entries" | "olderCursor" | "plans">,
+  page: Pick<
+    Page,
+    | "visibilityRevision"
+    | "entries"
+    | "olderCursor"
+    | "plans"
+    | "reasoningSummaryAnchors"
+  >,
 ): { window: TimelineWindow; reset: boolean; changed: boolean } {
   const fresh = (reset: boolean) => ({
     window: {
@@ -90,6 +99,39 @@ export function mergeTimeline(
       changed = true;
     held.set(entry.entryId, entry);
   }
+  if (page.reasoningSummaryAnchors !== undefined) {
+    const summaries = new Map([
+      ...page.reasoningSummaryAnchors.map(
+        (anchor) => [anchor.entryId, anchor] as const,
+      ),
+      ...page.entries.flatMap((entry) =>
+        entry.kind === "assistant" && entry.turnKey && entry.reasoningSummary
+          ? [
+              [
+                entry.entryId,
+                {
+                  turnKey: entry.turnKey,
+                  reasoningSummary: entry.reasoningSummary,
+                },
+              ] as const,
+            ]
+          : [],
+      ),
+    ]);
+    for (const [id, entry] of held) {
+      if (entry.kind !== "assistant") continue;
+      const summary = summaries.get(id);
+      const { reasoningSummary: _old, ...ordinary } = entry;
+      const next =
+        summary && summary.turnKey === entry.turnKey
+          ? { ...ordinary, reasoningSummary: summary.reasoningSummary }
+          : ordinary;
+      if (JSON.stringify(entry) !== JSON.stringify(next)) {
+        held.set(id, next);
+        changed = true;
+      }
+    }
+  }
   return {
     window: changed
       ? {
@@ -110,11 +152,23 @@ export function mergeTimeline(
 export function prependTimeline(
   window: TimelineWindow,
   page: Pick<Page, "visibilityRevision" | "entries">,
+  preserveSummaries = false,
 ): TimelineWindow | null {
   if (page.visibilityRevision !== window.visibilityRevision) return null;
   const held = new Map(window.entries.map((e) => [e.entryId, e]));
   let changed = false;
-  for (const entry of page.entries) {
+  for (const incoming of page.entries) {
+    let entry = incoming;
+    if (preserveSummaries && incoming.kind === "assistant") {
+      const old = held.get(incoming.entryId);
+      const { reasoningSummary: _mixed, ...ordinary } = incoming;
+      entry =
+        old?.kind === "assistant" &&
+        old.turnKey === incoming.turnKey &&
+        old.reasoningSummary
+          ? { ...ordinary, reasoningSummary: old.reasoningSummary }
+          : ordinary;
+    }
     const before = held.get(entry.entryId);
     if (!before || JSON.stringify(before) !== JSON.stringify(entry)) {
       changed = true;

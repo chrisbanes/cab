@@ -9,6 +9,7 @@ import { type ChildProcess, spawn } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
 import { lstat, mkdir, open, readdir, realpath, rm } from "node:fs/promises";
 import { basename, dirname, join, resolve } from "node:path";
+import { setTimeout as delay } from "node:timers/promises";
 import type {
   CanUseTool,
   HookCallback,
@@ -105,6 +106,8 @@ export interface ClaudeRuntimeOptions {
   exitTimeoutMs?: number;
   /** How soon a failed self-test or settings read is retried; defaults to 30 s. */
   probeRetryMs?: number;
+  /** Bounds a turn's admission checks; defaults to the 30 s settings-read bound. */
+  admissionTimeoutMs?: number;
   /** Model-free check that Seatbelt can start in the turn's spawn context. */
   sandboxSelfTest?: (input: {
     workspace: string;
@@ -138,6 +141,14 @@ const settingsReadTimeoutMs = 30_000;
 const probeFreshMs = 30_000;
 /** A failed probe or settings read is retried no sooner than this by default. */
 const defaultProbeRetryMs = 30_000;
+const admissionPollMs = 100;
+const mcpServerStatusSchema = z.array(
+  z.object({
+    name: z.string(),
+    status: z.string(),
+    source: z.string().optional(),
+  }),
+);
 /** The CLI falls back to the shared `/tmp/claude-<uid>` above this (AF_UNIX, #825 T1). */
 const maxSandboxTemporaryBytes = 44;
 
@@ -1377,9 +1388,13 @@ export class ClaudeRuntime implements Runtime {
       throw new Error("Claude turn could not start");
     }
     this.retain(turn);
-    let admissionRefused = false;
+    // Claude Code may report the cab SDK MCP row shortly after spawn; poll until the bound.
+    type AdmissionCheck = "subscription" | "mcp";
+    let stage: AdmissionCheck = "subscription";
+    let refusal: AdmissionCheck | undefined;
     const refuseAdmission = () => {
-      admissionRefused = true;
+      // An abort (stop, query failure, an earlier refusal) keeps its own reason.
+      if (!turn.abort.signal.aborted) refusal ??= stage;
       turn.release(false);
       turn.started.reject(
         new Error(
@@ -1390,32 +1405,39 @@ export class ClaudeRuntime implements Runtime {
     };
     const admissionTimer = setTimeout(
       refuseAdmission,
-      settingsReadTimeoutMs,
+      this.options.admissionTimeoutMs ?? settingsReadTimeoutMs,
     ).unref();
     void (async () => {
       try {
         nativeSubscriptionSchema.parse(await stream.accountInfo());
-        const servers = z
-          .array(
-            z.object({
-              name: z.string(),
-              status: z.string(),
-              source: z.string().optional(),
-            }),
+        stage = "mcp";
+        for (;;) {
+          if (turn.abort.signal.aborted) return;
+          const cabServers = mcpServerStatusSchema
+            .parse(await stream.mcpServerStatus())
+            .filter((server) => server.name === mcpServerName);
+          if (turn.abort.signal.aborted) return;
+          const [cab] = cabServers;
+          if (
+            cabServers.length === 1 &&
+            cab?.source === "sdk" &&
+            cab.status === "connected"
           )
-          .parse(await stream.mcpServerStatus());
-        const cabServers = servers.filter(
-          (server) => server.name === mcpServerName,
-        );
-        if (
-          cabServers.length !== 1 ||
-          cabServers[0]?.source !== "sdk" ||
-          cabServers[0].status !== "connected"
-        ) {
-          refuseAdmission();
-          return;
+            break;
+          // Only an absent row or one pending SDK row may still become connected.
+          if (
+            cab &&
+            (cabServers.length > 1 ||
+              cab.source !== "sdk" ||
+              cab.status !== "pending")
+          ) {
+            refuseAdmission();
+            return;
+          }
+          await delay(admissionPollMs, undefined, {
+            signal: turn.abort.signal,
+          });
         }
-        if (turn.abort.signal.aborted) return;
         turn.mcpVerified = true;
         if (turn.identity) this.releaseRecordedProcess(turn);
       } catch {
@@ -1432,9 +1454,11 @@ export class ClaudeRuntime implements Runtime {
       turn.abort.abort();
       await turn.settled.promise.catch(() => {});
       throw new Error(
-        admissionRefused
-          ? "Claude turn could not start: native subscription login or the reserved cab MCP endpoint is unavailable"
-          : "Claude turn could not start",
+        refusal === "subscription"
+          ? "Claude turn could not start: native subscription login is unavailable"
+          : refusal === "mcp"
+            ? "Claude turn could not start: the reserved cab MCP endpoint is not connected"
+            : "Claude turn could not start",
       );
     }
     return turn.turnId;

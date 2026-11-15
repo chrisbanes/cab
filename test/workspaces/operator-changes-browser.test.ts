@@ -348,7 +348,15 @@ test("Changes opens on the Branch comparison against the configured ref", async 
     await changes.locator(".changes-baseline").innerText(),
     `main @ ${mergeBase.slice(0, 8)}`,
   );
-  assert.equal(await changes.getByText(/^Stale\./).count(), 0);
+  assert.equal(
+    await changes
+      .getByText(
+        "A newer workspace observation is known. Refresh comparison to update.",
+        { exact: true },
+      )
+      .count(),
+    0,
+  );
   const strip = await changes.locator(".changes-observation").innerText();
   assert.doesNotMatch(strip, /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}/);
   assert.doesNotMatch(strip, /[0-9a-f]{40}/);
@@ -665,7 +673,15 @@ test("workspace-unavailable Last turn keeps captured changes and identity", asyn
 test("Files observations arriving after navigation stay stale after closing the preview", async (_t, j) => {
   const { page, changes, comparisonRequests } = await startChangesJourney(j);
   await changes.getByText(/^As of /).waitFor();
-  assert.equal(await changes.getByText(/^Stale\./).count(), 0);
+  assert.equal(
+    await changes
+      .getByText(
+        "A newer workspace observation is known. Refresh comparison to update.",
+        { exact: true },
+      )
+      .count(),
+    0,
+  );
   let previewReadStarted!: () => void;
   const previewStarted = new Promise<void>((resolve) => {
     previewReadStarted = resolve;
@@ -731,7 +747,15 @@ test("Files observations arriving after navigation stay stale after closing the 
     ).find((candidate) => candidate.textContent === "Refresh comparison");
     return button !== undefined && !button.disabled;
   });
-  assert.equal(await changes.getByText(/^Stale\./).count(), 0);
+  assert.equal(
+    await changes
+      .getByText(
+        "A newer workspace observation is known. Refresh comparison to update.",
+        { exact: true },
+      )
+      .count(),
+    0,
+  );
   const branchComparisonId = comparisonRequests
     .map((request) => new URL(request))
     .filter(
@@ -744,7 +768,18 @@ test("Files observations arriving after navigation stay stale after closing the 
   assert.ok(branchComparisonId);
   const readsBeforeFilesObservation = comparisonRequests.length;
   releasePreviewRead();
-  await changes.getByText(/^Stale\./).waitFor();
+  await changes
+    .getByText(
+      "A newer workspace observation is known. Refresh comparison to update.",
+      { exact: true },
+    )
+    .waitFor();
+  await changes
+    .getByText(
+      "A newer workspace observation is known. Refresh comparison to update.",
+      { exact: true },
+    )
+    .waitFor();
   assert.equal(comparisonRequests.length, readsBeforeFilesObservation);
   assert.equal(
     await changes.getByText(branchComparisonId, { exact: true }).count(),
@@ -754,7 +789,12 @@ test("Files observations arriving after navigation stay stale after closing the 
   await openTaskTab(page, "Files");
   await page.getByRole("button", { name: "Close guide.md tab" }).click();
   await openTaskTab(page, "Changes");
-  await changes.getByText(/^Stale\./).waitFor();
+  await changes
+    .getByText(
+      "A newer workspace observation is known. Refresh comparison to update.",
+      { exact: true },
+    )
+    .waitFor();
   assert.equal(comparisonRequests.length, readsBeforeFilesObservation);
   assert.equal(
     await changes.getByText(branchComparisonId, { exact: true }).count(),
@@ -2039,7 +2079,15 @@ test("production Changes retains pending and latest-finished Last-turn provenanc
   } = await startChangesJourney(j, { recordResult: false });
   consoleState.historyRaceAllowed = true;
   await changes.getByText(/^As of /).waitFor();
-  assert.equal(await changes.getByText(/^Stale\./).count(), 0);
+  assert.equal(
+    await changes
+      .getByText(
+        "A newer workspace observation is known. Refresh comparison to update.",
+        { exact: true },
+      )
+      .count(),
+    0,
+  );
   const initialBranchId = comparisonRequests
     .map((request) => new URL(request))
     .find(
@@ -2209,7 +2257,12 @@ test("production Changes retains pending and latest-finished Last-turn provenanc
 
   const requestsBeforeCachedBranch = comparisonRequests.length;
   await comparisonTargetControl.selectOption("branch");
-  await changes.getByText(/^Stale\./).waitFor();
+  await changes
+    .getByText(
+      "A newer workspace observation is known. Refresh comparison to update.",
+      { exact: true },
+    )
+    .waitFor();
   assert.equal(comparisonRequests.length, requestsBeforeCachedBranch);
   assert.equal(
     await changes.getByText(initialBranchId, { exact: true }).count(),
@@ -2230,7 +2283,15 @@ test("production Changes retains pending and latest-finished Last-turn provenanc
   };
   assert.ok(uncommittedBody.data.comparisonId);
   await changes.getByText(/^As of /).waitFor();
-  assert.equal(await changes.getByText(/^Stale\./).count(), 0);
+  assert.equal(
+    await changes
+      .getByText(
+        "A newer workspace observation is known. Refresh comparison to update.",
+        { exact: true },
+      )
+      .count(),
+    0,
+  );
   await comparisonTargetControl.selectOption("last-turn");
   await changes
     .getByRole("heading", { name: "Current actual turn", exact: true })
@@ -2307,7 +2368,12 @@ test("production Changes retains pending and latest-finished Last-turn provenanc
   const requestsBeforeStaleCachedTargets = comparisonRequests.length;
   for (const targetName of ["branch", "uncommitted"]) {
     await comparisonTargetControl.selectOption(targetName);
-    await changes.getByText(/^Stale\./).waitFor();
+    await changes
+      .getByText(
+        "A newer workspace observation is known. Refresh comparison to update.",
+        { exact: true },
+      )
+      .waitFor();
     assert.equal(comparisonRequests.length, requestsBeforeStaleCachedTargets);
     assert.equal(
       await changes

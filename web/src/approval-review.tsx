@@ -17,9 +17,8 @@ import {
 } from "./delivery-presentation.js";
 import { failureCause } from "./outcome-copy.js";
 import { approvalMaterialView } from "../../src/operator/approval-material.js";
-import { type DiffRow, lineDiff } from "./issue-improve-model.js";
+import { TextComparison } from "./text-comparison.js";
 import { MarkdownPreview } from "./task-files.js";
-import "./issue-improve.css";
 
 type Approval = TaskRead["data"]["approvals"][number];
 type Decision = "approved" | "denied";
@@ -280,18 +279,15 @@ function Material({
           <MarkdownPreview text={text} />
         </div>
       ))}
-      {view.diffs.map(({ label, before, after }) => {
-        const diff = lineDiff(before, after);
-        return (
-          <div key={label} className="issue-improve-compare">
-            <span className="body issue-improve-strong">{label}</span>
-            <div className="issue-improve-diff">
-              <DiffColumn label="Current" rows={diff.current} />
-              <DiffColumn label="Proposed" rows={diff.proposed} />
-            </div>
-          </div>
-        );
-      })}
+      {view.diffs.map(({ label, before, after }) => (
+        <TextComparison
+          key={label}
+          name={label}
+          currentLabel="Current"
+          current={before}
+          proposed={after}
+        />
+      ))}
       {view.unrecognized && !fields && (
         <pre className="literal-text approval-material-literal">
           {typeof value === "string" ? value : JSON.stringify(value, null, 2)}
@@ -315,36 +311,6 @@ function Material({
           ))}
         </dl>
       )}
-    </div>
-  );
-}
-
-function DiffColumn({ label, rows }: { label: string; rows: DiffRow[] }) {
-  return (
-    <div className="issue-improve-diff-column">
-      <span className="metadata muted issue-improve-diff-label">{label}</span>
-      <div className="issue-improve-diff-rows">
-        {rows.map((row, index) => (
-          <div
-            // biome-ignore lint/suspicious/noArrayIndexKey: rows are positional and never reordered.
-            key={index}
-            className="issue-improve-diff-row"
-            data-kind={row.kind}
-          >
-            <span aria-hidden="true" className="issue-improve-diff-mark">
-              {row.kind === "removed" ? "−" : row.kind === "added" ? "+" : ""}
-            </span>
-            <span className="issue-improve-diff-text">
-              {row.kind !== "same" && (
-                <span className="issue-improve-sr">
-                  {row.kind === "removed" ? "Removed: " : "Added: "}
-                </span>
-              )}
-              {row.text || " "}
-            </span>
-          </div>
-        ))}
-      </div>
     </div>
   );
 }

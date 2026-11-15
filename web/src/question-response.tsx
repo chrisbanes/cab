@@ -558,18 +558,15 @@ export function QuestionResponse({
             </form>
           )}
           <div className="question-context question-context-foot">
-            {state && !recorded && (
-              <p className="question-hint metadata muted">
-                Preselected and recommended choices are drafts. Submit the
-                complete group explicitly.
+            <details>
+              <summary>Details</summary>
+              <p className="metadata muted">
+                {compactContext
+                  ? ""
+                  : `Requester: assignment ${data.requestingAssignmentId}. `}
+                Conversation revision {data.conversationRevision}.
               </p>
-            )}
-            <p className="metadata muted">
-              {compactContext
-                ? ""
-                : `Requester: assignment ${data.requestingAssignmentId}. `}
-              Conversation revision {data.conversationRevision}.
-            </p>
+            </details>
             {!compactContext && (
               <ActionLink
                 id={conversationId}

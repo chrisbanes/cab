@@ -273,7 +273,9 @@ async function retainedJourney(j: BrowserJourney, counterpart: boolean) {
       fullPage: false,
     });
   }
-  await page.getByLabel("Editable reply").fill("Retained exact old draft");
+  await page
+    .getByLabel("Reply", { exact: true })
+    .fill("Retained exact old draft");
   // The conversation pages back through every retained turn omission, newest page first.
   const log = page.getByRole("log", { name: "Task conversation" });
   const omissionRecords = log.locator(".conv-gap", {
@@ -667,7 +669,7 @@ async function retainedJourney(j: BrowserJourney, counterpart: boolean) {
     0,
   );
   assert.equal(
-    await page.getByLabel("Editable reply").inputValue(),
+    await page.getByLabel("Reply", { exact: true }).inputValue(),
     "Retained exact old draft",
   );
   stage("bound-head-read-complete");
@@ -702,7 +704,7 @@ async function retainedJourney(j: BrowserJourney, counterpart: boolean) {
     await page.clock.fastForward(15000);
     await intentionalEntered;
     assert.equal(await singleItem.count(), 1);
-    await page.getByLabel("Editable reply").focus();
+    await page.getByLabel("Reply", { exact: true }).focus();
     await readingDiagnostic("intentional-control-focus-pending");
     await page.clock.fastForward(15000);
   } finally {

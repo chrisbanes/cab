@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { randomUUID } from "node:crypto";
 import { genericInvalidInputMessage } from "../../src/operator/contracts.js";
+import { projectArchiveBlockedMessage } from "../../src/operator/project-lifecycle-copy.js";
 import { OperatorClient } from "../../web/src/api.js";
 import {
   ConfigurationDraft,
@@ -798,6 +799,74 @@ test("source credential refusal is actionable only after a definite lifecycle di
   assert.equal(unrelated.notice, outcomeCopy.conflict);
   assert.equal(unrelated.credentialRefusal, false);
   assert.equal(definite.credentialRefusal, true);
+});
+
+test("a blocked archive refusal names active work, not a newer version", async () => {
+  const projectId = randomUUID();
+  const refuse = (message: string) =>
+    new OperatorClient(async () =>
+      Response.json({ error: { code: "conflict", message } }, { status: 409 }),
+    );
+  const archive = () => ({
+    type: "project.archive" as const,
+    key: randomUUID(),
+    projectId,
+    expectedVersion: 2,
+  });
+  const blocked = new ConfigurationDraft();
+  await blocked.submit(refuse(projectArchiveBlockedMessage), archive(), "csrf");
+  assert.equal(blocked.phase, "conflict");
+  assert.equal(blocked.archiveBlocked, true);
+  assert.equal(blocked.notice, outcomeCopy.archiveBlocked);
+  const configure = new ConfigurationDraft();
+  await configure.submit(
+    refuse(projectArchiveBlockedMessage),
+    {
+      type: "project.configure",
+      key: randomUUID(),
+      projectId,
+      expectedVersion: 2,
+      name: "Atlas",
+    },
+    "csrf",
+  );
+  assert.equal(configure.notice, outcomeCopy.conflict);
+  assert.equal(configure.archiveBlocked, false);
+  const stale = new ConfigurationDraft();
+  await stale.submit(
+    refuse("Saved state conflicts with this request. Review before retrying."),
+    archive(),
+    "csrf",
+  );
+  assert.equal(stale.notice, outcomeCopy.conflict);
+  assert.equal(stale.archiveBlocked, false);
+  await blocked.submit(
+    new OperatorClient(async (_url, init) =>
+      Response.json({
+        kind: "configuration",
+        key: JSON.parse(String(init?.body)).key,
+        recorded: true,
+        result: {
+          commandType: "project.configure",
+          resourceId: projectId,
+          version: 3,
+          paused: true,
+          leadProfileId: null,
+          instructionsRevision: 1,
+        },
+      }),
+    ),
+    {
+      type: "project.configure",
+      key: randomUUID(),
+      projectId,
+      expectedVersion: 2,
+      name: "Atlas",
+    },
+    "csrf",
+  );
+  assert.equal(blocked.phase, "recorded");
+  assert.equal(blocked.archiveBlocked, false);
 });
 
 test("every outcome reads in plain words and keeps the receipt fields for Details", async () => {
@@ -2223,4 +2292,265 @@ test("read-only capacity recovery preserves the original system-scoped command a
     requests.filter((request) => request.method === "POST").length,
     1,
   );
+});
+
+for (const target of ["project", "profile"] as const) {
+  test(`${target}: proposal-only recovery verifies the original operation before trusting a stored save`, async () => {
+    const id = randomUUID(),
+      key = randomUUID();
+    const command =
+      target === "project"
+        ? {
+            type: "project.configure" as const,
+            key,
+            projectId: id,
+            expectedVersion: 3,
+            instructions: "Reviewed edit",
+          }
+        : {
+            type: "profile.configure" as const,
+            key,
+            profileId: id,
+            expectedVersion: 3,
+            instructions: "Reviewed edit",
+          };
+    const receipt =
+      target === "project"
+        ? {
+            kind: "configuration" as const,
+            key,
+            recorded: true as const,
+            result: {
+              commandType: "project.configure" as const,
+              resourceId: id,
+              version: 4,
+              paused: true,
+              leadProfileId: null,
+              instructionsRevision: 2,
+            },
+          }
+        : {
+            kind: "configuration" as const,
+            key,
+            recorded: true as const,
+            result: {
+              commandType: "profile.configure" as const,
+              resourceId: id,
+              version: 4,
+              revoked: false,
+            },
+          };
+    let saved:
+      | import("../../web/src/settings-state.js").ConfigurationRecovery
+      | null = null;
+    const readSaved = ():
+      | import("../../web/src/settings-state.js").ConfigurationRecovery
+      | null => saved;
+    const recovery = {
+      read: readSaved,
+      write: (
+        v: import("../../web/src/settings-state.js").ConfigurationRecovery,
+      ) => {
+        saved = structuredClone(v);
+      },
+    };
+    const original = new ConfigurationDrafts().get(
+      "proposal",
+      () => {},
+      recovery,
+    );
+    original.startOperation({ key, instructions: "Draft" });
+    original.set("instructions", "Reviewed edit");
+    assert.equal(readSaved()?.values.instructions, "Reviewed edit");
+    let finish!: () => void;
+    const gate = new Promise<void>((r) => {
+      finish = r;
+    });
+    const pending = original.submit(
+      new OperatorClient(async () => {
+        await gate;
+        return Response.json(receipt);
+      }),
+      command,
+      "csrf",
+    );
+    assert.deepEqual(
+      readSaved()?.command,
+      command,
+      "persist the frozen command before the network settles",
+    );
+    finish();
+    await pending;
+    assert.deepEqual(
+      readSaved()?.receipt,
+      receipt,
+      "unmounted completion persists its receipt before closing",
+    );
+    const frozen = structuredClone(readSaved()!);
+    const calls: string[] = [];
+    const client = new OperatorClient(async (url, init) => {
+      calls.push(init?.method ?? "GET");
+      const query = new URL(String(url), "http://cab.test").searchParams;
+      assert.equal(query.get("scope"), `${target}:${id}`);
+      assert.equal(query.get("type"), command.type);
+      assert.equal(query.get("key"), key);
+      return Response.json({
+        data: { state: "recorded", receipt },
+        observedAt: 1,
+      });
+    });
+    const restored = new ConfigurationDrafts().get(
+      "proposal",
+      () => {},
+      recovery,
+    );
+    assert.equal(restored.phase, "unknown");
+    assert.equal(
+      restored.set("instructions", "Cannot edit an unknown save"),
+      false,
+    );
+    assert.equal(restored.receipt, null);
+    await restored.verifyRecovery(client);
+    assert.equal(restored.phase, "recorded");
+    assert.deepEqual(restored.receipt, receipt);
+    assert.deepEqual(calls, ["GET"]);
+    for (const outcome of ["missing", "failed", "forged"] as const) {
+      saved = structuredClone(frozen);
+      if (
+        outcome === "forged" &&
+        saved?.receipt?.kind === "configuration" &&
+        "version" in saved.receipt.result
+      )
+        saved.receipt.result = {
+          ...saved.receipt.result,
+          ...(target === "project" ? { paused: false } : { revoked: true }),
+        } as typeof saved.receipt.result;
+      const candidate = new ConfigurationDrafts().get(
+        "proposal",
+        () => {},
+        recovery,
+      );
+      let posts = 0;
+      await candidate.verifyRecovery(
+        new OperatorClient(async (_url, init) => {
+          if (init?.method === "POST") posts++;
+          if (outcome === "failed") throw Error("offline");
+          return Response.json({
+            data:
+              outcome === "missing"
+                ? { state: "not-recorded" }
+                : { state: "recorded", receipt },
+            observedAt: 1,
+          });
+        }),
+      );
+      assert.equal(candidate.phase, "unknown", outcome);
+      assert.equal(candidate.receipt, null, outcome);
+      assert.equal(posts, 0);
+    }
+  });
+}
+
+test("a reloaded unknown proposal save checks by GET and only an explicit Check replays its frozen command", async () => {
+  const command = {
+    type: "profile.configure" as const,
+    key: randomUUID(),
+    profileId: randomUUID(),
+    expectedVersion: 3,
+    instructions: "Frozen edit",
+  };
+  let saved: import("../../web/src/settings-state.js").ConfigurationRecovery = {
+    values: { key: command.key, instructions: command.instructions },
+    command,
+    receipt: null,
+  };
+  const recovery = {
+    read: () => saved,
+    write: (v: typeof saved) => {
+      saved = structuredClone(v);
+    },
+  };
+  const draft = new ConfigurationDrafts().get("proposal", () => {}, recovery);
+  const posts: unknown[] = [];
+  const client = new OperatorClient(async (_url, init) => {
+    if (init?.method === "POST") {
+      posts.push(JSON.parse(String(init.body)));
+      return Response.json({
+        kind: "configuration",
+        key: command.key,
+        recorded: true,
+        result: {
+          commandType: command.type,
+          resourceId: command.profileId,
+          version: 4,
+          revoked: false,
+        },
+      });
+    }
+    return Response.json({ data: { state: "not-recorded" }, observedAt: 1 });
+  });
+  await draft.verifyRecovery(client);
+  assert.equal(draft.phase, "unknown");
+  assert.deepEqual(posts, []);
+  await draft.reconcile(client, "csrf");
+  assert.equal(draft.phase, "recorded");
+  assert.deepEqual(posts, [command]);
+});
+
+test("purging an opted-in draft fences an awaited completion and ordinary settings remain memory-only", async () => {
+  const command = {
+    type: "profile.configure" as const,
+    key: randomUUID(),
+    profileId: randomUUID(),
+    expectedVersion: 3,
+    instructions: "Private edit",
+  };
+  let saved:
+    | import("../../web/src/settings-state.js").ConfigurationRecovery
+    | null = null;
+  const drafts = new ConfigurationDrafts();
+  const readSaved = ():
+    | import("../../web/src/settings-state.js").ConfigurationRecovery
+    | null => saved;
+  const recovery = {
+    read: readSaved,
+    write: (v: NonNullable<typeof saved>) => {
+      saved = structuredClone(v);
+    },
+  };
+  const draft = drafts.get("proposal", () => {}, recovery);
+  draft.startOperation({
+    key: command.key,
+    instructions: command.instructions,
+  });
+  let finish!: () => void;
+  const gate = new Promise<void>((r) => {
+    finish = r;
+  });
+  const client = new OperatorClient(async () => {
+    await gate;
+    return Response.json({
+      kind: "configuration",
+      key: command.key,
+      recorded: true,
+      result: {
+        commandType: command.type,
+        resourceId: command.profileId,
+        version: 4,
+        revoked: false,
+      },
+    });
+  });
+  const pending = draft.submit(client, command, "csrf");
+  client.invalidateAuthentication();
+  drafts.purge();
+  finish();
+  await pending;
+  assert.deepEqual(readSaved()?.values, {});
+  assert.equal(readSaved()?.receipt, null);
+  const before = structuredClone(saved);
+  drafts
+    .get("ordinary", () => {})
+    .startOperation({ instructions: "Never persisted" });
+  assert.deepEqual(saved, before);
 });

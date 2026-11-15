@@ -123,7 +123,7 @@ test("Settings guides empty workspace through profile and paused project creatio
   });
   journey.observe(page);
   page.setDefaultTimeout(5000);
-  await page.goto(`${web.origin}/settings`);
+  await page.goto(`${web.origin}/settings/agents`);
   await page.getByLabel("Password").fill(web.password);
   await page.getByRole("button", { name: "Sign in", exact: true }).click();
   await page.getByRole("link", { name: "Create agent", exact: true }).waitFor();
@@ -142,6 +142,10 @@ test("Settings guides empty workspace through profile and paused project creatio
     .getByRole("navigation", { name: "Breadcrumb" })
     .getByRole("link", { name: "Settings", exact: true })
     .click();
+  await page
+    .getByRole("navigation", { name: "Settings sections" })
+    .getByRole("link", { name: "Projects", exact: true })
+    .click();
   await page.getByRole("link", { name: "Create project", exact: true }).click();
   await page.getByLabel("Project name", { exact: true }).fill("Setup project");
   await page
@@ -159,7 +163,7 @@ test("Settings guides empty workspace through profile and paused project creatio
 async function openSync(page: Page, project: string) {
   await page
     .getByRole("navigation", { name: "Breadcrumb" })
-    .getByRole("link", { name: "Settings", exact: true })
+    .getByRole("link", { name: "Projects", exact: true })
     .click();
   await page
     .getByRole("link", { name: `Configure ${project}`, exact: true })
@@ -313,7 +317,7 @@ test("ordinary links stay distinct while styled actions and long controls fit sm
   assert.equal(ordinaryStyle.decoration, "underline");
   assert.equal(ordinaryStyle.color, "rgb(244, 244, 245)");
 
-  await page.goto(`${web.origin}/settings`);
+  await page.goto(`${web.origin}/settings/projects`);
   const navigation = page.locator(".sidebar .nav-link").first();
   assert.equal(
     await navigation.evaluate(
@@ -449,6 +453,10 @@ test("unknown configuration survives scope navigation and exact reconciliation w
   await page
     .getByRole("navigation", { name: "Breadcrumb" })
     .getByRole("link", { name: "Settings", exact: true })
+    .click();
+  await page
+    .getByRole("navigation", { name: "Settings sections" })
+    .getByRole("link", { name: "Projects", exact: true })
     .click();
   await page
     .getByRole("link", {
@@ -628,6 +636,10 @@ test("configuration inline validation stale revision and revoked lead failures r
   await page
     .getByRole("navigation", { name: "Breadcrumb" })
     .getByRole("link", { name: "Settings", exact: true })
+    .click();
+  await page
+    .getByRole("navigation", { name: "Settings sections" })
+    .getByRole("link", { name: "Agents", exact: true })
     .click();
   await page.getByRole("link", { name: "Edit Candidate", exact: true }).click();
   await page
@@ -910,7 +922,7 @@ for (const layout of [
       if (!r.url().startsWith(web.origin)) external.push(r.url());
     });
     page.on("pageerror", (e) => errors.push(e.message));
-    await signIn(page, web, "/settings");
+    await signIn(page, web, "/settings/projects");
     await capture(page, `${layout.name}-populated-settings`);
     await page
       .getByRole("link", {
@@ -945,7 +957,7 @@ for (const layout of [
     );
     if (layout.width < 768) {
       // Project configuration is a nested screen (Back header); the drawer is on Settings.
-      await page.goto(`${web.origin}/settings`);
+      await page.goto(`${web.origin}/settings/projects`);
       await page
         .getByRole("button", { name: "Projects and navigation", exact: true })
         .click();
@@ -1312,6 +1324,10 @@ test("unknown committed placement stays reachable after conflict disappearance a
   await page
     .getByRole("navigation", { name: "Breadcrumb" })
     .getByRole("link", { name: "Settings", exact: true })
+    .click();
+  await page
+    .getByRole("navigation", { name: "Settings sections" })
+    .getByRole("link", { name: "Projects", exact: true })
     .click();
   await page
     .getByRole("link", {
@@ -2261,7 +2277,7 @@ test("new private input survives a detached receipt and old-session 401 after sa
     } else {
       // Phone: Sign out is in the drawer of the top-level parent of this nested screen.
       await page
-        .getByRole("link", { name: "Back to Settings", exact: true })
+        .getByRole("link", { name: "Back to Projects", exact: true })
         .click();
       await page
         .getByRole("button", { name: "Projects and navigation", exact: true })
@@ -2359,7 +2375,7 @@ test("new private input survives a detached receipt and old-session 401 after sa
     assert.deepEqual(errors, []);
     if (mode === "401-logout") {
       await page
-        .getByRole("link", { name: "Back to Settings", exact: true })
+        .getByRole("link", { name: "Back to Projects", exact: true })
         .click();
       await page
         .getByRole("button", { name: "Projects and navigation", exact: true })

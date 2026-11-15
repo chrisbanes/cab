@@ -1,5 +1,7 @@
 export const archivedProjectNotice =
   "This project is archived. Tasks and history are read-only. Restore keeps it paused.";
+export const projectArchiveBlockedMessage =
+  "Pause the project and resolve active work before archiving. Refresh project status for details.";
 export const projectDeletionWarning =
   "Delete permanently removes this project's tasks, configuration and history, and force-discards current captured worktree contents, including dirty, untracked and unpushed work. There is no undo.";
 export const projectExternalRetention =

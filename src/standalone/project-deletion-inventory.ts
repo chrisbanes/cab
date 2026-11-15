@@ -1614,6 +1614,14 @@ export const projectDeletionInventory = {
     columns: ["seq", "taskId", "blockerTaskId"],
     ownership: "taskId or blockerTaskId in T",
   },
+  task_execution_allowance_unprovable: {
+    columns: ["taskId"],
+    ownership: "taskId in T",
+  },
+  task_execution_allowances: {
+    columns: ["taskId", "total", "version"],
+    ownership: "taskId in T",
+  },
   task_execution_bindings: {
     columns: [
       "workId",
@@ -1626,6 +1634,10 @@ export const projectDeletionInventory = {
       "harness",
     ],
     ownership: "taskId in T OR workId in W OR assignmentId in A",
+  },
+  task_execution_charges: {
+    columns: ["workId", "taskId", "chargedAt", "correctedAt"],
+    ownership: "workId in W",
   },
   task_execution_results: {
     columns: ["workId", "payload"],

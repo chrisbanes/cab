@@ -7,6 +7,9 @@
 The operator returns to the same filtered task list after opening a task, leaving the
 list or reloading, and always sees which filters are hiding work.
 
+
+Board columns describe cab work rather than source issue state. Search covers permitted retained task, decision and result excerpts, not full agent transcripts; excerpts are bounded and long source coverage may be partial.
+
 ## Entry points
 
 - Sidebar Tasks, the All tasks links and a task's Back link open `/tasks`.

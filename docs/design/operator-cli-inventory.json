@@ -893,6 +893,23 @@
       "gap": "Exercised through the in-process CLI against a real loopback service with fixture runtimes, not through the installed binary."
     },
     {
+      "id": "task allowance",
+      "kind": "command",
+      "area": "task",
+      "scenarios": ["CLI02", "CLI04"],
+      "evidence": [
+        "test/execution/operator-cli-allowance.test.ts",
+        "test/execution/task-execution-allowance.test.ts"
+      ],
+      "effect": "Sets the task's absolute execution allowance total, or removes it with --remove (effect saved); it gates only new admissions and revokes nothing already admitted.",
+      "denial": "A read-only credential exits 3; a task whose admissions predate the charge ledger refuses activation and exits 4 with nothing recorded.",
+      "revision": "A stale allowance --expected-version (not the task version) exits 4 naming the current allowance version, with nothing recorded.",
+      "retry": "A lost reply then rerun reuses the key and replays the receipt; operation get does not read coordination receipts.",
+      "observation": "synthetic",
+      "state": "bounded",
+      "gap": "Exercised through the in-process CLI against a real loopback service with fixture runtimes, not through the installed binary."
+    },
+    {
       "id": "task reset",
       "kind": "command",
       "area": "task",

@@ -10,19 +10,19 @@
   margin: 0;
 }
 
-.settings-index,
+.settings-content,
 .settings-split {
   display: grid;
   gap: var(--space-12);
   align-items: start;
 }
 
-.settings-index {
+.settings-content {
   min-width: 0;
 }
 
-/* A section navigation column beside one column of sections. Not sticky: a
-   fixed bar would cover the target a link lands on. */
+/* The section navigation beside one section's page. Not sticky: a fixed bar
+   would cover the target a link lands on. */
 .settings-layout {
   display: grid;
   gap: var(--space-12);
@@ -30,14 +30,19 @@
   min-width: 0;
 }
 
-.settings-nav-select {
-  display: flex;
+/* Through 759px: a full-width Sections button above the same links, inline. */
+.settings-nav {
+  display: grid;
   gap: var(--space-8);
 }
 
-.settings-nav-select > span {
-  flex: 1;
-  min-width: 0;
+.settings-nav-trigger {
+  justify-content: space-between;
+  width: 100%;
+}
+
+.settings-nav ul[hidden] {
+  display: none;
 }
 
 .settings-nav ul {
@@ -53,7 +58,8 @@
   align-items: center;
   min-height: 30px;
   padding: 0 var(--space-8);
-  border-radius: var(--radius-md);
+  border-inline-start: 2px solid transparent;
+  border-radius: 0 var(--radius-md) var(--radius-md) 0;
   color: var(--muted-foreground);
   text-decoration: none;
 }
@@ -62,21 +68,16 @@
   color: var(--foreground);
 }
 
-.settings-nav li a[aria-current="true"] {
+/* The current section: a 2px edge as well as the tone, so it does not rest on colour. */
+.settings-nav li a[aria-current="page"] {
+  border-inline-start-color: var(--foreground);
   background: var(--overlay);
-  box-shadow: inset 0 0 0 1px var(--line-strong);
   color: var(--foreground);
 }
 
 @media (min-width: 760px) {
   .settings-layout {
-    grid-template-columns: 168px minmax(0, 1fr);
-  }
-}
-
-@media (min-width: 1121px) {
-  .settings-layout {
-    grid-template-columns: 180px minmax(0, 1fr);
+    grid-template-columns: 176px minmax(0, 1fr);
   }
 }
 
@@ -502,7 +503,7 @@
   .settings-discovery input,
   .settings-credentials-form input,
   .settings-credentials-form select,
-  .settings-nav select,
+  .settings-nav li a,
   .settings-tabs a,
   .runtime-limits > summary {
     min-height: 44px;

@@ -178,6 +178,7 @@ import {
   WithdrawalRecord,
 } from "./task-execution.js";
 import { stackSummary } from "../../src/operator/stacking-copy.js";
+import { attentionNext } from "../../src/operator/attention.js";
 import { WaitReasons } from "./wait-reasons.js";
 import {
   ChecklistCoverage,
@@ -203,6 +204,7 @@ const sectionIds = [
   "viewing-reference",
   "reply",
   "execution",
+  "execution-allowance",
 ];
 /** The section a tab opens at when a link names no section. */
 const tabSections: Record<TaskTab, string> = {
@@ -933,6 +935,8 @@ export function TaskWorkspace({
     // The tab and the pane never both hold the Changes view.
     if (tab === "changes") state.changesPane = null;
     if (tab === state.tab) return;
+    pendingLink.current = null;
+    linkFollow.current++;
     state.tabScroll[state.tab] = scrollY;
     anchor.current = null;
     anchorElement.current = null;
@@ -1126,6 +1130,12 @@ export function TaskWorkspace({
       )
         restoreReadingFocus.current = false;
     };
+    const cancelLatest = () => {
+      if (pendingLink.current?.kind === "latest") pendingLink.current = null;
+      linkFollow.current++;
+    };
+    window.addEventListener("wheel", cancelLatest, { passive: true });
+    window.addEventListener("touchmove", cancelLatest, { passive: true });
     document.addEventListener("click", leave, true);
     document.addEventListener("submit", leave, true);
     document.addEventListener("focusin", intentionalFocus);
@@ -1153,6 +1163,8 @@ export function TaskWorkspace({
         state.sourceRefreshFailed = true;
         state.sourceObservation = "unknown";
       }
+      window.removeEventListener("wheel", cancelLatest);
+      window.removeEventListener("touchmove", cancelLatest);
       document.removeEventListener("click", leave, true);
       document.removeEventListener("submit", leave, true);
       document.removeEventListener("focusin", intentionalFocus);
@@ -1293,7 +1305,11 @@ export function TaskWorkspace({
               ? document.getElementById(linked)
               : null;
       // A link into the conversation waits for the conversation to be read.
-      if (state.scrollY === 0 && !state.readingAnchor) {
+      if (
+        state.scrollY === 0 &&
+        !state.readingAnchor &&
+        state.tab === "overview"
+      ) {
         if (link) pendingLink.current = link;
         else if (
           initialVisit.current &&
@@ -1345,14 +1361,12 @@ export function TaskWorkspace({
               (el) =>
                 el.dataset.recordId === a.id && !el.closest("[data-pinned]"),
             );
-    if (bottom.current) {
+    if (bottom.current && state.tab === "overview") {
       // The conversation's newest entry is in view with the page's other columns, so hold the
       // reading position first, then follow what arrived.
-      if (state.tab === "overview") {
-        if (a && el) holdAnchor(a, el);
-        if (appended) followLatest();
-        setUpdates(false);
-      } else followLatest();
+      if (a && el) holdAnchor(a, el);
+      if (appended) followLatest();
+      setUpdates(false);
     } else {
       if (a && el) holdAnchor(a, el);
       if (newMaterial || appended) setUpdates(true);
@@ -2006,10 +2020,17 @@ export function TaskWorkspace({
   followLink.current = (link) => {
     if (link.kind === "assignment") return openAssignment(link.id);
     if (link.kind === "latest") {
-      linkFollow.current++;
+      const follow = ++linkFollow.current;
       state.conversationNotice = null;
       changed();
-      return requestAnimationFrame(followLatest);
+      return requestAnimationFrame(() => {
+        if (
+          scope.current &&
+          state.tab === "overview" &&
+          follow === linkFollow.current
+        )
+          followLatest();
+      });
     }
     const isRequest = (e: TimelineEntry) =>
       e.kind === "request" && e.interactionId === link.id;
@@ -2197,7 +2218,7 @@ export function TaskWorkspace({
     const { criteria, known } = briefParts(source),
       n = criteria.length;
     return n
-      ? `${n} supplied ${n === 1 ? "criterion" : "criteria"}`
+      ? `${n} ${n === 1 ? "acceptance criterion" : "acceptance criteria"}`
       : known
         ? "None supplied"
         : "Coverage unknown";
@@ -2383,7 +2404,7 @@ export function TaskWorkspace({
       ) : (
         <p className="metadata muted">{replyNote}</p>
       )}
-      <label htmlFor="workspace-reply">Editable reply</label>
+      <label htmlFor="workspace-reply">Reply</label>
       <Textarea
         id="workspace-reply"
         value={state.draft}
@@ -2518,7 +2539,7 @@ export function TaskWorkspace({
         data-attention={decisions > 0 || undefined}
         data-pinned={attentionPinned || undefined}
         data-collapsed={attentionCollapsed || undefined}
-        aria-label="Pending requests and holds"
+        aria-label="Decisions and holds"
       >
         <h3 className="sr-only">Decisions and holds</h3>
         {attentionBanner && (
@@ -2692,6 +2713,19 @@ export function TaskWorkspace({
                 href={`/tasks/${taskId}?section=execution`}
               >
                 Inspect execution
+              </ActionLink>
+            </p>
+          ))}
+        {attention.actions
+          .filter((item) => item.id === "allowance-exhausted")
+          .map((item) => (
+            <p key={item.id} className="metadata">
+              {item.title} ·{" "}
+              <ActionLink
+                variant="secondary"
+                href={`/tasks/${taskId}?section=execution-allowance`}
+              >
+                {attentionNext["allowance-exhausted"].inboxAction}
               </ActionLink>
             </p>
           ))}
@@ -3275,7 +3309,7 @@ export function TaskWorkspace({
                     {...overviewCard("brief")}
                   >
                     <summary>
-                      <h3 className="section-heading">Shared brief</h3>
+                      <h3 className="section-heading">Issue brief</h3>
                       <span className="metadata muted">{briefSummary}</span>
                     </summary>
                     {state.selectedSource && !source && (
@@ -3295,7 +3329,7 @@ export function TaskWorkspace({
                               </div>
                             )}
                             <h4 className="small-heading">
-                              Supplied acceptance criteria
+                              Acceptance criteria
                             </h4>
                             {brief.criteria.length ? (
                               <ol className="brief-criteria">
@@ -3905,12 +3939,6 @@ function Changes({
         </Button>
       )}
       {unconfirmed || (delivers && outcome)}
-      {delivers && (
-        <p>
-          Refresh reads provider state; it does not post, approve, merge or
-          clear a hold.
-        </p>
-      )}
       {delivers && d && d.omittedActionCount > 0 && (
         <p>
           {d.omittedActionCount} earlier retained delivery actions omitted;

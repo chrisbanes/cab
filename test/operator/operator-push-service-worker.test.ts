@@ -133,11 +133,11 @@ test("the Settings link of a test notification is accepted", async () => {
   await w.push({
     v: 1,
     title: "Test notification from cab",
-    url: "/settings#notifications",
+    url: "/settings/notifications",
     tag: "test:notification",
   });
   assert.deepEqual(plain(w.shown[0]?.options.data), {
-    url: "/settings#notifications",
+    url: "/settings/notifications",
   });
 });
 

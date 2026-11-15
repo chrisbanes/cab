@@ -793,7 +793,9 @@ export class WorkspaceManager implements TaskWorkspaceLifecycle {
   ): Promise<TaskWorkspaceBinding | undefined> {
     const id = z.string().trim().min(1).max(512).parse(taskId);
     if (this.store.writable?.(id) === false) return this.store.get(id);
-    return this.withTaskLock(id, async () => {
+    // A read takes no project lease: a hold write's writable check runs synchronously with it.
+    return this.withTaskIdentityLock(id, async () => {
+      if (this.store.writable?.(id) === false) return this.store.get(id);
       const binding = this.store.get(id);
       if (binding?.state !== "ready") return binding;
       return this.validateReady(binding, options.reuseRecentIdentity === true);

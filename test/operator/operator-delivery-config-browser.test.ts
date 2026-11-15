@@ -1371,7 +1371,7 @@ test("bulk targets the complete saved link snapshot and cancels without editing"
     await page
       .getByRole("link", { name: "Open GitLab Settings", exact: true })
       .getAttribute("href"),
-    "/settings#gitlab-credentials",
+    "/settings/gitlab-credentials",
   );
   await page
     .getByRole("region", { name: "Repository 42", exact: true })

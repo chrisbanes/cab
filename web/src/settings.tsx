@@ -19,6 +19,7 @@ import {
   outcomeCopy,
   type ConfigurationDraft,
   type ConfigurationDrafts,
+  type DraftRecovery,
 } from "./settings-state.js";
 import { sameText, type Values } from "./settings-changes.js";
 import { Button } from "./components.js";
@@ -37,6 +38,63 @@ export interface SettingsProps {
   /** Bumped by the header Refresh; each settings page re-reads its own resources. */
   refreshNonce?: number;
 }
+const sessionStates = new Map<string, unknown>();
+const sessionListeners = new Set<() => void>();
+const subscribeSessionStates = (listener: () => void) => {
+  sessionListeners.add(listener);
+  return () => sessionListeners.delete(listener);
+};
+/** Bumped by each purge, so a request that outlived its sign-in cannot write back. */
+let sessionGeneration = 0;
+/** Forgets every page's session state, such as a one-time token; called when sign-in ends. */
+export function purgeSessionStates() {
+  sessionGeneration++;
+  sessionStates.clear();
+  for (const listener of sessionListeners) listener();
+}
+/**
+ * `useState` whose value outlives the Settings page that set it, so a request the page
+ * started still reports to it after the reader leaves and comes back (a one-time token,
+ * a pending or unknown outcome). Held in memory for the signed-in `scope` only.
+ */
+export function useSessionState<T>(scope: string, key: string, initial: T) {
+  const id = `${scope}:${key}`;
+  const first = useRef(initial);
+  const value = useSyncExternalStore(subscribeSessionStates, () =>
+    sessionStates.has(id) ? (sessionStates.get(id) as T) : first.current,
+  );
+  // The setter keeps the generation it was made in: every purge ends that sign-in, and
+  // the next one brings a new scope and so a new setter.
+  const generation = sessionGeneration;
+  const set = useCallback(
+    (next: T) => {
+      if (generation !== sessionGeneration) return;
+      sessionStates.set(id, next);
+      for (const listener of sessionListeners) listener();
+    },
+    [id],
+  );
+  return [value, set] as const;
+}
+
+/**
+ * Runs `reread` once when a page that mounted during its own still-busy operation sees it
+ * settle: the operation's own re-read belonged to the page that started it.
+ */
+export function useRereadWhenSettled(busy: boolean, reread: () => void) {
+  const mountedBusy = useRef(busy);
+  const latest = useRef(reread);
+  latest.current = reread;
+  useEffect(() => {
+    if (!mountedBusy.current || busy) return;
+    mountedBusy.current = false;
+    latest.current();
+  }, [busy]);
+}
+
+/** Input a form left in the draft store: changed, or refused and kept for another try. */
+export const unfinished = (d: ConfigurationDraft) =>
+  d.dirty || d.phase === "rejected" || d.phase === "conflict";
 /** Re-read a page's resources when the header Refresh is pressed. */
 export function useHeaderRefresh(nonce: number | undefined, read: () => void) {
   const latest = useRef(read);
@@ -91,9 +149,10 @@ export function useDraft(
   drafts: ConfigurationDrafts,
   key: string,
   readOnly = false,
+  recovery?: DraftRecovery,
 ) {
   const [, render] = useReducer((v) => v + 1, 0);
-  const d = drafts.get(key, render);
+  const d = drafts.get(key, render, recovery);
   d.readOnly = readOnly;
   // Each commit reports the changes it shows, so `afterRender` runs on the one that shows its own.
   const revision = d.revision;
@@ -541,7 +600,7 @@ export function DraftMessage({
         />
       );
     case "conflict":
-      return draft.credentialRefusal ? (
+      return draft.credentialRefusal || draft.archiveBlocked ? (
         <ActionOutcome
           tone="error"
           message={draft.notice}

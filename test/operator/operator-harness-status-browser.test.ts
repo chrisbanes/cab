@@ -694,7 +694,7 @@ test("with both runtimes off, Readiness fails with its fix and points at Runtime
     .click();
   await runtimeRow(page, "Codex").getByText("Disabled in Settings").waitFor();
   assert.equal(await page.getByRole("alert").count(), 0);
-  await page.goto(`${web.origin}/settings`);
+  await page.goto(`${web.origin}/settings/readiness`);
   const check = page
     .locator(".settings-panel", {
       has: page.getByRole("heading", { name: "Readiness", exact: true }),

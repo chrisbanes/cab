@@ -11,7 +11,6 @@ import type { IssueDraftStart } from "./composer-release.js";
 import {
   issueImproveCopy as copy,
   type DeliveryState,
-  type DiffRow,
   emptyStored,
   type IssueDraftRun,
   type IssueEditPolicy,
@@ -24,7 +23,6 @@ import {
   issueImprovePollMs,
   issueNoteLimit,
   issueTitleLimit,
-  lineDiff,
   readStored,
   reviewBlock,
   type Stored,
@@ -33,7 +31,7 @@ import {
 } from "./issue-improve-model.js";
 import { Input } from "./ui/input.js";
 import { Textarea } from "./ui/textarea.js";
-import "./issue-improve.css";
+import { TextComparison } from "./text-comparison.js";
 
 /** Reaching `sessionStorage` itself throws when site data is blocked; the panel then keeps its state in memory. */
 const sessionStore = {
@@ -609,58 +607,6 @@ export function useIssueImprove({
 
 export type IssueImprove = ReturnType<typeof useIssueImprove>;
 
-function DiffColumn({ label, rows }: { label: string; rows: DiffRow[] }) {
-  return (
-    <div className="issue-improve-diff-column">
-      <span className="metadata muted issue-improve-diff-label">{label}</span>
-      <div className="issue-improve-diff-rows">
-        {rows.map((row, index) => (
-          <div
-            // biome-ignore lint/suspicious/noArrayIndexKey: rows are positional and never reordered.
-            key={index}
-            className="issue-improve-diff-row"
-            data-kind={row.kind}
-          >
-            <span aria-hidden="true" className="issue-improve-diff-mark">
-              {row.kind === "removed" ? "−" : row.kind === "added" ? "+" : ""}
-            </span>
-            <span className="issue-improve-diff-text">
-              {row.kind === "removed" ? (
-                <span className="issue-improve-sr">Removed: </span>
-              ) : null}
-              {row.kind === "added" ? (
-                <span className="issue-improve-sr">Added: </span>
-              ) : null}
-              {row.text || " "}
-            </span>
-          </div>
-        ))}
-      </div>
-    </div>
-  );
-}
-
-function Compare({
-  name,
-  current,
-  proposed,
-}: {
-  name: string;
-  current: string;
-  proposed: string;
-}) {
-  const diff = useMemo(() => lineDiff(current, proposed), [current, proposed]);
-  return (
-    <div className="issue-improve-compare">
-      <span className="body issue-improve-strong">{name}</span>
-      <div className="issue-improve-diff">
-        <DiffColumn label="Current on GitHub" rows={diff.current} />
-        <DiffColumn label="Proposed" rows={diff.proposed} />
-      </div>
-    </div>
-  );
-}
-
 const formatClock = (seconds: number) => {
   const whole = Math.floor(seconds);
   return `${Math.floor(whole / 60)}:${String(whole % 60).padStart(2, "0")}`;
@@ -845,12 +791,14 @@ export function IssueImprovePanel({
               ? "Sending to GitHub…"
               : "Review the full replacement. Nothing has been sent."}
           </p>
-          <Compare
+          <TextComparison
+            currentLabel="Current on GitHub"
             name="Title"
             current={receipt.current.title}
             proposed={receipt.proposed.title}
           />
-          <Compare
+          <TextComparison
+            currentLabel="Current on GitHub"
             name="Body"
             current={receipt.current.body}
             proposed={receipt.proposed.body}

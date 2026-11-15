@@ -441,7 +441,9 @@ test("same-task historical Search entries preserve manual origin selections and 
     .locator("#review")
     .getByText("Entry manually selected result", { exact: true })
     .waitFor();
-  await page.getByLabel("Editable reply").fill("Shared unfinished entry reply");
+  await page
+    .getByLabel("Reply", { exact: true })
+    .fill("Shared unfinished entry reply");
   await openOverviewCard(page, "assignments");
   const assignmentDisclosure = page
     .locator("#assignments .assignment-facts")
@@ -470,7 +472,7 @@ test("same-task historical Search entries preserve manual origin selections and 
     .getByText("Entry ancient result", { exact: true })
     .waitFor();
   assert.equal(
-    await page.getByLabel("Editable reply").inputValue(),
+    await page.getByLabel("Reply", { exact: true }).inputValue(),
     "Shared unfinished entry reply",
   );
   await page.goBack();
@@ -508,7 +510,7 @@ test("same-task historical Search entries preserve manual origin selections and 
     source.sourceId,
   );
   assert.equal(
-    await page.getByLabel("Editable reply").inputValue(),
+    await page.getByLabel("Reply", { exact: true }).inputValue(),
     "Shared unfinished entry reply",
   );
   assert.equal(
@@ -545,7 +547,7 @@ test("same-task historical Search entries preserve manual origin selections and 
     "",
   );
   assert.equal(
-    await page.getByLabel("Editable reply").inputValue(),
+    await page.getByLabel("Reply", { exact: true }).inputValue(),
     "Shared unfinished entry reply",
   );
   assert.equal(
@@ -582,7 +584,7 @@ test("same-task historical Search entries preserve manual origin selections and 
     "",
   );
   assert.equal(
-    await page.getByLabel("Editable reply").inputValue(),
+    await page.getByLabel("Reply", { exact: true }).inputValue(),
     "Shared unfinished entry reply",
   );
 });
@@ -607,7 +609,7 @@ test("in-flight exact reply becomes original-key reconciliation across same-task
   await page.goto(`${web.origin}/tasks/${a.taskId}`);
   await page.getByLabel("Password").fill(web.password);
   await page.getByRole("button", { name: "Sign in", exact: true }).click();
-  await page.getByLabel("Editable reply").fill("Exact in-flight reply");
+  await page.getByLabel("Reply", { exact: true }).fill("Exact in-flight reply");
   let release!: () => void, entered!: () => void, settled!: () => void;
   const barrier = new Promise<void>((r) => (release = r)),
     arrival = new Promise<void>((r) => (entered = r)),
@@ -645,10 +647,13 @@ test("in-flight exact reply becomes original-key reconciliation across same-task
       })
       .waitFor();
     assert.equal(
-      await page.getByLabel("Editable reply").inputValue(),
+      await page.getByLabel("Reply", { exact: true }).inputValue(),
       "Exact in-flight reply",
     );
-    assert.equal(await page.getByLabel("Editable reply").isDisabled(), true);
+    assert.equal(
+      await page.getByLabel("Reply", { exact: true }).isDisabled(),
+      true,
+    );
     assert.equal(
       await page
         .getByRole("radio", { name: "Comment on task", exact: true })
@@ -658,7 +663,7 @@ test("in-flight exact reply becomes original-key reconciliation across same-task
     release();
     await done;
     assert.equal(
-      await page.getByLabel("Editable reply").inputValue(),
+      await page.getByLabel("Reply", { exact: true }).inputValue(),
       "Exact in-flight reply",
     );
     await page
@@ -683,7 +688,10 @@ test("in-flight exact reply becomes original-key reconciliation across same-task
         .innerText(),
       originalKey,
     );
-    assert.equal(await page.getByLabel("Editable reply").inputValue(), "");
+    assert.equal(
+      await page.getByLabel("Reply", { exact: true }).inputValue(),
+      "",
+    );
     assert.equal(
       f.service
         .coordinationView()
@@ -902,21 +910,7 @@ test("Search leads with the field and shows filters beside the result count once
     "retained-query",
   );
   await page.getByText("Enter a phrase to search across projects.").waitFor();
-  const coverage = page.locator(".search-coverage");
-  assert.equal(
-    await coverage.innerText(),
-    "Searches saved excerpts, not full agent transcripts.",
-  );
-  assert.equal(
-    await coverage.getAttribute("title"),
-    "Covers permitted retained task, decision and result excerpts, up to 16,000 characters each. Long source coverage is partial. It does not generate summaries.",
-  );
-  const oneLine = () =>
-    coverage.evaluate((el) => {
-      const lineHeight = Number.parseFloat(getComputedStyle(el).lineHeight);
-      return el.getBoundingClientRect().height <= lineHeight * 1.5;
-    });
-  assert.equal(await oneLine(), true);
+  assert.equal(await page.locator(".search-coverage").count(), 0);
 
   // After a query: every filter and the count share the results header.
   await searchRecords(page, "Leads");
@@ -932,7 +926,28 @@ test("Search leads with the field and shows filters beside the result count once
   );
   assert.equal(await page.locator("form").getByLabel("Record type").count(), 0);
   assert.ok((await recordTypes()).includes("Task"));
-  assert.equal(await oneLine(), true);
+  const actions = await page
+    .locator("[data-search-record]")
+    .evaluateAll((rows) =>
+      rows.map((row) => ({
+        type: row.querySelector(".search-match-head > :first-child")
+          ?.textContent,
+        action: row.querySelector("a")?.textContent?.trim(),
+      })),
+    );
+  for (const type of ["Task", "Decision", "Result"]) {
+    assert.ok(
+      actions.some(
+        (row) =>
+          row.type === type && row.action === `Open ${type.toLowerCase()}`,
+      ),
+    );
+  }
+  assert.doesNotMatch(
+    await page.locator("#search-count").innerText(),
+    /omitted or inaccessible/,
+  );
+  assert.equal(await page.locator(".search-coverage").count(), 0);
   await captureBrowserEvidence(page, "1366-search-header-filters");
 
   // Type applies on change and every rendered match is of that type, whatever the order.
@@ -1133,7 +1148,7 @@ test("Search leads with the field and shows filters beside the result count once
     heights.every((h) => h >= 44),
     JSON.stringify(heights),
   );
-  assert.equal(await oneLine(), true);
+  assert.equal(await page.locator(".search-coverage").count(), 0);
   assert.ok(
     (await page.evaluate(
       () => document.documentElement.scrollWidth - window.innerWidth,

@@ -40,7 +40,7 @@ test("Create agent saves with one message, a breadcrumb, boundary aside and Canc
     await page
       .getByRole("link", { name: "Cancel", exact: true })
       .getAttribute("href"),
-    "/settings#profiles",
+    "/settings/agents",
   );
   await page.getByLabel("Agent name", { exact: true }).fill("Tester");
   await page.getByLabel("Summary", { exact: true }).fill("Testing");
@@ -233,7 +233,7 @@ test("profile instructions reverted or edited keep their state after leaving the
   const leaveAndReturn = async () => {
     await page
       .getByRole("navigation", { name: "Breadcrumb" })
-      .getByRole("link", { name: "Settings", exact: true })
+      .getByRole("link", { name: "Agents", exact: true })
       .click();
     await page
       .getByRole("link", { name: "Reviewer", exact: false })
@@ -342,7 +342,7 @@ test("project settings highlight the project in the sidebar; phone profile pages
   await page
     .getByRole("heading", { level: 1, name: "Mira · agent configuration" })
     .waitFor();
-  await page.getByRole("link", { name: "Back to Settings" }).waitFor();
+  await page.getByRole("link", { name: "Back to Agents" }).waitFor();
   assert.equal(
     await page.getByRole("navigation", { name: "Breadcrumb" }).isVisible(),
     false,
@@ -422,7 +422,10 @@ test("Create agent chooses Claude with model and effort, rejecting invalid value
 });
 
 test("Agent configuration switches Codex to Claude and back as new revisions", async (_t, journey) => {
-  const { f, ids, page, web } = await startSettings(journey, "/settings");
+  const { f, ids, page, web } = await startSettings(
+    journey,
+    "/settings/agents",
+  );
   const builder = ids.profiles.Builder as string;
   const d = f.service.domain();
   await page.getByText("Runtime: Codex").first().waitFor();
@@ -459,7 +462,7 @@ test("Agent configuration switches Codex to Claude and back as new revisions", a
     model: "sonnet",
     reasoningEffort: "high",
   });
-  await page.goto(`${web.origin}/settings`);
+  await page.goto(`${web.origin}/settings/agents`);
   await page
     .locator(".settings-row", { hasText: "Builder" })
     .getByText("Runtime: Codex")
@@ -516,7 +519,7 @@ for (const schedule of [
   test(`New agent runtime follows workspace without replacing edits: ${schedule}`, async (_t, journey) => {
     const { page } = await claudeDefaultProfile(
       journey,
-      schedule === "workspace-first" ? "/settings" : undefined,
+      schedule === "workspace-first" ? "/settings/agents" : undefined,
     );
     let release!: () => void;
     const gate = new Promise<void>((done) => {
@@ -679,7 +682,7 @@ test("Codex agent configuration sets, shows and clears model and effort", async 
     model: "m-alt",
     reasoningEffort: "medium",
   });
-  await page.goto(`${web.origin}/settings`);
+  await page.goto(`${web.origin}/settings/agents`);
   await page
     .locator(".settings-row", { hasText: "Builder" })
     .getByText("Runtime: Codex · m-alt · medium")

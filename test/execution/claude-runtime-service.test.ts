@@ -960,7 +960,7 @@ test("an invalid Claude token fails the turn visibly as unauthorized and is not 
     assert.match(notice?.message ?? "", /Claude rejected its native login/);
     assert.deepEqual(
       notice?.routes.map((r) => r.href),
-      ["/settings#runtime", `/assignments/${assignmentId}/recovery`],
+      ["/settings/runtime", `/assignments/${assignmentId}/recovery`],
     );
   }
   await new Promise((resolve) => setTimeout(resolve, 100));

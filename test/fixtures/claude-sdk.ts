@@ -73,8 +73,16 @@ export function fakeSdk(
     mcpSources?: string[];
     apiProvider?: string;
     apiKeySource?: string | null;
+    /** Successive turn `mcpServerStatus` replies; the last one repeats. */
+    mcpStatuses?: unknown[][];
+    /** Replaces `accountInfo` on turn queries only; the settings read keeps passing. */
+    turnAccountInfo?: () => Promise<unknown>;
+    /** Delays each turn `mcpServerStatus` reply. */
+    mcpStatusDelayMs?: number;
   } = {},
 ) {
+  let mcpReads = 0;
+  let readsAtPrompt: number | undefined;
   const metadata = {
     mcpServerStatus: async () =>
       (options.mcpSources ?? ["sdk"]).map((source) => ({
@@ -90,6 +98,17 @@ export function fakeSdk(
           ? undefined
           : (options.apiKeySource ?? "none"),
     }),
+  };
+  const turnMetadata = {
+    mcpServerStatus: async () => {
+      const statuses = options.mcpStatuses;
+      mcpReads++;
+      if (options.mcpStatusDelayMs)
+        await new Promise((done) => setTimeout(done, options.mcpStatusDelayMs));
+      if (!statuses) return metadata.mcpServerStatus();
+      return statuses[Math.min(mcpReads, statuses.length) - 1];
+    },
+    accountInfo: options.turnAccountInfo ?? metadata.accountInfo,
   };
   const supportedModels = () =>
     options.hangModels
@@ -156,6 +175,7 @@ export function fakeSdk(
             return;
           }
           log.push("prompt");
+          readsAtPrompt = mcpReads;
           const tools =
             (
               options.mcpServers?.cab as unknown as
@@ -259,7 +279,7 @@ export function fakeSdk(
             await exit;
           }
         })(),
-        { supportedModels, ...metadata },
+        { supportedModels, ...turnMetadata },
       );
     },
     createSdkMcpServer: ((options: { tools: FakeTool[] }) => ({
@@ -279,7 +299,14 @@ export function fakeSdk(
         handler(z.object(shape).parse(args), extra),
     })) as never,
   };
-  return { sdk, sessions, queries, optionsSeen };
+  return {
+    sdk,
+    sessions,
+    queries,
+    optionsSeen,
+    mcpReads: () => mcpReads,
+    readsAtPrompt: () => readsAtPrompt,
+  };
 }
 
 export const init = (sessionId: string, permissionMode?: string) => ({

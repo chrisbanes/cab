@@ -269,6 +269,8 @@ Archive freezes a paused, drained project without cancelling work or removing it
 open tasks, configuration, source memberships or history. Refuse while assignments,
 executions, ownership/recovery holds, pending effects, reservations, drafting/routing,
 agent requests or provider writes remain unresolved. Unknown inspection is a refusal.
+A read-only workspace inspection is not in-flight work and does not refuse archive; a
+hold it would record after archive is refused instead.
 Check durable and in-flight service facts again inside the archive transaction; do
 not hold that transaction across network or filesystem operations.
 
@@ -1063,6 +1065,48 @@ settle external effects, or qualify a final operational cutover. See the
 [macOS operations procedure](operations/standalone-macos.md) and its
 [bounded evidence](evidence/s08a-operations-2026-09-30.md).
 
+### Task execution allowance
+
+Decided by [ADR-1037](adr/1037-task-execution-allowance.md). A task may carry an
+optional allowance, off by default with no default number, on net charged execution
+generations shared by its lead and every cab delegate, including task draft turns.
+
+- **Charge.** Every admission of task-bound work records one charge for its `workId`
+  in the admission transaction, whether or not the allowance is on, so turning it off
+  and on never resets the count. Direct work and project drafting runs are not charged
+  and are disclosed as such. A rolled-back admission charges nothing.
+- **Correction.** Only a runtime pre-turn refusal that proves `startTurn` was never
+  called corrects its charge, once. An uncertain submission, a failure after
+  `startTurn`, a crash, a release or an operator-adopted refusal keeps it charged.
+- **Gate.** While the allowance is on, admission requires charged `U` below total `L`;
+  otherwise the request stays queued with an `Allowance waiting:` reason, and the task
+  reads Waiting with reason code `allowance-held`. Admitted work finishes under the
+  ordinary rules. Retries, planned-shutdown requeues, follow-ups and Start again each
+  charge on admission; Reset and conversation replacement keep the total and the count.
+- **Control.** `task.allowance.set {key, taskId, expectedAllowanceVersion, total}` (CLI
+  `cab task allowance TASK_ID (--total N | --remove) --expected-version N`) sets the
+  absolute total, or removes it with `total: null`. It is keyed and fenced on the
+  allowance's own version (0 before one is set), not the task version. Raising the total
+  re-attempts the same held request; lowering it to or below `U` reports how far over it
+  is and revokes nothing. No coordination tool reaches it, so an agent cannot extend its
+  own task's allowance.
+- **History.** A task admitted before the charge ledger existed cannot prove its history:
+  the allowance reads `history-unavailable` and activation is refused with a conflict.
+  The upgrade marks every task with any execution record other than a queued request,
+  so a few tasks that never ran are also refused; nothing makes such a task provable later. An
+  enabled task whose admissions lack charges reads `inconsistent` and holds new admissions
+  with `Allowance waiting: accounting unavailable`.
+- **Surfaces.** The task read's `executionAllowance` gives the state, total, version,
+  charged, corrected and remaining units, provisional charges (admitted without a bound
+  turn yet), held work and how far over the total it is; the Execution tab and `cab task
+  get` show it with a set/remove control. One `allowance-exhausted` attention item exists
+  per open task with a request held by the allowance; it opens the Execution tab's
+  allowance section.
+
+The allowance gates new admissions against net charged generations. It does not cap raw
+admission attempts, and does not bound a turn's duration, runtime steps, native
+subagents, tool work, tokens, cost or host load. It is not a deadline or spend cap.
+
 ## Workspaces and execution access
 
 cab owns task workspace creation, identity, retention and cleanup. Use one
@@ -1368,7 +1412,14 @@ is stopped, Resume…, and a stale row of a started assignment applies current i
 for its next turn. Active and unsettled recovery records appear first; known terminal,
 effect-free records with no recorded holds are collapsed under a settled count. The
 evidence caveat stays visible, and every record remains available in the disclosure. These
-use the same receipted JSON commands as the CLI. Runtime settings at `/settings/runtime` show capacity, runtime availability and
+use the same receipted JSON commands as the CLI. Settings is nine section pages, each
+with its own route and a persistent section navigation: Projects, Runtime & recovery,
+Agents (`/settings/agents`), Routing, GitHub discovery, GitLab credentials, CLI
+credentials, Notifications and Readiness, at `/settings/<section>`. Each page reads
+only what it shows. `/settings` opens Readiness until a task starts a turn, Projects
+afterwards, and stays with its Retry when the workspace cannot be read; an older
+`/settings#<section>` or `/settings#readiness-<check>` address opens its section page,
+and any other fragment is dropped. Runtime settings at `/settings/runtime` show capacity, runtime availability and
 effective policy. The separate cross-project admission summary is dropped; List/Board
 per-task waiting reasons and project views replace it. Assignment recovery shows curated task status, the accountable lead, task-wide holds and their available reason, destination and lifecycle with its admission caveat. It links to task-wide Execution and the exact inspector row for a stale started assignment. Advanced identities and uncurated reasons remain available through the existing bounded CLI recovery options where supported; the recovery page offers Release for a generation that never sent a turn and the same Start again as the task page once cab has released a held turn. The former assignment HTML pages and Apply form route are not found. Project Settings edits delivery policy at `/projects/:id/settings?tab=delivery`. The technical
 contracts are the [foundation](design/ui02-foundation.md),
@@ -1411,7 +1462,11 @@ task item, or the runtime for a runtime problem. Unresolved questions, pending a
 when related history is collapsed.
 
 The Actionable view excludes Done/cancelled tasks and operator-dismissed items. Resolved
-and Dismissed views retain history with reasons and times, without timed deletion. A
+and Dismissed views retain history with reasons and times, without timed deletion. On a wide
+layout, the initial fresh read may open its first request once; the status select
+explicitly arms its chosen status. Status links and Back/Forward cancel a pending
+initial arm, polling never rearms it, and an explicit request link takes priority.
+Phone layouts never auto-open a request. A
 terminal task's execution holds remain accessible through Execution and recovery. Clearing
 one delegate's hold does not clear the lead's: a remaining intervention names the actual
 assignment/work or task hold still requiring action.
@@ -1772,7 +1827,8 @@ Agents are reusable identities; assignments and their conversations remain disti
 The UI calls them agents. For compatibility, CLI commands retain `cab profile`,
 API routes and fields retain names such as `/api/operator/profiles` and `profileId`,
 and command types, reason codes, stored IDs and revision records retain their existing
-names and meanings. Existing web routes and Settings fragments also remain valid.
+names and meanings. Existing web routes remain valid, and an older Settings fragment
+such as `/settings#profiles` opens its section page (`/settings/agents`).
 
 An agent has a name, an optional short summary, private instructions and
 capabilities. Settings and routing candidate lists show the name with its summary
@@ -2036,12 +2092,30 @@ keeps its meaning ([ADR-1013](adr/1013-project-owned-drafting-runs.md)).
     `project.configure` or `profile.configure` with the reviewed text, offered only while
     the target is unchanged since the run started (the same instructions revision for a
     project, the same text for an agent) and the final text differs; an unknown outcome
-    is checked by resending the same key and body. It creates the target's next
+    freezes the original key and body and offers Check outcome. Reload recovery first
+    reads that exact operation by scope, command type and key; browser-stored commands
+    and receipts alone never establish a save. Only an explicit check may resend the
+    frozen command under current write gates. It creates the target's next
     revision; new assignments use it and existing assignments keep their captured
     revision until Apply current instructions. Earlier wording is restored with the
     existing restore-revision workflow. After a confirmed save the run is settled as
-    accepted; Reject discards it and Redraft starts a new run from the same selection.
-    A changed target makes Accept unavailable and offers Redraft.
+    accepted; a failed or unconfirmed close remains distinct from the confirmed save
+    and retains its close key across reload. Confirmation names only the verified
+    save's revision, or says the instructions were saved when that exact revision is
+    unavailable. A later independent edit is shown separately.
+    Reject discards it and Redraft starts a new run from the same selection. The tab
+    retains the previous reviewed run and its edited draft until the replacement is
+    confirmed: a definite refusal restores it; an unknown start keeps both identities
+    and checks the original request. Run-read failure alone is not a refusal.
+    Recovery uses bounded per-tab session storage for the current and previous run,
+    only opting proposal drafts into configuration persistence. Storage failure keeps
+    current-page edits and discloses the reload limit. New selection prunes run recovery;
+    sign-out, expiry and replacement of an accepted authentication identity purge it
+    and fence late callbacks. Initial session acceptance after reload permits recovery.
+    A changed target makes Accept unavailable and offers Redraft. Loading or failed
+    project lifecycle reads show their resource status and Retry, never archived
+    truth; mutation tabs need usable direct-ID project data. A failed refresh retains
+    a mounted draft while the last usable lifecycle remains available.
 - **Operator CLI.** The CLI does not offer drafting, Improve with lead or instruction
   proposals; see [Operator CLI](design/operator-cli.md).
 
@@ -2209,6 +2283,18 @@ retained window, including older loaded pages, so erased or newly withheld summa
 are removed. A failed read keeps the existing stale/error notice and Retry; it does
 not promise instant retraction of already read browser text. Signing out purges the
 session's retained conversation and rejects late responses.
+
+A completed assistant item can gain its summary when its turn finishes. The timeline
+read exposes a stable `reasoningSummaryRevision` for exact readable canonical IDs,
+turns, text and truncation. Cold reads, matching newest reads and older pages carry
+no out-of-page summary text. A changed or `unknown` newest request carries a complete
+`reasoningSummaryAnchors` overlay, including authoritative absence, for at most 128
+retained turns. It updates only already-loaded exact anchors at any retained depth;
+it does not insert unpaged rows. Older pages from another content revision retain
+ordinary progress and reconcile once before acknowledging the expanded window.
+Privacy resets, session fences, reading position, cursor, draft and expansion choices
+retain their existing semantics. The unchanged response adds 94 JSON bytes; a changed
+complete overlay can add up to 12,318,458 JSON bytes. Genuine changes need not be rare.
 
 The lead's latest plan is pinned above the composer as a collapsible card, labelled as
 the agent's working plan and never as a requirement or the task brief. Its ordered
@@ -2383,7 +2469,7 @@ only by [held-turn release](#execution-and-recovery); until then it stays held.
 The task workspace brings the brief, delegation, latest result and supporting
 evidence together:
 
-- **Shared task brief.** Make the desired outcome, supplied acceptance criteria,
+- **Issue brief.** Make the desired outcome, acceptance criteria,
   current approach, recorded decisions and unresolved questions easy to find.
   Preserve provenance: imported GitHub content remains authoritative and read-only
   locally, while agent plans and decisions are distinguishable from requirements
@@ -2409,7 +2495,7 @@ evidence together:
   progress and dependency waiting separate from decisions needing the operator.
   List, Board, overview and attention entry points must lead to a consistent task
   experience without losing project or source context.
-- **Criterion outcomes.** Summarise supplied criteria using their recorded
+- **Criterion outcomes.** Summarise acceptance criteria using their recorded
   evidence relationships. Distinguish supported, failed, unverified and stale
   evidence; expose the supporting result, assignment and revision. Do not infer
   an overall pass from agent claims, missing checks or a count of supported rows.

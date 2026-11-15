@@ -1,13 +1,14 @@
 import { visibleProjects } from "./project-lifecycle-model.js";
 import {
-  Fragment,
   type ReactNode,
   useCallback,
   useEffect,
+  useId,
   useRef,
   useState,
 } from "react";
 import {
+  ChevronDown,
   CircleCheck,
   CirclePause,
   CircleQuestionMark,
@@ -24,24 +25,28 @@ import {
   projectLabel,
   workspaceLabels,
 } from "../../src/operator/project-labels.js";
-import { ActionLink, Button, ProjectName, StatusBadge } from "./components.js";
+import {
+  ActionLink,
+  Button,
+  ProjectName,
+  ResourceStatus,
+  StatusBadge,
+} from "./components.js";
 import { GitLabCredentialsSection } from "./gitlab-credentials.js";
 import { DiscoveryCredentialRow } from "./discovery-credential.js";
 import { runtimeSummary } from "./execution-runtime.js";
+import { RuntimeSettings } from "./recovery.js";
 import { NotificationsSection } from "./notifications.js";
 import { OperatorCredentialsSection } from "./operator-credentials.js";
 import { ReadinessPanel } from "./readiness.js";
 import { useMediaQuery } from "./use-media-query.js";
 import { useOperatorResource } from "./resource.js";
 import {
-  fragmentSection,
   SETTINGS_SECTIONS,
   type SettingsSectionId,
+  settingsSection,
   settingsSectionHref,
-  settingsSectionOrder,
-  useFragmentLanding,
 } from "./settings-sections.js";
-import { NativeSelect } from "./ui/native-select.js";
 import type { ProjectConfigurationData } from "./settings-changes.js";
 import { Panel, useHeaderRefresh, type SettingsProps } from "./settings.js";
 import {
@@ -107,12 +112,164 @@ function useProjectConfigurations(
   return { configs, retry };
 }
 
-export function SettingsWorkspace(
+const phoneQuery = "(max-width: 759px)";
+
+/**
+ * The nine Settings links. Through 759px a Sections button shows and hides the same list
+ * inline; from 760px the list stays visible. One list, ordinary links: no menu roles or
+ * arrow keys.
+ */
+export function SettingsSectionNav({
+  current,
+}: {
+  current: SettingsSectionId | null;
+}) {
+  const [open, setOpen] = useState(false);
+  const listId = useId();
+  const trigger = useRef<HTMLButtonElement>(null),
+    list = useRef<HTMLUListElement>(null);
+  // Focus on a control that a resize hides moves to its counterpart. This listener is
+  // registered before `useMediaQuery`'s, so it sees the focus before the re-render.
+  const refocus = useRef<"trigger" | "link" | null>(null);
+  useEffect(() => {
+    const media = matchMedia(phoneQuery);
+    const change = () => {
+      const active = document.activeElement;
+      refocus.current = media.matches
+        ? list.current?.contains(active)
+          ? "trigger"
+          : null
+        : active === trigger.current
+          ? "link"
+          : null;
+      if (media.matches) setOpen(false);
+    };
+    media.addEventListener("change", change);
+    return () => media.removeEventListener("change", change);
+  }, []);
+  const phone = useMediaQuery(phoneQuery);
+  // biome-ignore lint/correctness/useExhaustiveDependencies: a new section closes the list on arrival.
+  useEffect(() => setOpen(false), [current]);
+  // biome-ignore lint/correctness/useExhaustiveDependencies: runs after the layout switch renders.
+  useEffect(() => {
+    const target = refocus.current;
+    refocus.current = null;
+    if (target === "trigger") trigger.current?.focus();
+    else if (target === "link")
+      (
+        list.current?.querySelector<HTMLElement>('[aria-current="page"]') ??
+        list.current?.querySelector<HTMLElement>("a")
+      )?.focus();
+  }, [phone]);
+  return (
+    <nav className="settings-nav" aria-label="Settings sections">
+      {phone && (
+        <Button
+          ref={trigger}
+          variant="secondary"
+          className="settings-nav-trigger"
+          aria-expanded={open}
+          aria-controls={listId}
+          onClick={() => setOpen((o) => !o)}
+        >
+          <span>
+            Sections{current ? ` · ${settingsSection(current).label}` : ""}
+          </span>
+          <ChevronDown aria-hidden="true" />
+        </Button>
+      )}
+      <ul id={listId} ref={list} hidden={phone && !open}>
+        {SETTINGS_SECTIONS.map((s) => (
+          <li key={s.id}>
+            <a
+              href={settingsSectionHref(s.id)}
+              aria-current={s.id === current ? "page" : undefined}
+              onClick={() => setOpen(false)}
+            >
+              {s.label}
+            </a>
+          </li>
+        ))}
+      </ul>
+    </nav>
+  );
+}
+
+/** A Settings page: the section navigation beside one section's content. */
+export function SettingsLayout({
+  current,
+  children,
+}: {
+  current: SettingsSectionId | null;
+  children?: ReactNode;
+}) {
+  return (
+    <div className="settings-page">
+      <div className="settings-layout">
+        <SettingsSectionNav current={current} />
+        <div className="settings-content">{children}</div>
+      </div>
+    </div>
+  );
+}
+
+/** The page for one section, mounting only that section's reads. */
+export function SettingsSectionPage(
   p: SettingsProps & {
-    /** True once the workspace read has an answer, data or failure. */
-    workspaceSettled: boolean;
+    section: SettingsSectionId;
+    /** The workspace read failed; the shell shows its failure and Retry. */
+    workspaceFailed: boolean;
   },
 ) {
+  const pages: Record<SettingsSectionId, (props: SettingsProps) => ReactNode> =
+    {
+      projects: ProjectsSettings,
+      runtime: RuntimeSettings,
+      profiles: AgentsSettings,
+      routing: RoutingSettings,
+      "github-discovery": DiscoverySettings,
+      "gitlab-credentials": GitLabSettings,
+      "cli-credentials": OperatorCredentialsSection,
+      notifications: NotificationsSection,
+      readiness: ReadinessSettings,
+    };
+  const Page = pages[p.section];
+  // Projects, Agents and Routing list the workspace: without it they show no counts or
+  // rows, so a loading or failed read never reads as an empty workspace.
+  const listsWorkspace = ["projects", "profiles", "routing"].includes(
+    p.section,
+  );
+  return (
+    <SettingsLayout current={p.section}>
+      {listsWorkspace && !p.workspace ? (
+        !p.workspaceFailed && (
+          <p className="body muted" role="status">
+            Loading settings…
+          </p>
+        )
+      ) : (
+        <Page {...p} />
+      )}
+    </SettingsLayout>
+  );
+}
+
+function useUnavailable(retry: (id: string) => void) {
+  return (id: string, name: string) => (
+    <p className="body settings-unavailable">
+      Unavailable{" "}
+      <Button
+        variant="secondary"
+        aria-label={`Retry ${name}`}
+        onClick={() => retry(id)}
+      >
+        Retry
+      </Button>
+    </p>
+  );
+}
+
+function ProjectsSettings(p: SettingsProps) {
   const [showArchived, setShowArchived] = useState(false);
   const archivedLoader = useCallback(
     (signal: AbortSignal) =>
@@ -130,11 +287,9 @@ export function SettingsWorkspace(
   useHeaderRefresh(p.refreshNonce, () => {
     if (showArchived) void archivedWorkspace.refresh();
   });
-  const projects = visibleProjects(
-      (showArchived ? archivedWorkspace.state.data : p.workspace)?.data
-        .projects ?? [],
-      showArchived,
-    ),
+  // With Show archived, the list waits for its own read rather than showing none.
+  const listed = showArchived ? archivedWorkspace.state.data : p.workspace;
+  const projects = visibleProjects(listed?.data.projects ?? [], showArchived),
     profiles = p.workspace?.data.profiles ?? [],
     projectLabels = workspaceLabels(p.workspace);
   const { configs, retry } = useProjectConfigurations(
@@ -143,6 +298,7 @@ export function SettingsWorkspace(
     projects.map((r) => r.id),
     p.refreshNonce,
   );
+  const unavailable = useUnavailable(retry);
   const observationLoader = useCallback(
       (signal: AbortSignal) =>
         p.client.read(
@@ -169,388 +325,276 @@ export function SettingsWorkspace(
     runtimeData?.projects
       .find((r) => r.project.id === projectId)
       ?.tasks.filter((t) => t.held).length ?? 0;
-  const paused = projects.filter((r) => r.paused).length,
-    revoked = profiles.filter((r) => r.revoked).length;
-  const unavailable = (id: string, name: string) => (
-    <p className="body settings-unavailable">
-      Unavailable{" "}
-      <Button
-        variant="secondary"
-        aria-label={`Retry ${name}`}
-        onClick={() => retry(id)}
-      >
-        Retry
-      </Button>
-    </p>
-  );
-  // The order is read from the workspace, so sections render only once that read has an
-  // answer: a reorder after landing would move the target and the focused heading.
-  const order = settingsSectionOrder(
-    p.workspace?.data.gettingStarted.turnStarted,
-  );
-  const labels = Object.fromEntries(
-    SETTINGS_SECTIONS.map((x) => [x.id, x.label]),
-  ) as Record<SettingsSectionId, string>;
-  // Derived on every render from the URL fragment: no fragment, or an unknown one, marks
-  // the first section.
-  const current = fragmentSection() ?? order[0] ?? "projects";
-  const phone = useMediaQuery("(max-width: 759px)");
-  // The select only chooses; Go jumps. A choice belongs to the section it was made from,
-  // so any other navigation shows the current section again.
-  const [picked, setPicked] = useState<{
-    from: SettingsSectionId;
-    id: SettingsSectionId;
-  } | null>(null);
-  const chosen = picked?.from === current ? picked.id : current;
-  useFragmentLanding(p.workspaceSettled);
-  // Discovery is shown by its own section and by a Readiness row; a save in either
-  // re-reads both.
-  const [discoveryNonce, setDiscoveryNonce] = useState(0);
-  const discoveryChanged = () => setDiscoveryNonce((n) => n + 1);
-  const shared = {
-    ...p,
-    refreshNonce: (p.refreshNonce ?? 0) + discoveryNonce,
-  };
-  // A reorder can carry the focused control far from where the reader is looking.
-  const orderKey = order.join();
-  const shownOrder = useRef(orderKey);
-  useEffect(() => {
-    if (shownOrder.current === orderKey) return;
-    shownOrder.current = orderKey;
-    const active = document.activeElement;
-    if (active && document.querySelector(".settings-index")?.contains(active))
-      active.scrollIntoView({ block: "nearest" });
-  }, [orderKey]);
-  if (!p.workspaceSettled)
-    return (
-      <div className="settings-page">
-        <p className="body muted" role="status">
-          Loading settings…
-        </p>
-      </div>
-    );
-  const sections: Record<SettingsSectionId, ReactNode> = {
-    projects: (
-      <Panel
-        id="projects"
-        title="Projects"
-        description={`${plural(projects.length, "project")} · ${paused} paused · repository access and GitHub discovery per project`}
-        action={
-          <ActionLink href="/settings/projects/new">Create project</ActionLink>
-        }
-      >
-        <label className="body check-field">
-          <input
-            type="checkbox"
-            checked={showArchived}
-            onChange={(e) => setShowArchived(e.target.checked)}
-          />
-          Show archived
-        </label>
-        {projects.map((r) => {
-          const label = projectLabel(projectLabels, r.id, r.name),
-            name = label.text,
-            c = configs[r.id],
-            lead = profiles.find(
-              (x) => x.id === c?.project.leadProfileId,
-            )?.name;
-          return (
-            <article className="settings-row" key={r.id}>
-              <div className="settings-row-heading">
-                <h3 className="small-heading">
-                  <ProjectName label={label} id={r.id} />{" "}
-                  {r.archived && <StatusBadge>Archived</StatusBadge>}
-                </h3>
-                {c && (
-                  <span className="metadata muted">
-                    Lead: {lead ?? "Unconfigured"}
-                  </span>
-                )}
-                <StatusBadge
-                  tone="idle"
-                  icon={r.paused ? CirclePause : CircleCheck}
-                >
-                  {r.paused ? "Paused" : "Enabled"}
-                </StatusBadge>
-                <ActionLink
-                  variant="secondary"
-                  href={`/projects/${r.id}/settings`}
-                  aria-label={`Configure ${name}`}
-                >
-                  Configure
-                </ActionLink>
-              </div>
-              {c === undefined ? (
-                <p className="metadata muted">Loading configuration…</p>
-              ) : c === null ? (
-                unavailable(r.id, name)
-              ) : (
-                <dl className="settings-facts metadata">
-                  <div>
-                    <dt>Repository access</dt>
-                    <dd>
-                      {[
-                        ...repositoryLines(c),
-                        ...(heldTasks(r.id) ? ["execution hold recorded"] : []),
-                      ].join(" · ")}
-                    </dd>
-                  </div>
-                  <div>
-                    <dt>Task source</dt>
-                    <dd>
-                      {c.source.selections.length === 0 ? (
-                        c.source.tracker === "jira" ? (
-                          "No Jira selections"
-                        ) : (
-                          "No GitHub selections"
-                        )
-                      ) : (
-                        <ul>
-                          {c.source.selections.map((s, i) => {
-                            const o = observed
-                              ?.find((o) => o.projectId === r.id)
-                              ?.selections.find((o) => o.selectionId === s.id);
-                            return (
-                              <li key={s.id ?? i}>
-                                <span>{selectionLine(s)}</span>
-                                <StatusBadge
-                                  tone="idle"
-                                  icon={
-                                    observations.state.data
-                                      ? observationSymbol(o)
-                                      : CircleQuestionMark
-                                  }
-                                >
-                                  {observations.state.data
-                                    ? observationLabel(o)
-                                    : "Unavailable"}
-                                </StatusBadge>
-                              </li>
-                            );
-                          })}
-                        </ul>
-                      )}
-                    </dd>
-                  </div>
-                </dl>
-              )}
-            </article>
-          );
-        })}
-        <p className="metadata muted">
-          Discovery and readiness never grant repository access; each is listed
-          separately.
-        </p>
-      </Panel>
-    ),
-    runtime: (
-      <Panel
-        id="runtime"
-        title="Runtime and recovery"
-        description={
-          runtimeData
-            ? `Global active turns ${runtimeData.globalUsage} / ${runtimeData.globalLimit} · ${plural(
-                runtimeData.projects.reduce(
-                  (n, r) => n + r.tasks.filter((t) => t.held).length,
-                  0,
-                ),
-                "task",
-              )} with a recorded execution hold`
-            : runtime.state.status === "error"
-              ? "Global active turns: unavailable"
-              : "Global active turns: loading…"
-        }
-        action={
-          <ActionLink variant="secondary" href="/settings/runtime">
-            Open runtime
-          </ActionLink>
-        }
-      >
-        <p className="metadata muted">
-          Runtimes use the service user's native login and configuration.
-        </p>
-      </Panel>
-    ),
-    profiles: (
-      <Panel
-        id="profiles"
-        title="Agents"
-        description={`${plural(profiles.length, "agent")} · ${revoked} revoked`}
-        action={
-          <ActionLink variant="secondary" href="/settings/profiles/new">
-            Create agent
-          </ActionLink>
-        }
-      >
-        {profiles.map((r) => {
-          const name = r.name ?? "Name unavailable";
-          return (
-            <article className="settings-row" key={r.id}>
-              <div className="settings-row-heading">
-                <div>
-                  <h3 className="small-heading">{name}</h3>
-                  <p className="metadata muted">
-                    {[r.summary, `revision ${r.version}`]
-                      .filter(Boolean)
-                      .join(" · ")}
-                  </p>
-                  <p className="metadata muted">
-                    Runtime: {runtimeSummary(r.runtime)}
-                  </p>
-                </div>
-                <StatusBadge
-                  tone={r.revoked ? "warning" : "idle"}
-                  icon={r.revoked ? undefined : CircleCheck}
-                >
-                  {r.revoked ? "Revoked" : "Available"}
-                </StatusBadge>
-                <ActionLink
-                  variant="secondary"
-                  href={`/profiles/${r.id}/settings`}
-                  aria-label={`Edit ${name}`}
-                >
-                  Edit
-                </ActionLink>
-              </div>
-            </article>
-          );
-        })}
-      </Panel>
-    ),
-    routing: (
-      <Panel
-        id="routing"
-        title="Routing"
-        description="Per project. Requires opt-in and a TypeSafe credential reference."
-      >
-        {projects.map((r) => {
-          const label = projectLabel(projectLabels, r.id, r.name),
-            name = label.text,
-            c = configs[r.id];
-          return (
-            <article className="settings-row" key={r.id}>
-              <div className="settings-row-heading">
-                <div>
-                  <h3 className="small-heading">
-                    <ProjectName label={label} id={r.id} />
-                  </h3>
-                  {c === undefined ? (
-                    <p className="metadata muted">Loading…</p>
-                  ) : c === null ? (
-                    unavailable(r.id, name)
-                  ) : (
-                    <p className="metadata muted">{routingLine(c.routing)}</p>
-                  )}
-                </div>
-                {c && (
-                  <StatusBadge
-                    tone="idle"
-                    icon={c.routing.enabled ? CircleCheck : CircleSlash}
-                  >
-                    {c.routing.enabled ? "Enabled" : "Disabled"}
-                  </StatusBadge>
-                )}
-                <ActionLink
-                  variant="secondary"
-                  href={`/projects/${r.id}/settings?tab=routing`}
-                  aria-label={`Open routing for ${name}`}
-                >
-                  Open routing
-                </ActionLink>
-              </div>
-            </article>
-          );
-        })}
-      </Panel>
-    ),
-    "github-discovery": (
-      <Panel
-        id="github-discovery"
-        title="GitHub discovery"
-        description="Read-only credential for listing repositories, refs and GitHub Projects. It grants no repository access."
-      >
-        <DiscoveryCredentialRow {...shared} onChange={discoveryChanged} />
-      </Panel>
-    ),
-    "gitlab-credentials": (
-      <Panel
-        id="gitlab-credentials"
-        title="GitLab credentials"
-        description="The credential for each GitLab host: lists projects, shows the account and pushes task branches. Links and delivery grants decide what it may reach."
-      >
-        <GitLabCredentialsSection {...p} />
-      </Panel>
-    ),
-    "cli-credentials": (
-      <div id="cli-credentials">
-        <OperatorCredentialsSection {...p} />
-      </div>
-    ),
-    notifications: (
-      <div id="notifications">
-        <NotificationsSection {...p} />
-      </div>
-    ),
-    readiness: (
-      <ReadinessPanel {...shared} onDiscoveryChange={discoveryChanged} />
-    ),
-  };
+  const paused = projects.filter((r) => r.paused).length;
   return (
-    <div className="settings-page">
-      <p className="introduction muted">
-        Configure paused projects, reusable agents, routing, task sources and
-        installation capacity. Each change is saved separately. Saving never
-        resumes work, clears holds or grants repository access.
-      </p>
-      <div className="settings-layout">
-        <nav className="settings-nav" aria-label="Settings sections">
-          {phone ? (
-            <div className="settings-nav-select">
-              <NativeSelect
-                aria-label="Settings section"
-                value={chosen}
-                onChange={(e) =>
-                  setPicked({
-                    from: current,
-                    id: e.target.value as SettingsSectionId,
-                  })
-                }
+    <Panel
+      id="projects"
+      title="Projects"
+      description={
+        listed
+          ? `${plural(projects.length, "project")} · ${paused} paused · repository access and GitHub discovery per project`
+          : "Repository access and GitHub discovery per project"
+      }
+      action={
+        <ActionLink href="/settings/projects/new">Create project</ActionLink>
+      }
+    >
+      <label className="body check-field">
+        <input
+          type="checkbox"
+          checked={showArchived}
+          onChange={(e) => setShowArchived(e.target.checked)}
+        />
+        Show archived
+      </label>
+      {!listed && (
+        <ResourceStatus
+          label="Archived projects"
+          state={archivedWorkspace.state}
+          retry={archivedWorkspace.refresh}
+        />
+      )}
+      {projects.map((r) => {
+        const label = projectLabel(projectLabels, r.id, r.name),
+          name = label.text,
+          c = configs[r.id],
+          lead = profiles.find((x) => x.id === c?.project.leadProfileId)?.name;
+        return (
+          <article className="settings-row" key={r.id}>
+            <div className="settings-row-heading">
+              <h3 className="small-heading">
+                <ProjectName label={label} id={r.id} />{" "}
+                {r.archived && <StatusBadge>Archived</StatusBadge>}
+              </h3>
+              {c && (
+                <span className="metadata muted">
+                  Lead: {lead ?? "Unconfigured"}
+                </span>
+              )}
+              <StatusBadge
+                tone="idle"
+                icon={r.paused ? CirclePause : CircleCheck}
               >
-                {order.map((id) => (
-                  <option key={id} value={id}>
-                    {labels[id]}
-                  </option>
-                ))}
-              </NativeSelect>
-              {/* Choosing never navigates: arrow keys on a closed select fire change. */}
+                {r.paused ? "Paused" : "Enabled"}
+              </StatusBadge>
               <ActionLink
                 variant="secondary"
-                href={settingsSectionHref(chosen)}
+                href={`/projects/${r.id}/settings`}
+                aria-label={`Configure ${name}`}
               >
-                Go
+                Configure
               </ActionLink>
             </div>
-          ) : (
-            <ul>
-              {order.map((id) => (
-                <li key={id}>
-                  <a
-                    href={settingsSectionHref(id)}
-                    aria-current={id === current ? "true" : undefined}
-                  >
-                    {labels[id]}
-                  </a>
-                </li>
-              ))}
-            </ul>
-          )}
-        </nav>
-        <div className="settings-index">
-          {order.map((id) => (
-            <Fragment key={id}>{sections[id]}</Fragment>
-          ))}
-        </div>
-      </div>
-    </div>
+            {c === undefined ? (
+              <p className="metadata muted">Loading configuration…</p>
+            ) : c === null ? (
+              unavailable(r.id, name)
+            ) : (
+              <dl className="settings-facts metadata">
+                <div>
+                  <dt>Repository access</dt>
+                  <dd>
+                    {[
+                      ...repositoryLines(c),
+                      ...(heldTasks(r.id) ? ["execution hold recorded"] : []),
+                    ].join(" · ")}
+                  </dd>
+                </div>
+                <div>
+                  <dt>Task source</dt>
+                  <dd>
+                    {c.source.selections.length === 0 ? (
+                      c.source.tracker === "jira" ? (
+                        "No Jira selections"
+                      ) : (
+                        "No GitHub selections"
+                      )
+                    ) : (
+                      <ul>
+                        {c.source.selections.map((s, i) => {
+                          const o = observed
+                            ?.find((o) => o.projectId === r.id)
+                            ?.selections.find((o) => o.selectionId === s.id);
+                          return (
+                            <li key={s.id ?? i}>
+                              <span>{selectionLine(s)}</span>
+                              <StatusBadge
+                                tone="idle"
+                                icon={
+                                  observations.state.data
+                                    ? observationSymbol(o)
+                                    : CircleQuestionMark
+                                }
+                              >
+                                {observations.state.data
+                                  ? observationLabel(o)
+                                  : "Unavailable"}
+                              </StatusBadge>
+                            </li>
+                          );
+                        })}
+                      </ul>
+                    )}
+                  </dd>
+                </div>
+              </dl>
+            )}
+          </article>
+        );
+      })}
+      <p className="metadata muted">
+        Discovery and readiness never grant repository access; each is listed
+        separately.
+      </p>
+    </Panel>
+  );
+}
+
+function AgentsSettings(p: SettingsProps) {
+  const profiles = p.workspace?.data.profiles ?? [],
+    revoked = profiles.filter((r) => r.revoked).length;
+  return (
+    <Panel
+      id="profiles"
+      title="Agents"
+      description={`${plural(profiles.length, "agent")} · ${revoked} revoked`}
+      action={
+        <ActionLink variant="secondary" href="/settings/profiles/new">
+          Create agent
+        </ActionLink>
+      }
+    >
+      {profiles.map((r) => {
+        const name = r.name ?? "Name unavailable";
+        return (
+          <article className="settings-row" key={r.id}>
+            <div className="settings-row-heading">
+              <div>
+                <h3 className="small-heading">{name}</h3>
+                <p className="metadata muted">
+                  {[r.summary, `revision ${r.version}`]
+                    .filter(Boolean)
+                    .join(" · ")}
+                </p>
+                <p className="metadata muted">
+                  Runtime: {runtimeSummary(r.runtime)}
+                </p>
+              </div>
+              <StatusBadge
+                tone={r.revoked ? "warning" : "idle"}
+                icon={r.revoked ? undefined : CircleCheck}
+              >
+                {r.revoked ? "Revoked" : "Available"}
+              </StatusBadge>
+              <ActionLink
+                variant="secondary"
+                href={`/profiles/${r.id}/settings`}
+                aria-label={`Edit ${name}`}
+              >
+                Edit
+              </ActionLink>
+            </div>
+          </article>
+        );
+      })}
+    </Panel>
+  );
+}
+
+function RoutingSettings(p: SettingsProps) {
+  const projects = visibleProjects(p.workspace?.data.projects ?? [], false),
+    projectLabels = workspaceLabels(p.workspace);
+  const { configs, retry } = useProjectConfigurations(
+    p.client,
+    p.session.csrfToken,
+    projects.map((r) => r.id),
+    p.refreshNonce,
+  );
+  const unavailable = useUnavailable(retry);
+  return (
+    <Panel
+      id="routing"
+      title="Routing"
+      description="Per project. Requires opt-in and a TypeSafe credential reference."
+    >
+      {projects.map((r) => {
+        const label = projectLabel(projectLabels, r.id, r.name),
+          name = label.text,
+          c = configs[r.id];
+        return (
+          <article className="settings-row" key={r.id}>
+            <div className="settings-row-heading">
+              <div>
+                <h3 className="small-heading">
+                  <ProjectName label={label} id={r.id} />
+                </h3>
+                {c === undefined ? (
+                  <p className="metadata muted">Loading…</p>
+                ) : c === null ? (
+                  unavailable(r.id, name)
+                ) : (
+                  <p className="metadata muted">{routingLine(c.routing)}</p>
+                )}
+              </div>
+              {c && (
+                <StatusBadge
+                  tone="idle"
+                  icon={c.routing.enabled ? CircleCheck : CircleSlash}
+                >
+                  {c.routing.enabled ? "Enabled" : "Disabled"}
+                </StatusBadge>
+              )}
+              <ActionLink
+                variant="secondary"
+                href={`/projects/${r.id}/settings?tab=routing`}
+                aria-label={`Open routing for ${name}`}
+              >
+                Open routing
+              </ActionLink>
+            </div>
+          </article>
+        );
+      })}
+    </Panel>
+  );
+}
+
+function DiscoverySettings(p: SettingsProps) {
+  return (
+    <Panel
+      id="github-discovery"
+      title="GitHub discovery"
+      description="Read-only credential for listing repositories, refs and GitHub Projects. It grants no repository access."
+    >
+      <DiscoveryCredentialRow {...p} />
+    </Panel>
+  );
+}
+
+function ReadinessSettings(p: SettingsProps) {
+  // A discovery save from a check's repair re-reads the checks.
+  const [discoveryNonce, setDiscoveryNonce] = useState(0);
+  const discoveryChanged = useCallback(
+    () => setDiscoveryNonce((n) => n + 1),
+    [],
+  );
+  return (
+    <ReadinessPanel
+      {...p}
+      refreshNonce={(p.refreshNonce ?? 0) + discoveryNonce}
+      onDiscoveryChange={discoveryChanged}
+    />
+  );
+}
+
+function GitLabSettings(p: SettingsProps) {
+  return (
+    <Panel
+      id="gitlab-credentials"
+      title="GitLab credentials"
+      description="The credential for each GitLab host: lists projects, shows the account and pushes task branches. Links and delivery grants decide what it may reach."
+    >
+      <GitLabCredentialsSection {...p} />
+    </Panel>
   );
 }

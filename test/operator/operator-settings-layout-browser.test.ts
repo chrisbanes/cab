@@ -44,10 +44,10 @@ async function assertSidebarPaused(scope: Locator) {
   assert.ok(name.height <= name.lineHeight * 1.5, JSON.stringify(name));
 }
 
-test("Settings index lists projects, profiles, routing and runtime from their own reads", async (_t, journey) => {
-  const { ids, page } = await startSettings(journey, "/settings");
+test("Settings pages list projects, profiles and routing from their own reads", async (_t, journey) => {
+  const { ids, page, web } = await startSettings(journey, "/settings/projects");
   const main = page.locator("main");
-  await page.getByRole("heading", { level: 1, name: "Settings" }).waitFor();
+  await page.getByRole("heading", { level: 1, name: "Projects" }).waitFor();
   const projects = main.locator(".settings-panel", {
     has: page.getByRole("heading", { name: "Projects", exact: true }),
   });
@@ -78,6 +78,26 @@ test("Settings index lists projects, profiles, routing and runtime from their ow
       "Discovery and readiness never grant repository access; each is listed separately.",
     )
     .waitFor();
+  // Every state badge pairs a symbol with its word; counts and labels do not.
+  assert.deepEqual(await unpairedBadges(main), []);
+  await assertPausedBadgeIdle(projects);
+  await assertSidebarPaused(
+    page.getByRole("navigation", { name: "Operator navigation" }),
+  );
+  await noPageOverflow(page);
+  await captureBrowserEvidence(page, "1366-sidebar-paused-project");
+  await captureBrowserEvidence(page, "1366-settings-projects");
+  const refresh = page.getByRole("button", { name: "Refresh", exact: true });
+  assert.equal(await refresh.count(), 1);
+  const workspace = page.waitForResponse((r) =>
+      r.url().endsWith("/api/operator/workspace"),
+    ),
+    configuration = page.waitForResponse((r) =>
+      r.url().endsWith(`/api/operator/projects/${ids.atlas}/configuration`),
+    );
+  await refresh.click();
+  await Promise.all([workspace, configuration]);
+  await page.goto(`${web.origin}/settings/agents`);
   const profiles = main.locator(".settings-panel", {
     has: page.getByRole("heading", { name: "Agents", exact: true }),
   });
@@ -90,6 +110,12 @@ test("Settings index lists projects, profiles, routing and runtime from their ow
       .getAttribute("href"),
     `/profiles/${ids.profiles.Reviewer}/settings`,
   );
+  const revoked = profiles.getByText("Revoked", { exact: true });
+  assert.ok(
+    ((await revoked.getAttribute("class")) ?? "").includes("text-(--attn)"),
+  );
+  assert.deepEqual(await unpairedBadges(main), []);
+  await page.goto(`${web.origin}/settings/routing`);
   const routing = main.locator(".settings-panel", {
     has: page.getByRole("heading", { name: "Routing", exact: true }),
   });
@@ -103,41 +129,9 @@ test("Settings index lists projects, profiles, routing and runtime from their ow
       .getAttribute("href"),
     `/projects/${ids.relay}/settings?tab=routing`,
   );
-  await main
-    .getByText("1 task with a recorded execution hold", { exact: false })
-    .waitFor();
-  assert.equal(
-    await page
-      .getByRole("link", { name: "Open runtime", exact: true })
-      .getAttribute("href"),
-    "/settings/runtime",
-  );
   const text = await page.locator("body").innerText();
   for (const secret of ["PRIVATE", "FIXTURE_GITHUB", "atlas-checkout"])
     assert.equal(text.includes(secret), false, secret);
-  // Every state badge on the index pairs a symbol with its word; counts and labels do not.
-  assert.deepEqual(await unpairedBadges(main), []);
-  await assertPausedBadgeIdle(projects);
-  const revoked = profiles.getByText("Revoked", { exact: true });
-  assert.ok(
-    ((await revoked.getAttribute("class")) ?? "").includes("text-(--attn)"),
-  );
-  await assertSidebarPaused(
-    page.getByRole("navigation", { name: "Operator navigation" }),
-  );
-  await noPageOverflow(page);
-  await captureBrowserEvidence(page, "1366-sidebar-paused-project");
-  await captureBrowserEvidence(page, "1366-settings");
-  const refresh = page.getByRole("button", { name: "Refresh", exact: true });
-  assert.equal(await refresh.count(), 1);
-  const workspace = page.waitForResponse((r) =>
-      r.url().endsWith("/api/operator/workspace"),
-    ),
-    configuration = page.waitForResponse((r) =>
-      r.url().endsWith(`/api/operator/projects/${ids.atlas}/configuration`),
-    );
-  await refresh.click();
-  await Promise.all([workspace, configuration]);
 });
 
 test("a failed project configuration read marks only that row unavailable", async (_t, journey) => {
@@ -145,8 +139,8 @@ test("a failed project configuration read marks only that row unavailable", asyn
   const route = `**/api/operator/projects/${ids.atlas}/configuration`;
   await page.route(route, (r) => r.fulfill({ status: 500, body: "{}" }));
   try {
-    await page.goto(`${web.origin}/settings`);
-    await page.getByRole("heading", { level: 1, name: "Settings" }).waitFor();
+    await page.goto(`${web.origin}/settings/projects`);
+    await page.getByRole("heading", { level: 1, name: "Projects" }).waitFor();
     await page.getByRole("button", { name: "Retry Atlas" }).first().waitFor();
     await page.getByText("Lead: Jonas").waitFor();
     await page.getByText("None · repository-free").first().waitFor();
@@ -159,15 +153,16 @@ test("a failed project configuration read marks only that row unavailable", asyn
   await page.getByText("Lead: Mira").waitFor();
 });
 
-test("Settings index is one column with 44px targets on a phone", async (_t, journey) => {
-  const { page } = await startSettings(journey, "/settings", phone);
-  await page.getByRole("heading", { level: 1, name: "Settings" }).waitFor();
-  await page.getByText("7 agents · 1 revoked").waitFor();
+test("a Settings page is one column with 44px targets on a phone", async (_t, journey) => {
+  const { page } = await startSettings(journey, "/settings/projects", phone);
+  await page.getByRole("heading", { level: 1, name: "Projects" }).waitFor();
   await page.getByText("Lead: Mira").waitFor();
+  // Open the section list, so its links are measured too.
+  await page.getByRole("button", { name: "Sections · Projects" }).click();
   assert.deepEqual(await unpairedBadges(page.locator("main")), []);
   await noPageOverflow(page);
   const columns = await page
-    .locator(".settings-index")
+    .locator(".settings-layout")
     .evaluate((e) => getComputedStyle(e).gridTemplateColumns.split(" ").length);
   assert.equal(columns, 1);
   const short = await page
@@ -189,11 +184,14 @@ test("Settings index is one column with 44px targets on a phone", async (_t, jou
 });
 
 test(
-  "Settings index renders in WebKit",
+  "Settings pages render in WebKit",
   { browserEngine: "webkit" },
   async (_t, journey) => {
-    const { page } = await startSettings(journey, "/settings", undefined, () =>
-      webkit.launch(),
+    const { page } = await startSettings(
+      journey,
+      "/settings/projects",
+      undefined,
+      () => webkit.launch(),
     );
     await page.getByText("3 projects · 1 paused", { exact: false }).waitFor();
   },

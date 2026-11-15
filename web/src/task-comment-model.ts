@@ -117,7 +117,7 @@ export const unavailableText = (fact: CommentRecipientFact) =>
 export function effectText(fact: CommentRecipientFact): string {
   switch (fact.mode) {
     case "input":
-      return "receives this as input on its next eligible turn";
+      return "receives this on its next turn";
     case "resume":
       return "resumes the same assignment with this as a follow-up";
     case "unavailable":

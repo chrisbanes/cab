@@ -182,7 +182,7 @@ export function TaskInspector({
             <p className="inspector-divider">cab execution</p>
           </>
         )}
-        <Group label={`Holds · ${attention.rows.length}`}>
+        <Group label={`Decisions and holds · ${attention.rows.length}`}>
           {attention.rows.length ? (
             <ul className="inspector-rows">
               {attention.rows.map((row) => (

@@ -6,11 +6,10 @@ defined by the web app (`web/src/`) and its browser journey tests; this document
 holds the rules that apply across them. Explore new screens in any tool; those
 artboards are throwaway and are not maintained once a screen ships.
 
-The [Settings section-page proposal](settings-pages/proposal.md) explores persistent
-route-based section navigation and an inline Sections disclosure on phones. This
-is a proposed navigation foundation for review, not shipped behaviour; its artboard
-keeps the existing tokens, typography and shell. User flows and SPEC continue to
-describe the current application until the design is implemented.
+Global Settings follows the [Settings section-page design](settings-pages/proposal.md):
+one page per section with persistent route-based section navigation, and an inline
+Sections disclosure on phones. Its artboard keeps the existing tokens, typography and
+shell.
 
 [SPEC.md](../docs/SPEC.md#operator-interface-and-human-requests) owns product
 behaviour, [acceptance.md](../docs/acceptance.md#operator-ui-scenarios) owns required
@@ -162,6 +161,15 @@ fixed application dimensions.
   top bar. This shell breakpoint does not qualify task-row, Inbox or reading
   layouts by itself. Phone controls accommodate touch, keyboard and safe-area space
   without covering content.
+- **Settings navigation:** global Settings uses a stable nine-link section
+  navigation. Desktop content keeps the 176px local column within the existing
+  232px/48px shell. Through 759px a house Button exposes the same ordinary links
+  inline, reports expanded state, and keeps the current section visible while closed.
+  At 760px local links remain visible; the global drawer threshold stays 1120px.
+  Phone controls keep 44px targets. Section route, page title, current link, ancestor
+  crumbs and parent Back agree. New navigation focuses its heading; saved
+  browser-history restoration and reader interaction take precedence over delayed
+  target landing.
 - **Changes pane:** from 1024px the Overview's Changes actions open a split in place of
   the inspector: the conversation (at least 480px) and the Changes view (at least
   320px, one surface card like the inspector, sticky under the page top) share the row,
