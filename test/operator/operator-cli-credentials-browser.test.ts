@@ -1,7 +1,9 @@
 import assert from "node:assert/strict";
-import type { Locator, Page } from "playwright";
+import type { Locator, Page, Route } from "playwright";
 import { browserSuite } from "../fixtures/browser-diagnostics.js";
 import { setupJourney } from "../fixtures/setup-browser.js";
+import { until } from "../fixtures/until.js";
+import { signIn } from "../fixtures/operator-settings.js";
 const test = browserSuite("operator-cli-credentials");
 
 const DAY = 24 * 60 * 60 * 1000;
@@ -252,3 +254,66 @@ async function assertNoStoredToken(page: Page, tokens: string[]) {
   );
   for (const token of tokens) assert.equal(stored.includes(token), false);
 }
+
+test("a create or rotate still in flight shows its one-time token after leaving and returning", async (_t, journey) => {
+  const { page, web } = await setupJourney(journey, {
+    path: "/settings/cli-credentials",
+  });
+  const panel = page
+    .locator("section.settings-panel")
+    .filter({ has: page.getByRole("heading", { name: "CLI credentials" }) });
+  const sections = page.getByRole("navigation", { name: "Settings sections" });
+  const held: Route[] = [];
+  const hold = (route: Route) =>
+    route.request().method() === "POST" ? held.push(route) : route.continue();
+  await page.route("**/api/operator/credentials**", hold);
+  const leaveAndReturn = async () => {
+    await sections.getByRole("link", { name: "Notifications" }).click();
+    await page
+      .getByRole("heading", { level: 1, name: "Notifications" })
+      .waitFor();
+    await sections.getByRole("link", { name: "CLI credentials" }).click();
+    await page
+      .getByRole("heading", { level: 1, name: "CLI credentials" })
+      .waitFor();
+  };
+  // Create: the request is in flight while the reader is on another section.
+  await panel.getByLabel("Credential name").fill("Laptop");
+  await panel.getByRole("button", { name: "Create credential" }).click();
+  await until(() => held.length === 1);
+  await leaveAndReturn();
+  // Still pending: the controls stay held, so nothing can be sent twice.
+  assert.equal(
+    await panel.getByRole("button", { name: "Create credential" }).isDisabled(),
+    true,
+  );
+  await held.shift()?.continue();
+  const dialog = page.getByRole("dialog");
+  await dialog.getByRole("button", { name: "Copy" }).waitFor();
+  assert.match(
+    (await dialog.locator(".settings-token").innerText()).trim(),
+    /^ens_/,
+  );
+  await dialog.getByRole("button", { name: "Done" }).click();
+  // Rotate: its token and outcome are also shown after returning.
+  await panel.getByRole("button", { name: /^Rotate Laptop/ }).click();
+  await until(() => held.length === 1);
+  await leaveAndReturn();
+  await held.shift()?.continue();
+  await dialog.getByRole("button", { name: "Copy" }).waitFor();
+  await dialog.getByRole("button", { name: "Done" }).click();
+  await panel.getByText(/^Rotated Laptop\./).waitFor();
+  await page.unroute("**/api/operator/credentials**", hold);
+  // Signing out forgets the session's outcomes.
+  await page.getByRole("button", { name: /account$/ }).click();
+  await page.getByRole("menuitem", { name: "Sign out" }).click();
+  await page.getByLabel("Password").waitFor();
+  await signIn(page, web, "/settings/cli-credentials");
+  // The rotation left the old credential active beside the new one.
+  await panel
+    .getByRole("button", { name: /^Rotate Laptop/ })
+    .first()
+    .waitFor();
+  assert.equal(await panel.getByText(/^Rotated Laptop\./).count(), 0);
+  assert.equal(await page.getByRole("dialog").count(), 0);
+});

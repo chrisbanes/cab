@@ -1,6 +1,12 @@
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
-import { chromium, type Browser, type Locator, type Page } from "playwright";
+import {
+  chromium,
+  type Browser,
+  type Locator,
+  type Page,
+  type Route,
+} from "playwright";
 import {
   browserSuite,
   type BrowserJourney,
@@ -10,6 +16,7 @@ import { createOperatorFixture } from "../fixtures/operator-web.js";
 import { signIn } from "../fixtures/operator-settings.js";
 import { seedOwnQuestion } from "../fixtures/questions.js";
 import { exhaustibleRuntime } from "../fixtures/runtime-exhaustion.js";
+import { until } from "../fixtures/until.js";
 
 const test = browserSuite("operator-notifications");
 
@@ -320,6 +327,34 @@ test("notifications: turn on, test, deep links through sign-in, turn off and rev
     ),
     true,
     "no horizontal overflow",
+  );
+});
+
+test("notifications: a test sent before leaving the page reports when the reader returns", async (_t, journey) => {
+  const { web, page } = await start(journey);
+  await signIn(page, web, "/settings/notifications");
+  const panel = section(page);
+  await panel.getByRole("button", { name: "Turn on notifications" }).click();
+  await panel.getByText("Notifications are on in this browser").waitFor();
+  const held: Route[] = [];
+  const hold = (route: Route) => void held.push(route);
+  await page.route("**/api/operator/notifications/subscriptions/*/test", hold);
+  await panel.getByRole("button", { name: "Send test notification" }).click();
+  await until(() => held.length === 1);
+  const sections = page.getByRole("navigation", { name: "Settings sections" });
+  await sections.getByRole("link", { name: "Readiness" }).click();
+  await page.getByRole("heading", { level: 1, name: "Readiness" }).waitFor();
+  await sections.getByRole("link", { name: "Notifications" }).click();
+  // Still sending: the controls stay held, so the test is not sent twice.
+  const send = panel.getByRole("button", { name: "Send test notification" });
+  await send.waitFor();
+  assert.equal(await send.isDisabled(), true);
+  await held.shift()?.continue();
+  await panel.getByText("Test notification sent.").waitFor();
+  assert.equal(await send.isDisabled(), false);
+  await page.unroute(
+    "**/api/operator/notifications/subscriptions/*/test",
+    hold,
   );
 });
 

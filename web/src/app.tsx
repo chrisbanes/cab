@@ -70,6 +70,7 @@ import { TaskComposer } from "./task-composer.js";
 import { AssignmentRecovery } from "./recovery.js";
 import { unavailableAlert } from "./execution-runtime.js";
 import { ConfigurationDrafts } from "./settings-state.js";
+import { purgeSessionStates } from "./settings.js";
 import { ProjectSetup, type SetupHeader } from "./project-setup.js";
 import { SettingsLayout, SettingsSectionPage } from "./settings-index.js";
 import {
@@ -671,6 +672,7 @@ export function App() {
     setLogoutPending(false);
     purgeProposalRecovery();
     drafts.current.purge();
+    purgeSessionStates();
     taskStates.current.purge();
     questionStates.current.purge();
     commandSends.current.purge();
@@ -703,6 +705,7 @@ export function App() {
         }
         client.invalidateAuthentication();
         drafts.current.purge();
+        purgeSessionStates();
         taskStates.current.purge();
         questionStates.current.purge();
         commandSends.current.purge();
@@ -1163,6 +1166,7 @@ export function App() {
     const isCurrentScope = client.captureAuthenticationScope();
     purgeProposalRecovery();
     drafts.current.purge();
+    purgeSessionStates();
     taskStates.current.purge();
     questionStates.current.purge();
     commandSends.current.purge();

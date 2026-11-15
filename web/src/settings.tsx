@@ -38,6 +38,61 @@ export interface SettingsProps {
   /** Bumped by the header Refresh; each settings page re-reads its own resources. */
   refreshNonce?: number;
 }
+const sessionStates = new Map<string, unknown>();
+const sessionListeners = new Set<() => void>();
+const subscribeSessionStates = (listener: () => void) => {
+  sessionListeners.add(listener);
+  return () => sessionListeners.delete(listener);
+};
+/** Forgets every page's session state, such as a one-time token; called when sign-in ends. */
+export function purgeSessionStates() {
+  sessionStates.clear();
+  for (const listener of sessionListeners) listener();
+}
+/**
+ * `useState` whose value outlives the Settings page that set it, so a request the page
+ * started still reports to it after the reader leaves and comes back (a one-time token,
+ * a pending or unknown outcome). Held in memory for the signed-in `scope` only.
+ */
+export function useSessionState<T>(scope: string, key: string, initial: T) {
+  const id = `${scope}:${key}`;
+  const first = useRef(initial);
+  const value = useSyncExternalStore(subscribeSessionStates, () =>
+    sessionStates.has(id) ? (sessionStates.get(id) as T) : first.current,
+  );
+  const set = useCallback(
+    (next: T | ((previous: T) => T)) => {
+      const previous = sessionStates.has(id)
+        ? (sessionStates.get(id) as T)
+        : first.current;
+      sessionStates.set(
+        id,
+        typeof next === "function"
+          ? (next as (previous: T) => T)(previous)
+          : next,
+      );
+      for (const listener of sessionListeners) listener();
+    },
+    [id],
+  );
+  return [value, set] as const;
+}
+
+/**
+ * Runs `reread` once when a page that mounted during its own still-busy operation sees it
+ * settle: the operation's own re-read belonged to the page that started it.
+ */
+export function useRereadWhenSettled(busy: boolean, reread: () => void) {
+  const mountedBusy = useRef(busy);
+  const latest = useRef(reread);
+  latest.current = reread;
+  useEffect(() => {
+    if (!mountedBusy.current || busy) return;
+    mountedBusy.current = false;
+    latest.current();
+  }, [busy]);
+}
+
 /** Input a form left in the draft store: changed, or refused and kept for another try. */
 export const unfinished = (d: ConfigurationDraft) =>
   d.dirty || d.phase === "rejected" || d.phase === "conflict";

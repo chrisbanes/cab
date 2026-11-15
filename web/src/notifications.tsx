@@ -28,7 +28,13 @@ import {
 } from "./notifications-model.js";
 import { failureCause, type ReceiptDetails } from "./outcome-copy.js";
 import { useOperatorResource } from "./resource.js";
-import { Panel, useHeaderRefresh, type SettingsProps } from "./settings.js";
+import {
+  Panel,
+  useHeaderRefresh,
+  useRereadWhenSettled,
+  useSessionState,
+  type SettingsProps,
+} from "./settings.js";
 import {
   Dialog,
   DialogClose,
@@ -299,11 +305,26 @@ export function NotificationsSection(p: SettingsProps) {
   const rows = read?.subscriptions ?? [];
   const publicKey = read?.publicKey ?? null;
   const [browser, setBrowser] = useState<BrowserRead | null>(null);
-  const [busy, setBusy] = useState(false);
-  const [outcome, setOutcome] = useState<Outcome | null>(null);
-  const [test, setTest] = useState<{ ok: boolean; text: string } | null>(null);
+  // Session state survives leaving the page, so a change still in flight shows as busy,
+  // and its outcome is shown, when the reader comes back.
+  const [busy, setBusy] = useSessionState(csrf, "notifications:busy", false);
+  useRereadWhenSettled(busy, list.refresh);
+  const [outcome, setOutcome] = useSessionState<Outcome | null>(
+    csrf,
+    "notifications:outcome",
+    null,
+  );
+  const [test, setTest] = useSessionState<{ ok: boolean; text: string } | null>(
+    csrf,
+    "notifications:test",
+    null,
+  );
   const [revoking, setRevoking] = useState<PushSubscriptionRecord | null>(null);
-  const [revokeOutcome, setRevokeOutcome] = useState<Outcome | null>(null);
+  const [revokeOutcome, setRevokeOutcome] = useSessionState<Outcome | null>(
+    csrf,
+    "notifications:revoke-outcome",
+    null,
+  );
   const turnOn = useRef<HTMLButtonElement>(null);
   const sendTest = useRef<HTMLButtonElement>(null);
   const browsers = useRef<HTMLHeadingElement>(null);
