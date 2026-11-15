@@ -1011,7 +1011,7 @@ test("answering a question words each hold notice for answers, with the same tit
       "paused",
       "Project paused",
       [],
-      "Task paused. Recording answers does not resume execution.",
+      "Answering does not resume work.",
     ],
   ];
   for (const [reason, label] of [

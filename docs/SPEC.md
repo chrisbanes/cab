@@ -2396,7 +2396,7 @@ only by [held-turn release](#execution-and-recovery); until then it stays held.
 The task workspace brings the brief, delegation, latest result and supporting
 evidence together:
 
-- **Shared task brief.** Make the desired outcome, supplied acceptance criteria,
+- **Issue brief.** Make the desired outcome, acceptance criteria,
   current approach, recorded decisions and unresolved questions easy to find.
   Preserve provenance: imported GitHub content remains authoritative and read-only
   locally, while agent plans and decisions are distinguishable from requirements
@@ -2422,7 +2422,7 @@ evidence together:
   progress and dependency waiting separate from decisions needing the operator.
   List, Board, overview and attention entry points must lead to a consistent task
   experience without losing project or source context.
-- **Criterion outcomes.** Summarise supplied criteria using their recorded
+- **Criterion outcomes.** Summarise acceptance criteria using their recorded
   evidence relationships. Distinguish supported, failed, unverified and stale
   evidence; expose the supporting result, assignment and revision. Do not infer
   an overall pass from agent claims, missing checks or a count of supported rows.

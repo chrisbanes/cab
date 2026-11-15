@@ -280,7 +280,7 @@ test("Task detail shows the designed header, two columns and C1/C2 criteria", as
   assert.ok(inspector.width <= 320);
   assert.ok(
     await page
-      .getByRole("heading", { name: "Shared brief", exact: true })
+      .getByRole("heading", { name: "Issue brief", exact: true })
       .isVisible(),
   );
   assert.ok(await noHorizontalScroll(page));
@@ -305,7 +305,7 @@ test("Task detail shows the designed header, two columns and C1/C2 criteria", as
   assert.match(
     (await overviewCard(page, "brief").locator("> summary").textContent()) ??
       "",
-    /Shared brief.*Requirements · Local · 3 supplied criteria/,
+    /Issue brief.*Requirements · Local · 3 acceptance criteria/,
   );
   await openOverviewCard(page, "brief");
   // Criteria: C1/C2/C3 with recorded words, no aggregate, raw checklist only in the disclosure.
@@ -356,10 +356,10 @@ test("Task detail shows the designed header, two columns and C1/C2 criteria", as
     () => document.activeElement?.id === "workspace-reply",
   );
   assert.equal(
-    await page.getByLabel("Editable reply").inputValue(),
+    await page.getByLabel("Reply", { exact: true }).inputValue(),
     "Please review criterion 9 in source revision 1.",
   );
-  await page.getByLabel("Editable reply").fill("");
+  await page.getByLabel("Reply", { exact: true }).fill("");
 
   // Overview repeats none of the other tabs: no in-page entries to them.
   assert.equal(
@@ -404,7 +404,7 @@ test("Task detail shows the designed header, two columns and C1/C2 criteria", as
   // Expanded assignment facts and an unsent reply survive a refresh.
   await page.locator(".assignment-facts > summary").first().click();
   await page.locator(".assignment-facts[open]").first().waitFor();
-  await page.getByLabel("Editable reply").fill("Unsent reply");
+  await page.getByLabel("Reply", { exact: true }).fill("Unsent reply");
   // Read the anchor with the result in view; the grid must not disturb restoration.
   const anchor = page.locator(`[data-record-id="${a.result.resultId}"]`);
   await anchor.evaluate((e) => e.scrollIntoView());
@@ -433,7 +433,7 @@ test("Task detail shows the designed header, two columns and C1/C2 criteria", as
   );
   assert.equal(await page.locator(".assignment-facts[open]").count(), 1);
   assert.equal(
-    await page.getByLabel("Editable reply").inputValue(),
+    await page.getByLabel("Reply", { exact: true }).inputValue(),
     "Unsent reply",
   );
 
@@ -461,7 +461,7 @@ test("Task detail shows the designed header, two columns and C1/C2 criteria", as
   assert.ok(phoneReply.y + phoneReply.height <= phoneInspector.y);
   assert.ok(await noHorizontalScroll(page));
   await captureBrowserEvidence(page, "task-detail-phone", { fullPage: false });
-  await page.getByLabel("Editable reply").waitFor();
+  await page.getByLabel("Reply", { exact: true }).waitFor();
   await h1.waitFor();
 });
 
@@ -993,7 +993,7 @@ for (const [label, viewport] of [
     await signIn(page, web.origin, web.password, `/tasks/${a.taskId}`);
     // The inspector renders with the task read, so the card's absence is settled.
     await page
-      .getByText("Holds · 0", { exact: true })
+      .getByText("Decisions and holds · 0", { exact: true })
       .waitFor({ state: "attached" });
     assert.equal(
       await page
@@ -1036,7 +1036,7 @@ for (const [label, viewport] of [
     const inspectorFold = page.locator(".task-inspector .inspector-fold");
     if ((await inspectorFold.getAttribute("open")) === null)
       await inspectorFold.locator(":scope > summary").click();
-    await page.getByText("Holds · 1", { exact: true }).waitFor();
+    await page.getByText("Decisions and holds · 1", { exact: true }).waitFor();
     await page
       .locator('aside[aria-label="Task context"]')
       .getByText("Uncertainty", { exact: true })
@@ -1065,7 +1065,7 @@ for (const [label, viewport] of [
       await inspectorFold.locator(":scope > summary").click();
     await page
       .locator('aside[aria-label="Task context"]')
-      .getByText("Holds · 3", { exact: true })
+      .getByText("Decisions and holds · 3", { exact: true })
       .waitFor();
     const inspector = page.locator('aside[aria-label="Task context"]');
     await openTaskDetails(page);
@@ -1128,7 +1128,9 @@ for (const [label, viewport] of [
     const inspectorFold = inspector.locator(".inspector-fold");
     if ((await inspectorFold.getAttribute("open")) === null)
       await inspectorFold.locator(":scope > summary").click();
-    await inspector.getByText("Holds · 1", { exact: true }).waitFor();
+    await inspector
+      .getByText("Decisions and holds · 1", { exact: true })
+      .waitFor();
     await inspector.getByText("Question pending", { exact: false }).waitFor();
     await captureBrowserEvidence(page, `task-question-running-${label}`);
   });
@@ -2361,7 +2363,7 @@ test("Tab switches, Refresh task and polls keep the reply, expansions and each t
   await page.addStyleTag({
     content: '#task-panel-files::after{content:"";display:block;height:3000px}',
   });
-  await page.getByLabel("Editable reply").fill("Unsent reply");
+  await page.getByLabel("Reply", { exact: true }).fill("Unsent reply");
   const anchor = page.locator(`[data-record-id="${a.result.resultId}"]`);
   await anchor.evaluate((e) => e.scrollIntoView());
   await page.evaluate(() => scrollBy(0, -40));
@@ -2378,7 +2380,7 @@ test("Tab switches, Refresh task and polls keep the reply, expansions and each t
       `${label}: ${anchorTop} -> ${after}`,
     );
     assert.equal(
-      await page.getByLabel("Editable reply").inputValue(),
+      await page.getByLabel("Reply", { exact: true }).inputValue(),
       "Unsent reply",
     );
     assert.equal(await page.locator(".assignment-facts[open]").count(), 1);
@@ -2440,7 +2442,7 @@ test("Tab switches, Refresh task and polls keep the reply, expansions and each t
   assert.ok(Math.abs((await page.evaluate(() => scrollY)) - filesY) <= 1);
   await openTaskTab(page, "Overview");
   assert.equal(
-    await page.getByLabel("Editable reply").inputValue(),
+    await page.getByLabel("Reply", { exact: true }).inputValue(),
     "Unsent reply",
   );
 
@@ -3076,7 +3078,7 @@ test("The decision card and inspector do not repeat open approvals as merged hol
   assert.equal(await holds.getByText(approvalHold).count(), 0);
   // Both approval rows and the pause each appear once in the inspector projection.
   await openTaskDetails(page);
-  await aside.getByText("Holds · 3", { exact: true }).waitFor();
+  await aside.getByText("Decisions and holds · 3", { exact: true }).waitFor();
   assert.equal(await aside.getByText("Approval pending").count(), 2);
   assert.equal(await card.getByText(approvalHold).count(), 0);
 
@@ -3084,14 +3086,14 @@ test("The decision card and inspector do not repeat open approvals as merged hol
   await serveApprovals(page, a.taskId, [a.interactionId]);
   await page.reload();
   await openTaskDetails(page);
-  await aside.getByText("Holds · 2", { exact: true }).waitFor();
+  await aside.getByText("Decisions and holds · 2", { exact: true }).waitFor();
   assert.equal(await card.getByText(approvalHold).count(), 0);
 
   // Nothing selected: both approvals remain their own rows.
   await serveApprovals(page, a.taskId, [a.interactionId, other]);
   await page.goto(`${web.origin}/tasks/${a.taskId}`);
   await openTaskDetails(page);
-  await aside.getByText("Holds · 3", { exact: true }).waitFor();
+  await aside.getByText("Decisions and holds · 3", { exact: true }).waitFor();
   assert.equal(await aside.getByText("Approval pending").count(), 2);
   assert.equal(await card.getByText(approvalHold).count(), 0);
 });
@@ -3160,13 +3162,13 @@ test("A local task without a repository shows no GitHub reply or delivery lines"
 
   // The project gains a repository while the page is open: Refresh shows delivery, keeps the draft.
   await openTaskTab(page, "Overview");
-  await page.getByLabel("Editable reply").fill("Keep this draft");
+  await page.getByLabel("Reply", { exact: true }).fill("Keep this draft");
   setLinkedRepository(fixture.f, a.projectId, true);
   await refreshTask(page, a.taskId);
   await delivery.waitFor();
   await openTaskTab(page, "Overview");
   assert.equal(
-    await page.getByLabel("Editable reply").inputValue(),
+    await page.getByLabel("Reply", { exact: true }).inputValue(),
     "Keep this draft",
   );
   assert.equal(await github.count(), 0);
@@ -3212,7 +3214,7 @@ test("The reply box has one sentence above it", async (_t, j) => {
   a.result("Guide drafted");
   const { web, page } = await fixture.launch();
   await signIn(page, web.origin, web.password, `/tasks/${a.taskId}`);
-  await page.getByLabel("Editable reply").waitFor();
+  await page.getByLabel("Reply", { exact: true }).waitFor();
   // The shared comment names its one rule; the lead's completed assignment is previewed below the box.
   assert.deepEqual(await sentencesAboveReply(page), [`P:${commentNote}`]);
   await page.getByText(/Task lead resumes the same assignment/).waitFor();
@@ -3231,7 +3233,7 @@ test("The reply box has one sentence above it", async (_t, j) => {
   assert.deepEqual(await sentencesAboveReply(page), [`P:${resumes}`]);
   assert.equal(
     await page
-      .getByLabel("Editable reply")
+      .getByLabel("Reply", { exact: true })
       .evaluate((box) =>
         Boolean(
           box.compareDocumentPosition(
@@ -3246,7 +3248,7 @@ test("The reply box has one sentence above it", async (_t, j) => {
 
   // The server's unavailable mode replaces that one sentence, keeps the draft and stops Send.
   // The sentence for each mode is asserted in the presentation test.
-  await page.getByLabel("Editable reply").fill("Keep this draft");
+  await page.getByLabel("Reply", { exact: true }).fill("Keep this draft");
   await page.route(
     (url) => url.pathname === `/api/operator/tasks/${a.taskId}`,
     async (route) => {
@@ -3272,7 +3274,7 @@ test("The reply box has one sentence above it", async (_t, j) => {
   );
   await openTaskTab(page, "Overview");
   assert.equal(
-    await page.getByLabel("Editable reply").inputValue(),
+    await page.getByLabel("Reply", { exact: true }).inputValue(),
     "Keep this draft",
   );
   await page.unrouteAll({ behavior: "wait" });
@@ -3303,7 +3305,7 @@ test("A project without a lead says so above the reply box", async (_t, j) => {
   });
   const { web, page } = await fixture.launch();
   await signIn(page, web.origin, web.password, `/tasks/${taskId}`);
-  await page.getByLabel("Editable reply").waitFor();
+  await page.getByLabel("Reply", { exact: true }).waitFor();
   assert.deepEqual(await sentencesAboveReply(page), [`P:${commentNote}`]);
   // With no lead, nothing is selected: the comment is recorded for the task only.
   await page.getByText(recordOnlyText).waitFor();
@@ -3340,7 +3342,7 @@ test("The GitHub reply says what posting does in one sentence and keeps its draf
       ),
     1,
   );
-  await page.getByLabel("Editable reply").fill("Exact comment body");
+  await page.getByLabel("Reply", { exact: true }).fill("Exact comment body");
   assert.deepEqual(await sentencesAboveReply(page), [
     "P:You review the exact comment before it posts to the GitHub issue.",
   ]);
@@ -3369,7 +3371,7 @@ test("The GitHub reply says what posting does in one sentence and keeps its draf
   );
   assert.equal(await tab.getAttribute("aria-disabled"), "true");
   assert.equal(
-    await page.getByLabel("Editable reply").inputValue(),
+    await page.getByLabel("Reply", { exact: true }).inputValue(),
     "Exact comment body",
   );
   assert.deepEqual(commands, []);
@@ -3394,7 +3396,7 @@ test("The GitHub reply says what posting does in one sentence and keeps its draf
     .waitFor();
   assert.equal(await tab.getAttribute("aria-disabled"), null);
   assert.equal(
-    await page.getByLabel("Editable reply").inputValue(),
+    await page.getByLabel("Reply", { exact: true }).inputValue(),
     "Exact comment body",
   );
   assert.equal(
@@ -3417,7 +3419,7 @@ test("The GitHub reply says what posting does in one sentence and keeps its draf
     true,
   );
   assert.equal(
-    await page.getByLabel("Editable reply").inputValue(),
+    await page.getByLabel("Reply", { exact: true }).inputValue(),
     "Exact comment body",
   );
   a.setGrant("approval", false);
@@ -3470,7 +3472,7 @@ test("Reply destinations are 44px touch targets on phones and mark the checked o
   await labels.first().waitFor();
   await page.setViewportSize({ width: 390, height: 844 });
   // The phone Reply is compact until focused; focusing the box shows the destinations.
-  await page.getByLabel("Editable reply").focus();
+  await page.getByLabel("Reply", { exact: true }).focus();
   const heights = await labels.evaluateAll((els) =>
     els.map((e) => e.getBoundingClientRect().height),
   );
@@ -3587,7 +3589,7 @@ test("The viewing reference appears only once a result exists", async (_t, j) =>
   );
 
   // The first result arrives while the page is open: the block appears with the draft kept.
-  await page.getByLabel("Editable reply").fill("Keep this draft");
+  await page.getByLabel("Reply", { exact: true }).fill("Keep this draft");
   a.result("Guide drafted");
   await refreshTask(page, a.taskId);
   await openTaskTab(page, "Review");
@@ -3602,7 +3604,7 @@ test("The viewing reference appears only once a result exists", async (_t, j) =>
   await review.getByText(/Viewing records availability only/).waitFor();
   await openTaskTab(page, "Overview");
   assert.equal(
-    await page.getByLabel("Editable reply").inputValue(),
+    await page.getByLabel("Reply", { exact: true }).inputValue(),
     "Keep this draft",
   );
 });
@@ -4282,7 +4284,7 @@ test("Delivery feedback leaves with the delivery controls and returns with them"
   setLinkedRepository(fixture.f, a.projectId, true);
   const { web, page } = await fixture.launch();
   await signIn(page, web.origin, web.password, `/tasks/${a.taskId}`);
-  await page.getByLabel("Editable reply").fill("Keep this draft");
+  await page.getByLabel("Reply", { exact: true }).fill("Keep this draft");
   await openTaskTab(page, "Changes");
   const changes = page.locator("#changes");
   const refresh = changes.getByRole("button", {
@@ -4307,7 +4309,7 @@ test("Delivery feedback leaves with the delivery controls and returns with them"
   await openTaskTab(page, "Overview");
   await openTaskTab(page, "Overview");
   assert.equal(
-    await page.getByLabel("Editable reply").inputValue(),
+    await page.getByLabel("Reply", { exact: true }).inputValue(),
     "Keep this draft",
   );
 });
@@ -4380,7 +4382,7 @@ test("A task that loses its GitHub source mid-edit moves to the lead with the le
     .at(-1)!.sourceId;
   const { web, page, commands } = await fixture.launch();
   await signIn(page, web.origin, web.password, `/tasks/${a.taskId}`);
-  const box = page.getByLabel("Editable reply");
+  const box = page.getByLabel("Reply", { exact: true });
   const post = page.getByRole("button", { name: "Post comment", exact: true });
   // A contextual lead draft with its immutable reference, then an approved GitHub comment.
   await openOverviewCard(page, "brief");
@@ -4554,8 +4556,8 @@ for (const engine of ["chromium", "webkit"] as const)
       for (const [name, heading, detail] of [
         [
           "brief",
-          "Shared brief",
-          `Requirements · Local · ${criteria} supplied ${criteria === 1 ? "criterion" : "criteria"}`,
+          "Issue brief",
+          `Requirements · Local · ${criteria} ${criteria === 1 ? "acceptance criterion" : "acceptance criteria"}`,
         ],
         [
           "evidence",

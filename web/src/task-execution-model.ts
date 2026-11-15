@@ -133,7 +133,7 @@ export const admissionLine = (admission: Data["admission"]) =>
     : `Task admission blocked: ${admission.reasons.map((r) => reasonLabels[r]).join(", ")}`;
 
 export const evidenceWarning =
-  "Recorded identities, observations, receipts and dispositions are evidence only; they do not prove that a process has terminated or that all effects have been released.";
+  "Recovery records do not confirm that execution has ended or released its holds.";
 export const resumeWarning =
   "Effects may continue while an execution is stopping. Resume clears only the Stop. cab releases a held turn's writer only after it interrupts the turn and the runtime reports its end, its process is verified to have exited, or 30 minutes pass with no event for it.";
 

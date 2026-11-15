@@ -4,6 +4,7 @@ import type { Execution, TaskRead } from "../../src/operator/contracts.js";
 import {
   admissionLine,
   evidenceNotice,
+  evidenceWarning,
   executionHoldLines,
   executionStatus,
   partitionRecoveryRecords,
@@ -288,5 +289,12 @@ test("recovery distinguishes absent and withheld lead and task hold facts", () =
       { reason: "Review" },
     ),
     { lead: "Lead", taskHold: "Review" },
+  );
+});
+
+test("recovery warning preserves the termination and holds limit", () => {
+  assert.equal(
+    evidenceWarning,
+    "Recovery records do not confirm that execution has ended or released its holds.",
   );
 });

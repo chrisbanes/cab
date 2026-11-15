@@ -1,3 +1,4 @@
+import { searchOmissionText } from "../../web/src/presentation.js";
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import {
@@ -472,4 +473,9 @@ test("recovery evidence labels stay distinct only as far as needed", () => {
   assert.deepEqual(recoveryEvidenceLabels([a("a1", null, null)]), [
     "Agent name unavailable: recovery evidence",
   ]);
+});
+
+test("search names only positive omission counts", () => {
+  assert.equal(searchOmissionText(0), undefined);
+  assert.equal(searchOmissionText(3), "3 omitted or inaccessible");
 });

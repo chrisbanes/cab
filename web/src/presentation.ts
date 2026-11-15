@@ -143,3 +143,6 @@ export function outcomeLine(text: string | null): {
   const line = first.match(/^.*?[.!?](?=\s|$)/)?.[0] ?? first;
   return { line, more: lines.length > 1 || line.length < first.length };
 }
+
+export const searchOmissionText = (count: number) =>
+  count > 0 ? `${count} omitted or inaccessible` : undefined;

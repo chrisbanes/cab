@@ -685,7 +685,7 @@ test(
     assert.equal(await settled.getAttribute("open"), null);
     await execution
       .getByText(
-        /identities, observations, receipts and dispositions are evidence only/,
+        /Recovery records do not confirm that execution has ended or released its holds/,
       )
       .waitFor();
     assert.match(

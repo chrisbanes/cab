@@ -490,15 +490,25 @@ test("the request pane leads with the question and keeps its scaffolding below t
     0,
   );
   const field = (await detail.locator("fieldset").last().boundingBox())!;
-  for (const below of [
-    detail.locator(".inbox-identity"),
-    detail.getByText(/^Conversation revision \d+\.$/),
-    detail.getByText(/^Preselected and recommended choices are drafts/),
-    detail.getByRole("link", { name: "Question evidence", exact: true }),
-  ]) {
-    const box = (await below.boundingBox())!;
-    assert.ok(box.y >= field.y + field.height, "below the form");
-  }
+  const details = detail.locator(".question-context-foot details");
+  const box = (await details.boundingBox())!;
+  assert.ok(box.y >= field.y + field.height, "below the form");
+  assert.equal(
+    await detail.getByText(/^Conversation revision \d+\.$/).isVisible(),
+    false,
+  );
+  await details.locator("summary").focus();
+  await page.keyboard.press("Enter");
+  assert.equal(
+    await detail.getByText(/^Conversation revision \d+\.$/).isVisible(),
+    true,
+  );
+  assert.equal(
+    await detail
+      .getByRole("link", { name: "Question evidence", exact: true })
+      .isVisible(),
+    true,
+  );
 });
 
 test("phone: the options are above the sticky submit bar on first view and the evidence links follow the form", async (_t, j) => {
@@ -1540,7 +1550,7 @@ test("returning to the Inbox restores the request the operator chose, not the on
 });
 
 const pausedHold = "Project paused",
-  pausedDetail = "Task paused. Recording answers does not resume execution.";
+  pausedDetail = "Answering does not resume work.";
 const seedHeldQuestions =
   (...titles: string[]) =>
   async (f: Fixture) => {

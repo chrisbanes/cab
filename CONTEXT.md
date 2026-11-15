@@ -172,7 +172,11 @@ _Avoid_: Source configuration when referring to external task identity
 
 **Issue brief**:
 The comment on an external item that states the work's contract, with the trusted notes that follow it.
+The operator UI also uses Issue brief for the corresponding retained contract of a local task.
 _Avoid_: agent brief, brief (alone), when not meaning an assignment brief
+
+**Decisions and holds**:
+The operator-attention grouping for decisions and unusual holds requiring attention. Ordinary live writer and capacity ownership remains on Execution.
 
 **Task publication**:
 The operator creating an external item from a local task, so that the same task

@@ -36,7 +36,7 @@ test("task visibility and shared readiness copy stay concise", () => {
   ]);
   assert.equal(
     sharedTaskReasonText(2, "Draft: not Ready"),
-    "2 tasks share this readiness/dependency reason: Draft: not Ready.",
+    "2 tasks are not Ready.",
   );
   assert.deepEqual(
     taskReasonItems(first).map((reason) => reason.text),

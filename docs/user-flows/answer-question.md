@@ -18,6 +18,9 @@ through the Inbox").
 The operator sees what is being asked before opening anything, answers it where
 they are, and gets one confirmation that the answer was recorded.
 
+
+Recommended and preselected choices remain drafts until explicitly submitted. Details contains the requester, revision and evidence links.
+
 ## Entry points
 
 - Home "Needs you" card.

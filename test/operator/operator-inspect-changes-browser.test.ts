@@ -248,3 +248,70 @@ for (const [label, viewport] of [
     assert.equal(interactions, 1);
   });
 }
+
+for (const wheel of [false, true])
+  test(`a delayed initial conversation keeps Changes position${wheel ? " after a wheel" : ""}`, async (_t, journey) => {
+    const f = await journey.start("fixture.create", () =>
+      createOperatorFixture(null, undefined, undefined, journey.fixtureOptions),
+    );
+    let browser: Browser | undefined;
+    journey.cleanup(
+      (primary) => f.close(browser, primary),
+      "fixture.close",
+      () => f.lifecycle.steps,
+    );
+    const task = await seedChangedTask(f);
+    const { web, page } = await launch(journey, phone, f, (b) => {
+      browser = b;
+    });
+    let release!: () => void, arrived!: () => void;
+    const gate = new Promise<void>((r) => {
+      release = r;
+    });
+    const pending = new Promise<void>((r) => {
+      arrived = r;
+    });
+    await page.route("**/api/operator/tasks/*/timeline?*", async (route) => {
+      const response = await route.fetch();
+      arrived();
+      await gate;
+      await route.fulfill({ response });
+    });
+    try {
+      await signIn(page, web, `/tasks/${task.taskId}`);
+      await pending;
+      await page.getByRole("tab", { name: "Changes", exact: true }).click();
+      await entry(page, "guide.md").waitFor();
+      await settle(page);
+      assert.equal(await page.evaluate(() => scrollY), 0);
+      if (wheel) {
+        // A deliberate wheel back to the top must survive the delayed conversation read.
+        await page.evaluate(() =>
+          scrollTo(0, document.documentElement.scrollHeight),
+        );
+        const wheelDelivered = page.evaluate(
+          () =>
+            new Promise<void>((resolve) =>
+              window.addEventListener("wheel", () => resolve(), { once: true }),
+            ),
+        );
+        await page.mouse.wheel(0, -200);
+        await wheelDelivered;
+        await page.waitForFunction(() => scrollY === 0);
+      }
+      const response = page.waitForResponse(
+        (r) => r.url().includes("/timeline?") && r.status() === 200,
+      );
+      release();
+      await response;
+      await page
+        .locator("#conversation [data-record-id]")
+        .first()
+        .waitFor({ state: "attached" });
+      await settle(page);
+      assert.equal(await page.evaluate(() => scrollY), 0);
+      assert.equal(await inFirstViewport(page, entry(page, "guide.md")), true);
+    } finally {
+      release();
+    }
+  });

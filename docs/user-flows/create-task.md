@@ -7,6 +7,9 @@
 The operator describes the outcome, sees whether it would start now, and creates
 it in one submission.
 
+
+Reference links are passive context and grant no repository access. An explicit assignee overrides routing; other holds still apply and the project lead remains accountable.
+
 ## Entry points
 
 - New task in the top bar.

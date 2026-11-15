@@ -540,10 +540,7 @@ test("desktop shell lists the designed destinations, an honest Inbox count and a
   // Overview and the task views carry their subtitle and the one primary action in the header.
   await page.goto(`${web.origin}/`);
   await page.locator("main.page h1").waitFor();
-  assert.equal(
-    await page.locator(".page-header-title p").textContent(),
-    "Decisions first. Work and completed results stay separate.",
-  );
+  assert.equal(await page.locator(".page-header-title p").count(), 0);
   assert.equal(
     await page
       .locator(".top-bar")

@@ -393,10 +393,7 @@ test("route subtitles count filtered tasks and name the accountable lead", () =>
     "1 task shown · no accountable lead",
   );
   assert.equal(taskRouteSubtitle("tasks", undefined, workspace), undefined);
-  assert.equal(
-    taskRouteSubtitle("overview", undefined, null),
-    "Decisions first. Work and completed results stay separate.",
-  );
+  assert.equal(taskRouteSubtitle("overview", undefined, null), undefined);
 });
 
 test("the attention summary prefers uncertain ownership, then Stopping, and ignores terminal work", () => {
