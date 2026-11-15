@@ -2707,6 +2707,7 @@ for (const laterCount of [325, 575])
       await frames();
       return (await read.json()).data;
     };
+    let knownRevision = initial.reasoningSummaryRevision as string;
     for (let batch = 0; batch < laterCount / 25; batch++) {
       for (let n = batch * 25; n < (batch + 1) * 25; n++)
         emit({
@@ -2716,6 +2717,7 @@ for (const laterCount of [325, 575])
         });
       const unchanged = await reread();
       assert.equal(unchanged.reasoningSummaryAnchors, undefined);
+      knownRevision = unchanged.reasoningSummaryRevision;
       await page
         .getByText(`LATE_ROW_${batch * 25 + 24}`, { exact: true })
         .waitFor();
@@ -2729,6 +2731,30 @@ for (const laterCount of [325, 575])
     await anchor.scrollIntoViewIfNeeded();
     await frames();
     const top = (await anchor.boundingBox())!.y;
+    const start = requests.length;
+    const changedResponse = page.waitForResponse(async (response) => {
+      const url = new URL(response.url());
+      if (
+        url.pathname !== `/api/operator/tasks/${a.taskId}/timeline` ||
+        url.searchParams.has("before") ||
+        url.searchParams.get("reasoningSummaryRevision") !== knownRevision ||
+        response.status() !== 200
+      )
+        return false;
+      try {
+        const data = (await response.json()).data;
+        return (
+          data.reasoningSummaryRevision !== knownRevision &&
+          Array.isArray(data.reasoningSummaryAnchors) &&
+          data.reasoningSummaryAnchors.some(
+            (value: { reasoningSummary: { text: string } }) =>
+              value.reasoningSummary.text === "TERMINAL_RETAINED_SUMMARY",
+          )
+        );
+      } catch {
+        return false;
+      }
+    });
     emit({
       kind: "reasoning-summary",
       itemId: "summary",
@@ -2740,9 +2766,14 @@ for (const laterCount of [325, 575])
         .list()
         .some((w) => w.workId === active.workId && w.state === "completed"),
     );
-    const start = requests.length;
-    const changed = await reread();
+    const changed = (await (await changedResponse).json()).data;
     await toggle.waitFor();
+    const applied = await reread();
+    assert.equal(
+      applied.reasoningSummaryRevision,
+      changed.reasoningSummaryRevision,
+    );
+    assert.equal(applied.reasoningSummaryAnchors, undefined);
     assert.ok(
       changed.reasoningSummaryAnchors.some(
         (value: { reasoningSummary: { text: string } }) =>
