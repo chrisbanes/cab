@@ -175,7 +175,8 @@ The live command refuses before runtime/auth initialization unless it receives
 `--live --one-attempt --grant-file FILE` and the separately authorized grant digest
 in `CAB_WORKSPACE_QUALIFICATION_AUTHORIZED_GRANT_SHA256`. A grant names exact binary
 hashes, models, native disposable configuration homes, fixture and evidence roots,
-expiry and the eight-turn/15-minute ceiling. A grant file or its digest is not itself
+expiry and the 15-minute ceiling. It names both runtimes with eight turns, or Claude
+alone with four when an earlier Codex pass is reused. A grant file or its digest is not itself
 permission: the controller must authorize those exact resources separately. No live
 grant is bundled, and an existing checkpoint refuses a new attempt. Unknown execution
 or shutdown settlement retains its identities and fixture data for reconciliation.
