@@ -76,6 +76,7 @@ import {
   isSettingsRoute,
   landingTargetId,
   legacySettingsUrl,
+  readerInput,
   sectionForPath,
   settingsLanding,
   settingsSectionHref,
@@ -562,13 +563,13 @@ const RESTORE_MS = 5000;
  */
 function restoreAsPageGrows(y: number) {
   stopRestore();
-  const events = ["wheel", "touchstart", "pointerdown", "keydown"] as const;
   const observer = new ResizeObserver(() => attempt());
   const timer = setTimeout(() => stop(), RESTORE_MS);
   const stop = () => {
     observer.disconnect();
     clearTimeout(timer);
-    for (const e of events) removeEventListener(e, stop, { capture: true });
+    for (const e of readerInput)
+      removeEventListener(e, stop, { capture: true });
     stopRestore = () => {};
   };
   const attempt = () => {
@@ -576,9 +577,9 @@ function restoreAsPageGrows(y: number) {
     if (Math.abs(scrollY - y) < 1) stop();
   };
   stopRestore = stop;
-  for (const e of events)
+  for (const e of readerInput)
     addEventListener(e, stop, { capture: true, passive: true });
-  // The page content grows as its reads arrive; the body keeps the viewport height.
+  // Observe `main`, whose content grows as the page's reads arrive.
   observer.observe(document.querySelector("main") ?? document.body);
   attempt();
 }
@@ -781,7 +782,10 @@ export function App() {
       const { pathname, hash } = location;
       // Once the page has rendered: a saved position is restored, otherwise the entry
       // starts at the top unless its page lands on a target.
+      const navKey = history.state?.navKey;
       requestAnimationFrame(() => {
+        // A later navigation in the same frame owns the scroll now.
+        if (history.state?.navKey !== navKey) return;
         if (typeof state?.scrollY !== "number") {
           if (!landingTargetId(pathname, hash)) scrollTo(0, 0);
         } else if (sectionForPath(pathname)) restoreAsPageGrows(state.scrollY);

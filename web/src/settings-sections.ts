@@ -107,7 +107,12 @@ const landingIdentity = () =>
   `${(history.state as { navKey?: string } | null)?.navKey ?? ""}|${location.pathname}${location.hash}`;
 
 /** Reader input that keeps their position: landing after it would move them. */
-const readerInput = ["wheel", "touchstart", "pointerdown", "keydown"] as const;
+export const readerInput = [
+  "wheel",
+  "touchstart",
+  "pointerdown",
+  "keydown",
+] as const;
 
 /**
  * Focus and scroll to the address's target once the page's own read is fresh. It lands

@@ -291,7 +291,9 @@ test("Back to a section restores its saved position once its reads have grown th
   };
   await back();
   await page
-    .waitForFunction((y) => scrollY === y, saved, { timeout: 3000 })
+    .waitForFunction((y) => Math.abs(scrollY - y) < 1, saved, {
+      timeout: 3000,
+    })
     .catch(async () =>
       assert.fail(
         `restored to ${await page.evaluate(() => scrollY)} of ${saved}`,
