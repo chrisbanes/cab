@@ -12,6 +12,7 @@ import {
   seedDraftingProject,
   seedOperatorFeedback,
 } from "../fixtures/drafting.js";
+import { operatorCommandSchema } from "../../src/operator/contracts.js";
 import { signOutFromSidebar } from "../fixtures/operator-account.js";
 import { desktop, phone } from "../fixtures/operator-settings.js";
 import { createOperatorFixture } from "../fixtures/operator-web.js";
@@ -601,6 +602,103 @@ for (const committed of [false, true])
       }
       assert.equal(ctx.commands("project.configure").length, 0);
     });
+
+for (const outcome of ["starts", "refused", "already recorded"] as const)
+  test(`an explicit retry after two undelivered starts ${outcome} with the frozen redraft request`, async (_t, j) => {
+    const ctx = await launch(j, desktop),
+      old = await reviewed(ctx);
+    const starts: Record<string, unknown>[] = [];
+    let missingReads = 0,
+      heldReads = 0,
+      release!: () => void;
+    let readGate: Promise<void> | undefined;
+    j.cleanup(async () => release?.(), "release retry reads");
+    await ctx.page.route("**/api/operator/drafting-runs/*", async (route) => {
+      if (route.request().url().endsWith(old)) return route.continue();
+      if (readGate) {
+        heldReads++;
+        await readGate;
+      }
+      const response = await route.fetch();
+      if (response.status() === 404) missingReads++;
+      await route.fulfill({ response });
+    });
+    await ctx.page.route("**/api/operator/commands", async (route) => {
+      const command = route.request().postDataJSON();
+      if (command.type !== "instruction.draft.start") return route.continue();
+      starts.push(command);
+      if (starts.length <= 2) return route.abort();
+      await route.continue();
+    });
+    await ctx.page
+      .getByRole("button", { name: "Redraft", exact: true })
+      .click();
+    await until(() => starts.length === 2 && missingReads >= 4);
+    assert.deepEqual(starts[1], starts[0]);
+    const frozen = operatorCommandSchema.parse(starts[0]);
+    assert.equal(frozen.type, "instruction.draft.start");
+    if (frozen.type !== "instruction.draft.start")
+      throw new Error("wrong start");
+    assert.equal(ctx.f.service.readDrafting(frozen.runId), undefined);
+    const stored = await ctx.page.evaluate(
+      (id) =>
+        JSON.parse(sessionStorage.getItem(`cab.instruction-proposal:${id}`)!),
+      ctx.projectId,
+    );
+    assert.equal(stored.previous.runId, old);
+    assert.equal(
+      stored.drafts[old].values.instructions,
+      "Reviewed and edited instructions.",
+    );
+    assert.deepEqual(stored.pendingStart, frozen);
+    readGate = new Promise<void>((r) => {
+      release = r;
+    });
+    await ctx.page
+      .getByRole("button", { name: "Try again", exact: true })
+      .evaluate((button) => {
+        if (!(button instanceof HTMLButtonElement))
+          throw new Error("not a button");
+        button.click();
+        button.click();
+      });
+    // Hold the manual read alongside a poll, so both can observe the same absence.
+    await until(() => heldReads >= 2);
+    if (outcome === "already recorded")
+      await ctx.f.service.draftingCommand(frozen);
+    else if (outcome === "refused")
+      ctx.f.service.domain().execute({
+        type: "project.configure",
+        actor: "operator",
+        key: randomUUID(),
+        projectId: ctx.projectId,
+        expectedVersion: Number(
+          ctx.f.service.domain().project(ctx.projectId).version,
+        ),
+        instructions: "Independent instruction change.",
+      });
+    release();
+    if (outcome === "refused") {
+      await ctx.page.locator("#instruction-final").waitFor();
+      assert.equal(
+        await ctx.page.locator("#instruction-final").inputValue(),
+        "Reviewed and edited instructions.",
+      );
+      assert.equal(ctx.f.service.readDrafting(frozen.runId), undefined);
+    } else {
+      await ctx.page
+        .getByText("The lead is drafting from the selected feedback.")
+        .waitFor();
+      assert.equal(
+        ctx.f.service.readDrafting(frozen.runId)?.runId,
+        frozen.runId,
+      );
+    }
+    assert.equal(starts.length, outcome === "already recorded" ? 2 : 3);
+    for (const start of starts) assert.deepEqual(start, frozen);
+    assert.equal(ctx.commands("project.configure").length, 0);
+    assert.equal(ctx.commands("drafting.settle").length, 0);
+  });
 
 for (const target of ["project", "profile"] as const)
   test(`${target}: confirmed instruction save survives reload and failed close without adopting a later writer's revision`, async (_t, j) => {

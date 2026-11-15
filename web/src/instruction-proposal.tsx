@@ -118,14 +118,16 @@ export function InstructionProposalsTab(p: TabProps) {
   const runId = stored.runId ?? null;
   const resent = useRef(new Set<string>());
   const startingId = useRef<string | null>(null);
+  const retrying = useRef(false);
   const readOnlyRef = useRef(readOnly);
   readOnlyRef.current = readOnly;
   // The latest render's sender, so a resend uses the current session.
   const sendStartRef = useRef<typeof sendStart>(async () => {});
   const readRun = useCallback(
-    async (signal?: AbortSignal) => {
+    async (signal?: AbortSignal, explicitRetry = false) => {
       if (!runId) return;
       const currentAuthentication = client.captureAuthenticationScope();
+      const selectionAtStart = journal.snapshot();
       try {
         const { data: read } = await client.read(
           `/api/operator/drafting-runs/${runId}`,
@@ -160,15 +162,20 @@ export function InstructionProposalsTab(p: TabProps) {
           if (!signal?.aborted) setReadFailed(true);
           return;
         }
-        if (startingId.current === runId) return;
-        // A start that may never have arrived is sent once more under its key and content,
-        // except from a read-only view, which only clears it.
+        if (
+          startingId.current === runId ||
+          journal.snapshot() !== selectionAtStart
+        )
+          return;
+        // Polling replays once; a deliberate retry permits one more read-first replay.
         const { startKey, expectedProjectVersion } = latest.current;
         if (
           !readOnlyRef.current &&
           startKey &&
           expectedProjectVersion &&
-          !resent.current.has(runId)
+          (explicitRetry
+            ? latest.current.pendingStart
+            : !resent.current.has(runId))
         ) {
           resent.current.add(runId);
           await sendStartRef.current(
@@ -195,6 +202,18 @@ export function InstructionProposalsTab(p: TabProps) {
     },
     [client, projectId, runId, journal],
   );
+  const retry = async () => {
+    if (busy || startingId.current || retrying.current) return;
+    const currentAuthentication = client.captureAuthenticationScope();
+    retrying.current = true;
+    setBusy(true);
+    try {
+      await readRun(undefined, true);
+    } finally {
+      retrying.current = false;
+      if (currentAuthentication()) setBusy(false);
+    }
+  };
   const reviewing = run?.state === "proposed";
   // A proposal is read again too, so a target changed elsewhere shows as changed.
   const polling =
@@ -476,7 +495,7 @@ export function InstructionProposalsTab(p: TabProps) {
                   type="button"
                   variant="secondary"
                   disabled={busy}
-                  onClick={() => void readRun()}
+                  onClick={() => void retry()}
                 >
                   Try again
                 </Button>
