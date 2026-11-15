@@ -4551,31 +4551,28 @@ export class StandaloneService {
     }
     if (isWorkspaceRemovalCaller(caller)) {
       // Pushes only for the removal that still owns this exact workspace generation.
-      const task = domain.task(caller.taskId);
+      const lifecycle = new WorkspaceLifecycleStore(this.cache!);
       const binding = workspaceBindings.get(caller.taskId);
-      const generation = new WorkspaceLifecycleStore(this.cache!).current(
-        caller.taskId,
-      );
+      const generation = lifecycle.current(caller.taskId);
       const operation = generation
-        ? new WorkspaceLifecycleStore(this.cache!)
+        ? lifecycle
             .operations(generation)
             .find((o) => o.operationId === caller.removalOperationId)
         : undefined;
-      if (
-        (task.state !== "done" && task.state !== "cancelled") ||
-        Number(task.version) !== caller.taskVersion ||
+      const reason =
         binding?.state !== "ready" ||
         binding.workspaceId !== caller.workspaceId ||
         generation?.workspaceId !== caller.workspaceId ||
         operation?.kind !== "remove" ||
-        operation.state !== "active" ||
-        !state.confirmArchive(caller.taskId, caller.removalOperationId)
-      )
-        throw new DomainConflictError(
-          "Workspace removal no longer owns the task",
-        );
-      if (deliveryStore.actionBlockers(caller.taskId, exceptOperationId).length)
-        throw new DeliveryHoldError("Task has unresolved external action");
+        operation.state !== "active"
+          ? "Workspace removal no longer owns the task"
+          : this.removalBlocker(
+              caller.taskId,
+              caller.removalOperationId,
+              caller.taskVersion,
+              exceptOperationId,
+            );
+      if (reason) throw new DomainConflictError(reason);
       return;
     }
     const intent = state.byWorkId(caller.workId);
@@ -5950,6 +5947,30 @@ export class StandaloneService {
   }
 
   /**
+   * Why removal operation `operationId` no longer owns the task at `taskVersion`, or undefined.
+   * Shared by removal itself and by delivery authority for its pushes.
+   */
+  private removalBlocker(
+    taskId: string,
+    operationId: string,
+    taskVersion: number,
+    exceptOperationId?: string,
+  ): string | undefined {
+    const { state, deliveryStore } = this.started();
+    const task = this.domain().task(taskId);
+    if (
+      (task.state !== "done" && task.state !== "cancelled") ||
+      Number(task.version) !== taskVersion
+    )
+      return "The task changed during workspace removal";
+    if (deliveryStore.actionBlockers(taskId, exceptOperationId).length)
+      return "The task has delivery actions whose outcome is not settled";
+    if (!state.confirmArchive(taskId, operationId))
+      return "Task execution is not settled or its workspace is held";
+    return undefined;
+  }
+
+  /**
    * Removes a done or cancelled task's workspace once cab proves it safe: settled execution under
    * this operation's archival hold, no unsettled delivery or result work, clean repositories, and
    * each HEAD on its task branch or provisioned base. Committed but unpushed work is pushed first
@@ -6034,15 +6055,9 @@ export class StandaloneService {
             ).all(taskId) as { workId: string }[]
           ).map((row) => row.workId);
           const blocked = () =>
-            terminal() !== taskVersion
-              ? "The task changed during workspace removal"
-              : works.some((workId) => this.callbacks.get(workId)?.size)
-                ? "A cab callback for this task is still running"
-                : deliveryStore.actionBlockers(taskId).length
-                  ? "The task has delivery actions whose outcome is not settled"
-                  : !state.confirmArchive(taskId, operationId)
-                    ? "Task execution is not settled or its workspace is held"
-                    : undefined;
+            works.some((workId) => this.callbacks.get(workId)?.size)
+              ? "A cab callback for this task is still running"
+              : this.removalBlocker(taskId, operationId, taskVersion);
           const facts = () => ({
             workspaceId: binding.workspaceId,
             branches: Object.fromEntries(
@@ -6172,6 +6187,7 @@ export class StandaloneService {
       async () => {
         this.domain().task(taskId);
         const { state, workspaces, workspaceBindings } = this.started();
+        // The trim's journal identity owns its lease, so a held trim keeps it across a restart.
         const owner = randomUUID();
         if (!state.beginArchive(taskId, owner))
           return {
@@ -6185,6 +6201,7 @@ export class StandaloneService {
             trigger,
             new WorkspaceLifecycleStore(this.cache!),
             () => state.confirmArchive(taskId, owner),
+            owner,
           );
         } finally {
           // Trim effects are awaited before it returns or throws, so only Git uncertainty

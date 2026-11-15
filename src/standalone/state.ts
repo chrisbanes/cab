@@ -950,32 +950,29 @@ export class ExecutionState {
             SELECT taskId, reason FROM task_archival_holds_untokened;
           DROP TABLE task_archival_holds_untokened;`),
       );
-    // Workspace recovery runs before this state is opened. Keep the archival hold only when
-    // bounded Git work recorded unresolved filesystem effects, or its maintenance is unfinished.
+    // Workspace recovery runs before this state is opened. Keep an archival hold when bounded Git
+    // work recorded unresolved filesystem effects, when its maintenance is unfinished, or when it
+    // has no owner (written by an earlier build) and so nothing can prove it may be released.
     const workspaceColumns = this.db
       .prepare("PRAGMA table_info(task_workspace_bindings)")
       .all() as Array<{ name: string }>;
-    const maintenance = this.db
-      .prepare(
-        "SELECT 1 FROM sqlite_master WHERE type='table' AND name='workspace_maintenance_operations'",
-      )
-      .get()
-      ? `OR task_archival_holds.ownerToken IN (
-          SELECT operationId FROM workspace_maintenance_operations
-          WHERE json_extract(data, '$.state') IN ('active', 'held'))`
-      : "";
+    const kept = ["task_archival_holds.ownerToken IS NULL"];
     if (workspaceColumns.some(({ name }) => name === "gitUncertain"))
-      this.db.exec(`DELETE FROM task_archival_holds
-        WHERE NOT (EXISTS (
-          SELECT 1 FROM task_workspace_bindings binding
-          WHERE binding.taskId = task_archival_holds.taskId
-            AND binding.gitUncertain = 1
-        ) ${maintenance})`);
-    else if (maintenance)
-      this.db.exec(
-        `DELETE FROM task_archival_holds WHERE NOT (0 ${maintenance})`,
-      );
-    else this.db.exec("DELETE FROM task_archival_holds");
+      kept.push(`EXISTS (SELECT 1 FROM task_workspace_bindings binding
+        WHERE binding.taskId = task_archival_holds.taskId AND binding.gitUncertain = 1)`);
+    if (
+      this.db
+        .prepare(
+          "SELECT 1 FROM sqlite_master WHERE type='table' AND name='workspace_maintenance_operations'",
+        )
+        .get()
+    )
+      kept.push(`task_archival_holds.ownerToken IN (
+        SELECT operationId FROM workspace_maintenance_operations
+        WHERE json_extract(data, '$.state') IN ('active', 'held'))`);
+    this.db.exec(
+      `DELETE FROM task_archival_holds WHERE NOT (${kept.join(" OR ")})`,
+    );
     this.db.exec(`INSERT OR IGNORE INTO task_writer_ambiguity_holds (taskId, reason)
       SELECT taskId, reason FROM task_writer_holds
       WHERE reason = 'Legacy work revision order is ambiguous'

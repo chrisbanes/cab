@@ -1260,6 +1260,8 @@ export class WorkspaceManager implements TaskWorkspaceLifecycle {
     trigger: "manual" | "idle" | "disk",
     lifecycle: WorkspaceLifecycleStore,
     ownership: () => boolean,
+    /** The journal identity; the service also owns the archival lease under it. */
+    operationId: string = randomUUID(),
   ): Promise<WorkspaceTrimResult> {
     const id = z.string().trim().min(1).max(512).parse(taskId);
     return this.withTaskLock(id, async () => {
@@ -1320,7 +1322,6 @@ export class WorkspaceManager implements TaskWorkspaceLifecycle {
         return refused(checked, "Task execution is not settled");
 
       const owner = { taskId: id, workspaceId: checked.workspaceId };
-      const operationId = randomUUID();
       lifecycle.beginOperation(owner, {
         operationId,
         kind: "trim",

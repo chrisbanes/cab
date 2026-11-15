@@ -774,5 +774,82 @@ test("a tokenless archival hold from an earlier build stays held and refuses rem
     /Task execution is not settled or its workspace is held/,
   );
   assert.equal(w.archivalHeld(taskId), true);
+  // A restart cannot prove who owns it either, so it stays.
+  await w.f.reopen();
+  assert.equal(w.archivalHeld(taskId), true);
+  const again = await w.remove(taskId);
+  assert.equal(again.outcome, "retained");
   assert.equal(existsSync(worktree()), true);
+});
+
+test("a removal interrupted before any deletion is refused at restart and releases its hold", async (t) => {
+  const w = await world(t);
+  const { taskId, binding } = await w.task();
+  w.finish(taskId);
+  const operationId = randomUUID();
+  // A crash during the push window: the operation began, nothing was deleted.
+  w.f.seedPersistedState((db) => {
+    new WorkspaceLifecycleStore(db as never).beginOperation(
+      { taskId, workspaceId: binding.workspaceId },
+      {
+        operationId,
+        kind: "remove",
+        trigger: "manual",
+        startedAt: Date.now(),
+      },
+    );
+    db.prepare(
+      "INSERT INTO task_archival_holds (taskId, reason, ownerToken) VALUES (?, 'Task archival in progress', ?)",
+    ).run(taskId, operationId);
+  });
+  await w.f.reopen();
+  const [operation] = w.operations(binding);
+  assert.equal(operation?.state, "refused");
+  assert.match(operation?.reason ?? "", /interrupted before any deletion/);
+  assert.equal(w.archivalHeld(taskId), false);
+  assert.equal(w.f.service.taskHold(taskId), undefined);
+  const removed = await w.remove(taskId);
+  assert.equal(removed.outcome, "cleaned", JSON.stringify(removed));
+});
+
+test("a push with an unknown outcome refuses removal until delivery settles it", async (t) => {
+  const w = await world(t);
+  const { taskId, binding, worktree } = await w.task();
+  commitFile(worktree(), "work.txt");
+  w.finish(taskId);
+  w.setPushHook(() => "uncertain");
+  const first = await w.remove(taskId);
+  w.setPushHook(undefined);
+  assert.match(
+    first.outcome === "retained" ? first.reason : "",
+    /Pushing R1 to its task branch was refused/,
+  );
+  assert.equal(w.operations(binding).at(-1)?.state, "refused");
+  assert.equal(w.archivalHeld(taskId), false);
+  const second = await w.remove(taskId);
+  assert.match(
+    second.outcome === "retained" ? second.reason : "",
+    /delivery actions whose outcome is not settled/,
+  );
+  assert.equal(w.pushes.length, 1);
+  assert.equal(existsSync(worktree()), true);
+});
+
+test("a repository whose status Git cannot read refuses removal and deletes nothing", async (t) => {
+  const w = await world(t);
+  const { taskId, binding, worktree } = await w.task();
+  w.finish(taskId);
+  writeFileSync(
+    join(binding.repositories[0]!.gitDirectory!, "index"),
+    "not an index",
+  );
+  const refused = await w.remove(taskId);
+  assert.equal(refused.outcome, "retained", JSON.stringify(refused));
+  assert.equal(
+    refused.outcome === "retained" && refused.reason,
+    "Git could not read the status or HEAD of R1",
+  );
+  assert.equal(existsSync(worktree()), true);
+  assert.equal(existsSync(join(worktree(), "README.md")), true);
+  assert.equal(w.operations(binding).length, 0);
 });

@@ -500,7 +500,15 @@ export class WorkspaceLifecycleStore {
         .all()) {
         const { operationId } = z.object({ operationId: z.uuid() }).parse(raw);
         const operation = this.findOperation(operationId)!;
-        if (operation.state === "active")
+        // Nothing was deleted yet: a push it made has its own delivery record, which blocks a
+        // later removal until reconciled, so the attempt need not hold the workspace.
+        if (operation.state === "active" && !operation.effects.length)
+          this.refuseOperation(
+            operation,
+            operationId,
+            "Maintenance was interrupted before any deletion",
+          );
+        else if (operation.state === "active")
           this.holdOperation(
             operation,
             operationId,
