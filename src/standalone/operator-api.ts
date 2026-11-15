@@ -9,6 +9,7 @@ import {
   ProjectArchivedError,
 } from "../core/project-lifecycle.js";
 import { ProjectDeletionUnavailableError } from "./project-deletion.js";
+import { projectArchiveBlockedMessage } from "../operator/project-lifecycle-copy.js";
 import type { ReadinessResult } from "../operator/readiness.js";
 import type { RecoveryRecord } from "./recovery-types.js";
 import { createHash, randomUUID } from "node:crypto";
@@ -11170,7 +11171,7 @@ export class OperatorApi {
           "conflict",
           undefined,
           undefined,
-          "Pause the project and resolve active work before archiving. Refresh project status for details.",
+          projectArchiveBlockedMessage,
         );
       if (error instanceof ProjectArchivedError)
         throw new OperatorApiError(

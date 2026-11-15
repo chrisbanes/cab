@@ -600,7 +600,7 @@ export function DraftMessage({
         />
       );
     case "conflict":
-      return draft.credentialRefusal ? (
+      return draft.credentialRefusal || draft.archiveBlocked ? (
         <ActionOutcome
           tone="error"
           message={draft.notice}
