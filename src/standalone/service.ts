@@ -3952,12 +3952,20 @@ export class StandaloneService {
   }
 
   /** A done or cancelled task's leftover execution and holds; empty for an open task. */
-  closedTaskLeftovers(taskId: string): ClosedTaskLeftovers {
+  closedTaskLeftovers(
+    taskId: string,
+    /** Selections a caller already read, by assignment ID, so a list read selects once. */
+    selected?: ReadonlyMap<
+      string,
+      ReturnType<typeof selectAssignmentExecution>
+    >,
+  ): ClosedTaskLeftovers {
     const { domain, schedulerStore, state, supervisor } = this.started();
     const task = domain.task(taskId);
     const selections = withoutWithdrawn(domain.assignments(taskId)).map(
       (a): LeftoverSelection => {
-        const s = selectAssignmentExecution(a, this);
+        const s =
+          selected?.get(String(a.id)) ?? selectAssignmentExecution(a, this);
         return {
           assignmentId: String(a.id),
           profile: String(domain.profile(String(a.profileId)).name),

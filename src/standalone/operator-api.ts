@@ -2222,12 +2222,35 @@ export class OperatorApi {
     const selections = withoutWithdrawn(
       this.domain().assignments(String(task.id)),
     ).map((a) => this.selection(a));
+    const stop =
+      this.service.isTaskStopped(String(task.id)) ||
+      selections.some((s) => s.record?.holds.stop);
+    const writer = selections.some((s) => s.record?.holds.writer),
+      capacity = selections.some((s) => s.record?.holds.capacity);
+    // A closed task is Uncertain only while something is live; other leftovers wait for retire.
+    // The leftover read covers its task holds and held writers, so they are not read again.
+    if (!stop && (task.state === "done" || task.state === "cancelled")) {
+      const leftovers = this.service.closedTaskLeftovers(
+        String(task.id),
+        new Map(selections.map((s) => [s.assignmentId, s])),
+      );
+      const holds = { stop, writer, capacity, uncertainty: false, task: false };
+      if (leftovers.live)
+        return {
+          state: "uncertain",
+          reasonCodes: ["recovery-held"],
+          holds: { ...holds, uncertainty: true },
+        };
+      return {
+        state: task.state === "done" ? "completed" : "cancelled",
+        reasonCodes: leftovers.items.length ? ["execution-not-settled"] : [],
+        holds,
+      };
+    }
     const holds = {
-      stop:
-        this.service.isTaskStopped(String(task.id)) ||
-        selections.some((s) => s.record?.holds.stop),
-      writer: selections.some((s) => s.record?.holds.writer),
-      capacity: selections.some((s) => s.record?.holds.capacity),
+      stop,
+      writer,
+      capacity,
       uncertainty:
         selections.some((s) => s.record?.holds.uncertainty) ||
         this.service.uncertainAssignmentsForTask(String(task.id)).length > 0,
@@ -2235,17 +2258,6 @@ export class OperatorApi {
         Boolean(this.service.taskHold(String(task.id))) ||
         selections.some((s) => s.record?.holds.task),
     };
-    // A closed task is Uncertain only while something is live; other leftovers wait for retire.
-    if (!holds.stop && (task.state === "done" || task.state === "cancelled")) {
-      const leftovers = this.service.closedTaskLeftovers(String(task.id));
-      if (leftovers.live)
-        return { state: "uncertain", reasonCodes: ["recovery-held"], holds };
-      return {
-        state: task.state === "done" ? "completed" : "cancelled",
-        reasonCodes: leftovers.items.length ? ["execution-not-settled"] : [],
-        holds: { ...holds, uncertainty: false, task: false },
-      };
-    }
     let state: Execution["state"] = "idle";
     const reasonCodes: Execution["reasonCodes"] = [];
     if (holds.stop) state = "stopping";
