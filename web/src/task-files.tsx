@@ -916,10 +916,13 @@ export function TaskFiles({
   state,
   changes,
   onObservation,
+  generation = "",
 }: {
   client: OperatorClient;
   session: Session;
   taskId: string;
+  /** The task read's workspace identity and state: a removed or replaced workspace is read again. */
+  generation?: string;
   state: TaskFilesState;
   /** Read-only: the Branch comparisons the Changes tab has already read. Files never reads one. */
   changes: TaskChangesState;
@@ -951,7 +954,7 @@ export function TaskFiles({
     [client, taskId, directoryKey],
   );
   const directoryResource = useOperatorResource(
-    `${session.csrfToken}:${taskId}:files:${directoryKey}`,
+    `${session.csrfToken}:${taskId}:files:${generation}:${directoryKey}`,
     directoryLoader,
     true,
     readConflicted,

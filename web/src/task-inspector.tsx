@@ -21,6 +21,7 @@ import {
   taskIdentity,
   trackerName,
 } from "./task-overview.js";
+import { workspaceRecordRows } from "./workspace-removal-presentation.js";
 
 type Data = TaskRead["data"];
 
@@ -245,6 +246,25 @@ export function TaskInspector({
             )}
           </dl>
         </Group>
+        {workspaceRecordRows(data).length > 0 && (
+          <Group label="Workspace">
+            <ul className="inspector-rows" data-workspace-records>
+              {workspaceRecordRows(data).map((row) => (
+                <li key={row.text}>
+                  <span>
+                    {row.text}
+                    {row.evidence.map((line) => (
+                      <span key={line} className="muted task-id">
+                        <br />
+                        {line}
+                      </span>
+                    ))}
+                  </span>
+                </li>
+              ))}
+            </ul>
+          </Group>
+        )}
         <Group label="Results & artifacts">
           {data.results.length ||
           data.delivery?.binding ||

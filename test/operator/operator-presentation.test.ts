@@ -94,6 +94,19 @@ test("a workspace read that stayed in conflict is worded plainly; other states k
     ),
     "Preview is metadata-only (unsupported-format); file bytes are unavailable.",
   );
+  // The stored archived states read as Workspace removal, never as an archive.
+  assert.equal(
+    workspaceStateText(
+      "This location",
+      "archived",
+      "file bytes are not available",
+    ),
+    "The workspace was removed; file bytes are not available.",
+  );
+  assert.equal(
+    workspaceStateText("Preview", "archiving", "file bytes are unavailable"),
+    "The workspace is being removed; file bytes are unavailable.",
+  );
 });
 
 test("short identifier keeps the first eight characters unless told otherwise", () => {

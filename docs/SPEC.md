@@ -1174,9 +1174,9 @@ verified exit of its exact process or its 30-minute quiet period, once no indepe
 hold remains. Otherwise a timer, expired lease, quiet interval, empty terminal list,
 acknowledged Stop or operator acknowledgement cannot release them. Conversation replacement and archival
 do not automatically delete
-workspaces. Workspaces are retained until removed: removal has no CLI, API or UI entry
-point yet, the automatic maintenance pass is not implemented, and nothing schedules
-trimming yet.
+workspaces. Workspaces are retained until the operator removes one (see below); the
+automatic maintenance pass is planned, not implemented, so nothing schedules trimming
+or removal yet.
 
 Trimming is implemented as a service-internal operation with no CLI, API or UI
 entry point. It takes the archival lease at any task status, so it refuses while
@@ -1209,9 +1209,29 @@ do not move an episode's anchor. These facts never release execution ownership.
 An interrupted maintenance journal stays held for reconciliation, even if a path is
 absent or its retention has expired.
 
-Removal is implemented as a service-internal operation that takes only the task and a
-trigger (manual, delivered retention, merged retention or disk limit); callers assert
-no safety fact and there is no force override. It applies only to a done or cancelled
+Removal is a service operation that takes only the task and a trigger (manual,
+delivered retention, merged retention or disk limit); callers assert no safety fact
+and there is no force override. The operator reaches it through
+`task workspace-remove TASK_ID` and the task page's Remove workspace… action, both the
+authenticated, receipted `task.workspace.remove {key, taskId, workspaceId}` command,
+whose trigger is always manual. `workspaceId` fences the command to the workspace
+generation the operator confirmed: once the task has another workspace, the command is
+refused and never removes the newer one. The request and its operation identity are
+stored before anything runs, same-key requests run one at a time, and the same key
+replays the original receipt, also after a restart or re-provisioning; the same key
+with other content, or a new key naming a replaced workspace, is a conflict. A
+refusal returns its reason, redacted under the task's exclusions, with no receipt; a
+refused request may be sent again. A removal held part way is reported with its
+operation ID and never run again under any key until it is reconciled. The task page's
+confirmation lists what goes (each worktree with its ignored files, scratch, other
+workspace-root files and the Claude temporary base) and what stays (the task branch at
+its pushed commit, change requests, results and conversations), and says removal
+cannot be undone. The task read, task page and `task show` (an alias of `task get`)
+show the latest removal as "Workspace removed TIME (manual / delivered retention /
+merged retention / disk limit)" with each repository's pushed branch and commit or
+untouched base, and the latest trim as "Trimmed TIME (manual / idle limit / disk
+limit)"; both records survive re-provisioning. These reads carry no paths or sizes.
+Automatic removal is planned. It applies only to a done or cancelled
 task. It takes the archival lease under its own operation identity and refuses unless
 execution is settled, no cab callback is running, no delivery action of the task is
 unsettled and no result's uncommitted changes are left neither committed nor
@@ -1514,7 +1534,8 @@ budget the interface must meet: [first run to first task](user-flows/first-run.m
 [approve an exact action](user-flows/approve-action.md),
 [inspect changes and reply](user-flows/inspect-changes.md),
 [review a result](user-flows/review-result.md),
-[unblock waiting work](user-flows/unblock-work.md) and
+[unblock waiting work](user-flows/unblock-work.md),
+[remove a finished task's workspace](user-flows/workspace-maintenance.md) and
 [triage an uncertain execution](user-flows/triage-uncertainty.md). A flow's
 budget never overrides the rules in this specification; it bounds the path to them.
 

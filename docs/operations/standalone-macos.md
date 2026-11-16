@@ -1023,9 +1023,11 @@ start ends with the first complete Inbox read, or after three partial reads in a
 
 ## Workspace maintenance configuration
 
-These installation-wide limits are validated and loaded on service start. Trimming,
-manual removal and automatic maintenance are not yet implemented, so setting a limit
-does not currently remove files or raise maintenance Inbox items.
+These installation-wide limits are validated and loaded on service start. The
+automatic maintenance pass that applies them is planned, not implemented, so setting a
+limit does not currently trim or remove files or raise maintenance Inbox items. Manual
+removal (`cab task workspace-remove` or the task page's Remove workspace…) works
+whatever the limits.
 
 | Install/upgrade or render flag | Service environment | Default |
 | --- | --- | --- |

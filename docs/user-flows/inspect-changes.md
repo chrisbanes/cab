@@ -53,6 +53,8 @@ The operator CLI is outside the budget: it has no screens.
 
 ## Recovery
 
+- After [workspace removal](workspace-maintenance.md), Files and Changes say the
+  workspace was removed; results stay readable from their commits.
 - A comparison that cannot be computed names the reason in a sentence and keeps the
   last computed one visible as stale.
 - Branch and Uncommitted stay fixed until Refresh; a newer workspace observation or

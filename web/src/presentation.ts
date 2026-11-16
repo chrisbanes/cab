@@ -29,6 +29,10 @@ export function workspaceStateText(
   unavailable: string,
   detail?: string,
 ) {
+  // The stored `archived` states are Workspace removal; the UI never calls them archives.
+  if (state === "archived") return `The workspace was removed; ${unavailable}.`;
+  if (state === "archiving")
+    return `The workspace is being removed; ${unavailable}.`;
   return state === "conflict"
     ? `${subject} could not be read consistently, usually because the workspace changed while it was read; ${unavailable}. Refresh to try again.`
     : `${subject} is ${state}${detail ? ` (${detail})` : ""}; ${unavailable}.`;

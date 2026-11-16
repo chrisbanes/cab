@@ -824,6 +824,13 @@ name, version and preview digest. The service rechecks every confirmation atomic
      judgement (interrupted cleanup, a path or repository mismatch, uncertain Git),
      exit with the conflict code and the reason, recording nothing. The service
      also rechecks such holds at startup and before admitting a turn.
+   - `task workspace-remove TASK_ID` removes a done or cancelled task's workspace
+     (effect `completed`) once the service proves it safe, pushing committed work
+     first. It cannot be undone; the task branch, change requests, results and
+     conversations remain. It is the receipted `task.workspace.remove` command,
+     naming only the current workspace; any failing check exits with the conflict
+     code and the reason, recording nothing. `task show TASK_ID` is `task get`;
+     both print the latest removal and trim records.
 
    Output names the effect (`data.effect`): `saved`, `queued` (admission and holds
    still decide), `cancellation-requested` or `none`. These writes reuse a journal

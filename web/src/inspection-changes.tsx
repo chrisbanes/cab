@@ -235,6 +235,7 @@ function useTaskRepositories(
   client: OperatorClient,
   session: Session,
   taskId: string,
+  generation: string,
 ) {
   const loader = useCallback(
     (signal: AbortSignal) =>
@@ -246,7 +247,7 @@ function useTaskRepositories(
     [client, taskId],
   );
   return useOperatorResource(
-    `${session.csrfToken}:${taskId}:changes-repositories`,
+    `${session.csrfToken}:${taskId}:changes-repositories:${generation}`,
     loader,
     true,
     readConflicted,
@@ -261,10 +262,13 @@ export function TaskWorkspaceChanges({
   state,
   knownWorkspaceObservationAt,
   changed,
+  generation = "",
 }: {
   client: OperatorClient;
   session: Session;
   taskId: string;
+  /** The task read's workspace identity and state: a removed or replaced workspace is read again. */
+  generation?: string;
   assignments: Array<{ assignmentId: string; name: string | null }>;
   state: TaskChangesState;
   knownWorkspaceObservationAt: number | null;
@@ -272,7 +276,12 @@ export function TaskWorkspaceChanges({
 }) {
   const repositoryName = useRepositoryLabel();
   const phone = useNarrowViewport();
-  const repositoriesResource = useTaskRepositories(client, session, taskId);
+  const repositoriesResource = useTaskRepositories(
+    client,
+    session,
+    taskId,
+    generation,
+  );
   const directory = repositoriesResource.state.data?.data;
   const repositories = useMemo(
     () =>
