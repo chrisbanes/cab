@@ -3,6 +3,9 @@ import { randomUUID } from "node:crypto";
 import { test } from "node:test";
 import { publicationWorld, repositoryId } from "../fixtures/publication.js";
 import { absentBranchHead } from "../../src/core/delivery.js";
+import { WorkspaceLifecycleStore } from "../../src/core/workspace-lifecycle.js";
+import { ExecutionState } from "../../src/standalone/state.js";
+import { SqliteWorkspaceBindingStore } from "../../src/standalone/workspaces.js";
 
 type World = ReturnType<typeof publicationWorld>;
 const branchOf = (w: World) => w.store.taskBranch(w.taskId, repositoryId);
@@ -485,4 +488,65 @@ test("an overwrite of unknown outcome that finds the branch back at the last pus
   assert.equal(settled.observation?.reason, "branch-outside-cleared");
   assert.equal(branchOf(w)?.outsideHeadSha, null);
   assert.ok(w.store.mayHaveLanded(record.operationId));
+});
+
+test("an adoption is the generation's confirmed push, so a merge at the adopted head counts", async (t) => {
+  const w = adoptWorld(t);
+  const profileId = randomUUID();
+  w.domain.execute({
+    type: "profile.create",
+    actor: "operator",
+    key: randomUUID(),
+    profileId,
+    name: "Adopting lead",
+    instructions: "Deliver",
+    capabilities: "code",
+  });
+  w.domain.execute({
+    type: "project.configure",
+    actor: "operator",
+    key: randomUUID(),
+    projectId: w.projectId,
+    expectedVersion: Number(w.domain.project(w.projectId).version),
+    leadProfileId: profileId,
+  });
+  w.caller.assignmentId = String(w.domain.ensureLeadAssignment(w.taskId)!.id);
+  const state = new ExecutionState(w.db);
+  state.create(w.caller.workId, "fixture", w.workspace);
+  state.bindTask(w.caller.workId, {
+    taskId: w.taskId,
+    assignmentId: w.caller.assignmentId,
+    assignmentVersion: 1,
+    instructionsRevision: 1,
+    profileRevision: 1,
+  });
+  const workspaceId = randomUUID();
+  const bindings = new SqliteWorkspaceBindingStore(w.db);
+  bindings.createOrGet(w.taskId, workspaceId, w.workspace, [
+    {
+      repositoryId,
+      sourcePath: w.source,
+      workspacePath: w.workspace,
+      ref: "main",
+      gitCommonDir: null,
+      commit: w.base,
+    },
+  ]);
+  bindings.update(w.taskId, "ready", null);
+  const life = new WorkspaceLifecycleStore(w.db);
+  const { outside } = await withRealOutsideHead(w);
+  const pushedAt = life.get(workspaceId)!.lastPushAt;
+  assert.equal((await w.adoptOutside()).state, "confirmed-success");
+  const adopted = life.get(workspaceId)!;
+  assert.equal(adopted.repositoryClocks[0]?.pushedCommit, outside);
+  assert.ok(adopted.lastPushAt! >= pushedAt!);
+  const branch = branchOf(w)!.branch;
+  w.store.transaction(() =>
+    w.store.registerPrWithinTransaction(
+      w.caller,
+      { ...w.showPr(outside, branch), state: "MERGED", merged: true },
+      w.caller.assignmentId,
+    ),
+  );
+  assert.ok(life.get(workspaceId)?.allMergedAt);
 });

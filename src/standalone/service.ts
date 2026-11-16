@@ -5891,7 +5891,7 @@ export class StandaloneService {
       from: g.createdAt === null ? Number.NaN : Date.parse(g.createdAt),
       until: lifecycle.removal(g)?.completedAt ?? Number.POSITIVE_INFINITY,
     }));
-    // A replacement still provisioning has no lifecycle row yet.
+    // A first workspace still provisioning has no lifecycle row yet.
     if (
       current &&
       !spans.some((s) => s.generation.workspaceId === current.workspaceId)

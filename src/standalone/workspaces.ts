@@ -786,7 +786,16 @@ export class SqliteWorkspaceBindingStore implements WorkspaceBindingStore {
           taskId,
           workspaceId,
         );
-      return this.get(taskId) ?? this.invalidRow();
+      const replaced = this.get(taskId) ?? this.invalidRow();
+      // Recorded now, so facts during provisioning (a terminal transition) have their generation.
+      initializedWorkspaceLifecycle(this.db)?.recordBinding({
+        taskId,
+        workspaceId: replaced.workspaceId,
+        path: replaced.path,
+        repositories: replaced.repositories,
+        createdAt: replaced.createdAt,
+      });
+      return replaced;
     });
   }
 

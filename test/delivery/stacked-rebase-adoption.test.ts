@@ -8,6 +8,8 @@ import {
   repositoryId,
 } from "../fixtures/stacked-delivery.js";
 import { OperatorApi } from "../../src/standalone/operator-api.js";
+import { WorkspaceLifecycleStore } from "../../src/core/workspace-lifecycle.js";
+import type { MaintenanceCandidate } from "../../src/standalone/workspace-maintenance.js";
 
 async function prepared(t: TestContext) {
   const f = await stackedDeliveryFixture(t);
@@ -122,6 +124,43 @@ test("bound lower merge and accepted retarget adopt exactly proved commits and p
     [proof],
   );
   assert.deepEqual(f.image(), before);
+});
+
+test("an adopted rebase is the generation's confirmed push, so a merge at the rebased head counts", async (t) => {
+  const f = await prepared(t);
+  const lifecycle = () =>
+    new WorkspaceLifecycleStore(
+      // biome-ignore lint/complexity/useLiteralKeys: the service's own database
+      f.currentService()["cache"]!,
+    );
+  const generation = () => lifecycle().current(f.dependent)!;
+  assert.equal(generation().repositoryClocks[0]?.pushedCommit, f.oldHead);
+  f.publish();
+  const before = Date.now();
+  await f.currentService().refreshGitHub();
+  const after = Date.now();
+  assert.equal(
+    f.currentService().delivery().delivery(f.dependent)?.rebaseProofs?.length,
+    1,
+  );
+  const rebased = generation();
+  assert.equal(rebased.repositoryClocks[0]?.pushedCommit, f.newHead);
+  // The delivered clock anchors at the rebase.
+  assert.ok(rebased.lastPushAt! >= before && rebased.lastPushAt! <= after);
+  const candidate = (
+    f.currentService() as unknown as {
+      maintenanceCandidates(): MaintenanceCandidate[];
+    }
+  )
+    .maintenanceCandidates()
+    .find((c) => c.taskId === f.dependent)!;
+  assert.equal(candidate.pushUnknown, false);
+  assert.equal(candidate.lastPushAt, rebased.lastPushAt);
+  assert.equal(rebased.allMergedAt, null);
+  const pr = f.prs.get(f.oldPr.nodeId)!;
+  f.prs.set(f.oldPr.nodeId, { ...pr, state: "MERGED", merged: true });
+  await f.currentService().refreshGitHub();
+  assert.ok(generation().allMergedAt);
 });
 
 for (const change of [

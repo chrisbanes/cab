@@ -335,7 +335,32 @@ export class WorkspaceLifecycleStore {
     sha: string,
     at: number,
   ): void {
-    const generation = this.forWork(taskId, workId);
+    this.push(this.forWork(taskId, workId), repositoryId, operationId, sha, at);
+  }
+
+  /**
+   * A confirmed move of the task branch with no work behind it, such as a stack rebase: a push
+   * of the task's current generation, unless its removal completed.
+   */
+  recordTaskPush(
+    taskId: string,
+    repositoryId: string,
+    operationId: string,
+    sha: string,
+    at: number,
+  ): void {
+    const current = this.current(taskId);
+    if (current && !this.removal(current))
+      this.push(current, repositoryId, operationId, sha, at);
+  }
+
+  private push(
+    generation: WorkspaceGeneration | undefined,
+    repositoryId: string,
+    operationId: string,
+    sha: string,
+    at: number,
+  ): void {
     if (!generation?.repositories.some((r) => r.repositoryId === repositoryId))
       return;
     this.observe(generation, {
@@ -376,7 +401,8 @@ export class WorkspaceLifecycleStore {
    * A change request observation, recorded on the generation its head belongs to (see
    * `mergeGeneration`). A merged one counts only when its head is that repository's latest
    * confirmed push, so re-polling a request merged before later pushes never marks that later
-   * work merged. With no recorded push (legacy) the observation counts as before.
+   * work merged. When that generation holds no push for the repository (nothing pushed, or
+   * pushed before cab recorded push clocks), a merged observation counts.
    */
   recordMerge(
     taskId: string,
@@ -387,18 +413,16 @@ export class WorkspaceLifecycleStore {
     observationId: string,
     at: number,
   ): void {
-    const generation = this.mergeGeneration(taskId, repositoryId, headSha);
-    if (!generation) return;
-    const current = generation.repositoryClocks.find(
-      (r) => r.repositoryId === repositoryId,
-    );
+    const attributed = this.mergeGeneration(taskId, repositoryId, headSha);
+    if (!attributed) return;
+    const { generation, clock: current } = attributed;
     // shortcut: only an exact head match proves coverage, upgrade to an ancestry proof if
     // hosts report merged heads that contain, but differ from, cab's last push.
     const merged =
       observedMerged &&
-      (current?.pushedCommit == null || current.pushedCommit === headSha);
+      (current.pushedCommit == null || current.pushedCommit === headSha);
     if (
-      current?.changeRequestId === changeRequestId &&
+      current.changeRequestId === changeRequestId &&
       current.merged === merged
     )
       return;
@@ -430,25 +454,33 @@ export class WorkspaceLifecycleStore {
    * current generation, unless its removal completed, since a removed generation's clocks are
    * history and no later observation changes them. A head that the current generation's clock
    * does not hold but a replaced generation's does is that earlier work's, so it is not recorded
-   * on the current one either. A replacement starts holding its predecessor's last confirmed
-   * push (see `retain`), so a head both hold is the current generation's.
+   * on the current one either. A replacement starts holding the confirmed pushes its
+   * repositories start at (see `retain`), so a head both hold is the current generation's.
    */
   private mergeGeneration(
     taskId: string,
     repositoryId: string,
     headSha: string,
-  ): WorkspaceGeneration | undefined {
-    const current = this.current(taskId);
-    const clock = (g: WorkspaceGeneration) =>
-      g.repositoryClocks.find((r) => r.repositoryId === repositoryId);
-    if (!current || !clock(current) || this.removal(current)) return undefined;
-    if (clock(current)!.pushedCommit === headSha) return current;
+  ):
+    | {
+        generation: WorkspaceGeneration;
+        clock: WorkspaceGeneration["repositoryClocks"][number];
+      }
+    | undefined {
+    const generation = this.current(taskId);
+    const clock = generation?.repositoryClocks.find(
+      (r) => r.repositoryId === repositoryId,
+    );
+    if (!generation || !clock || this.removal(generation)) return undefined;
+    if (clock.pushedCommit === headSha) return { generation, clock };
     const earlier = this.forTask(taskId).some(
       (g) =>
-        g.workspaceId !== current.workspaceId &&
-        clock(g)?.pushedCommit === headSha,
+        g.workspaceId !== generation.workspaceId &&
+        g.repositoryClocks.some(
+          (r) => r.repositoryId === repositoryId && r.pushedCommit === headSha,
+        ),
     );
-    return earlier ? undefined : current;
+    return earlier ? undefined : { generation, clock };
   }
 
   importBindings(): void {
@@ -595,7 +627,8 @@ export class WorkspaceLifecycleStore {
           this.conflict("Workspace generation identity changed");
         return existing;
       }
-      // A replacement starts at its predecessor's confirmed push, so its clock holds that push.
+      // A repository that starts at a commit some removed generation of the task recorded as
+      // pushed to that repository's task branch holds that confirmed push from the start.
       const inherited = new Set(
         this.forTask(parsed.taskId).flatMap((g) =>
           (this.removal(g)?.repositories ?? []).flatMap((p) =>

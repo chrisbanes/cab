@@ -1234,3 +1234,70 @@ test("terminal episodes, late turn ends and late removal pushes stay with their 
     w.db.close();
   }
 });
+
+test("a terminal transition while a replacement is provisioning anchors the replacement, not the removed generation", () => {
+  const f = coordinationFixture();
+  try {
+    const taskId = "20000000-0000-4000-8000-000000000001",
+      projectId = "10000000-0000-4000-8000-000000000001",
+      oldId = randomUUID(),
+      newId = randomUUID(),
+      pushed = "c".repeat(40);
+    const transition = (state: "done" | "open") =>
+      f.domain.execute({
+        type: "task.configure",
+        actor: "operator",
+        key: randomUUID(),
+        projectId,
+        taskId,
+        expectedVersion: Number(f.domain.task(taskId).version),
+        state,
+      });
+    const bindings = new SqliteWorkspaceBindingStore(f.db);
+    const repository = {
+      repositoryId: "repo",
+      sourcePath: "/fixture/source",
+      workspacePath: "/fixture/old/repo-1",
+      ref: "main",
+      gitCommonDir: null,
+      commit: sha,
+    };
+    bindings.createOrGet(taskId, oldId, "/fixture/old", [repository]);
+    bindings.update(taskId, "ready", null);
+    const life = new WorkspaceLifecycleStore(f.db);
+    const old = { taskId, workspaceId: oldId };
+    transition("done");
+    const { operationId } = life.beginOperation(old, removal());
+    life.completeOperation(old, operationId, life.get(oldId)!.revision, 200, [
+      {
+        kind: "pushed",
+        repositoryId: "repo",
+        branch: "cab/task",
+        commit: pushed,
+      },
+    ]);
+    bindings.update(taskId, "archived", null);
+    transition("open");
+    const removed = life.get(oldId)!;
+    bindings.replaceRemoved(
+      taskId,
+      oldId,
+      { workspaceId: newId, path: "/fixture/new" },
+      [{ ...repository, workspacePath: "/fixture/new/repo-1", commit: pushed }],
+    );
+    assert.equal(bindings.get(taskId)?.state, "provisioning");
+    // Recorded with the binding, seeded at the removed generation's confirmed push.
+    assert.equal(life.current(taskId)?.workspaceId, newId);
+    assert.equal(life.get(newId)?.repositoryClocks[0]?.pushedCommit, pushed);
+    transition("done");
+    const provisioning = life.get(newId)!;
+    assert.equal(provisioning.terminal?.status, "done");
+    assert.ok(provisioning.terminal!.at > 0);
+    assert.deepEqual(life.get(oldId), removed);
+    // Becoming ready leaves the recorded generation as it was.
+    bindings.update(taskId, "ready", null);
+    assert.deepEqual(life.get(newId), provisioning);
+  } finally {
+    f.close();
+  }
+});

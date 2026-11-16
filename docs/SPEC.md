@@ -1312,14 +1312,18 @@ candidates. In order, it:
   repository's change request merged at cab's last confirmed push to it, whichever
   expires first (merged on an exact tie). A later push makes that repository unmerged
   again until its change request is observed merged at the new head.
-  A push made by removal does not restart the clock. Each fact belongs to one workspace
-  generation: a turn end and a confirmed push to the generation the work ran in, a
+  A push made by removal does not restart the clock. An adoption of an outside head and
+  an automatic stack rebase each make the new head the task branch's confirmed push.
+  Each fact belongs to one workspace generation: a turn end and a confirmed push to the
+  generation the work ran in, a stack rebase to the task's current generation, a
   removal's push to the generation it removed, and a terminal or reopening transition
-  to the task's current generation. A change request observation belongs to the
+  to the task's current generation, including one provisioned again that is not yet
+  ready. A change request observation belongs to the
   current generation, unless that generation's removal has completed or the observed
-  head is a confirmed push that only a replaced generation holds. A generation
-  provisioned again starts holding its predecessor's last confirmed push, so a merge at
-  that commit, or at a later push of its own to the same change request, counts for it.
+  head is a confirmed push that only a replaced generation holds. A repository of a
+  generation provisioned again starts holding the confirmed push it starts at, as a
+  removed generation of the task recorded it, so a merge at that commit, or at a later
+  push of its own to the same change request, counts for it.
   A removed generation's clocks are history: no later observation marks it merged, and
   no fact about it moves its replacement's clocks. A workspace whose needed time fact
   predates cab's records is never expired and raises no attention; it stays until it is

@@ -2761,13 +2761,16 @@ export class DeliveryStore {
               .nullable(),
           })
           .safeParse(record.beforeState);
-        // An already-equal ref confirms delivery but is not a new push clock.
+        // An already-equal ref confirms delivery but is not a new push clock. An adoption
+        // makes the outside head cab's last push, so it is one.
         if (
           owned &&
-          pushBefore.success &&
-          pushBefore.data.beforeHead !== observation.receipt?.headSha &&
           observation.receipt?.headSha &&
-          (action.kind === "branch.push" || action.kind === "branch.force-push")
+          (action.kind === "branch.adopt" ||
+            (pushBefore.success &&
+              pushBefore.data.beforeHead !== observation.receipt.headSha &&
+              (action.kind === "branch.push" ||
+                action.kind === "branch.force-push")))
         ) {
           if ("workId" in record.binding)
             initializedWorkspaceLifecycle(this.db)?.recordPush(
@@ -3390,6 +3393,14 @@ export class DeliveryStore {
         "UPDATE delivery_task_branches SET lastPushedSha=?, outsideHeadSha=NULL WHERE taskId=? AND repositoryId=?",
       )
       .run(parsed.newHead, taskId, binding.observation.repositoryId);
+    // The rebased head is the task branch's new confirmed push, as a host branch update is.
+    initializedWorkspaceLifecycle(this.db)?.recordTaskPush(
+      taskId,
+      binding.observation.repositoryId,
+      `rebase:${parsed.oldHead}:${parsed.newHead}`,
+      parsed.newHead,
+      Date.now(),
+    );
     binding.rebaseProofs = [...(binding.rebaseProofs ?? []), parsed];
     binding.settlement = null;
     binding.revision++;
