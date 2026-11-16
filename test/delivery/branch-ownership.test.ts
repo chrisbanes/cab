@@ -893,3 +893,129 @@ test("confirmed new pushes and first merged observation record generation clocks
     reopened.close();
   }
 });
+
+test("after a workspace removed before its PR merged is provisioned again and pushes to that PR, its merge credits the new generation", async (t) => {
+  const w = publicationWorld(t),
+    state = new ExecutionState(w.db),
+    life = new WorkspaceLifecycleStore(w.db),
+    bindings = new SqliteWorkspaceBindingStore(w.db);
+  assert.ok("workId" in w.caller);
+  const caller = w.caller;
+  const profileId = randomUUID();
+  w.domain.execute({
+    type: "profile.create",
+    actor: "operator",
+    key: randomUUID(),
+    profileId,
+    name: "Rebind lead",
+    instructions: "Deliver",
+    capabilities: "code",
+  });
+  w.domain.execute({
+    type: "project.configure",
+    actor: "operator",
+    key: randomUUID(),
+    projectId: w.projectId,
+    expectedVersion: Number(w.domain.project(w.projectId).version),
+    leadProfileId: profileId,
+  });
+  caller.assignmentId = String(w.domain.ensureLeadAssignment(w.taskId)!.id);
+  const bindWork = (workId: string, workspace: string) => {
+    state.create(workId, "fixture", workspace);
+    state.bindTask(workId, {
+      taskId: w.taskId,
+      assignmentId: caller.assignmentId,
+      assignmentVersion: 1,
+      instructionsRevision: 1,
+      profileRevision: 1,
+    });
+  };
+  const transition = (next: "done" | "open") =>
+    w.domain.execute({
+      type: "task.configure",
+      actor: "operator",
+      key: randomUUID(),
+      projectId: w.projectId,
+      taskId: w.taskId,
+      expectedVersion: Number(w.domain.task(w.taskId).version),
+      state: next,
+    });
+  bindWork(caller.workId, w.workspace);
+  const oldId = randomUUID();
+  bindings.createOrGet(w.taskId, oldId, w.workspace, [
+    {
+      repositoryId,
+      sourcePath: w.source,
+      workspacePath: w.workspace,
+      ref: "main",
+      gitCommonDir: null,
+      commit: w.base,
+    },
+  ]);
+  bindings.update(w.taskId, "ready", null);
+  const first = w.commit();
+  assert.equal(
+    (await w.submit("branch.push", first)).state,
+    "confirmed-success",
+  );
+  const branch = branchOf(w)!.branch;
+  const open = w.showPr(first, branch);
+  w.store.transaction(() =>
+    w.store.registerPrWithinTransaction(
+      caller as Parameters<typeof w.store.registerPrWithinTransaction>[0],
+      open,
+      caller.assignmentId,
+    ),
+  );
+  // Done, and removed before its PR merged.
+  transition("done");
+  const old = { taskId: w.taskId, workspaceId: oldId };
+  const { operationId } = life.beginOperation(old, {
+    operationId: randomUUID(),
+    kind: "remove",
+    trigger: "manual",
+    startedAt: Date.now(),
+  });
+  life.completeOperation(
+    old,
+    operationId,
+    life.get(oldId)!.revision,
+    Date.now(),
+    [{ kind: "pushed", repositoryId, branch, commit: first }],
+  );
+  bindings.update(w.taskId, "archived", null);
+  // A later turn's workspace starts at the last push and pushes more to the same PR.
+  transition("open");
+  const removed = life.get(oldId)!;
+  const newId = randomUUID(),
+    newPath = join(w.root, "replacement");
+  bindings.replaceRemoved(
+    w.taskId,
+    oldId,
+    { workspaceId: newId, path: newPath },
+    bindings.get(w.taskId)!.repositories.map((r) => ({
+      ...r,
+      workspacePath: join(newPath, "repo-1"),
+      commit: first,
+    })),
+  );
+  bindings.update(w.taskId, "ready", null);
+  caller.workId = randomUUID();
+  bindWork(caller.workId, newPath);
+  const second = w.commit();
+  assert.equal(
+    (await w.submit("branch.push", second)).state,
+    "confirmed-success",
+  );
+  assert.equal(life.get(newId)?.repositoryClocks[0]?.pushedCommit, second);
+  transition("done");
+  w.store.transaction(() =>
+    w.store.observePrWithinTransaction(w.taskId, {
+      ...w.showPr(second, branch),
+      state: "MERGED",
+      merged: true,
+    }),
+  );
+  assert.ok(life.get(newId)?.allMergedAt);
+  assert.deepEqual(life.get(oldId), removed);
+});

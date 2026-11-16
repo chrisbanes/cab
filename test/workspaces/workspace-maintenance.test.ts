@@ -37,7 +37,10 @@ import { controlledGit } from "../fixtures/controlled-git.js";
 import { processIdentityDenied } from "../fixtures/host-access.js";
 import { createOperatorFixture } from "../fixtures/operator-web.js";
 import { tmpdir } from "../fixtures/temp.js";
-import { finishTask } from "../fixtures/workspace-removal.js";
+import {
+  finishTask,
+  linkBindingRepositories,
+} from "../fixtures/workspace-removal.js";
 import { startedOf } from "../fixtures/service-internals.js";
 
 const H = 3_600_000;
@@ -1051,6 +1054,92 @@ test("ordinary pushes restart the delivered clock; a removal's push does not; pa
   assert.equal(reopened.terminal, false);
   assert.equal(reopened.allMergedAt, null);
   assert.equal(retentionDue(reopened, s, t0 + 1_000 * H), null);
+});
+
+test("with delivered retention off, a provisioned-again workspace is removed by merged retention from its own merge", async (t) => {
+  const root = mkdtempSync(join(tmpdir(), "cab-maintenance-rebind-"));
+  t.after(() => rmSync(root, { recursive: true, force: true }));
+  const source = join(root, "R1");
+  mkdirSync(source);
+  const git = (...args: string[]) =>
+    execFileSync(
+      "git",
+      [
+        "-C",
+        source,
+        "-c",
+        "user.name=M",
+        "-c",
+        "user.email=m@example.invalid",
+        ...args,
+      ],
+      { env: { ...process.env, GIT_CONFIG_GLOBAL: "/dev/null" } },
+    );
+  git("init", "--quiet", "--initial-branch=main");
+  writeFileSync(join(source, "README.md"), "R1\n");
+  git("add", ".");
+  git("commit", "--quiet", "-m", "base");
+  const w = await serviceWorld(t, {
+    settings: { deliveredRetentionHours: "off" },
+  });
+  const taskId = randomUUID();
+  w.domain.execute({
+    type: "task.create",
+    actor: "operator",
+    key: randomUUID(),
+    projectId: w.projectId,
+    taskId,
+    title: "Provisioned again",
+    outcome: "O",
+  });
+  const old = await w.f.service.provisionTask(taskId, [
+    { repositoryId: "R1", path: source, ref: "main" },
+  ]);
+  assert.equal(old.state, "ready", old.reason ?? "");
+  finishTask(w.f.service, taskId);
+  const removed = await w.f.service.removeTaskWorkspace(taskId, "manual");
+  assert.equal(removed.outcome, "cleaned", JSON.stringify(removed));
+  finishTask(w.f.service, taskId, "open");
+  linkBindingRepositories(w.f, w.projectId, old);
+  const next = (await w.f.service[
+    // biome-ignore lint/complexity/useLiteralKeys: the re-provisioning entry point under test
+    "reprovisionTaskWorkspace"
+  ](taskId))!;
+  assert.equal(next.state, "ready", next.reason ?? "");
+  assert.notEqual(next.workspaceId, old.workspaceId);
+  const before = w.lifecycle().get(old.workspaceId);
+  // The new generation pushes to the change request, which is then merged at that push.
+  const pushed = "a".repeat(40);
+  w.lifecycle().observe(next, {
+    kind: "push",
+    eventId: `push:${randomUUID()}`,
+    at: Date.now(),
+    repositoryId: "R1",
+    commit: pushed,
+    removalOperationId: null,
+  });
+  finishTask(w.f.service, taskId);
+  const mergedAt = Date.now();
+  w.lifecycle().recordMerge(
+    taskId,
+    "R1",
+    "pr",
+    true,
+    pushed,
+    "merged",
+    mergedAt,
+  );
+  assert.equal(w.lifecycle().get(next.workspaceId)?.allMergedAt, mergedAt);
+  assert.deepEqual(w.lifecycle().get(old.workspaceId), before);
+  // The test clock follows real time, so the earlier pass stays a minute short of expiry.
+  w.clock.offset = mergedAt + H - 60_000 - Date.now();
+  assert.deepEqual((await w.pass())?.removed ?? [], []);
+  assert.equal(existsSync(next.path), true);
+  w.clock.offset = mergedAt + H - Date.now();
+  assert.deepEqual((await w.pass())?.removed, [
+    { workspaceId: next.workspaceId, trigger: "merged" },
+  ]);
+  assert.equal(existsSync(next.path), false);
 });
 
 test("idle trimming at the service records the idle trigger once per turn epoch, across a restart", async (t) => {

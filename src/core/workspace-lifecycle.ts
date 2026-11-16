@@ -373,13 +373,13 @@ export class WorkspaceLifecycleStore {
   }
 
   /**
-   * A change request observation. A merged one counts only when its head is the repository's
-   * latest confirmed push, so re-polling a request merged before later pushes never marks that
-   * later work merged. With no recorded push (legacy) the observation counts as before.
+   * A change request observation, recorded on the generation its head belongs to (see
+   * `mergeGeneration`). A merged one counts only when its head is that repository's latest
+   * confirmed push, so re-polling a request merged before later pushes never marks that later
+   * work merged. With no recorded push (legacy) the observation counts as before.
    */
   recordMerge(
     taskId: string,
-    workId: string,
     repositoryId: string,
     changeRequestId: string,
     observedMerged: boolean,
@@ -387,9 +387,8 @@ export class WorkspaceLifecycleStore {
     observationId: string,
     at: number,
   ): void {
-    const generation = this.forWork(taskId, workId);
-    if (!generation?.repositories.some((r) => r.repositoryId === repositoryId))
-      return;
+    const generation = this.mergeGeneration(taskId, repositoryId, headSha);
+    if (!generation) return;
     const current = generation.repositoryClocks.find(
       (r) => r.repositoryId === repositoryId,
     );
@@ -424,6 +423,32 @@ export class WorkspaceLifecycleStore {
       changeRequestId,
       merged,
     });
+  }
+
+  /**
+   * The one generation a change request observation at `headSha` can be about: the task's
+   * current generation, unless its removal completed, since a removed generation's clocks are
+   * history and no later observation changes them. A head that the current generation's clock
+   * does not hold but a replaced generation's does is that earlier work's, so it is not recorded
+   * on the current one either. A replacement starts holding its predecessor's last confirmed
+   * push (see `retain`), so a head both hold is the current generation's.
+   */
+  private mergeGeneration(
+    taskId: string,
+    repositoryId: string,
+    headSha: string,
+  ): WorkspaceGeneration | undefined {
+    const current = this.current(taskId);
+    const clock = (g: WorkspaceGeneration) =>
+      g.repositoryClocks.find((r) => r.repositoryId === repositoryId);
+    if (!current || !clock(current) || this.removal(current)) return undefined;
+    if (clock(current)!.pushedCommit === headSha) return current;
+    const earlier = this.forTask(taskId).some(
+      (g) =>
+        g.workspaceId !== current.workspaceId &&
+        clock(g)?.pushedCommit === headSha,
+    );
+    return earlier ? undefined : current;
   }
 
   importBindings(): void {
@@ -570,6 +595,14 @@ export class WorkspaceLifecycleStore {
           this.conflict("Workspace generation identity changed");
         return existing;
       }
+      // A replacement starts at its predecessor's confirmed push, so its clock holds that push.
+      const inherited = new Set(
+        this.forTask(parsed.taskId).flatMap((g) =>
+          (this.removal(g)?.repositories ?? []).flatMap((p) =>
+            p.kind === "pushed" ? [`${p.repositoryId}\0${p.commit}`] : [],
+          ),
+        ),
+      );
       const generation = workspaceGenerationSchema.parse({
         ...parsed,
         revision: 1,
@@ -579,13 +612,17 @@ export class WorkspaceLifecycleStore {
         terminal: null,
         lastPushAt: null,
         allMergedAt: null,
-        repositoryClocks: parsed.repositories.map(({ repositoryId }) => ({
-          repositoryId,
-          pushedCommit: null,
-          pushedAt: null,
-          changeRequestId: null,
-          merged: null,
-        })),
+        repositoryClocks: parsed.repositories.map(
+          ({ repositoryId, commit }) => ({
+            repositoryId,
+            pushedCommit: inherited.has(`${repositoryId}\0${commit}`)
+              ? commit
+              : null,
+            pushedAt: null,
+            changeRequestId: null,
+            merged: null,
+          }),
+        ),
       });
       this.db
         .prepare("INSERT INTO workspace_generations VALUES (?,?,?)")

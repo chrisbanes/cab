@@ -972,7 +972,8 @@ test("a merged change request counts only for the pushed commit it merged", () =
     // The work whose observations attribute pushes and merges to this generation.
     const workId = randomUUID();
     db.exec(`CREATE TABLE execution_intents (workId TEXT PRIMARY KEY, workspace TEXT);
-      CREATE TABLE task_execution_bindings (workId TEXT PRIMARY KEY, taskId TEXT)`);
+      CREATE TABLE task_execution_bindings (workId TEXT PRIMARY KEY, taskId TEXT);
+      CREATE TABLE task_workspace_bindings (taskId TEXT PRIMARY KEY, workspaceId TEXT)`);
     db.prepare("INSERT INTO execution_intents VALUES (?,?)").run(
       workId,
       input.path,
@@ -980,6 +981,10 @@ test("a merged change request counts only for the pushed commit it merged", () =
     db.prepare("INSERT INTO task_execution_bindings VALUES (?,?)").run(
       workId,
       input.taskId,
+    );
+    db.prepare("INSERT INTO task_workspace_bindings VALUES (?,?)").run(
+      input.taskId,
+      input.workspaceId,
     );
     const first = "c".repeat(40),
       second = "d".repeat(40);
@@ -1000,7 +1005,6 @@ test("a merged change request counts only for the pushed commit it merged", () =
     ) =>
       store.recordMerge(
         input.taskId,
-        workId,
         repositoryId,
         `pr-${repositoryId}`,
         true,
@@ -1027,5 +1031,206 @@ test("a merged change request counts only for the pushed commit it merged", () =
     assert.equal(allMerged(), 70);
   } finally {
     db.close();
+  }
+});
+
+/**
+ * A task whose first generation has one repository and one work, with helpers to remove it and
+ * replace it by a second generation that starts at the first one's last confirmed push, as
+ * re-provisioning does.
+ */
+function rebindable() {
+  const db = database();
+  db.exec(`ALTER TABLE domain_tasks ADD COLUMN version INTEGER NOT NULL DEFAULT 1;
+    CREATE TABLE execution_intents (workId TEXT PRIMARY KEY, workspace TEXT, threadId TEXT, turnId TEXT);
+    CREATE TABLE task_execution_bindings (workId TEXT PRIMARY KEY, taskId TEXT);
+    CREATE TABLE task_workspace_bindings (taskId TEXT PRIMARY KEY, workspaceId TEXT)`);
+  const store = new WorkspaceLifecycleStore(db);
+  store.migrate();
+  const old = generation();
+  old.repositories = old.repositories.filter((r) => r.repositoryId === "one");
+  const { taskId } = old;
+  db.prepare("INSERT INTO domain_tasks (id) VALUES (?)").run(taskId);
+  store.retain(old);
+  db.prepare("INSERT INTO task_workspace_bindings VALUES (?,?)").run(
+    taskId,
+    old.workspaceId,
+  );
+  const work = (workId: string, path: string) => {
+    db.prepare("INSERT INTO execution_intents VALUES (?,?,?,?)").run(
+      workId,
+      path,
+      `thread-${workId}`,
+      `turn-${workId}`,
+    );
+    db.prepare("INSERT INTO task_execution_bindings VALUES (?,?)").run(
+      workId,
+      taskId,
+    );
+  };
+  work("old-work", old.path);
+  const clock = (input: WorkspaceGenerationInput) =>
+    store.get(input.workspaceId)!;
+  let removalOperationId = "";
+  const remove = (at: number) => {
+    const pushed = clock(old).repositoryClocks[0]!.pushedCommit;
+    removalOperationId = store.beginOperation(old, {
+      ...removal(),
+      startedAt: at,
+    }).operationId;
+    store.completeOperation(old, removalOperationId, clock(old).revision, at, [
+      pushed
+        ? {
+            kind: "pushed",
+            repositoryId: "one",
+            branch: "task/one",
+            commit: pushed,
+          }
+        : {
+            kind: "base",
+            repositoryId: "one",
+            branch: "task/one",
+            commit: sha,
+            noTaskCommits: true,
+          },
+    ]);
+  };
+  const rebind = () => {
+    const removed = store.removal(old)!.repositories![0]!;
+    const next: WorkspaceGenerationInput = {
+      ...old,
+      workspaceId: randomUUID(),
+      path: "/disposable/replacement",
+      repositories: old.repositories.map((r) => ({
+        ...r,
+        workspacePath: "/disposable/replacement/one",
+        commit: removed.commit,
+      })),
+    };
+    store.retain(next);
+    db.prepare(
+      "UPDATE task_workspace_bindings SET workspaceId=? WHERE taskId=?",
+    ).run(next.workspaceId, taskId);
+    work("new-work", next.path);
+    return next;
+  };
+  const push = (workId: string, commit: string, at: number) =>
+    store.recordPush(taskId, workId, "one", randomUUID(), commit, at);
+  const merge = (head: string, observation: string, at: number) =>
+    store.recordMerge(taskId, "one", "pr", true, head, observation, at);
+  const taskState = (status: "open" | "done", at: number) => {
+    db.prepare("UPDATE domain_tasks SET version=version+1 WHERE id=?").run(
+      taskId,
+    );
+    store.taskStateChanged(taskId, status, at);
+  };
+  return {
+    db,
+    store,
+    old,
+    clock,
+    remove,
+    rebind,
+    push,
+    merge,
+    taskState,
+    removalOperationId: () => removalOperationId,
+  };
+}
+
+test("a replacement generation is credited with merges of its own pushes, never the removed one", () => {
+  const w = rebindable();
+  try {
+    const first = "c".repeat(40),
+      second = "d".repeat(40);
+    w.push("old-work", first, 10);
+    w.taskState("done", 15);
+    w.remove(20);
+    w.taskState("open", 25);
+    const removed = w.clock(w.old);
+    const next = w.rebind();
+    // It starts holding the push it was provisioned at, without a push clock of its own.
+    assert.equal(w.clock(next).repositoryClocks[0]!.pushedCommit, first);
+    assert.equal(w.clock(next).lastPushAt, null);
+    // Removed, re-provisioned, then merged at that push: the replacement's work is merged.
+    w.merge(first, "merged-first", 30);
+    assert.equal(w.clock(next).allMergedAt, 30);
+    // More work on the same change request makes it unmerged until merged at the new head.
+    w.push("new-work", second, 40);
+    assert.equal(w.clock(next).allMergedAt, null);
+    assert.equal(w.clock(next).lastPushAt, 40);
+    // A re-poll of the old head is the removed generation's history: it changes neither.
+    const pushed = w.clock(next);
+    w.merge(first, "merged-first-repoll", 50);
+    assert.deepEqual(w.clock(next), pushed);
+    w.merge(second, "merged-second", 60);
+    assert.equal(w.clock(next).allMergedAt, 60);
+    w.merge(second, "merged-second-poll", 70);
+    assert.equal(w.clock(next).allMergedAt, 60);
+    assert.deepEqual(w.clock(w.old), removed);
+  } finally {
+    w.db.close();
+  }
+});
+
+test("a merge after removal completed is not recorded on the removed generation", () => {
+  const w = rebindable();
+  try {
+    const first = "c".repeat(40);
+    w.push("old-work", first, 10);
+    w.remove(20);
+    const removed = w.clock(w.old);
+    w.merge(first, "merged", 30);
+    assert.deepEqual(w.clock(w.old), removed);
+    // The same observation polled after re-provisioning credits the replacement.
+    const next = w.rebind();
+    w.merge(first, "merged", 40);
+    assert.equal(w.clock(next).allMergedAt, 40);
+    assert.deepEqual(w.clock(w.old), removed);
+  } finally {
+    w.db.close();
+  }
+});
+
+test("terminal episodes, late turn ends and late removal pushes stay with their own generation", () => {
+  const w = rebindable();
+  try {
+    w.taskState("done", 10);
+    assert.equal(w.clock(w.old).terminal?.at, 10);
+    w.remove(20);
+    // A reopen before re-provisioning is the removed generation's: the binding still names it.
+    w.taskState("open", 25);
+    assert.equal(w.clock(w.old).terminal, null);
+    const next = w.rebind();
+    assert.equal(w.clock(next).terminal, null);
+    const removed = w.clock(w.old);
+    w.taskState("done", 40);
+    assert.equal(w.clock(next).terminal?.at, 40);
+    assert.deepEqual(w.clock(w.old), removed);
+    // A turn end of work that ran in the removed generation arrives late.
+    w.store.recordTurnEnd("old-work", "thread-old-work", "turn-old-work", 50);
+    assert.equal(w.clock(w.old).lastTurnEndedAt, 50);
+    assert.equal(w.clock(next).lastTurnEndedAt, null);
+    // A removal push reconciled after the rebind, and a merge of it, never reach the replacement.
+    const replacement = w.clock(next);
+    const late = "e".repeat(40);
+    w.store.recordRemovalPush(
+      {
+        taskId: w.old.taskId,
+        workspaceId: w.old.workspaceId,
+        removalOperationId: w.removalOperationId(),
+      },
+      "one",
+      randomUUID(),
+      late,
+      60,
+    );
+    assert.equal(w.clock(w.old).repositoryClocks[0]!.pushedCommit, late);
+    assert.equal(w.clock(w.old).lastPushAt, null);
+    w.merge(late, "merged-late", 70);
+    assert.deepEqual(w.clock(next), replacement);
+    assert.equal(w.clock(w.old).allMergedAt, null);
+  } finally {
+    w.db.close();
   }
 });

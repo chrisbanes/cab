@@ -3155,7 +3155,6 @@ export class DeliveryStore {
       );
     initializedWorkspaceLifecycle(this.db)?.recordMerge(
       binding.taskId,
-      binding.registeredWorkId,
       observation.repositoryId,
       observation.nodeId,
       observation.state === "MERGED",
@@ -3309,7 +3308,6 @@ export class DeliveryStore {
       .run(taskId, digest, canonicalMaterial(observation), Date.now());
     initializedWorkspaceLifecycle(this.db)?.recordMerge(
       taskId,
-      binding.registeredWorkId,
       observation.repositoryId,
       observation.nodeId,
       observation.state === "MERGED",
