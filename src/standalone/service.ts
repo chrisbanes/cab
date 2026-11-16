@@ -3130,6 +3130,9 @@ export class StandaloneService {
     const generation = this.generation;
     if (generation) generation.accepting = false;
     if (this.stopPromise) return this.stopPromise;
+    // A pass in flight finishes against the stopped state and logs; the next start begins afresh.
+    this.leftoverCheck = undefined;
+    this.leftoverCheckQueued = undefined;
     this.stoppedExclusions = this.failureExclusions();
     const stopping = this.stopOwned();
     this.stopPromise = stopping;
@@ -3951,7 +3954,7 @@ export class StandaloneService {
 
   /** A done or cancelled task's leftover execution and holds; empty for an open task. */
   closedTaskLeftovers(taskId: string): ClosedTaskLeftovers {
-    const { domain, schedulerStore, state } = this.started();
+    const { domain, schedulerStore, state, supervisor } = this.started();
     const task = domain.task(taskId);
     const selections = withoutWithdrawn(domain.assignments(taskId)).map(
       (a): LeftoverSelection => {
@@ -3975,6 +3978,11 @@ export class StandaloneService {
       settlement: (workId) => state.leftoverSettlement(workId),
       heldWriterWork: () => state.heldWriterWorkForTask(taskId),
       holds: () => state.nonStopTaskHolds(taskId),
+      running: (workId) =>
+        ["submitting", "running"].includes(
+          state.executionStateForWork(workId) ?? "",
+        ) || this.releaseInProcessBlockers(workId, supervisor).length > 0,
+      holdsOwnership: (workId) => state.workHoldsOwnership(workId),
     });
   }
 
@@ -3999,6 +4007,13 @@ export class StandaloneService {
     // shortcut: a fixed five-minute recheck; tune if many present processes accumulate.
     recheckAfterMs = 5 * 60_000,
   ): Promise<void> {
+    // Startup passes its own components and recheck: it waits for a running pass, never joins a queued one.
+    if (this.leftoverCheck && components) {
+      const current = this.leftoverCheck;
+      return current.then(() =>
+        this.checkClosedTaskLeftovers(components, recheckAfterMs),
+      );
+    }
     if (this.leftoverCheck) {
       this.leftoverCheckQueued ??= this.leftoverCheck.then(() => {
         this.leftoverCheckQueued = undefined;

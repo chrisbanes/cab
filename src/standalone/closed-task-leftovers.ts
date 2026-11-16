@@ -44,6 +44,10 @@ export interface LeftoverFacts {
   settlement(workId: string): { outcome: string } | undefined;
   heldWriterWork(): Array<{ workId: string; assignmentId: string }>;
   holds(): LeftoverHold[];
+  /** Submitting or running, or still held by this process (a callback, a known survivor). */
+  running(workId: string): boolean;
+  /** Still holds writer admission or capacity. */
+  holdsOwnership(workId: string): boolean;
 }
 
 const finalOutcomes = new Set(["process-gone", "retired"]);
@@ -89,6 +93,15 @@ export function closedTaskLeftovers(
         reason,
       });
     };
+    // A present process counts only while the work still holds ownership; once another route
+    // frees it, the stale verdict no longer keeps the task Uncertain.
+    const liveReason = (workId: string) =>
+      facts.running(workId)
+        ? "Execution is still running in cab"
+        : facts.settlement(workId)?.outcome === "process-present" &&
+            facts.holdsOwnership(workId)
+          ? "Execution process is still present"
+          : undefined;
     for (const s of selections) {
       const workId = s.request?.workId ?? s.record?.workId;
       if (!workId) continue;
@@ -99,17 +112,8 @@ export function closedTaskLeftovers(
         push(workId, s.assignmentId, "live", "Turn is running");
         continue;
       }
-      const settlement = facts.settlement(workId);
-      if (settledLeftover(settlement)) continue;
-      if (settlement?.outcome === "process-present") {
-        push(
-          workId,
-          s.assignmentId,
-          "live",
-          "Execution process is still present",
-        );
-        continue;
-      }
+      if (settledLeftover(facts.settlement(workId))) continue;
+      // The existing proofs first: a request they settle is history whatever this process holds.
       const request = s.request;
       const heldRequest =
         request?.state === "held" &&
@@ -125,16 +129,20 @@ export function closedTaskLeftovers(
               s.record?.holds.uncertainty
             ? "Execution still holds writer or capacity"
             : undefined;
-      if (reason) push(workId, s.assignmentId, "unsettled", reason);
+      if (!reason) continue;
+      const live = liveReason(workId);
+      push(workId, s.assignmentId, live ? "live" : "unsettled", live ?? reason);
     }
-    for (const work of facts.heldWriterWork())
-      if (!settledLeftover(facts.settlement(work.workId)))
-        push(
-          work.workId,
-          work.assignmentId,
-          "unsettled",
-          "Held execution keeps its writer admission",
-        );
+    for (const work of facts.heldWriterWork()) {
+      if (settledLeftover(facts.settlement(work.workId))) continue;
+      const live = liveReason(work.workId);
+      push(
+        work.workId,
+        work.assignmentId,
+        live ? "live" : "unsettled",
+        live ?? "Held execution keeps its writer admission",
+      );
+    }
     for (const hold of facts.holds()) items.push({ kind: "hold", ...hold });
   }
   return {

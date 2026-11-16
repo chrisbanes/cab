@@ -25,7 +25,7 @@ import { Textarea } from "./ui/textarea.js";
 /** One leftover as the confirmation lists it. */
 export function leftoverItemText(item: LeftoverExecution["items"][number]) {
   return item.kind === "request"
-    ? `${item.profile}: ${item.reason}`
+    ? `${item.status === "live" ? "Live" : "Unsettled"} ${item.profile} request ${item.workId}: ${item.reason}`
     : `${item.hold === "writer" ? "Writer" : item.hold === "ambiguity" ? "Ambiguity" : "Archival"} hold: ${item.reason}${item.workspaceEffects ? " (workspace effects unresolved)" : ""}`;
 }
 
@@ -40,6 +40,13 @@ export const leftoverRetireCopy = {
   recorded: "Leftover execution retired.",
   conflict: "Not retired: the leftovers changed since they were listed.",
   unavailable: "The leftover execution could not be read.",
+  refusals: {
+    "task-not-closed":
+      "Only a done or cancelled task's leftovers can be retired.",
+    "live-turn":
+      "Execution is still live; wait for it to end, then list again.",
+    "nothing-to-retire": "Nothing is left to retire.",
+  },
 } as const;
 
 /**
@@ -145,6 +152,11 @@ export function RetireLeftovers({
           {leftoverRetireCopy.irreversible}
         </DialogDescription>
         {failed && <p className="body">{leftoverRetireCopy.unavailable}</p>}
+        {shown?.refusal && (
+          <p className="body" data-leftover-refusal>
+            {leftoverRetireCopy.refusals[shown.refusal]}
+          </p>
+        )}
         {shown && (
           <ul className="body" data-leftover-items>
             {shown.items.map((item) => (

@@ -61,7 +61,10 @@ test("Retire leftover execution lists a closed task's holds, keeps the reason th
   await page.getByLabel("Password").fill(web.password);
   await page.getByRole("button", { name: "Sign in", exact: true }).click();
   await page.locator("main.page h1").waitFor();
-  await page.getByText(/execution not settled/).first().waitFor();
+  await page
+    .getByText(/execution not settled/)
+    .first()
+    .waitFor();
 
   // The confirmation lists each hold and opens on its safe choice.
   await trigger(page).click();
@@ -112,7 +115,10 @@ test("Retire leftover execution lists a closed task's holds, keeps the reason th
   assert.equal(commands[1]?.reason, "Closed before it settled");
   await dialog(page).getByRole("button", { name: "Close" }).click();
   await trigger(page).waitFor({ state: "detached" });
-  await page.getByText(/execution not settled/).first().waitFor({
-    state: "detached",
-  });
+  await page
+    .getByText(/execution not settled/)
+    .first()
+    .waitFor({
+      state: "detached",
+    });
 });

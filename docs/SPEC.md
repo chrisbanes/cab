@@ -1032,10 +1032,10 @@ boot or a reused process identifier proves the process ended: cab records that a
 frees the work's writer, capacity and Stop target in one transaction. A process still
 present, a missing process identity or evidence that can't be read is recorded and
 checked again later; reading status never runs the check. A closed task stays
-Uncertain only while a turn is running or its process is still present. With other
-leftovers it shows Done or Cancelled with *execution not settled*, and Next is the
-operator retiring them; it raises no Inbox item. With none it shows plain Done or
-Cancelled.
+Uncertain only while a turn is running, cab still holds its execution in process, or its
+process is still present while it holds writer or capacity. With other leftovers it
+shows Done or Cancelled with *execution not settled*, and Next is the operator retiring
+them; it raises no Inbox item. With none it shows plain Done or Cancelled.
 
 `cab recovery retire TASK_ID` (and the task page's Retire leftover execution action)
 lists those leftovers with a digest and writes nothing. Confirmed with that digest and a
@@ -1044,8 +1044,9 @@ retired and kept as history with its writer and capacity freed, and each listed 
 hold is deleted, including archival holds whose workspace still has unresolved Git or
 removal effects, which the listing marks. It is refused, changing nothing, for an open
 task, while anything is live, or when the listing changed. Retiring cannot be undone
-and does not prove a listed process stopped. This is the only way a task hold other
-than Stop is released; on an open task those holds keep the rules above. A recorded
+and does not prove a listed process stopped. Apart from an archival hold its own
+operation releases, this is the only way a task hold other than Stop is released; on an
+open task those holds keep the rules above. A recorded
 exit or retirement stays settled if the task reopens.
 
 Already-admitted execution and tools may survive coordinator or App Server failure

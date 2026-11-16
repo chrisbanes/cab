@@ -326,3 +326,25 @@ test("a closed task whose only leftover was refused before it ran is Done with n
     await f.close();
   }
 });
+
+test("a stale present verdict stops counting once another route frees the work", async (t) => {
+  const w = await closedWorld(t);
+  w.close("done");
+  await w.restart();
+  w.setMode("live");
+  await w.check();
+  assert.equal((await w.read()).column, "Uncertain");
+  // Held-turn release (or another route) frees writer and capacity without a new verdict.
+  for (const table of [
+    "execution_capacity_reservations",
+    "task_writer_admissions",
+  ])
+    w.db().prepare(`DELETE FROM ${table} WHERE workId=?`).run(w.g.workId);
+  const r = await w.read();
+  assert.notEqual(r.column, "Uncertain");
+  const listing = (await w.api.readLeftoverExecution(w.g.taskId)).data;
+  assert.ok(
+    listing.items.every((i) => i.kind !== "request" || i.status !== "live"),
+  );
+  assert.notEqual(listing.refusal, "live-turn");
+});

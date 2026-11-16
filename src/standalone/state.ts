@@ -2316,6 +2316,26 @@ export class ExecutionState {
       .all(taskId) as Array<{ workId: string; assignmentId: string }>;
   }
 
+  /** The work's execution intent state, if it has one. */
+  executionStateForWork(workId: string): string | undefined {
+    return (
+      this.db
+        .prepare("SELECT state FROM execution_intents WHERE workId = ?")
+        .get(workId) as { state: string } | undefined
+    )?.state;
+  }
+
+  /** Whether the work still holds a writer admission or a capacity reservation. */
+  workHoldsOwnership(workId: string): boolean {
+    return (
+      this.db
+        .prepare(`SELECT 1 WHERE
+          EXISTS (SELECT 1 FROM task_writer_admissions WHERE workId = ?)
+          OR EXISTS (SELECT 1 FROM execution_capacity_reservations WHERE workId = ?)`)
+        .get(workId, workId) !== undefined
+    );
+  }
+
   /** What the closed-task exit check or an operator retirement recorded for this work. */
   leftoverSettlement(workId: string): LeftoverSettlement | undefined {
     const row = this.db
