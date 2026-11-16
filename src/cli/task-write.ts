@@ -17,7 +17,10 @@ import {
   startAgainUnavailableText,
 } from "../operator/task-restart-copy.js";
 import { allowanceExcludedText } from "../operator/execution-allowance-copy.js";
-import { taskColumnOf } from "../operator/task-presentation.js";
+import {
+  executionNotSettled,
+  taskColumnOf,
+} from "../operator/task-presentation.js";
 import { cliFix, type Wait, waitLabels } from "../operator/wait-reasons.js";
 import { uuidArg } from "./browse.js";
 import {
@@ -168,7 +171,7 @@ export function taskStatusLines(task: TaskData): [string, string][] {
     ["Task", task.task.id],
     [
       "State",
-      `${taskColumnOf(task)}${task.execution.reasonCodes?.includes("execution-not-settled") ? " · execution not settled" : ""}${closureSuffix(task.source?.closure, task.source?.closureWait)}, version ${task.task.version}`,
+      `${taskColumnOf(task)}${executionNotSettled(task.execution) ? " · execution not settled" : ""}${closureSuffix(task.source?.closure, task.source?.closureWait)}, version ${task.task.version}`,
     ],
     [
       "Waiting",

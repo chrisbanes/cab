@@ -9,7 +9,7 @@ import {
 import { createOperatorFixture } from "../fixtures/operator-web.js";
 import { refusedTask } from "../fixtures/refused-task.js";
 import { ManualRestartClock } from "../fixtures/restart-clock.js";
-import { startedOf } from "../fixtures/service-internals.js";
+import { databaseOf, startedOf } from "../fixtures/service-internals.js";
 import { HOST_BOOT_DIFFERS } from "../../src/standalone/termination.js";
 import { boundWorld } from "./bound-turn-recovery-fixture.js";
 
@@ -24,9 +24,7 @@ async function closedWorld(t: { after(fn: () => unknown): void }) {
   });
   const service = w.s.f.service;
   const api = new OperatorApi(service);
-  const db = () =>
-    // biome-ignore lint/complexity/useLiteralKeys: private member access for tests
-    startedOf(service).state["db"] as import("node:sqlite").DatabaseSync;
+  const db = () => databaseOf(service);
   const held = (table: string) =>
     db().prepare(`SELECT 1 FROM ${table} WHERE workId=?`).get(w.g.workId) !==
     undefined;
@@ -52,7 +50,7 @@ async function closedWorld(t: { after(fn: () => unknown): void }) {
       codes: data.attention.codes,
     };
   };
-  const check = () => service.checkClosedTaskLeftovers(undefined, 0);
+  const check = () => service.checkClosedTaskLeftovers(0);
   /** A restart forgets the lost submission, as an upgrade does; startup records the verdict. */
   const restart = async () => {
     await service.stop();

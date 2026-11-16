@@ -7,6 +7,11 @@ import {
   operatorCommandSchema,
   type Session,
 } from "../../src/operator/contracts.js";
+import {
+  leftoverItemText,
+  leftoverRetireNote,
+  leftoverRetireRefusalText,
+} from "../../src/operator/leftover-retire-copy.js";
 import type { OperatorClient } from "./api.js";
 import { useCommandSend } from "./command-send.js";
 import { SendFeedback } from "./coordination-actions.js";
@@ -22,31 +27,15 @@ import {
 } from "./ui/dialog.js";
 import { Textarea } from "./ui/textarea.js";
 
-/** One leftover as the confirmation lists it. */
-export function leftoverItemText(item: LeftoverExecution["items"][number]) {
-  return item.kind === "request"
-    ? `${item.status === "live" ? "Live" : "Unsettled"} ${item.profile} request ${item.workId}: ${item.reason}`
-    : `${item.hold === "writer" ? "Writer" : item.hold === "ambiguity" ? "Ambiguity" : "Archival"} hold: ${item.reason}${item.workspaceEffects ? " (workspace effects unresolved)" : ""}`;
-}
-
 export const leftoverRetireCopy = {
   trigger: "Retire leftover execution…",
   title: (task: string) => `Retire the leftover execution of ${task}?`,
-  irreversible:
-    "Retiring cannot be undone. Each request is kept as history with its writer and capacity freed, and each hold is deleted. cab cannot prove a listed process has stopped.",
   reason: "Why these can be retired",
   confirm: "Retire leftovers",
   sending: "Retiring…",
   recorded: "Leftover execution retired.",
   conflict: "Not retired: the leftovers changed since they were listed.",
   unavailable: "The leftover execution could not be read.",
-  refusals: {
-    "task-not-closed":
-      "Only a done or cancelled task's leftovers can be retired.",
-    "live-turn":
-      "Execution is still live; wait for it to end, then list again.",
-    "nothing-to-retire": "Nothing is left to retire.",
-  },
 } as const;
 
 /**
@@ -146,15 +135,26 @@ export function RetireLeftovers({
           event.preventDefault();
           safe.current?.focus();
         }}
+        onCloseAutoFocus={(event) => {
+          // A retired listing takes its trigger away: focus the header's remaining control.
+          event.preventDefault();
+          requestAnimationFrame(() =>
+            (
+              document.querySelector<HTMLElement>(
+                ".task-header-actions [data-leftover-retire]",
+              ) ?? document.querySelector<HTMLElement>(".task-header-actions a")
+            )?.focus(),
+          );
+        }}
       >
         <DialogTitle>{leftoverRetireCopy.title(title)}</DialogTitle>
         <DialogDescription className="body">
-          {leftoverRetireCopy.irreversible}
+          {leftoverRetireNote}
         </DialogDescription>
         {failed && <p className="body">{leftoverRetireCopy.unavailable}</p>}
         {shown?.refusal && (
           <p className="body" data-leftover-refusal>
-            {leftoverRetireCopy.refusals[shown.refusal]}
+            {leftoverRetireRefusalText[shown.refusal]}
           </p>
         )}
         {shown && (

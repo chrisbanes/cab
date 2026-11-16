@@ -302,6 +302,7 @@ import {
   recoveryOptions,
 } from "./operator-recovery.js";
 import { selectAssignmentExecution } from "./operator-runtime.js";
+import { leftoverDigest } from "./closed-task-leftovers.js";
 import {
   FolderAccessError,
   listHomeFolders,
@@ -2241,7 +2242,7 @@ export class OperatorApi {
         return { state: "uncertain", reasonCodes: ["recovery-held"], holds };
       return {
         state: task.state === "done" ? "completed" : "cancelled",
-        reasonCodes: leftovers.unsettled ? ["execution-not-settled"] : [],
+        reasonCodes: leftovers.items.length ? ["execution-not-settled"] : [],
         holds: { ...holds, uncertainty: false, task: false },
       };
     }
@@ -8442,14 +8443,8 @@ export class OperatorApi {
               ? { profile: this.leftoverReason(item.profile, excluded) }
               : {}),
           })),
-          digest: shown.digest,
-          ...(shown.taskState === "open"
-            ? { refusal: "task-not-closed" }
-            : shown.live
-              ? { refusal: "live-turn" }
-              : shown.items.length === 0
-                ? { refusal: "nothing-to-retire" }
-                : {}),
+          digest: leftoverDigest(shown),
+          ...(shown.refusal ? { refusal: shown.refusal } : {}),
         }),
         observedAt: Date.now(),
       };
@@ -8460,9 +8455,7 @@ export class OperatorApi {
     value: string,
     excluded: readonly string[] | undefined,
   ): string {
-    return this.safe(value, excluded, 4096) === value
-      ? value
-      : "Reason withheld";
+    return this.disclosable(value, excluded, 4096) ? value : "Reason withheld";
   }
   private safeRetireReceipt(
     receipt: Extract<CommandReceipt, { kind: "recovery-retire" }>,

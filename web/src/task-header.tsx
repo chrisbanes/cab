@@ -32,6 +32,7 @@ import { useMediaQuery } from "./use-media-query.js";
 import { EditTask, type TaskEditOffer } from "./task-edit.js";
 import { ResetTask, taskChangedEvent } from "./task-restart.js";
 import { stateIcons } from "./task-views.js";
+import { executionNotSettled } from "../../src/operator/task-presentation.js";
 import { RetireLeftovers } from "./task-leftover-retire.js";
 import { RemoveWorkspace } from "./task-workspace-remove.js";
 import { workspaceRemovalOffered } from "./workspace-removal-presentation.js";
@@ -134,9 +135,7 @@ export function taskHeaderReport(
       offered: workspaceRemovalOffered(data),
     },
     leftovers: {
-      offered:
-        data.task.state !== "open" &&
-        data.execution.reasonCodes.includes("execution-not-settled"),
+      offered: executionNotSettled(data.execution),
     },
     options,
   };

@@ -20,6 +20,7 @@ import { executionIntentStateSchema } from "../core/execution-runtime.js";
 import {
   type CommandReceipt,
   commandReceiptSchema,
+  leftoverHoldItemSchema,
 } from "../operator/contracts.js";
 import {
   archivedResumeRejectionSchema,
@@ -144,12 +145,7 @@ const legacyFailedInterruptReason = "Codex interrupt request failed";
 /** Durable pending effect of a known unfinished execution; it refuses bound recovery. */
 const knownSurvivorEffect = "known-survivor";
 
-export const leftoverHoldSchema = z.object({
-  hold: z.enum(["writer", "ambiguity", "archival"]),
-  reason: z.string().min(1).max(4096),
-  workspaceEffects: z.boolean(),
-});
-export type LeftoverHold = z.infer<typeof leftoverHoldSchema>;
+export type LeftoverHold = z.infer<typeof leftoverHoldItemSchema>;
 const leftoverSettlementSchema = z.object({
   outcome: z.enum(["process-gone", "process-present", "unknown", "retired"]),
   detail: z
@@ -2263,9 +2259,13 @@ export class ExecutionState {
     return row?.reason;
   }
 
-  /** Task holds other than Stop, each a leftover once the task is done or cancelled. */
-  nonStopTaskHolds(taskId: string): LeftoverHold[] {
-    const id = z.string().uuid().parse(taskId);
+  private archivalEffects: string | undefined;
+  /**
+   * The archival-hold condition for unresolved workspace effects (Git-uncertain, or a removal
+   * still in progress), as the state open keeps those holds. Kept once both tables exist.
+   */
+  private archivalEffectsSql(): string {
+    if (this.archivalEffects) return this.archivalEffects;
     const removals = this.hasTable("workspace_maintenance_operations")
       ? `OR hold.ownerToken IN (SELECT operationId FROM workspace_maintenance_operations
           WHERE json_extract(data, '$.kind') = 'remove'
@@ -2279,7 +2279,15 @@ export class ExecutionState {
       ? `OR EXISTS (SELECT 1 FROM task_workspace_bindings binding
           WHERE binding.taskId = hold.taskId AND binding.gitUncertain = 1)`
       : "";
-    return z.array(leftoverHoldSchema).parse(
+    const sql = `(0 ${gitUncertain} ${removals})`;
+    if (removals && gitUncertain) this.archivalEffects = sql;
+    return sql;
+  }
+
+  /** Task holds other than Stop, each a leftover once the task is done or cancelled. */
+  nonStopTaskHolds(taskId: string): LeftoverHold[] {
+    const id = z.string().uuid().parse(taskId);
+    return z.array(leftoverHoldItemSchema).parse(
       this.db
         .prepare(
           `SELECT 'writer' AS hold, COALESCE(NULLIF(reason, ''), 'Task held') AS reason,
@@ -2290,7 +2298,7 @@ export class ExecutionState {
             FROM task_writer_ambiguity_holds WHERE taskId = ?
           UNION ALL
           SELECT 'archival', COALESCE(NULLIF(reason, ''), 'Task held'),
-            (0 ${gitUncertain} ${removals}) FROM task_archival_holds hold WHERE taskId = ?
+            ${this.archivalEffectsSql()} FROM task_archival_holds hold WHERE taskId = ?
           ORDER BY 1, 2`,
         )
         .all(id, id, id)
@@ -2314,15 +2322,6 @@ export class ExecutionState {
       WHERE binding.taskId = ? AND intent.state = 'held'
       ORDER BY intent.rowid`)
       .all(taskId) as Array<{ workId: string; assignmentId: string }>;
-  }
-
-  /** The work's execution intent state, if it has one. */
-  executionStateForWork(workId: string): string | undefined {
-    return (
-      this.db
-        .prepare("SELECT state FROM execution_intents WHERE workId = ?")
-        .get(workId) as { state: string } | undefined
-    )?.state;
   }
 
   /** Whether the work still holds a writer admission or a capacity reservation. */
@@ -2351,7 +2350,11 @@ export class ExecutionState {
    * settlement: what the closed-task exit check verifies. A process found present or unknown is
    * rechecked once `recheckAfterMs` has passed since that verdict.
    */
-  leftoverExitCandidates(recheckAfterMs = 0): Array<{
+  leftoverExitCandidates(
+    recheckAfterMs = 0,
+    /** Only this work: the in-transaction recheck before a verdict is written. */
+    onlyWorkId?: string,
+  ): Array<{
     workId: string;
     taskId: string;
     identity: RuntimeProcessIdentity | null;
@@ -2370,8 +2373,13 @@ export class ExecutionState {
           AND NOT EXISTS (SELECT 1 FROM closed_task_leftover_settlements s
             WHERE s.workId = intent.workId AND (s.outcome IN ('process-gone','retired')
               OR s.recordedAt > ?))
+          AND (? IS NULL OR intent.workId = ?)
         ORDER BY intent.rowid`)
-        .all(Date.now() - recheckAfterMs) as Array<{
+        .all(
+          Date.now() - recheckAfterMs,
+          onlyWorkId ?? null,
+          onlyWorkId ?? null,
+        ) as Array<{
         workId: string;
         taskId: string;
         processId: string | null;
@@ -2403,9 +2411,7 @@ export class ExecutionState {
     reason: string,
   ): boolean {
     return transaction(this.db, () => {
-      const candidate = this.leftoverExitCandidates(0).find(
-        (c) => c.workId === workId,
-      );
+      const [candidate] = this.leftoverExitCandidates(0, workId);
       if (!candidate) return false;
       this.writeLeftoverSettlement(candidate.taskId, workId, outcome, {
         reason,

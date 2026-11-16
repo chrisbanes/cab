@@ -9,6 +9,12 @@ import {
   recoveryOptionsSchema,
 } from "../operator/contracts.js";
 import {
+  leftoverHoldText,
+  leftoverItemText,
+  leftoverRetireNote,
+  leftoverRetireRefusalText,
+} from "../operator/leftover-retire-copy.js";
+import {
   type BrowseCommand,
   browseOutput,
   type CoverageGap,
@@ -373,27 +379,6 @@ async function restart(ctx: Parameters<WriteCommand["run"]>[0]) {
   );
 }
 
-type Leftovers = z.infer<typeof leftoverExecutionSchema>["data"];
-const RETIRE_NOTE =
-  "Retiring cannot be undone. A request is kept as history with its writer and capacity freed; a hold is deleted. An item whose process may still be running is not proved to have stopped.";
-
-function leftoverLines(items: Leftovers["items"]): string[] {
-  return items.length
-    ? items.map((i) =>
-        i.kind === "request"
-          ? `${i.status === "live" ? "Live" : "Unsettled"} request ${i.workId} (${i.profile}): ${i.reason}`
-          : `${i.hold[0]?.toUpperCase()}${i.hold.slice(1)} hold: ${i.reason}${i.workspaceEffects ? " (workspace effects unresolved)" : ""}`,
-      )
-    : ["No leftover execution or task holds."];
-}
-
-const retireRefusals: Record<NonNullable<Leftovers["refusal"]>, string> = {
-  "task-not-closed":
-    "Only a done or cancelled task's leftovers can be retired.",
-  "live-turn": "The task still has live execution; wait for it to end.",
-  "nothing-to-retire": "Nothing is left to retire.",
-};
-
 /**
  * Lists a closed task's leftover execution and task holds with a digest; with --confirm and
  * --reason it retires exactly that listing. The service refuses if the listing changed.
@@ -431,14 +416,16 @@ async function retire(ctx: Parameters<WriteCommand["run"]>[0]) {
       data: { ...d, observedAt: read.observedAt },
       human: [
         `Task ${taskId} (${d.taskState})`,
-        ...leftoverLines(d.items),
+        ...(d.items.length
+          ? d.items.map(leftoverItemText)
+          : ["No leftover execution or task holds."]),
         "",
         `Digest: ${d.digest}`,
         d.refusal
-          ? `Not retirable: ${retireRefusals[d.refusal]}`
+          ? `Not retirable: ${leftoverRetireRefusalText[d.refusal]}`
           : `Retire with: cab recovery retire ${taskId} --confirm ${d.digest} --reason TEXT`,
         "Nothing was written.",
-        RETIRE_NOTE,
+        leftoverRetireNote,
       ].join("\n"),
     };
   const session = readSession as Session;
@@ -488,11 +475,8 @@ async function retire(ctx: Parameters<WriteCommand["run"]>[0]) {
         (r) =>
           `Retired request ${r.workId} (assignment ${r.assignmentId}): ${r.reason}`,
       ),
-      ...(receipt?.holds ?? []).map(
-        (h) =>
-          `Removed ${h.hold} hold: ${h.reason}${h.workspaceEffects ? " (workspace effects unresolved)" : ""}`,
-      ),
-      RETIRE_NOTE,
+      ...(receipt?.holds ?? []).map((h) => `Removed ${leftoverHoldText(h)}`),
+      leftoverRetireNote,
     ],
     data: { taskId },
   });

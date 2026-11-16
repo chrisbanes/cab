@@ -798,7 +798,7 @@ export const workspaceComparisonReadSchema = envelope(
   ]),
 );
 /** A task hold other than Stop on a closed task: cab lists it for retirement. */
-const leftoverHoldItemSchema = z
+export const leftoverHoldItemSchema = z
   .object({
     hold: z.enum(["writer", "ambiguity", "archival"]),
     reason: z.string().min(1).max(4096),
@@ -831,7 +831,7 @@ export const leftoverExecutionDataSchema = z
         ]),
       )
       .max(1000),
-    digest: z.string().regex(/^[0-9a-f]{64}$/),
+    digest: hash,
     /** Why retire would be refused now; absent when it can run. */
     refusal: z
       .enum(["task-not-closed", "live-turn", "nothing-to-retire"])
@@ -4046,7 +4046,7 @@ export const operatorCommandSchema = z.discriminatedUnion("type", [
       ...base,
       type: z.literal("recovery.retire"),
       taskId: uuid,
-      digest: z.string().regex(/^[0-9a-f]{64}$/),
+      digest: hash,
       reason: z.string().trim().min(1).max(2000),
     })
     .strict(),
@@ -5320,7 +5320,7 @@ export const commandReceiptSchema = z.discriminatedUnion("kind", [
       key: uuid,
       recorded: z.literal(true),
       taskId: uuid,
-      digest: z.string().regex(/^[0-9a-f]{64}$/),
+      digest: hash,
       requests: z
         .array(
           z

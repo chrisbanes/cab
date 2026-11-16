@@ -251,7 +251,7 @@ test("recovery retire lists a closed task's leftovers, retires exactly that list
   );
   const human = await w.h.run([...confirm, "--connection", "rw"]);
   assert.match(human.out, new RegExp(`Retired request ${w.g.workId}`));
-  assert.match(human.out, /Removed writer hold: Legacy writer hold/);
+  assert.match(human.out, /Removed Writer hold: Legacy writer hold/);
   r = await w.cli("rw", confirm);
   assert.deepEqual(r.json().data.receipt, envelope.data.receipt);
   r = await w.cli("ro", retire(w));
