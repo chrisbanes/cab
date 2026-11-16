@@ -134,6 +134,9 @@ import {
   checkoutVerifyRequestSchema,
   type claudeTokenStatusSchema,
   commandReceiptSchema,
+  type CommandReceipt,
+  leftoverExecutionDataSchema,
+  type LeftoverExecution,
   composerOptionsSchema,
   draftingRunReadSchema,
   operatorFeedbackPageSchema,
@@ -2200,7 +2203,8 @@ export class OperatorApi {
     return (
       request?.state === "held" &&
       !this.service.notStartedWork(request.workId) &&
-      !this.service.settledDraftRefusal(request.workId)
+      !this.service.settledDraftRefusal(request.workId) &&
+      !this.service.leftoverSettled(request.workId)
     );
   }
   private nonStopTaskHold(
@@ -2230,6 +2234,17 @@ export class OperatorApi {
         Boolean(this.service.taskHold(String(task.id))) ||
         selections.some((s) => s.record?.holds.task),
     };
+    // A closed task is Uncertain only while something is live; other leftovers wait for retire.
+    if (!holds.stop && (task.state === "done" || task.state === "cancelled")) {
+      const leftovers = this.service.closedTaskLeftovers(String(task.id));
+      if (leftovers.live)
+        return { state: "uncertain", reasonCodes: ["recovery-held"], holds };
+      return {
+        state: task.state === "done" ? "completed" : "cancelled",
+        reasonCodes: leftovers.unsettled ? ["execution-not-settled"] : [],
+        holds: { ...holds, uncertainty: false, task: false },
+      };
+    }
     let state: Execution["state"] = "idle";
     const reasonCodes: Execution["reasonCodes"] = [];
     if (holds.stop) state = "stopping";
@@ -3219,22 +3234,31 @@ export class OperatorApi {
           c.status === "rejected" && c.taskVersion === Number(task.version),
       ).length,
     );
-    const uncertain =
-      execution.holds.uncertainty ||
-      this.service.hasNonStopTaskHold(taskId) ||
-      assignments.some((a) => {
-        const s = this.selection(a);
-        const confirmed =
-          s.request?.state === "active" &&
-          ["running", "submitting"].includes(s.intent?.state ?? "");
-        return (
-          this.unresolvedHeldRequest(s) ||
-          (s.request?.state === "active" && !confirmed) ||
-          Boolean(
-            (s.record?.holds.writer || s.record?.holds.capacity) && !confirmed,
-          )
-        );
-      });
+    const closed =
+      (task.state === "done" || task.state === "cancelled") &&
+      !execution.holds.stop;
+    add(
+      "execution-not-settled",
+      execution.reasonCodes.includes("execution-not-settled") ? 1 : 0,
+    );
+    const uncertain = closed
+      ? execution.state === "uncertain"
+      : execution.holds.uncertainty ||
+        this.service.hasNonStopTaskHold(taskId) ||
+        assignments.some((a) => {
+          const s = this.selection(a);
+          const confirmed =
+            s.request?.state === "active" &&
+            ["running", "submitting"].includes(s.intent?.state ?? "");
+          return (
+            this.unresolvedHeldRequest(s) ||
+            (s.request?.state === "active" && !confirmed) ||
+            Boolean(
+              (s.record?.holds.writer || s.record?.holds.capacity) &&
+                !confirmed,
+            )
+          );
+        });
     add("execution-uncertain", uncertain ? 1 : 0);
     add(
       "not-started",
@@ -7696,6 +7720,34 @@ export class OperatorApi {
         observedAt: Date.now(),
       });
     }
+    if (type.data === "recovery.retire") {
+      if (kind !== "task") throw new OperatorApiError(400, "invalid-input");
+      this.requireTask(id);
+      let receipt: ReturnType<StandaloneService["recoveryRetireReceipt"]>;
+      try {
+        receipt = this.service.recoveryRetireReceipt(id, key.data);
+      } catch (error) {
+        if (error instanceof DomainConflictError)
+          throw new OperatorApiError(409, "conflict");
+        throw error;
+      }
+      // The receipt repeats the leftover listing the operator was shown, under the same exclusions.
+      return operationReadSchema.parse({
+        data: receipt
+          ? {
+              state: "recorded",
+              receipt: this.safeRetireReceipt(
+                receipt,
+                await this.exclusions(
+                  String(this.domain().task(id).projectId),
+                  id,
+                ),
+              ),
+            }
+          : { state: "not-recorded" },
+        observedAt: Date.now(),
+      });
+    }
     if (type.data === "task.comment.send") {
       if (kind !== "task") throw new OperatorApiError(400, "invalid-input");
       return this.readWithExclusionFence(async () => {
@@ -8369,6 +8421,64 @@ export class OperatorApi {
     };
     this.requireWorkspaceSnapshot(snapshot);
     return runtimeSettingsSchema.parse(response);
+  }
+  /** A closed task's leftover execution and holds, with the digest `recovery.retire` binds. */
+  async readLeftoverExecution(taskId: string): Promise<{
+    data: LeftoverExecution;
+    observedAt: number;
+  }> {
+    return this.readWithExclusionFence(async () => {
+      const task = this.requireTask(taskId);
+      const excluded = await this.exclusions(String(task.projectId), taskId);
+      const shown = this.service.closedTaskLeftovers(taskId);
+      return {
+        data: leftoverExecutionDataSchema.parse({
+          taskId,
+          taskState: shown.taskState,
+          items: shown.items.map((item) => ({
+            ...item,
+            reason: this.leftoverReason(item.reason, excluded),
+            ...(item.kind === "request"
+              ? { profile: this.leftoverReason(item.profile, excluded) }
+              : {}),
+          })),
+          digest: shown.digest,
+          ...(shown.taskState === "open"
+            ? { refusal: "task-not-closed" }
+            : shown.live
+              ? { refusal: "live-turn" }
+              : shown.items.length === 0
+                ? { refusal: "nothing-to-retire" }
+                : {}),
+        }),
+        observedAt: Date.now(),
+      };
+    });
+  }
+  /** Leftover reasons are cab's own text, but a held request can quote a runtime error. */
+  private leftoverReason(
+    value: string,
+    excluded: readonly string[] | undefined,
+  ): string {
+    return this.safe(value, excluded, 4096) === value
+      ? value
+      : "Reason withheld";
+  }
+  private safeRetireReceipt(
+    receipt: Extract<CommandReceipt, { kind: "recovery-retire" }>,
+    excluded: readonly string[] | undefined,
+  ) {
+    return {
+      ...receipt,
+      requests: receipt.requests.map((r) => ({
+        ...r,
+        reason: this.leftoverReason(r.reason, excluded),
+      })),
+      holds: receipt.holds.map((h) => ({
+        ...h,
+        reason: this.leftoverReason(h.reason, excluded),
+      })),
+    };
   }
   async readAssignmentRecovery(assignmentId: string) {
     return this.readWithExclusionFence(() =>
@@ -10993,6 +11103,29 @@ export class OperatorApi {
           if (error instanceof RecoveryRejectedError)
             throw new OperatorApiError(409, "conflict");
           throw error;
+        }
+      }
+      if (c.type === "recovery.retire") {
+        const task = this.requireTask(c.taskId);
+        const excluded = await this.exclusions(
+          String(task.projectId),
+          c.taskId,
+        );
+        try {
+          const { receipt } = this.service.retireLeftovers(c);
+          return commandReceiptSchema.parse(
+            this.safeRetireReceipt(receipt, excluded),
+          );
+        } catch (error) {
+          if (!(error instanceof DomainConflictError)) throw error;
+          // cab's own refusal text, naming its code; never operator or runtime content.
+          throw new OperatorApiError(
+            409,
+            "conflict",
+            undefined,
+            undefined,
+            error.message.slice(0, 256),
+          );
         }
       }
       if (c.type === "task.unstack") {

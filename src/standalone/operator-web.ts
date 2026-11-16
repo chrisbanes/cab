@@ -490,6 +490,10 @@ export class OperatorWebBoundary {
     );
     if (recoveryOptions)
       return this.api.readRecoveryOptions(recoveryOptions[1] ?? "");
+    const leftovers = path.match(
+      /^\/api\/operator\/tasks\/([^/]+)\/leftover-execution$/,
+    );
+    if (leftovers) return this.api.readLeftoverExecution(leftovers[1] ?? "");
     const assignment = path.match(
       /^\/api\/operator\/assignments\/([^/]+)(\/instructions)?$/,
     );

@@ -996,6 +996,18 @@ name, version and preview digest. The service rechecks every confirmation atomic
      fails a check is refused with exit 4 and the current blockers. `--work` names
      the generation when several are held. The service also releases every such
      generation itself at startup, so this is for one it could not release then.
+   - `recovery retire TASK_ID [--confirm DIGEST --reason TEXT] [--request-id UUID]`
+     handles a done or cancelled task's leftover execution. Without `--confirm` it
+     lists each unsettled or live request and each task hold other than Stop (marking
+     archival holds with unresolved workspace effects), prints `Digest:` and whether it
+     can be retired (`task-not-closed`, `live-turn`, `nothing-to-retire`), and writes
+     nothing. With `--confirm DIGEST --reason TEXT` (both required, a read/write
+     credential) it retires exactly that listing: each request is kept as history with
+     its writer and capacity freed and each hold is deleted; the receipt names each.
+     A changed listing, an open task or live execution exits 4 (`digest-changed`,
+     `task-not-closed`, `live-turn`) with nothing applied. It cannot be undone. A lost
+     reply exits 6 and is settled with the same command or `operation get KEY --scope
+     task:ID --type recovery.retire`.
    - `recovery restart ASSIGNMENT_ID [--yes] [--work WORK_ID] [--request-id UUID]`
      confirms Start again once. Without `--yes` it names the request it would queue
      and sends nothing; with `--yes` it sends the same `task.start-again` as

@@ -857,8 +857,14 @@ function restoreDraftingSchema25(db: DatabaseSync) {
     DROP TABLE drafting_runs_new;`);
 }
 
-/** Level 38 added only the workspace lifecycle tables. */
+/** Level 39 added only the closed-task leftover settlement table. */
+function undoLeftoverSettlements(db: DatabaseSync) {
+  db.exec("DROP TABLE closed_task_leftover_settlements");
+}
+
+/** Undo level 39; level 38 added only the workspace lifecycle tables. */
 function undoWorkspaceLifecycle(db: DatabaseSync) {
+  undoLeftoverSettlements(db);
   undoArchivalHoldOwner(db);
   db.exec(
     "DROP TABLE IF EXISTS workspace_lifecycle_events; DROP TABLE IF EXISTS workspace_maintenance_operations; DROP TABLE IF EXISTS workspace_generations",
@@ -1044,6 +1050,8 @@ function restoreRequestSchema21(db: DatabaseSync) {
 
 /** The schema digest each migration level created. Append an entry with every level bump. */
 const SCHEMA_PINS: Record<number, string> = {
+  // What settled a closed task's leftover execution.
+  39: "21085732faa0bfd27c31f4bc8248245b775a894c3e93b7ea50ad68e94915b5c0",
   // The workspace generation, lifecycle event and maintenance operation tables, and the
   // archival hold's owner token.
   38: "b309bded2b802f5d286db17450407f99b2e11d800432b1671772d69549965464",
@@ -2282,6 +2290,36 @@ test("completed-recipient migration refuses an unknown CHECK atomically", async 
       assert.equal(schemaState(dirs.data), before);
     } finally {
       db.close();
+    }
+  } finally {
+    dirs.cleanup();
+  }
+});
+
+test("leftover settlement migration snapshots level 38 and adds the table empty", async () => {
+  const dirs = layout();
+  try {
+    await run(dirs.data, 38);
+    const before = new DatabaseSync(join(dirs.data, "standalone.sqlite"));
+    undoLeftoverSettlements(before);
+    before.close();
+    assert.equal(schemaDigest(dirs.data), SCHEMA_PINS[38]);
+    await run(dirs.data);
+    const snapshot = readStartupState(dirs.data)?.snapshot;
+    assert.equal(snapshot?.from, 38);
+    assert.ok(snapshot?.path);
+    assert.equal(schemaDigest(snapshot.path), SCHEMA_PINS[38]);
+    assert.equal(schemaDigest(dirs.data), SCHEMA_PINS[MIGRATION_LEVEL]);
+    const after = new DatabaseSync(join(dirs.data, "standalone.sqlite"));
+    try {
+      assert.equal(
+        after
+          .prepare("SELECT count(*) n FROM closed_task_leftover_settlements")
+          .get()?.n,
+        0,
+      );
+    } finally {
+      after.close();
     }
   } finally {
     dirs.cleanup();

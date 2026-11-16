@@ -163,3 +163,97 @@ test("recovery restart previews without --yes, then sends Start again once and r
   assert.equal(r.code, 0, r.err + r.out);
   assert.deepEqual(r.json().data.receipt, envelope.data.receipt);
 });
+
+const retire = (w: World, ...extra: string[]) => [
+  "recovery",
+  "retire",
+  w.g.taskId,
+  ...extra,
+];
+
+test("recovery retire lists a closed task's leftovers, retires exactly that listing once and replays", async (t) => {
+  const w = await cliGeneration(t, "no-turn");
+  // The process is never proved gone, so the exit check leaves the generation for retire.
+  w.verifier.set("unknown");
+  const d = w.s.f.service.domain();
+  w.s.f.seedPersistedState((db) =>
+    db
+      .prepare(
+        "INSERT INTO task_writer_holds (taskId, reason) VALUES (?, 'Legacy writer hold')",
+      )
+      .run(w.g.taskId),
+  );
+  // An open task is listed as not retirable.
+  let r = await w.cli("ro", retire(w));
+  assert.equal(r.code, 0, r.err);
+  assert.equal(r.json().data.refusal, "task-not-closed");
+  d.execute({
+    type: "task.configure",
+    actor: "operator",
+    key: randomUUID(),
+    projectId: d.task(w.g.taskId).projectId,
+    taskId: w.g.taskId,
+    expectedVersion: Number(d.task(w.g.taskId).version),
+    state: "cancelled",
+  } as never);
+  const postsBefore = posts(w),
+    journalBefore = journal(w);
+  const read = await w.h.run([...retire(w), "--connection", "ro"]);
+  assert.equal(read.code, 0, read.err);
+  assert.match(read.out, new RegExp(`Unsettled request ${w.g.workId}`));
+  assert.match(read.out, /Writer hold: Legacy writer hold/);
+  assert.match(read.out, /Digest: [0-9a-f]{64}/);
+  assert.match(read.out, /Nothing was written/);
+  r = await w.cli("ro", retire(w));
+  const digest = r.json().data.digest as string;
+  assert.equal(posts(w), postsBefore, "nothing sent without --confirm");
+  assert.equal(journal(w), journalBefore);
+
+  // Usage and scope come first: nothing is sent.
+  assert.equal((await w.cli("rw", retire(w, "--confirm", digest))).code, 2);
+  assert.equal(
+    (await w.cli("ro", retire(w, "--confirm", digest, "--reason", "x"))).code,
+    3,
+  );
+  // A listing that changed is refused and changes nothing.
+  r = await w.cli(
+    "rw",
+    retire(w, "--confirm", "0".repeat(64), "--reason", "x"),
+  );
+  assert.equal(r.code, 4, r.err + r.out);
+  assert.match(r.json().error.message, /digest-changed/);
+
+  const key = randomUUID();
+  const confirm = retire(
+    w,
+    "--confirm",
+    digest,
+    "--reason",
+    "Closed before the hold settled",
+    "--request-id",
+    key,
+  );
+  r = await w.cli("rw", confirm, { fetch: w.lostReply });
+  assert.equal(r.code, 6, r.err + r.out);
+  assert.equal(r.json().error.request.type, "recovery.retire");
+  r = await w.cli("rw", confirm);
+  assert.equal(r.code, 0, r.err + r.out);
+  const envelope = r.json();
+  assert.equal(envelope.request.scope, `task:${w.g.taskId}`);
+  assert.equal(envelope.data.receipt.kind, "recovery-retire");
+  assert.deepEqual(
+    envelope.data.receipt.requests.map((x: { workId: string }) => x.workId),
+    [w.g.workId],
+  );
+  assert.deepEqual(
+    envelope.data.receipt.holds.map((h: { hold: string }) => h.hold),
+    ["writer"],
+  );
+  const human = await w.h.run([...confirm, "--connection", "rw"]);
+  assert.match(human.out, new RegExp(`Retired request ${w.g.workId}`));
+  assert.match(human.out, /Removed writer hold: Legacy writer hold/);
+  r = await w.cli("rw", confirm);
+  assert.deepEqual(r.json().data.receipt, envelope.data.receipt);
+  r = await w.cli("ro", retire(w));
+  assert.equal(r.json().data.refusal, "nothing-to-retire");
+});

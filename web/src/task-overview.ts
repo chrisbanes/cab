@@ -166,9 +166,11 @@ export function taskReadiness(data: Omit<StatusData, "lead">) {
       : terminal
         ? active
           ? `${terminal} · ${execution.state}`
-          : data.source?.closure === "completed"
-            ? `${terminal} · closed at source`
-            : terminal
+          : execution.reasonCodes?.includes("execution-not-settled")
+            ? `${terminal} · execution not settled`
+            : data.source?.closure === "completed"
+              ? `${terminal} · closed at source`
+              : terminal
         : data.source?.closure === "held"
           ? `Held · closed at source${active ? ` · ${execution.state}` : ""}`
           : data.source?.closure === "unattributed"

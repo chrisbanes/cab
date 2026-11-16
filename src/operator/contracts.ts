@@ -797,6 +797,49 @@ export const workspaceComparisonReadSchema = envelope(
       .strict(),
   ]),
 );
+/** A task hold other than Stop on a closed task: cab lists it for retirement. */
+const leftoverHoldItemSchema = z
+  .object({
+    hold: z.enum(["writer", "ambiguity", "archival"]),
+    reason: z.string().min(1).max(4096),
+    /** An archival hold whose workspace has unresolved Git or removal effects. */
+    workspaceEffects: z.boolean(),
+  })
+  .strict();
+/** A done or cancelled task's leftover execution and holds, with the digest retire binds. */
+export const leftoverExecutionDataSchema = z
+  .object({
+    taskId: z.string().uuid(),
+    taskState: z.enum(["open", "done", "cancelled"]),
+    items: z
+      .array(
+        z.discriminatedUnion("kind", [
+          z
+            .object({
+              kind: z.literal("request"),
+              workId: z.string().min(1).max(512),
+              assignmentId: z.string().uuid(),
+              profile: z.string().min(1).max(512),
+              status: z.enum(["live", "unsettled"]),
+              reason: z.string().min(1).max(4096),
+            })
+            .strict(),
+          z
+            .object({ kind: z.literal("hold") })
+            .merge(leftoverHoldItemSchema)
+            .strict(),
+        ]),
+      )
+      .max(1000),
+    digest: z.string().regex(/^[0-9a-f]{64}$/),
+    /** Why retire would be refused now; absent when it can run. */
+    refusal: z
+      .enum(["task-not-closed", "live-turn", "nothing-to-retire"])
+      .optional(),
+  })
+  .strict();
+export type LeftoverExecution = z.infer<typeof leftoverExecutionDataSchema>;
+export const leftoverExecutionSchema = envelope(leftoverExecutionDataSchema);
 export const executionSchema = z
   .object({
     state: z.enum([
@@ -824,6 +867,8 @@ export const executionSchema = z
         "turn-release-pending",
         "held-turn-released",
         "allowance-held",
+        /** A done or cancelled task with leftovers not proved settled; nothing is live. */
+        "execution-not-settled",
       ]),
     ),
     holds: z
@@ -3995,6 +4040,16 @@ export const operatorCommandSchema = z.discriminatedUnion("type", [
       ...releaseBodySchema.shape,
     })
     .strict(),
+  // Bound to the leftover listing the operator read: a changed listing is refused.
+  z
+    .object({
+      ...base,
+      type: z.literal("recovery.retire"),
+      taskId: uuid,
+      digest: z.string().regex(/^[0-9a-f]{64}$/),
+      reason: z.string().trim().min(1).max(2000),
+    })
+    .strict(),
   z
     .object({
       ...base,
@@ -5261,6 +5316,27 @@ export const commandReceiptSchema = z.discriminatedUnion("kind", [
     .strict(),
   z
     .object({
+      kind: z.literal("recovery-retire"),
+      key: uuid,
+      recorded: z.literal(true),
+      taskId: uuid,
+      digest: z.string().regex(/^[0-9a-f]{64}$/),
+      requests: z
+        .array(
+          z
+            .object({
+              workId: z.string().min(1).max(512),
+              assignmentId: uuid,
+              reason: z.string().min(1).max(4096),
+            })
+            .strict(),
+        )
+        .max(1000),
+      holds: z.array(leftoverHoldItemSchema).max(1000),
+    })
+    .strict(),
+  z
+    .object({
       kind: z.literal("recovery-release"),
       key: uuid,
       recorded: z.literal(true),
@@ -5905,6 +5981,7 @@ export const operationTypeSchema = z.enum([
   "status-mapping.configure",
   "github.preview",
   "recovery.release",
+  "recovery.retire",
   "recovery.pre-turn.adopt",
   "recovery.pre-turn.recover",
   "recovery.no-turn.adopt",

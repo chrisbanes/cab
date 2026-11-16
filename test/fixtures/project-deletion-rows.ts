@@ -1621,6 +1621,17 @@ export function deletionOwnedSeedRows(i: DeletionSeedIdentity) {
     },
     {
       shared: false,
+      table: "closed_task_leftover_settlements",
+      values: {
+        workId: i.workId,
+        taskId: i.taskId,
+        outcome: "retired",
+        detail: "{}",
+        recordedAt: 1,
+      },
+    },
+    {
+      shared: false,
       table: "execution_held_turn_releases",
       values: {
         workId: i.workId,

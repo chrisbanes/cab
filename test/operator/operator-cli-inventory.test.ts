@@ -100,6 +100,7 @@ const documentedWrites = [
   "delivery send-comment",
   "recovery release",
   "recovery restart",
+  "recovery retire",
   "runtime enable",
   "runtime disable",
 ];

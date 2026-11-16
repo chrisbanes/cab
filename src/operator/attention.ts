@@ -9,6 +9,7 @@ import type {
 /** A task's attention codes, in the precedence that names who acts next. */
 export const attentionCodes = [
   "execution-uncertain",
+  "execution-not-settled",
   "not-started",
   "allowance-exhausted",
   "stacked-blocker-failed",
@@ -40,6 +41,12 @@ export const attentionNext: Record<
     action: "inspect execution",
     reason: "Execution ownership is uncertain",
     inboxAction: "Inspect execution",
+  },
+  "execution-not-settled": {
+    operator: true,
+    action: "retire leftover execution",
+    reason: "Leftover execution is not settled",
+    inboxAction: "Retire leftover execution",
   },
   "not-started": {
     operator: true,

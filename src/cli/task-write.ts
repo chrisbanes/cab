@@ -168,7 +168,7 @@ export function taskStatusLines(task: TaskData): [string, string][] {
     ["Task", task.task.id],
     [
       "State",
-      `${taskColumnOf(task)}${closureSuffix(task.source?.closure, task.source?.closureWait)}, version ${task.task.version}`,
+      `${taskColumnOf(task)}${task.execution.reasonCodes?.includes("execution-not-settled") ? " · execution not settled" : ""}${closureSuffix(task.source?.closure, task.source?.closureWait)}, version ${task.task.version}`,
     ],
     [
       "Waiting",

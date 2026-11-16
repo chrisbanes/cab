@@ -4,7 +4,10 @@ import {
 } from "../operator/task-restart-copy.js";
 import type { z } from "zod";
 import { recoveryCommandTypes } from "../core/recovery-contracts.js";
-import { recoveryOptionsSchema } from "../operator/contracts.js";
+import {
+  leftoverExecutionSchema,
+  recoveryOptionsSchema,
+} from "../operator/contracts.js";
 import {
   type BrowseCommand,
   browseOutput,
@@ -370,7 +373,142 @@ async function restart(ctx: Parameters<WriteCommand["run"]>[0]) {
   );
 }
 
+type Leftovers = z.infer<typeof leftoverExecutionSchema>["data"];
+const RETIRE_NOTE =
+  "Retiring cannot be undone. A request is kept as history with its writer and capacity freed; a hold is deleted. An item whose process may still be running is not proved to have stopped.";
+
+function leftoverLines(items: Leftovers["items"]): string[] {
+  return items.length
+    ? items.map((i) =>
+        i.kind === "request"
+          ? `${i.status === "live" ? "Live" : "Unsettled"} request ${i.workId} (${i.profile}): ${i.reason}`
+          : `${i.hold[0]?.toUpperCase()}${i.hold.slice(1)} hold: ${i.reason}${i.workspaceEffects ? " (workspace effects unresolved)" : ""}`,
+      )
+    : ["No leftover execution or task holds."];
+}
+
+const retireRefusals: Record<NonNullable<Leftovers["refusal"]>, string> = {
+  "task-not-closed":
+    "Only a done or cancelled task's leftovers can be retired.",
+  "live-turn": "The task still has live execution; wait for it to end.",
+  "nothing-to-retire": "Nothing is left to retire.",
+};
+
+/**
+ * Lists a closed task's leftover execution and task holds with a digest; with --confirm and
+ * --reason it retires exactly that listing. The service refuses if the listing changed.
+ */
+async function retire(ctx: Parameters<WriteCommand["run"]>[0]) {
+  const taskId = uuidArg(ctx.positionals[2] ?? "", "TASK_ID");
+  const digest = ctx.values.confirm,
+    reason = ctx.values.reason?.trim();
+  if ((digest === undefined) !== (reason === undefined))
+    throw new CliError(
+      "usage",
+      "--confirm and --reason go together. Nothing was written.",
+    );
+  if (digest !== undefined && !/^[a-f0-9]{64}$/.test(digest))
+    throw new CliError(
+      "invalid-input",
+      "--confirm must be the 64-character digest 'cab recovery retire TASK_ID' prints. Nothing was written.",
+    );
+  if (reason !== undefined && (reason.length === 0 || reason.length > 2000))
+    throw new CliError(
+      "invalid-input",
+      "--reason must be 1 to 2000 characters. Nothing was written.",
+    );
+  const READ_TASK = ["cli.identity", "task.read", "recovery.read"] as const;
+  const readSession = digest
+    ? await connectWrite(ctx, [...READ_TASK, "recovery.write"])
+    : await ctx.connect(READ_TASK);
+  const read = await readSession.client.get(
+    `/api/operator/tasks/${encodeURIComponent(taskId)}/leftover-execution`,
+    leftoverExecutionSchema,
+  );
+  const d = read.data;
+  if (!digest || !reason)
+    return {
+      data: { ...d, observedAt: read.observedAt },
+      human: [
+        `Task ${taskId} (${d.taskState})`,
+        ...leftoverLines(d.items),
+        "",
+        `Digest: ${d.digest}`,
+        d.refusal
+          ? `Not retirable: ${retireRefusals[d.refusal]}`
+          : `Retire with: cab recovery retire ${taskId} --confirm ${d.digest} --reason TEXT`,
+        "Nothing was written.",
+        RETIRE_NOTE,
+      ].join("\n"),
+    };
+  const session = readSession as Session;
+  const command = { type: "recovery.retire", taskId, digest, reason };
+  const identity = { scope: `task:${taskId}`, type: command.type };
+  const {
+    key,
+    digest: requestDigest,
+    state,
+    reached,
+  } = await requestKey(ctx, session, identity, [command]);
+  let sent: Awaited<ReturnType<typeof sendCommand>>;
+  try {
+    sent = await sendCommand(ctx, session, {
+      ...identity,
+      key,
+      digest: requestDigest,
+      resource: taskId,
+      command: exactCommand(command, key),
+      match: (r) =>
+        r.kind === "recovery-retire" &&
+        r.taskId === taskId &&
+        r.digest === digest,
+    });
+  } catch (error) {
+    if (error instanceof CliError && error.code === "conflict")
+      throw new CliError(
+        "conflict",
+        `The service refused to retire; nothing was applied and request ${key} will not be reused.\n${error.message}`,
+        {
+          ...error.extra,
+          fix: `Run 'cab recovery retire ${taskId}' to list the leftovers again.`,
+        },
+      );
+    throw error;
+  }
+  const receipt = sent.receipt.kind === "recovery-retire" ? sent.receipt : null;
+  return writeOutput({
+    request: sent.request,
+    receipt: sent.receipt,
+    reused: reached && state?.state !== "recorded",
+    effect: "completed",
+    summary: `Retired the leftover execution of task ${taskId}`,
+    lines: receiptLines(sent.receipt),
+    notes: [
+      ...(receipt?.requests ?? []).map(
+        (r) =>
+          `Retired request ${r.workId} (assignment ${r.assignmentId}): ${r.reason}`,
+      ),
+      ...(receipt?.holds ?? []).map(
+        (h) =>
+          `Removed ${h.hold} hold: ${h.reason}${h.workspaceEffects ? " (workspace effects unresolved)" : ""}`,
+      ),
+      RETIRE_NOTE,
+    ],
+    data: { taskId },
+  });
+}
+
 export const recoveryWriteCommands = new Map<string, WriteCommand>([
+  [
+    "recovery retire",
+    {
+      usage:
+        "recovery retire TASK_ID [--confirm DIGEST --reason TEXT] [--request-id UUID]",
+      positionals: 1,
+      flags: ["confirm", "reason", "request-id"],
+      run: retire,
+    },
+  ],
   [
     "recovery release",
     {

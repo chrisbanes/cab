@@ -245,6 +245,14 @@ event or callback for it; a turn whose ID was never saved releases only on a ver
 exit. Independent holds win. Later activity for the turn holds the task again.
 _Avoid_: Recovery receipt, force unlock
 
+**Leftover execution**:
+What a done or cancelled task still holds: a request that is held or never confirmed,
+work holding writer or capacity, or a task hold other than Stop. It is settled when its
+request is history or its process is proved gone; otherwise the task shows *execution not
+settled* until the operator retires it. Retiring is receipted, names each item and is not
+undone.
+_Avoid_: Stuck task, force unlock
+
 **Reset task**:
 The operator action that replaces every assignment's conversation and starts the project
 lead fresh in the same workspace. The old conversations and the workspace stay readable;

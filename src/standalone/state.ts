@@ -144,6 +144,21 @@ const legacyFailedInterruptReason = "Codex interrupt request failed";
 /** Durable pending effect of a known unfinished execution; it refuses bound recovery. */
 const knownSurvivorEffect = "known-survivor";
 
+export const leftoverHoldSchema = z.object({
+  hold: z.enum(["writer", "ambiguity", "archival"]),
+  reason: z.string().min(1).max(4096),
+  workspaceEffects: z.boolean(),
+});
+export type LeftoverHold = z.infer<typeof leftoverHoldSchema>;
+const leftoverSettlementSchema = z.object({
+  outcome: z.enum(["process-gone", "process-present", "unknown", "retired"]),
+  detail: z
+    .string()
+    .transform((value) =>
+      z.record(z.string(), z.unknown()).parse(JSON.parse(value)),
+    ),
+});
+export type LeftoverSettlement = z.infer<typeof leftoverSettlementSchema>;
 const heldTurnCandidateSchema = z.object({
   workId: z.string().min(1),
   threadId: z.string().min(1),
@@ -785,6 +800,16 @@ export class ExecutionState {
       basis TEXT CHECK(basis IN ('turn-ended','process-exited','quiet-period')),
       releasedAt INTEGER,
       CHECK((basis IS NULL) = (releasedAt IS NULL))
+    );
+    -- Level 39: what settled a closed task's leftover execution. process-gone and retired are
+    -- final and freed its writer and capacity; process-present and unknown are rechecked.
+    CREATE TABLE IF NOT EXISTS closed_task_leftover_settlements (
+      workId TEXT PRIMARY KEY,
+      taskId TEXT NOT NULL,
+      outcome TEXT NOT NULL
+        CHECK(outcome IN ('process-gone','process-present','unknown','retired')),
+      detail TEXT NOT NULL CHECK(length(detail) <= 4096),
+      recordedAt INTEGER NOT NULL
     );
     CREATE TABLE IF NOT EXISTS execution_recovery_identities (
       workId TEXT PRIMARY KEY REFERENCES execution_intents(workId),
@@ -2236,6 +2261,208 @@ export class ExecutionState {
       | { reason: string }
       | undefined;
     return row?.reason;
+  }
+
+  /** Task holds other than Stop, each a leftover once the task is done or cancelled. */
+  nonStopTaskHolds(taskId: string): LeftoverHold[] {
+    const id = z.string().uuid().parse(taskId);
+    const removals = this.hasTable("workspace_maintenance_operations")
+      ? `OR hold.ownerToken IN (SELECT operationId FROM workspace_maintenance_operations
+          WHERE json_extract(data, '$.kind') = 'remove'
+            AND json_extract(data, '$.state') IN ('active', 'held'))`
+      : "";
+    const gitUncertain = (
+      this.db
+        .prepare("PRAGMA table_info(task_workspace_bindings)")
+        .all() as Array<{ name: string }>
+    ).some(({ name }) => name === "gitUncertain")
+      ? `OR EXISTS (SELECT 1 FROM task_workspace_bindings binding
+          WHERE binding.taskId = hold.taskId AND binding.gitUncertain = 1)`
+      : "";
+    return z.array(leftoverHoldSchema).parse(
+      this.db
+        .prepare(
+          `SELECT 'writer' AS hold, COALESCE(NULLIF(reason, ''), 'Task held') AS reason,
+            0 AS workspaceEffects FROM task_writer_holds
+          WHERE taskId = ? AND holdKind IS NOT 'operator-stop'
+          UNION ALL
+          SELECT 'ambiguity', COALESCE(NULLIF(reason, ''), 'Task held'), 0
+            FROM task_writer_ambiguity_holds WHERE taskId = ?
+          UNION ALL
+          SELECT 'archival', COALESCE(NULLIF(reason, ''), 'Task held'),
+            (0 ${gitUncertain} ${removals}) FROM task_archival_holds hold WHERE taskId = ?
+          ORDER BY 1, 2`,
+        )
+        .all(id, id, id)
+        .map((row) => ({
+          ...(row as object),
+          workspaceEffects:
+            (row as { workspaceEffects: number }).workspaceEffects === 1,
+        })),
+    );
+  }
+
+  /** Held work that still holds a writer admission, which `uncertainAssignmentsForTask` counts. */
+  heldWriterWorkForTask(
+    taskId: string,
+  ): Array<{ workId: string; assignmentId: string }> {
+    return this.db
+      .prepare(`SELECT DISTINCT intent.workId, binding.assignmentId
+      FROM task_writer_admissions admission
+      JOIN execution_intents intent ON intent.workId = admission.workId
+      JOIN task_execution_bindings binding ON binding.workId = intent.workId
+      WHERE binding.taskId = ? AND intent.state = 'held'
+      ORDER BY intent.rowid`)
+      .all(taskId) as Array<{ workId: string; assignmentId: string }>;
+  }
+
+  /** What the closed-task exit check or an operator retirement recorded for this work. */
+  leftoverSettlement(workId: string): LeftoverSettlement | undefined {
+    const row = this.db
+      .prepare(
+        "SELECT outcome, detail FROM closed_task_leftover_settlements WHERE workId = ?",
+      )
+      .get(workId);
+    return row === undefined ? undefined : leftoverSettlementSchema.parse(row);
+  }
+
+  /**
+   * Held work on a done or cancelled task that still holds writer or capacity and has no final
+   * settlement: what the closed-task exit check verifies. A process found present or unknown is
+   * rechecked once `recheckAfterMs` has passed since that verdict.
+   */
+  leftoverExitCandidates(recheckAfterMs = 0): Array<{
+    workId: string;
+    taskId: string;
+    identity: RuntimeProcessIdentity | null;
+  }> {
+    return (
+      this.db
+        .prepare(`SELECT intent.workId, binding.taskId, identity.processId,
+          identity.processStartedAt, identity.bootId
+        FROM execution_intents intent
+        JOIN task_execution_bindings binding ON binding.workId = intent.workId
+        JOIN domain_tasks task ON task.id = binding.taskId
+        LEFT JOIN execution_recovery_identities identity ON identity.workId = intent.workId
+        WHERE intent.state = 'held' AND task.state IN ('done','cancelled')
+          AND (EXISTS (SELECT 1 FROM task_writer_admissions a WHERE a.workId = intent.workId)
+            OR EXISTS (SELECT 1 FROM execution_capacity_reservations c WHERE c.workId = intent.workId))
+          AND NOT EXISTS (SELECT 1 FROM closed_task_leftover_settlements s
+            WHERE s.workId = intent.workId AND (s.outcome IN ('process-gone','retired')
+              OR s.recordedAt > ?))
+        ORDER BY intent.rowid`)
+        .all(Date.now() - recheckAfterMs) as Array<{
+        workId: string;
+        taskId: string;
+        processId: string | null;
+        processStartedAt: string | null;
+        bootId: string | null;
+      }>
+    ).map((row) => ({
+      workId: row.workId,
+      taskId: row.taskId,
+      identity:
+        row.processId && row.processStartedAt && row.bootId
+          ? {
+              processId: row.processId,
+              processStartedAt: row.processStartedAt,
+              bootId: row.bootId,
+            }
+          : null,
+    }));
+  }
+
+  /**
+   * Records one exit-check verdict for held work on a closed task. `process-gone` frees its
+   * writer, capacity and Stop target in the same transaction; a final settlement is never
+   * downgraded. False, changing nothing, when the work is no longer a candidate.
+   */
+  recordLeftoverExitCheck(
+    workId: string,
+    outcome: "process-gone" | "process-present" | "unknown",
+    reason: string,
+  ): boolean {
+    return transaction(this.db, () => {
+      const candidate = this.leftoverExitCandidates(0).find(
+        (c) => c.workId === workId,
+      );
+      if (!candidate) return false;
+      this.writeLeftoverSettlement(candidate.taskId, workId, outcome, {
+        reason,
+      });
+      return true;
+    });
+  }
+
+  /**
+   * Retires a closed task's leftovers under one request key: `apply` re-reads the listing and
+   * checks its digest inside the transaction, and the receipt it returns is replayed.
+   */
+  recordLeftoverRetirement<R extends { kind: string }>(
+    command: { key: string; taskId: string; digest: string; reason: string },
+    apply: (base: { key: string; recorded: true; taskId: string }) => R,
+  ): { receipt: R; replayed: boolean } {
+    return this.recordReceipted(
+      {
+        type: "recovery.retire",
+        taskId: command.taskId,
+        digest: command.digest,
+        reason: command.reason,
+      },
+      command.key,
+      apply,
+      false,
+    );
+  }
+
+  /** Inside `recordLeftoverRetirement`: settles the listed work and deletes the listed holds. */
+  retireLeftoverRows(
+    taskId: string,
+    workIds: readonly string[],
+    holds: readonly LeftoverHold[],
+    detail: Record<string, unknown>,
+  ): void {
+    for (const workId of workIds)
+      this.writeLeftoverSettlement(taskId, workId, "retired", detail);
+    for (const hold of holds) {
+      const table = {
+        writer: "task_writer_holds",
+        ambiguity: "task_writer_ambiguity_holds",
+        archival: "task_archival_holds",
+      }[hold.hold];
+      this.db
+        .prepare(
+          `DELETE FROM ${table} WHERE taskId = ?
+          AND COALESCE(NULLIF(reason, ''), 'Task held') = ?
+          ${hold.hold === "writer" ? "AND holdKind IS NOT 'operator-stop'" : ""}`,
+        )
+        .run(taskId, hold.reason);
+    }
+  }
+
+  private writeLeftoverSettlement(
+    taskId: string,
+    workId: string,
+    outcome: LeftoverSettlement["outcome"],
+    detail: Record<string, unknown>,
+  ): void {
+    const json = JSON.stringify(detail);
+    this.db
+      .prepare(
+        `INSERT INTO closed_task_leftover_settlements (workId, taskId, outcome, detail, recordedAt)
+        VALUES (?, ?, ?, ?, ?)
+        ON CONFLICT(workId) DO UPDATE SET outcome = excluded.outcome,
+          detail = excluded.detail, recordedAt = excluded.recordedAt
+        WHERE closed_task_leftover_settlements.outcome NOT IN ('process-gone','retired')`,
+      )
+      .run(workId, taskId, outcome, json, Date.now());
+    if (outcome === "process-gone" || outcome === "retired")
+      for (const table of [
+        "execution_capacity_reservations",
+        "task_writer_admissions",
+        "execution_stop_targets",
+      ])
+        this.db.prepare(`DELETE FROM ${table} WHERE workId = ?`).run(workId);
   }
 
   /** Acquires the archival hold for `ownerToken`, the durable identity of the operation using it. */
