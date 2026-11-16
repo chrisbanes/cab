@@ -1174,12 +1174,11 @@ verified exit of its exact process or its 30-minute quiet period, once no indepe
 hold remains. Otherwise a timer, expired lease, quiet interval, empty terminal list,
 acknowledged Stop or operator acknowledgement cannot release them. Conversation replacement and archival
 do not automatically delete
-workspaces. Workspaces are retained until the operator removes one (see below); the
-automatic maintenance pass is planned, not implemented, so nothing schedules trimming
-or removal yet.
+workspaces. Workspaces are retained until the operator removes one or the automatic
+maintenance pass trims or removes it under the installation limits (see below).
 
-Trimming is implemented as a service-internal operation with no CLI, API or UI
-entry point. It takes the archival lease at any task status, so it refuses while
+Trimming is a service-internal operation with no CLI, API or UI entry point; the
+automatic maintenance pass is its only caller. It takes the archival lease at any task status, so it refuses while
 execution is unsettled or the workspace is held. For each repository it lists Git's
 ignored untracked files with `git status --ignored=traditional --untracked-files=all`,
 which names each ignored file and reports a directory only when Git did not enumerate
@@ -1292,9 +1291,48 @@ in decimal GB (10). Each accepts a positive safe whole integer or exact `off`, a
 its conversion to milliseconds or bytes must remain safe. Invalid values refuse
 startup. The supported installation and low-level LaunchAgent render paths preserve
 explicit values, including `off`; an omitted upgrade option keeps its recorded value.
-The loaded limits do not yet schedule effects. The planned policy disables every
-automatic removal when both retentions are off, while cap trimming may still run;
-manual removal remains independent of the limits.
+Manual removal is independent of the limits.
+
+The automatic maintenance pass applies them. It starts after startup recovery and wakes
+once a minute; one pass runs at a time and new tasks never wait for it. A pass reads
+stored facts only, awaits each effect through the trim and removal entry points, which
+derive every safety check again for the generation it chose, and yields between
+candidates. In order, it:
+
+- removes a done or cancelled task's workspace once its delivered retention has passed
+  since the task's last confirmed push, or since it became terminal when nothing was
+  pushed, or once its merged retention has passed since cab first observed every
+  repository's change request merged, whichever expires first (merged on an exact tie).
+  A push made by removal does not restart the clock. A workspace whose needed time fact
+  predates cab's records is never expired: the pass records it as an evidence gap;
+- trims a workspace once its idle limit has passed since its last turn ended, once per
+  ended turn;
+- over the disk cap, trims eligible workspaces oldest idle first, then removes done or
+  cancelled ones oldest idle first while usage stays over the cap, measuring again
+  after each effect. Workspaces of unknown idle time or unmeasured size are not ranked.
+
+Disk usage is the allocated bytes of each task workspace root and its Claude temporary
+base, measured in a worker thread that has only the paths: links are not followed and
+an inode reached twice counts once. Managed repositories, drafting workspaces and other
+installation directories are not counted, and a measurement error is unknown usage,
+never zero. Each limit set to `off` disables only its trigger. With both retentions off
+nothing is removed automatically, including over the cap, while cap trimming still
+runs; with the disk cap off nothing is measured and no cap attention is raised.
+Workspaces of archived or deleting projects are not trimmed or removed. Shutdown stops
+new candidates, cancels a measurement in flight and drains the effect in flight before
+the database closes.
+
+While usage stays over the cap after a pass, or a workspace past its retention was
+refused, the Inbox has exactly one installation item, Workspace maintenance. It belongs
+to no project, so project filters exclude it, and it lists each blocking workspace by
+task with cab's fixed reason (open task, unsettled execution, uncommitted work, pending
+result work, refused push, unproved history, unsettled delivery, held maintenance,
+read-only project, unknown time, unmeasured size, automatic removal off), never a path
+or Git output. Task names are resolved on each read; a deleted task's entry is dropped,
+and project deletion prunes its tasks' entries in the same transaction. A later pass
+refreshes the same item in place; it cannot be dismissed and resolves once both
+conditions clear, and a recurrence reactivates the same item. Each task link opens the
+task page; nothing is removed from the Inbox.
 
 Every Git subprocess the service starts (workspace provisioning, cleanup and
 identity checks, file and comparison reads, setup probes and repository
@@ -3291,8 +3329,9 @@ alerts. Browser notifications are opt-in Web Push, turned on per browser in Sett
 Notifications; nothing is sent until then. While a browser is subscribed the service
 reads the same Inbox every 15 seconds and sends one push per newly seen alert to each
 active browser: a question or approval once per interaction, an intervention once per
-task and problem, and a runtime whose restarts ran out once per exhaustion episode,
-naming only the runtime. An alert already in the Inbox when the first browser subscribes
+task and problem, a runtime whose restarts ran out once per exhaustion episode,
+naming only the runtime, and workspace maintenance once per active episode with fixed
+text, not again when the same item is refreshed. An alert already in the Inbox when the first browser subscribes
 sends nothing (the first complete Inbox read, or the third partial read in a row, ends that
 silent start), an unchanged alert is never sent again, and a request that resolves and
 later returns is new. An alert is recorded before it is sent, so a crash can lose a push

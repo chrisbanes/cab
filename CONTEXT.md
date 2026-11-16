@@ -369,7 +369,8 @@ _Avoid_: Temporary base, which is Claude's per-workspace directory outside the w
 **Workspace trimming**:
 The service-internal operation that deletes Git-reported ignored worktree files and
 scratch contents, keeping worktrees, tracked and non-ignored work, the scratch directory
-itself and other workspace-root files. Nothing schedules it yet.
+itself and other workspace-root files. The automatic maintenance pass runs it after
+the idle limit and under the disk cap.
 _Avoid_: Archive; Project archive is restorable
 
 **Workspace removal**:

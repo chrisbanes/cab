@@ -76,8 +76,9 @@ Service install and upgrade accept `--workspace-idle-hours`,
 `--workspace-delivered-retention-hours`, `--workspace-merged-retention-hours` and
 `--workspace-disk-cap-gb`, each with a positive safe whole integer or `off`.
 Omitted upgrade options retain the protected installation's values; output reports
-the desired loaded limits. These options currently configure limits only: the
-automatic maintenance pass that applies them is planned, not implemented. Manual
+the desired loaded limits, which the automatic maintenance pass applies from service
+start. `inbox list` shows its one Workspace maintenance item with the task, workspace
+and reason of each blocking workspace. Manual
 removal (`task workspace-remove`) and the `task show` records work whatever the limits.
 See the [maintenance configuration](../operations/standalone-macos.md#workspace-maintenance-configuration).
 
@@ -602,7 +603,7 @@ They never print workspace paths, sizes or archive terminology.
 which task command produced them, so an uncertain outcome is settled by retrying
 the same command with its key and checked with `task get`, `question get` or
 `approval get`. `GET /api/operator/inbox` accepts `limit` (1–100, default 100),
-`kind` (`question|approval|result-review|intervention|runtime`), `status`
+`kind` (`question|approval|result-review|intervention|runtime|workspace-maintenance`), `status`
 (`actionable|resolved|dismissed`, default `actionable`) and `project`, each at most once and
 applied before paging; a cursor from other parameters is `409`. A `runtime` item carries `harness` and `since` instead of task fields.
 Every item carries durable lifecycle status/revision and resolution/dismissal metadata.

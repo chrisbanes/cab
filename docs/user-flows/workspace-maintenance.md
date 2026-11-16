@@ -1,12 +1,13 @@
 # Workspace maintenance
 
-**Status:** manual removal is built. The task page's Remove workspace… action and
+**Status:** built. The task page's Remove workspace… action and
 `cab task workspace-remove` remove a done or cancelled task's workspace, and the task
 page and `cab task show` show the latest removal and trim records. The automatic
-maintenance pass (idle trimming, delivered and merged retention, the disk cap and its
-Inbox item) is planned; nothing schedules trimming or removal yet. The flow is covered
-by `test/operator/operator-task-workspace-remove-browser.test.ts` at 1366 × 900 and
-390 × 844.
+maintenance pass trims and removes under the installation limits and raises one Inbox
+item when it cannot meet them. Manual removal is covered by
+`test/operator/operator-task-workspace-remove-browser.test.ts` at 1366 × 900 and
+390 × 844, and the Inbox item by
+`test/operator/operator-workspace-maintenance-browser.test.ts` at 1366 × 900.
 
 ## Goal
 
@@ -20,6 +21,9 @@ and can later see when and why a workspace was removed or trimmed.
 - Operator CLI: `cab task workspace-remove TASK_ID [--request-id UUID]`.
 - Records: Task details on Overview (Workspace), `cab task show TASK_ID` or
   `cab task get TASK_ID`.
+- Automatic: the Inbox's Workspace maintenance item (Request kind: Workspace
+  maintenance), the Overview card that leads to it, a browser notification once per
+  active episode, and `cab inbox list`.
 
 ## Steps
 
@@ -59,3 +63,27 @@ The operator CLI is outside the budget: it has no screens.
   service refuses it; the new workspace is untouched.
 - A removal that stopped part way stays held with its operation ID and is not retried;
   it needs reconciliation.
+
+## Automatic maintenance
+
+The service applies the four installation limits
+([configuration](../operations/standalone-macos.md#workspace-maintenance-configuration))
+without an operator step: it trims a workspace after the idle limit, removes a done or
+cancelled task's workspace after its delivered or merged retention, and over the disk
+cap trims and then removes eligible workspaces oldest idle first. Records show the
+trigger: "Trimmed TIME (idle limit)" or "Workspace removed TIME (delivered retention)".
+
+When usage stays over the cap after a pass, or a workspace past its retention was
+refused, the Inbox has one Workspace maintenance item:
+
+1. The queue lists it under Intervention with what is unresolved, such as "Task
+   workspaces use 12.3 GB, over the 10.0 GB disk limit". A project filter hides it.
+2. Selecting it lists the blocking workspaces in two groups, Over the disk limit and
+   Past retention, not removed, each by task and project with cab's reason, such as
+   uncommitted work or unsettled execution.
+3. A task link opens that task's page only; Back returns to the item with the Inbox
+   filter and other drafts as they were. Resolving the reason there (committing, ending
+   a hold or removing the workspace by hand) lets the next pass act.
+4. The next pass refreshes the same item. Once usage is within the limit and no expired
+   workspace is refused it resolves on its own; it cannot be dismissed. A recurrence
+   brings the same item back, with one new notification.

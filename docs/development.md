@@ -160,10 +160,14 @@ path as the runner does.
 
 ### Workspace lifetime qualification
 
-Workspace generations and attributable lifecycle clocks are persisted, and the four
-installation limits are loaded, but no automatic maintenance or operator removal
-command runs yet. Task-turn scratch provisioning remains unimplemented. The existing
-workspace setup below still applies until that integration is qualified.
+Workspace generations and attributable lifecycle clocks are persisted, and the
+automatic maintenance pass applies the four installation limits. Its policy, cap
+ordering and Inbox item are tested with a fake clock and size table in
+`test/workspaces/workspace-maintenance.test.ts`, which also measures a real disposable
+tree in the worker and holds a measurement and a Git child to show coordination goes
+on meanwhile; `test/operator/operator-workspace-maintenance-browser.test.ts` covers
+the Inbox item in Chromium. The service tests inject the measurement, clock and wake
+through the test-only `maintenancePass` option, never sleeping on real time.
 
 `test/execution/workspace-environment-qualification/runtime-contract.mjs` contains
 the bounded candidate probe for per-thread Codex scratch environment and historical
@@ -775,7 +779,7 @@ name, version and preview digest. The service rechecks every confirmation atomic
      assignment version), which resumes the lead of an open task subject to
      admission, pause, Stop, dependency and capacity holds. A done task is never
      reopened.
-   - `inbox list [--status actionable|resolved|dismissed] [--kind question|approval|result-review|intervention|runtime] [--project ID] [--limit N]
+   - `inbox list [--status actionable|resolved|dismissed] [--kind question|approval|result-review|intervention|runtime|workspace-maintenance] [--project ID] [--limit N]
      [--cursor TOKEN]` pages server-side (at most 100). Interventions name `task get`. A
      `runtime` row (an execution runtime whose automatic restarts are exhausted) names the
      runtime and `runtime list`; it has no task, so `--project` excludes it.
