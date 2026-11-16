@@ -32,6 +32,8 @@ import { useMediaQuery } from "./use-media-query.js";
 import { EditTask, type TaskEditOffer } from "./task-edit.js";
 import { ResetTask, taskChangedEvent } from "./task-restart.js";
 import { stateIcons } from "./task-views.js";
+import { executionNotSettled } from "../../src/operator/task-presentation.js";
+import { RetireLeftovers } from "./task-leftover-retire.js";
 import { RemoveWorkspace } from "./task-workspace-remove.js";
 import { workspaceRemovalOffered } from "./workspace-removal-presentation.js";
 import {
@@ -72,6 +74,8 @@ export interface TaskHeaderReport {
   edit: TaskEditOffer | null;
   /** Remove workspace…: the current workspace generation and whether removal is offered. */
   workspace: { workspaceId: string | null; offered: boolean };
+  /** Retire leftover execution…: offered for a closed task whose leftovers are not settled. */
+  leftovers: { offered: boolean };
   /** The strip's options, which a phone shows in Task actions instead. */
   options: TaskOption[];
 }
@@ -130,6 +134,9 @@ export function taskHeaderReport(
       workspaceId: data.workspace?.workspaceId ?? null,
       offered: workspaceRemovalOffered(data),
     },
+    leftovers: {
+      offered: executionNotSettled(data.execution),
+    },
     options,
   };
 }
@@ -153,6 +160,7 @@ export function TaskHeaderActions({
     [resetOpen, setResetOpen] = useState(false),
     [editOpen, setEditOpen] = useState(false),
     [removeOpen, setRemoveOpen] = useState(false),
+    [retireOpen, setRetireOpen] = useState(false),
     [menuOpen, setMenuOpen] = useState(false);
   // An unconfirmed reset keeps its control, so a lost reply can still be checked; otherwise the
   // control follows the task's current offer.
@@ -165,7 +173,8 @@ export function TaskHeaderActions({
   const overflow = useRef<HTMLDetailsElement>(null);
   // A tap outside closes the phone overflow; the Stop dialog's own layer is not outside.
   useEffect(() => {
-    if (!phone || open || resetOpen || editOpen || removeOpen) return;
+    if (!phone || open || resetOpen || editOpen || removeOpen || retireOpen)
+      return;
     const away = (event: PointerEvent) => {
       const details = overflow.current;
       if (details?.open && !details.contains(event.target as Node)) {
@@ -176,7 +185,7 @@ export function TaskHeaderActions({
     };
     document.addEventListener("pointerdown", away);
     return () => document.removeEventListener("pointerdown", away);
-  }, [phone, open, resetOpen, editOpen, removeOpen]);
+  }, [phone, open, resetOpen, editOpen, removeOpen, retireOpen]);
   // A page restored from the back-forward cache starts with the phone overflow closed: it is
   // a visit-long overlay, not state to keep.
   useEffect(() => {
@@ -186,6 +195,7 @@ export function TaskHeaderActions({
         setOpen(false);
         setEditOpen(false);
         setRemoveOpen(false);
+        setRetireOpen(false);
       }
     };
     addEventListener("pageshow", restored);
@@ -195,7 +205,15 @@ export function TaskHeaderActions({
     <details
       ref={overflow}
       className="task-header-overflow"
-      open={!phone || menuOpen || open || resetOpen || editOpen || removeOpen}
+      open={
+        !phone ||
+        menuOpen ||
+        open ||
+        resetOpen ||
+        editOpen ||
+        removeOpen ||
+        retireOpen
+      }
       onToggle={(event) => {
         if (phone) setMenuOpen(event.currentTarget.open);
       }}
@@ -270,6 +288,18 @@ export function TaskHeaderActions({
             // The trigger lives in the overflow, which stays open behind the dialog.
             if (phone) setMenuOpen(true);
             setRemoveOpen(next);
+          }}
+        />
+        <RetireLeftovers
+          client={client}
+          session={session}
+          taskId={report.taskId}
+          title={report.title}
+          offered={report.leftovers.offered}
+          onOpenChange={(next) => {
+            // The trigger lives in the overflow, which stays open behind the dialog.
+            if (phone) setMenuOpen(true);
+            setRetireOpen(next);
           }}
         />
         {phone &&

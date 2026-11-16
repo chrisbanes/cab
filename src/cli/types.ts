@@ -60,6 +60,7 @@ export type Values = {
   preview?: boolean | undefined;
   "confirm-name"?: string | undefined;
   "preview-digest"?: string | undefined;
+  confirm?: string | undefined;
   local?: boolean | undefined;
   "local-state"?: string | undefined;
   "local-installation"?: string | undefined;

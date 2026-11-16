@@ -1412,6 +1412,23 @@
       "gap": "Held turns come from fake runtimes with an injected clock, never a real stuck process. Exercised only through the in-process CLI against a real loopback service with fixture runtimes: not through the installed binary in the live journey."
     },
     {
+      "id": "recovery retire",
+      "kind": "command",
+      "area": "recovery",
+      "scenarios": ["CLI02", "CLI04"],
+      "evidence": [
+        "test/execution/operator-cli-recovery-write.test.ts",
+        "test/execution/closed-task-leftovers.test.ts"
+      ],
+      "effect": "Without --confirm lists a done or cancelled task's unsettled or live requests and task holds other than Stop with a digest and writes nothing; with --confirm DIGEST --reason TEXT sends recovery.retire bound to that listing, keeping each request as history with writer and capacity freed and deleting each hold (completed). It dispatches no work and is irreversible.",
+      "denial": "A read-only credential exits 3 before anything is sent; --confirm without --reason exits 2; an open task, live execution or a changed listing exits 4 naming its code, with nothing applied.",
+      "revision": "Bound to the listing digest read; the service recomputes the listing inside its transaction and refuses one that changed.",
+      "retry": "The same --request-id replays one receipt; a lost reply exits 6 and a rerun reads it recorded.",
+      "observation": "synthetic",
+      "state": "bounded",
+      "gap": "Leftovers come from fake runtimes and seeded task holds, never a real stuck process or a real upgraded database. Exercised only through the in-process CLI against a real loopback service with fixture runtimes: not through the installed binary in the live journey."
+    },
+    {
       "id": "result list",
       "kind": "command",
       "area": "result/artifact/delivery",

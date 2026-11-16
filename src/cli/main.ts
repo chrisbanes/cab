@@ -237,7 +237,11 @@ exited, or 30 minutes pass with no event for it. recovery restart then confirms 
 (--yes) and continues the assignment's conversation; it sends the same request as
 task start-again. recovery release reads whether a held generation with no saved
 thread or turn (so no turn was sent) can be released; with --yes it releases it so
-Start again applies. Release cannot be undone and does not resume the task.`;
+Start again applies. Release cannot be undone and does not resume the task.
+recovery retire lists a done or cancelled task's leftover execution and task holds
+with a digest; with --confirm DIGEST --reason TEXT it retires each listed request
+(freeing its writer and capacity) and deletes each listed hold. Retiring cannot be
+undone; it never retires anything the listing did not show.`;
 
 /** The prose notes that name an area's commands. */
 const LOCAL_ACCESS_NOTE = `Local access uses this OS account with read/write CLI authority, without a token
@@ -371,6 +375,7 @@ export const OPTIONS = {
   preview: { type: "boolean" },
   "confirm-name": { type: "string" },
   "preview-digest": { type: "string" },
+  confirm: { type: "string" },
   revision: { type: "string" },
   out: { type: "string" },
   file: { type: "string" },

@@ -20,7 +20,9 @@ import type {
   TerminationVerifier,
 } from "./recovery-types.js";
 import {
+  HOST_BOOT_DIFFERS,
   MacProcessTerminationVerifier,
+  PROCESS_IDENTIFIER_REUSED,
   PROCESS_STILL_PRESENT,
 } from "./termination.js";
 
@@ -247,6 +249,27 @@ export class ExecutionSupervisor {
     return true;
   }
 
+  /**
+   * Whether a closed task's held work's process has gone, without recording an observation: a
+   * verified exit, a different host boot or a reused process identifier prove it ended.
+   */
+  async exitVerdict(processIdentity: RuntimeProcessIdentity): Promise<{
+    outcome: "process-gone" | "process-present" | "unknown";
+    reason: string;
+  }> {
+    const result = await this.terminationProof(processIdentity);
+    if ("verification" in result)
+      return { outcome: "process-gone", reason: "Process exit verified" };
+    if (result.blocker === "termination-live")
+      return { outcome: "process-present", reason: PROCESS_STILL_PRESENT };
+    if (
+      result.reason === HOST_BOOT_DIFFERS ||
+      result.reason === PROCESS_IDENTIFIER_REUSED
+    )
+      return { outcome: "process-gone", reason: result.reason };
+    return { outcome: "unknown", reason: result.reason ?? result.refusal };
+  }
+
   /** Checks the stored process exit once and records what was observed; refusals carry the reason. */
   private async confirmTermination(
     workId: string,
@@ -280,6 +303,8 @@ export class ExecutionSupervisor {
           | "termination-live"
           | "termination-conflict"
           | "termination-unknown";
+        /** The verifier's own reason for a conflict or unknown verdict. */
+        reason?: string;
       }
   > {
     let timer: NodeJS.Timeout | undefined;
@@ -323,6 +348,7 @@ export class ExecutionSupervisor {
             verification.kind === "conflict"
               ? "Process termination evidence conflicts with the stored identity"
               : "Original process termination could not be verified",
+          reason: verification.reason,
         };
       if (!exactProcessIdentity(processIdentity, verification.processIdentity))
         return {

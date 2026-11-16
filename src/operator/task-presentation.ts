@@ -54,6 +54,11 @@ export function nextActor(
         : "No operator decision";
   return { text, operator: false };
 }
+/** A done or cancelled task with leftovers not proved settled: Done or Cancelled, with a note. */
+export const executionNotSettled = (execution: {
+  reasonCodes: readonly string[];
+}) => execution.reasonCodes.includes("execution-not-settled");
+
 /** The task's Board column from its own read, in `taskColumn`'s precedence. */
 export function taskColumnOf(
   data: Pick<TaskRead["data"], "task" | "execution" | "admission" | "source">,

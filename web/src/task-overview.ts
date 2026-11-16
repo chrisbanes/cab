@@ -11,7 +11,10 @@ import { type WaitCode, waitLabels } from "../../src/operator/wait-reasons.js";
 import { executionSummary } from "./execution-runtime.js";
 import { pullRequestReference } from "./delivery-presentation.js";
 import { clockLabel, midSentence, shortId } from "./presentation.js";
-import { taskColumnOf } from "../../src/operator/task-presentation.js";
+import {
+  executionNotSettled,
+  taskColumnOf,
+} from "../../src/operator/task-presentation.js";
 import { nextActor, reasonLabels } from "./tasks.js";
 
 export { taskColumnOf };
@@ -166,9 +169,11 @@ export function taskReadiness(data: Omit<StatusData, "lead">) {
       : terminal
         ? active
           ? `${terminal} · ${execution.state}`
-          : data.source?.closure === "completed"
-            ? `${terminal} · closed at source`
-            : terminal
+          : executionNotSettled(execution)
+            ? `${terminal} · execution not settled`
+            : data.source?.closure === "completed"
+              ? `${terminal} · closed at source`
+              : terminal
         : data.source?.closure === "held"
           ? `Held · closed at source${active ? ` · ${execution.state}` : ""}`
           : data.source?.closure === "unattributed"

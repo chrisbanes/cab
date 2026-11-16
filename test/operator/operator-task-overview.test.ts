@@ -200,7 +200,7 @@ test("criterionRows reports recorded outcomes and never an aggregate", () => {
 test("taskReadiness states recorded state and wait", () => {
   const base = {
     task: { state: "open", ready: true },
-    execution: { state: "idle", holds },
+    execution: { state: "idle", reasonCodes: [], holds },
     admission: { reasons: [] },
     waits: [],
     source: null,
@@ -219,7 +219,7 @@ test("taskReadiness states recorded state and wait", () => {
     line({
       task: { state: "open", ready: false },
       source: { closure: "held" },
-      execution: { state: "running", holds },
+      execution: { state: "running", reasonCodes: [], holds },
     }),
     "Held · closed at source · running",
   );
@@ -325,7 +325,7 @@ test("taskReadiness states recorded state and wait", () => {
   assert.equal(
     line({
       admission: { reasons: ["local-dependency", "project-paused"] },
-      execution: { state: "paused", holds },
+      execution: { state: "paused", reasonCodes: [], holds },
     }),
     "Ready · project paused",
   );
@@ -340,21 +340,21 @@ test("taskReadiness states recorded state and wait", () => {
   assert.equal(
     line({
       task: { state: "cancelled", ready: true },
-      execution: { state: "uncertain", holds },
+      execution: { state: "uncertain", reasonCodes: [], holds },
     }),
     "Execution uncertain",
   );
   assert.equal(
     line({
       task: { state: "done", ready: true },
-      execution: { state: "running", holds },
+      execution: { state: "running", reasonCodes: [], holds },
     }),
     "Done · running",
   );
   assert.equal(
     line({
       task: { state: "open", ready: false },
-      execution: { state: "uncertain", holds },
+      execution: { state: "uncertain", reasonCodes: [], holds },
     }),
     "Execution uncertain",
   );
@@ -363,7 +363,7 @@ test("taskReadiness states recorded state and wait", () => {
 test("task strip shows one distinct reason", () => {
   const base = {
     task: { state: "open", ready: true },
-    execution: { state: "idle", holds },
+    execution: { state: "idle", reasonCodes: [], holds },
     admission: { eligible: true, reasons: [] },
     waits: [],
     source: null,
@@ -406,7 +406,7 @@ test("task strip shows one distinct reason", () => {
 test("Stop follows pending work and execution ownership, not the task's Ready badge", () => {
   const base = {
     task: { state: "open", ready: true },
-    execution: { state: "idle", holds },
+    execution: { state: "idle", reasonCodes: [], holds },
     assignments: [{ state: "completed" }, { state: "cancelled" }],
   } as unknown as Data;
   const offer = (

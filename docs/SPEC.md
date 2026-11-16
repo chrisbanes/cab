@@ -1021,6 +1021,34 @@ operator message; a bound-turn one through a new message. The old batch is proce
 revalidate the witness, receipt and continuation audit at use time, and late callbacks
 or known survivors persist a hold and retract successors across restart.
 
+A done or cancelled task's leftover execution settles without an open task. A leftover
+is a request still held or never confirmed, work still holding writer or capacity, or a
+task hold other than Stop (a writer, legacy-ambiguity or archival hold). A request
+counts as settled when it was refused before it ran, never started, was released by
+held-turn release, or passes the reconciled-assignment proof. At startup, before
+admission, and on each scheduler wake, cab also checks the process of each held work
+on a closed task that still holds writer or capacity. A verified exit, a different host
+boot or a reused process identifier proves the process ended: cab records that and
+frees the work's writer, capacity and Stop target in one transaction. A process still
+present, a missing process identity or evidence that can't be read is recorded and
+checked again later; reading status never runs the check. A closed task stays
+Uncertain only while a turn is running, cab still holds its execution in process, or its
+process is still present while it holds writer or capacity. With other leftovers it
+shows Done or Cancelled with *execution not settled*, and Next is the operator retiring
+them; it raises no Inbox item. With none it shows plain Done or Cancelled.
+
+`cab recovery retire TASK_ID` (and the task page's Retire leftover execution action)
+lists those leftovers with a digest and writes nothing. Confirmed with that digest and a
+reason, it retires exactly that listing in one transaction: each request is recorded as
+retired and kept as history with its writer and capacity freed, and each listed task
+hold is deleted, including archival holds whose workspace still has unresolved Git or
+removal effects, which the listing marks. It is refused, changing nothing, for an open
+task, while anything is live, or when the listing changed. Retiring cannot be undone
+and does not prove a listed process stopped. Apart from an archival hold its own
+operation releases, this is the only way a task hold other than Stop is released; on an
+open task those holds keep the rules above. A recorded
+exit or retirement stays settled if the task reopens.
+
 Already-admitted execution and tools may survive coordinator or App Server failure
 and continue effects. A crash by itself releases neither writer ownership nor capacity: a crashed
 task turn keeps them until [held-turn release](#execution-and-recovery). No

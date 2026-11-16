@@ -9,6 +9,14 @@ import {
   type WorkspaceMaintenanceConfiguration,
 } from "../operator/workspace-maintenance-settings.js";
 import { selectAssignmentExecution } from "./operator-runtime.js";
+import { leftoverRetireRefusalText } from "../operator/leftover-retire-copy.js";
+import {
+  closedTaskLeftovers,
+  leftoverDigest,
+  settledLeftover,
+  type ClosedTaskLeftovers,
+  type LeftoverSelection,
+} from "./closed-task-leftovers.js";
 import { attentionNext } from "../operator/attention.js";
 import { commandReceiptSchema } from "../operator/contracts.js";
 import { TaskUnstack } from "./task-unstack.js";
@@ -133,6 +141,10 @@ import {
 } from "../operator/github-reasons.js";
 
 type DraftingReceipt = Extract<CommandReceipt, { kind: "drafting" }>;
+type RecoveryRetireReceipt = Extract<
+  CommandReceipt,
+  { kind: "recovery-retire" }
+>;
 import { reviewMetadataSchema } from "../core/task-review.js";
 import type {
   HarnessStatus,
@@ -1383,10 +1395,7 @@ export class StandaloneService {
         db,
         domain,
         (workId) => state.isNeverAdmittedRefusedAssignmentWork(workId),
-        (workId, options) =>
-          (this.callbacks.get(workId)?.size ?? 0) === 0
-            ? state.reconciledAssignmentProof(workId, options)
-            : undefined,
+        (workId, options) => this.reconciledProof(state, workId, options),
         (workId) => state.startAgainTarget(workId),
       );
       coordination.migrate();
@@ -2022,6 +2031,8 @@ export class StandaloneService {
       this.heldTurns = heldTurns;
       // Before admission, so a turn proven ended frees capacity before queued work is admitted.
       await heldTurns?.sweep();
+      // Likewise held work on a closed task whose process is proved gone; no wake runs yet.
+      await this.leftoverCheckPass({ state, supervisor }, 0);
       // Old obsolete requests have no execution generation for recovery release to find.
       let refusedAfter = 0;
       for (;;) {
@@ -3118,6 +3129,9 @@ export class StandaloneService {
     const generation = this.generation;
     if (generation) generation.accepting = false;
     if (this.stopPromise) return this.stopPromise;
+    // A pass in flight finishes against the stopped state and logs; the next start begins afresh.
+    this.leftoverCheck = undefined;
+    this.leftoverCheckQueued = undefined;
     this.stoppedExclusions = this.failureExclusions();
     const stopping = this.stopOwned();
     this.stopPromise = stopping;
@@ -3935,6 +3949,181 @@ export class StandaloneService {
       },
       options,
     );
+  }
+
+  /** A done or cancelled task's leftover execution and holds; empty for an open task. */
+  closedTaskLeftovers(
+    taskId: string,
+    /** Selections a caller already read, by assignment ID, so a list read selects once. */
+    selected?: ReadonlyMap<
+      string,
+      ReturnType<typeof selectAssignmentExecution>
+    >,
+  ): ClosedTaskLeftovers {
+    const { domain, schedulerStore, state, supervisor } = this.started();
+    const task = domain.task(taskId);
+    const selections = withoutWithdrawn(domain.assignments(taskId)).map(
+      (a): LeftoverSelection => {
+        const s =
+          selected?.get(String(a.id)) ?? selectAssignmentExecution(a, this);
+        return {
+          assignmentId: String(a.id),
+          profile: String(domain.profile(String(a.profileId)).name),
+          request: s.request ?? schedulerStore.latest(String(a.id)),
+          active: s.request?.state === "active",
+          record: s.record,
+          intentState: s.intent?.state,
+        };
+      },
+    );
+    return closedTaskLeftovers(taskId, String(task.state), selections, {
+      notStartedWork: (workId) => this.notStartedWork(workId),
+      settledDraftRefusal: (workId) => this.settledDraftRefusal(workId),
+      reconciled: (workId) => this.reconciledProof(state, workId) !== undefined,
+      settlement: (workId) => state.leftoverSettlement(workId),
+      heldWriterWork: () => state.heldWriterWorkForTask(taskId),
+      holds: () => state.nonStopTaskHolds(taskId),
+      running: (workId) =>
+        ["submitting", "running"].includes(
+          state.byWorkId(workId)?.state ?? "",
+        ) || this.releaseInProcessBlockers(workId, supervisor).length > 0,
+      holdsOwnership: (workId) => state.workHoldsOwnership(workId),
+    });
+  }
+
+  /** The reconciled-assignment proof, which an unfinished callback withholds. */
+  private reconciledProof(
+    state: ExecutionState,
+    workId: string,
+    options?: { allowOperatorStop?: boolean },
+  ) {
+    return (this.callbacks.get(workId)?.size ?? 0) === 0
+      ? state.reconciledAssignmentProof(workId, options)
+      : undefined;
+  }
+
+  /** Whether this work's held request was settled by an exit check or retirement. */
+  leftoverSettled(workId: string): boolean {
+    return settledLeftover(this.started().state.leftoverSettlement(workId));
+  }
+
+  private leftoverCheck: Promise<void> | undefined;
+  private leftoverCheckQueued: Promise<void> | undefined;
+  /**
+   * Verifies the process of each held work on a closed task once and records the verdict; a
+   * process proved gone frees its writer and capacity. A call during a pass queues one more
+   * pass after it, which later calls share.
+   */
+  checkClosedTaskLeftovers(
+    /** A wake rechecks a present or unknown verdict after five minutes; startup rechecks all. */
+    // shortcut: a fixed five-minute recheck; tune if many present processes accumulate.
+    recheckAfterMs = 5 * 60_000,
+  ): Promise<void> {
+    if (this.leftoverCheck) {
+      this.leftoverCheckQueued ??= this.leftoverCheck.then(() => {
+        this.leftoverCheckQueued = undefined;
+        return this.checkClosedTaskLeftovers(recheckAfterMs);
+      });
+      return this.leftoverCheckQueued;
+    }
+    const pass = this.leftoverCheckPass(this.started(), recheckAfterMs).finally(
+      () => {
+        if (this.leftoverCheck === pass) this.leftoverCheck = undefined;
+      },
+    );
+    this.leftoverCheck = pass;
+    return pass;
+  }
+
+  private async leftoverCheckPass(
+    {
+      state,
+      supervisor,
+    }: Pick<ReturnType<StandaloneService["started"]>, "state" | "supervisor">,
+    recheckAfterMs: number,
+  ): Promise<void> {
+    try {
+      let freed = false;
+      for (const candidate of state.leftoverExitCandidates(recheckAfterMs)) {
+        if (
+          !state.projectWorkWritable(candidate.workId) ||
+          this.releaseInProcessBlockers(candidate.workId, supervisor).length
+        )
+          continue;
+        const verdict = candidate.identity
+          ? await supervisor.exitVerdict(candidate.identity)
+          : {
+              outcome: "unknown" as const,
+              reason: "Original process identity was not recorded",
+            };
+        if (
+          state.recordLeftoverExitCheck(
+            candidate.workId,
+            verdict.outcome,
+            verdict.reason,
+          ) &&
+          verdict.outcome === "process-gone"
+        )
+          freed = true;
+      }
+      // A settlement frees capacity for queued work.
+      if (freed && this.current) this.wakeAfterCommit();
+    } catch (error) {
+      process.stderr.write(
+        `${JSON.stringify({ event: "closed-task-leftover-check-failed", error: String(error).slice(0, 500) })}\n`,
+      );
+    }
+  }
+
+  /**
+   * Retires a closed task's leftover execution and task holds the operator listed: each
+   * request is settled with its writer and capacity freed, and each hold is deleted.
+   */
+  retireLeftovers(command: {
+    key: string;
+    taskId: string;
+    digest: string;
+    reason: string;
+  }): { receipt: RecoveryRetireReceipt; replayed: boolean } {
+    const { state } = this.started();
+    const result = state.recordLeftoverRetirement(command, (base) => {
+      const shown = this.closedTaskLeftovers(command.taskId);
+      // An empty listing retires nothing and still records its receipt.
+      if (shown.refusal && shown.refusal !== "nothing-to-retire")
+        throw new DomainConflictError(
+          `${shown.refusal}: ${leftoverRetireRefusalText[shown.refusal]}`,
+        );
+      if (leftoverDigest(shown) !== command.digest)
+        throw new DomainConflictError(
+          "digest-changed: the leftovers changed; list them again",
+        );
+      const requests = shown.items.flatMap((item) => {
+        if (item.kind !== "request") return [];
+        const { kind, profile, status, ...request } = item;
+        return [request];
+      });
+      const holds = shown.items.flatMap((item) => {
+        if (item.kind !== "hold") return [];
+        const { kind, ...hold } = item;
+        return [hold];
+      });
+      state.retireLeftoverRows(
+        command.taskId,
+        requests.map((r) => r.workId),
+        holds,
+        { actor: "operator", reason: command.reason, key: base.key },
+      );
+      return {
+        kind: "recovery-retire" as const,
+        ...base,
+        digest: command.digest,
+        requests,
+        holds,
+      };
+    });
+    // Freed capacity can admit queued work.
+    if (!result.replayed) this.wakeAfterCommit();
+    return result;
   }
 
   heldTurnReleased(workId: string): boolean {
@@ -6572,22 +6761,39 @@ export class StandaloneService {
     );
   }
 
-  /** The recorded receipt of the removal request under `key`, or null while none is recorded. */
-  taskWorkspaceRemovalReceipt(
+  /** The recorded task control receipt of `kind` under `key`, or null while none is recorded. */
+  private taskControlReceipt<K extends CommandReceipt["kind"]>(
     taskId: string,
     key: string,
-  ): WorkspaceRemoveReceipt | null {
+    kind: K,
+  ): Extract<CommandReceipt, { kind: K }> | null {
     this.domain().task(taskId);
     const row = this.cache!.prepare(
       "SELECT receiptJson FROM task_control_receipts WHERE taskId=? AND key=?",
     ).get(taskId, key) as { receiptJson: string } | undefined;
     if (!row) return null;
     const receipt = commandReceiptSchema.safeParse(JSON.parse(row.receiptJson));
-    if (!receipt.success || receipt.data.kind !== "workspace-remove")
-      return null;
-    if (receipt.data.taskId !== taskId || receipt.data.key !== key)
-      throw new DomainConflictError("Removal receipt identity mismatch");
-    return receipt.data;
+    if (!receipt.success || receipt.data.kind !== kind) return null;
+    const data = receipt.data as Extract<CommandReceipt, { kind: K }> & {
+      taskId: string;
+      key: string;
+    };
+    if (data.taskId !== taskId || data.key !== key)
+      throw new DomainConflictError("Receipt identity mismatch");
+    return data;
+  }
+
+  /** The recorded receipt of the leftover retirement under `key`, or null while none is recorded. */
+  recoveryRetireReceipt(taskId: string, key: string) {
+    return this.taskControlReceipt(taskId, key, "recovery-retire");
+  }
+
+  /** The recorded receipt of the removal request under `key`, or null while none is recorded. */
+  taskWorkspaceRemovalReceipt(
+    taskId: string,
+    key: string,
+  ): WorkspaceRemoveReceipt | null {
+    return this.taskControlReceipt(taskId, key, "workspace-remove");
   }
 
   /**
@@ -9772,6 +9978,8 @@ export class StandaloneService {
     if (this.current.taskUnstack.hasPending())
       await this.current.taskUnstack.reconcileAll();
     this.reconcileInbox();
+    // A task that closed since the last pass gets its leftovers checked; reads never wait on it.
+    void this.checkClosedTaskLeftovers();
     this.flushRuntimeAnswers();
     // Every confirmed push wakes the scheduler, and start-up ends with a wake. A dependency that
     // fails is reported and retried on the next wake; the others and the wake go on.

@@ -764,6 +764,13 @@ continues the task. Operator Stop/Resume are unchanged and there is no force unl
 turn is released only by held-turn release (reported end, verified exit or the quiet period).
 When a held generation has a saved thread but no saved turn ID, `recovery get` says quiet time
 will not release it and names Stop or ending the runtime process as the recovery available.
+`recovery retire TASK_ID [--confirm DIGEST --reason TEXT] [--request-id UUID]` reads
+`/api/operator/tasks/ID/leftover-execution`: a done or cancelled task's unsettled or live
+requests and task holds other than Stop, with a digest and, when it cannot run, `refusal`
+(`task-not-closed`, `live-turn`, `nothing-to-retire`). Without `--confirm` it writes nothing;
+with `--confirm` and `--reason` it sends `recovery.retire` under scope `task:ID`, bound to that
+digest, and prints a receipt naming each retired request and removed hold. The service
+recomputes the listing and refuses with exit 4 when it changed. It is irreversible.
 
 ## Acceptance scenarios
 
