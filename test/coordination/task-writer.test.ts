@@ -1332,7 +1332,7 @@ test("archival hold prevents writer admission after workspace validation", async
       "write",
     );
     assert.equal(queued.state, "ready");
-    assert.match(queued.reason ?? "", /Task archival in progress/);
+    assert.match(queued.reason ?? "", /Workspace maintenance in progress/);
     assert.equal(f.runtime.starts, 0);
     assert.equal(
       f.service.list().find((item) => item.workId === "racing-writer")?.state,

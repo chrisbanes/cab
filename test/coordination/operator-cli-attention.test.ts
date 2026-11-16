@@ -892,11 +892,13 @@ test("inbox list prints the installation maintenance item with each blocking tas
         reason: "uncommitted",
       },
     ],
+    total: 3,
   });
   const human = await o.h.run(["inbox", "list", "--connection", "ro"]);
   assert.equal(human.code, 0, human.err + human.out);
   assert.match(human.out, /workspace-maintenance\s+\(installation\)/);
   assert.match(human.out, /Open the listed tasks/);
+  assert.match(human.out, /And 2 more workspaces not listed\./);
   assert.ok(
     human.out.includes(
       `${q.taskId}  Choose full form  workspace ${workspaceId}  disk limit: Uncommitted work remains`,

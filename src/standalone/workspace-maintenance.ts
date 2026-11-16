@@ -149,11 +149,12 @@ export class WorkspaceMaintenance {
   private readonly abort = new AbortController();
   private cancelWake: (() => void) | undefined;
   private lastNow = 0;
-  /** Last-ended-turn epochs already given one idle trim attempt in this process. */
+  /** Last-ended-turn epochs whose idle trim succeeded or was refused for good, in this process. */
   private readonly idleAttempted = new Map<string, number>();
   /**
-   * Each root's last measurement. shortcut: a root measured in a different batch than another
-   * root sharing a hard-linked inode counts that inode twice; within one batch it counts once.
+   * Each root's last measurement.
+   * shortcut: a hard-linked inode shared by roots measured in different batches counts twice,
+   * upgrade to one batch per pass (or a persisted inode set) if shared hard links become common.
    */
   private readonly measured = new Map<
     string,
@@ -378,9 +379,17 @@ export class WorkspaceMaintenance {
           this.idleAttempted.get(candidate.workspaceId) === ended
         )
           continue;
-        this.live();
-        this.idleAttempted.set(candidate.workspaceId, ended);
-        const outcome = await host.trim(candidate, "idle");
+        const outcome = await this.attempt("trim", candidate, now, () =>
+          host.trim(candidate, "idle"),
+        );
+        // A refusal that may clear by itself (a running turn, a hold) backs off and retries in
+        // this epoch; success or any other refusal ends the epoch.
+        if (
+          outcome.done ||
+          (outcome.reason !== "unsettled" &&
+            outcome.reason !== "maintenance-held")
+        )
+          this.idleAttempted.set(candidate.workspaceId, ended);
         changed(outcome);
         if (outcome.done)
           report.trimmed.push({
@@ -506,12 +515,15 @@ export class WorkspaceMaintenance {
       }
     }
     this.live();
-    const blockers = [...retention, ...cap.blockers].slice(
-      0,
-      workspaceMaintenanceBlockerLimit,
-    );
+    const all = [...retention, ...cap.blockers];
     const attention =
-      cap.usage || blockers.length ? { usage: cap.usage, blockers } : null;
+      cap.usage || all.length
+        ? {
+            usage: cap.usage,
+            blockers: all.slice(0, workspaceMaintenanceBlockerLimit),
+            total: all.length,
+          }
+        : null;
     report.attention = attention;
     host.report(attention);
     return report;

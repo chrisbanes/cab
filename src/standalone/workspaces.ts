@@ -1285,7 +1285,11 @@ export class WorkspaceManager implements TaskWorkspaceLifecycle {
         binding.reason ?? `Workspace is ${binding.state}`,
       );
     if (!input.ownership())
-      return this.retained(binding, "Task execution is not settled");
+      return this.retained(
+        binding,
+        "Task execution is not settled",
+        "unsettled",
+      );
     const checked = await this.validateReady(binding);
     if (checked.state !== "ready")
       return this.retained(
@@ -1327,12 +1331,14 @@ export class WorkspaceManager implements TaskWorkspaceLifecycle {
         return this.retained(
           checked,
           `Uncommitted work remains in ${repositoryId}: modified tracked files or untracked files that are not ignored`,
+          "uncommitted",
         );
       const branch = input.branches[repositoryId] ?? null;
       if (branch?.outsideHeadSha)
         return this.retained(
           checked,
           `The task branch of ${repositoryId} changed outside cab; recover the branch before removing the workspace`,
+          "history",
         );
       if (!/^[0-9a-f]{40}$/.test(head))
         return this.retained(
@@ -1388,6 +1394,7 @@ export class WorkspaceManager implements TaskWorkspaceLifecycle {
         return this.retained(
           checked,
           `The history of ${repositoryId} does not provably follow its last push or provisioned base`,
+          "history",
         );
     }
     for (const work of input.pendingResultWork) {
@@ -1399,10 +1406,15 @@ export class WorkspaceManager implements TaskWorkspaceLifecycle {
       return this.retained(
         checked,
         `Result ${work.resultId} recorded uncommitted changes in ${work.repositoryId} that are neither committed nor delivered; commit or deliver them, or reset the task to discard them`,
+        "pending-result",
       );
     }
     if (!input.ownership())
-      return this.retained(checked, "Task execution is not settled");
+      return this.retained(
+        checked,
+        "Task execution is not settled",
+        "unsettled",
+      );
     return { outcome: "planned", binding: checked, repositories };
   }
 
@@ -2750,8 +2762,9 @@ export class WorkspaceManager implements TaskWorkspaceLifecycle {
   private retained(
     binding: TaskWorkspaceBinding,
     reason: string,
+    code?: WorkspaceMaintenanceReason,
   ): Extract<WorkspaceCleanupResult, { outcome: "retained" }> {
-    return { outcome: "retained", binding, reason };
+    return { outcome: "retained", binding, reason, ...(code ? { code } : {}) };
   }
 
   private assertRepositoryPaths(binding: TaskWorkspaceBinding): void {

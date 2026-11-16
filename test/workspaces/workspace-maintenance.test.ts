@@ -38,6 +38,7 @@ import { processIdentityDenied } from "../fixtures/host-access.js";
 import { createOperatorFixture } from "../fixtures/operator-web.js";
 import { tmpdir } from "../fixtures/temp.js";
 import { finishTask } from "../fixtures/workspace-removal.js";
+import { startedOf } from "../fixtures/service-internals.js";
 
 const H = 3_600_000;
 const GB = 1_000_000_000;
@@ -269,7 +270,7 @@ test("idle trimming runs once per last-ended-turn epoch, across repeated and res
   // A restarted coordinator sees the completed trim in the stored facts.
   await w.make().wake();
   assert.deepEqual(w.calls, ["trim:idle:1"]);
-  // A refused trim is attempted once per epoch in a process, not every minute.
+  // A transient refusal backs off and is retried in the same epoch, not every minute.
   const refused = fakeWorld(
     [candidate(2, { lastTurnEndedAt: 0 })],
     {},
@@ -280,8 +281,24 @@ test("idle trimming runs once per last-ended-turn epoch, across repeated and res
   refused.clock.now = 30 * H;
   const r = refused.make();
   await r.wake();
+  refused.clock.now += 60_000;
   await r.wake();
   assert.deepEqual(refused.calls, ["trim:idle:2"]);
+  refused.clock.now += 5 * 60_000;
+  await r.wake();
+  assert.deepEqual(refused.calls, ["trim:idle:2", "trim:idle:2"]);
+  // A refusal that will not clear by itself ends the epoch.
+  const final = fakeWorld(
+    [candidate(3, { lastTurnEndedAt: 0 })],
+    {},
+    { refuse: { "trim:3": { done: false, reason: "refused" } } },
+  );
+  final.clock.now = 30 * H;
+  const fm = final.make();
+  await fm.wake();
+  final.clock.now += 2 * H;
+  await fm.wake();
+  assert.deepEqual(final.calls, ["trim:idle:3"]);
   // A new turn end is a new epoch.
   w.list[0] = {
     ...w.list[0]!,
@@ -460,6 +477,29 @@ test("refused candidates leave residual pressure named by one attention report",
   assert.equal(w.reports.length, 1);
 });
 
+test("blockers beyond the stored bound are counted, not silently cut", async () => {
+  const many = Array.from({ length: 55 }, (_, i) =>
+    candidate(i + 1, { terminal: true, terminalAt: 0, lastPushAt: 0 }),
+  );
+  const w = fakeWorld(
+    many,
+    {},
+    {
+      settings: { diskCapGb: "off", idleHours: "off" },
+      refuse: Object.fromEntries(
+        many.map((_, i) => [
+          `remove:${i + 1}`,
+          { done: false, reason: "uncommitted" },
+        ]),
+      ),
+    },
+  );
+  w.clock.now = 25 * H;
+  const report = await w.make().wake();
+  assert.equal(report?.attention?.blockers.length, 50);
+  assert.equal(report?.attention?.total, 55);
+});
+
 test("with both retentions off the cap only trims, and with the cap off it neither measures nor reports", async () => {
   const both = fakeWorld(
     [
@@ -529,6 +569,7 @@ test("unknown usage is never zero: it never resolves the cap and names each unme
         reason: "unmeasured",
       },
     ],
+    total: 1,
   });
   w.table.set(wid(2), 1 * GB);
   assert.equal((await m.wake())?.attention, null);
@@ -1436,4 +1477,65 @@ test("the measurement walk runs in the worker: the main thread never stats and k
     syncBuiltinESMExports();
     rmSync(root, { recursive: true, force: true });
   }
+});
+
+test("a trim interrupted by a crash keeps no hold after restart, and the workspace can be trimmed and removed", async (t) => {
+  const w = await serviceWorld(t);
+  const { taskId, binding } = await w.task("Crashed trim");
+  writeFileSync(join(binding.path, "scratch", "cache.bin"), "x");
+  // A trim had begun its first effect when the process died, holding the archival lease.
+  const operationId = randomUUID();
+  w.lifecycle().beginOperation(binding, {
+    operationId,
+    kind: "trim",
+    trigger: "idle",
+    startedAt: Date.now(),
+  });
+  w.lifecycle().startEffect(binding, operationId, {
+    effectId: randomUUID(),
+    target: { kind: "scratch" },
+    startedAt: Date.now(),
+  });
+  assert.equal(
+    startedOf(w.f.service).state.beginArchive(taskId, operationId),
+    true,
+  );
+  await w.f.reopen();
+  const state = startedOf(w.f.service).state;
+  // The open task is admissible again: no archival hold, no task hold reason.
+  assert.equal(state.isArchiveHeld(taskId), false);
+  assert.equal(
+    w.lifecycle().operation(binding, operationId).state,
+    "held",
+    "the journal still records that it did not finish",
+  );
+  const trimmed = await w.f.service.trimTaskWorkspace(taskId, "manual");
+  assert.equal(trimmed.outcome, "trimmed", JSON.stringify(trimmed));
+  assert.equal(existsSync(join(binding.path, "scratch", "cache.bin")), false);
+  finishTask(w.f.service, taskId);
+  const removed = await w.f.service.removeTaskWorkspace(taskId, "manual");
+  assert.equal(removed.outcome, "cleaned", JSON.stringify(removed));
+  assert.equal(existsSync(binding.path), false);
+});
+
+test("a trim held by unreadable scratch blocks nothing: once fixed it trims, and the workspace is removed", async (t) => {
+  const w = await serviceWorld(t);
+  const { taskId, binding } = await w.task("Read-only scratch");
+  const locked = join(binding.path, "scratch", "locked");
+  mkdirSync(locked);
+  writeFileSync(join(locked, "file"), "x");
+  chmodSync(locked, 0o555);
+  // Restored for cleanup if the test stops before it does; removal deletes the path.
+  t.after(() => {
+    if (existsSync(locked)) chmodSync(locked, 0o755);
+  });
+  const held = await w.f.service.trimTaskWorkspace(taskId, "manual");
+  assert.equal(held.outcome, "held", JSON.stringify(held));
+  assert.equal(startedOf(w.f.service).state.isArchiveHeld(taskId), false);
+  chmodSync(locked, 0o755);
+  const trimmed = await w.f.service.trimTaskWorkspace(taskId, "manual");
+  assert.equal(trimmed.outcome, "trimmed", JSON.stringify(trimmed));
+  finishTask(w.f.service, taskId);
+  const removed = await w.f.service.removeTaskWorkspace(taskId, "manual");
+  assert.equal(removed.outcome, "cleaned", JSON.stringify(removed));
 });

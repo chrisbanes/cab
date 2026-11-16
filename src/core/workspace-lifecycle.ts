@@ -167,9 +167,15 @@ export const workspaceOperationSchema = operationInputSchema
 export type WorkspaceOperation = z.infer<typeof workspaceOperationSchema>;
 export type WorkspaceRemovalProof = z.infer<typeof removalProofSchema>;
 
-/** Active or held maintenance still owns its workspace generation. */
+/**
+ * Maintenance that still owns its workspace generation: an active operation, or a held removal,
+ * which may have deleted part of the workspace and needs a person. A held trim deleted only
+ * disposable files, so it stays as a record that it did not finish and blocks nothing: running
+ * a trim again is idempotent, and removal derives every check itself.
+ */
 export const unfinishedOperation = (operation: WorkspaceOperation) =>
-  operation.state === "active" || operation.state === "held";
+  operation.state === "active" ||
+  (operation.state === "held" && operation.kind === "remove");
 
 /** Stores facts only; callers retain ownership, safety checks and physical readback. */
 export class WorkspaceLifecycleStore {

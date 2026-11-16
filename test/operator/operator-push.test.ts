@@ -561,6 +561,7 @@ const maintenanceItem = (
       destination: `/tasks/${taskId}`,
     },
   ],
+  moreBlockers: 0,
   destination: "/inbox?request=workspace-maintenance",
   dismissible: false,
 });

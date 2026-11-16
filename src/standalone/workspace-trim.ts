@@ -104,7 +104,8 @@ export async function unlinkIgnored(
   if (!info) return false;
   if (info.isDirectory())
     throw new TrimPathError("An ignored path became a directory");
-  // shortcut: lstat-then-unlink is not atomic against a concurrent parent swap; settled ownership excludes cab writers.
+  // shortcut: lstat-then-unlink is not atomic against a concurrent parent swap (settled ownership
+  // excludes cab writers), upgrade to a directory-fd unlinkat if untrusted writers can race a trim.
   await unlink(target).catch((error: unknown) => {
     if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
   });
@@ -145,7 +146,9 @@ export async function clearScratch(
     cancelled();
     await assertRealDirectory(scratch);
     // `rm` lstats each entry, so a link is unlinked rather than followed.
-    // shortcut: `rm` walks a child directory by path, so a directory swapped for a link inside it mid-walk is not detected; settled ownership excludes cab writers.
+    // shortcut: `rm` walks a child directory by path, so a directory swapped for a link inside it
+    // mid-walk is not detected (settled ownership excludes cab writers), upgrade to an fd-relative
+    // walk if untrusted writers can race a trim.
     await rm(join(scratch, name), { recursive: true });
   }
   await assertRealDirectory(scratch);

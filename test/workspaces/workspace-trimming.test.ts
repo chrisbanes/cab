@@ -495,7 +495,8 @@ for (const [name, inject] of [
         operation?.effects.map((e) => [e.target, e.outcome]),
         [[{ kind: "repository", repositoryId: "repo-a" }, "succeeded"]],
       );
-      // An unfinished journal blocks the next trim instead of reporting success.
+      // A held trim deleted only disposable files, so once ownership settles a new trim runs
+      // and finishes; the held journal stays as the record that the first did not.
       f.db.exec(
         "DELETE FROM task_writer_holds; DELETE FROM task_writer_ambiguity_holds",
       );
@@ -506,9 +507,13 @@ for (const [name, inject] of [
         f.lifecycle,
         lease(f, taskA),
       );
+      assert.equal(again.outcome, "trimmed", JSON.stringify(again));
       assert.equal(
-        again.outcome === "refused" && again.reason,
-        "Workspace has unfinished maintenance",
+        f.lifecycle.operation(
+          { taskId: taskA, workspaceId: binding.workspaceId },
+          operation!.operationId,
+        ).state,
+        "held",
       );
     } finally {
       f.close();
@@ -1006,7 +1011,7 @@ test("the service releases the trim lease after a refusal or a certain hold and 
   assert.equal(leased(), true);
   assert.equal(
     f.service.nonStopTaskHoldReason(taskId),
-    "Task archival in progress",
+    "Workspace maintenance in progress",
   );
   // A certain failure part-way, on another task, holds the journal but releases the lease.
   const locked = join(taskScratchPath(otherBinding.path), "locked");

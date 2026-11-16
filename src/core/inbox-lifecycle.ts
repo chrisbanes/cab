@@ -53,27 +53,36 @@ export const workspaceMaintenanceReasons = [
 ] as const;
 export type WorkspaceMaintenanceReason =
   (typeof workspaceMaintenanceReasons)[number];
-/** Stored blockers are bounded; the pass keeps the oldest-idle first. */
+/**
+ * Stored blockers are bounded: retention blockers first, then disk-cap ones, each in the pass's
+ * candidate order; `total` counts every blocker, listed or not.
+ */
 export const workspaceMaintenanceBlockerLimit = 50;
-export const workspaceMaintenanceAttentionSchema = z.strictObject({
-  /** Set while measured usage stays over the disk cap after a pass. */
-  usage: z
-    .strictObject({
-      measuredBytes: z.number().int().nonnegative().safe(),
-      capBytes: z.number().int().positive().safe(),
-    })
-    .nullable(),
-  blockers: z
-    .array(
-      z.strictObject({
-        taskId: z.uuid(),
-        workspaceId: z.uuid(),
-        condition: z.enum(["disk-cap", "retention"]),
-        reason: z.enum(workspaceMaintenanceReasons),
-      }),
-    )
-    .max(workspaceMaintenanceBlockerLimit),
-});
+export const workspaceMaintenanceAttentionSchema = z
+  .strictObject({
+    /** Set while measured usage stays over the disk cap after a pass. */
+    usage: z
+      .strictObject({
+        measuredBytes: z.number().int().nonnegative().safe(),
+        capBytes: z.number().int().positive().safe(),
+      })
+      .nullable(),
+    blockers: z
+      .array(
+        z.strictObject({
+          taskId: z.uuid(),
+          workspaceId: z.uuid(),
+          condition: z.enum(["disk-cap", "retention"]),
+          reason: z.enum(workspaceMaintenanceReasons),
+        }),
+      )
+      .max(workspaceMaintenanceBlockerLimit),
+    /** Every blocker the pass found; absent means exactly those listed. */
+    total: z.number().int().nonnegative().safe().optional(),
+  })
+  .refine((a) => a.total === undefined || a.total >= a.blockers.length, {
+    message: "Blocker total is below the listed blockers",
+  });
 export type WorkspaceMaintenanceAttention = z.infer<
   typeof workspaceMaintenanceAttentionSchema
 >;
@@ -206,12 +215,21 @@ export class InboxLifecycle {
     const blockers = current.attention.blockers.filter(
       (b) => !deleted.has(b.taskId),
     );
-    if (blockers.length === current.attention.blockers.length) return;
+    const pruned = current.attention.blockers.length - blockers.length;
+    if (!pruned) return;
+    const { total } = current.attention;
     this.db
       .prepare(
         "UPDATE inbox_lifecycle SET dataJson=?,revision=revision+1 WHERE id=?",
       )
-      .run(JSON.stringify({ ...current.attention, blockers }), current.row.id);
+      .run(
+        JSON.stringify({
+          ...current.attention,
+          blockers,
+          ...(total === undefined ? {} : { total: total - pruned }),
+        }),
+        current.row.id,
+      );
   }
 
   resolve(id: string, reason: string, obsolete = false) {

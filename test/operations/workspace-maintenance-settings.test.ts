@@ -200,7 +200,7 @@ test("production load rejects invalid workspace limits before starting or openin
   }
 });
 
-test("production load passes every validated limit to service options while maintenance remains inactive", () => {
+test("production load passes every validated limit to service options", () => {
   const names = Object.values(workspaceMaintenanceSettings).map((d) => d.name);
   const prior = names.map((name) => process.env[name]);
   try {

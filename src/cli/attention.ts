@@ -1,5 +1,6 @@
 import { stat } from "node:fs/promises";
 import { attentionNext } from "../operator/attention.js";
+import { moreBlockersText } from "../operator/workspace-maintenance-copy.js";
 import { z } from "zod";
 import {
   nativeQuestionAnswers,
@@ -116,6 +117,9 @@ const maintenanceLines = (items: readonly InboxItem[]) =>
             ...i.blockers.map(
               (b) =>
                 `  ${b.taskId}  ${oneLine(b.taskTitle, 40)}  workspace ${b.workspaceId}  ${b.condition === "disk-cap" ? "disk limit" : "retention"}: ${b.reasonText}`,
+            ),
+            ...[moreBlockersText(i.moreBlockers)].flatMap((more) =>
+              more ? [`  ${more}`] : [],
             ),
           ]
         : [],

@@ -22,7 +22,10 @@ import type {
   TaskRead,
   WorkspaceMaintenanceInboxItem,
 } from "../../src/operator/contracts.js";
-import { maintenanceInboxReason } from "../../src/operator/workspace-maintenance-copy.js";
+import {
+  maintenanceInboxReason,
+  moreBlockersText,
+} from "../../src/operator/workspace-maintenance-copy.js";
 import { orderWaits } from "../../src/operator/wait-reasons.js";
 
 const minute = 60_000;
@@ -239,6 +242,7 @@ const maintenanceItem = (): WorkspaceMaintenanceInboxItem => ({
   ),
   usage: { measuredBytes: 12_300_000_000, capBytes: 10_000_000_000 },
   blockers: [],
+  moreBlockers: 0,
   destination: "/inbox?request=workspace-maintenance",
   dismissible: false,
 });
@@ -270,6 +274,10 @@ test("the maintenance item is named by its kind, says what is unresolved and bel
     maintenanceInboxReason(null, []),
     "No blocking workspace remains; the next pass resolves this item.",
   );
+  // Blockers beyond the stored bound are counted, never silently cut.
+  assert.equal(moreBlockersText(0), null);
+  assert.equal(moreBlockersText(1), "And 1 more workspace not listed.");
+  assert.equal(moreBlockersText(5), "And 5 more workspaces not listed.");
   const p = randomUUID(),
     counts = filterCounts([maintenance, item("question", p)]);
   assert.deepEqual(counts.project, { [p]: 1 });

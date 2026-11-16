@@ -980,6 +980,16 @@ export const withoutWithdrawn = <T extends Record<string, unknown>>(
 const sandboxReviewKey = (identity: SandboxReviewIdentity) =>
   `${identity.runtimeGeneration}\u0000${identity.threadId}\u0000${identity.reviewId}`;
 
+/** The fixed refusals of removal's ownership checks, by their exact text. */
+const removalBlockerCodes: Partial<Record<string, WorkspaceMaintenanceReason>> =
+  {
+    "A cab callback for this task is still running": "unsettled",
+    "The task changed during workspace removal": "unsettled",
+    "The task has delivery actions whose outcome is not settled":
+      "delivery-unsettled",
+    "Task execution is not settled or its workspace is held": "unsettled",
+  };
+
 /** Owns only standalone.sqlite in a marked data directory. No import or attach path exists. */
 export class StandaloneService {
   /** Validated limits the automatic maintenance pass applies. */
@@ -6321,7 +6331,8 @@ export class StandaloneService {
             ownership: () => blocked() === undefined,
           });
           const refusal = blocked();
-          if (refusal) return retained(binding, refusal);
+          if (refusal)
+            return retained(binding, refusal, removalBlockerCodes[refusal]);
           const generation = lifecycle.current(taskId);
           if (generation?.workspaceId !== binding.workspaceId)
             return retained(binding, "Workspace generation is not recorded");

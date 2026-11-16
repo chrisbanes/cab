@@ -169,12 +169,16 @@ on meanwhile; `test/operator/operator-workspace-maintenance-browser.test.ts` cov
 the Inbox item in Chromium. The service tests inject the measurement, clock and wake
 through the test-only `maintenancePass` option, never sleeping on real time.
 
-`test/execution/workspace-environment-qualification/runtime-contract.mjs` contains
-the bounded candidate probe for per-thread Codex scratch environment and historical
-resume at a new cwd, plus Claude per-query scratch with its existing managed temporary
-base. Its deterministic tests cover request capture, crossed-path sensitivity,
-production SQLite admission and terminal identity through restart, and retained
-uncertainty without redispatch. These tests do not prove real runtime behavior.
+`test/execution/workspace-environment-qualification/runtime-contract.mjs` qualifies
+per-thread Codex scratch environment and historical resume at a new cwd, plus Claude
+per-query scratch with its existing managed temporary base. Its live run passed for
+both runtimes; the records are in
+[`docs/evidence/1727-workspace-lifecycle-2026-11-15/`](evidence/1727-workspace-lifecycle-2026-11-15/)
+(Codex in `t1-runtime-qualification.md`, Claude in
+`t1-runtime-qualification-attempt-3.md`). Its deterministic tests cover request capture,
+crossed-path sensitivity, production SQLite admission and terminal identity through
+restart, and retained uncertainty without redispatch; they alone do not prove real
+runtime behavior.
 The live command refuses before runtime/auth initialization unless it receives
 `--live --one-attempt --grant-file FILE` and the separately authorized grant digest
 in `CAB_WORKSPACE_QUALIFICATION_AUTHORIZED_GRANT_SHA256`. A grant names exact binary

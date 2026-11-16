@@ -4821,6 +4821,8 @@ export const workspaceMaintenanceInboxItemSchema = z
           .strict(),
       )
       .max(workspaceMaintenanceBlockerLimit),
+    /** Blockers the pass found beyond those listed. */
+    moreBlockers: count,
     destination: z.string().max(512),
   })
   .strict();

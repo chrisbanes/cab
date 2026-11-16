@@ -1192,10 +1192,12 @@ are deleted and the scratch directory is kept. Settled ownership and the workspa
 binding are rechecked before each repository and the scratch directory. Each effect
 is journaled before it runs and settled after a readback. The trim's trigger and start
 time are journaled when it begins; its completion time is recorded only when every
-effect succeeded. A cancellation, error or ownership change leaves the journal held
-with its reason, which blocks later maintenance of that workspace. Any uncertain Git
-outcome also holds the workspace and keeps the archival lease; every other outcome,
-including a refusal, releases the lease.
+effect succeeded. A cancellation, error, crash or ownership change leaves the journal
+held with its reason, as the record that the trim did not finish. A held trim deleted
+only disposable files, so it blocks nothing: it keeps no archival lease, across a
+restart too, and a later trim (running it again is idempotent) or removal (which
+derives every check itself) proceeds. Only an uncertain Git outcome holds the workspace
+and keeps the archival lease; every other outcome, including a refusal, releases it.
 Until a turn of the task ends after a trim, each turn's context carries one line with
 the trim time and guidance to rebuild ignored and scratch files; a trim that stopped
 part-way says those files may be missing instead.
@@ -1205,8 +1207,13 @@ terminal, turn-end, confirmed-push and merge observations are stored independent
 of the current binding. Legacy facts without an attributable timestamp stay unknown;
 mutable update times and migration time do not establish age. Duplicate observations
 do not move an episode's anchor. These facts never release execution ownership.
-An interrupted maintenance journal stays held for reconciliation, even if a path is
-absent or its retention has expired.
+An interrupted or held removal journal stays held for reconciliation, even if a path is
+absent or its retention has expired, because it may have deleted part of the workspace.
+It keeps the task's archival hold, so the task is held with "Workspace maintenance in
+progress", the workspace shows as held, a later removal refuses because the workspace
+is held, and the Workspace maintenance Inbox item lists it once its retention has
+passed. cab has no command that reconciles it: this is a known limit,
+and the operator must inspect the workspace and the journal by hand.
 
 Removal is a service operation that takes only the task and a trigger (manual,
 delivered retention, merged retention or disk limit); callers assert no safety fact
@@ -1231,7 +1238,7 @@ show the latest removal as "Workspace removed TIME (manual / delivered retention
 merged retention / disk limit)" with each repository's pushed branch and commit or
 untouched base, and the latest trim as "Trimmed TIME (manual / idle limit / disk
 limit)"; both records survive re-provisioning. These reads carry no paths or sizes.
-Automatic removal is planned. It applies only to a done or cancelled
+Removal, manual or automatic, applies only to a done or cancelled
 task. It takes the archival lease under its own operation identity and refuses unless
 execution is settled, no cab callback is running, no delivery action of the task is
 unsettled and no result's uncommitted changes are left neither committed nor

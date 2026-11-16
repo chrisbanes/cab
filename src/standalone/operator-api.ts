@@ -3977,6 +3977,9 @@ export class OperatorApi {
         reason: maintenanceInboxReason(attention.usage, blockers),
         usage: attention.usage,
         blockers,
+        moreBlockers:
+          (attention.total ?? attention.blockers.length) -
+          attention.blockers.length,
         destination: `/inbox?request=${workspaceMaintenanceInboxId}`,
         lifecycle: this.inboxLifecycleView(row.id, excluded),
         dismissible: false as const,

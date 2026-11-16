@@ -9,6 +9,7 @@ import {
 } from "../../src/operator/contracts.js";
 import type { OperatorClient } from "./api.js";
 import { failureText } from "../../src/operator/runtime-restart-copy.js";
+import { moreBlockersText } from "../../src/operator/workspace-maintenance-copy.js";
 import { ActionLink, Button } from "./components.js";
 import { approvalActsOn } from "./delivery-presentation.js";
 import { clockLabel } from "./presentation.js";
@@ -318,7 +319,10 @@ export function WorkspaceMaintenanceDetail({
             </section>
           ) : null;
         })}
-        {!item.blockers.length && (
+        {moreBlockersText(item.moreBlockers) && (
+          <p>{moreBlockersText(item.moreBlockers)}</p>
+        )}
+        {!item.blockers.length && !item.moreBlockers && (
           <p>No listed workspace can be trimmed or removed safely.</p>
         )}
         <p className="metadata muted">

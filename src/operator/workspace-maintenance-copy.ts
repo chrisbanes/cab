@@ -94,3 +94,9 @@ export function maintenanceInboxReason(
     : "no blocking workspace remains; the next pass resolves this item";
   return `${text.charAt(0).toUpperCase()}${text.slice(1)}.`;
 }
+
+/** The blockers not listed, beyond the stored bound; null when every one is listed. */
+export const moreBlockersText = (more: number) =>
+  more > 0
+    ? `And ${more} more workspace${more === 1 ? "" : "s"} not listed.`
+    : null;

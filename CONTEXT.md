@@ -378,7 +378,8 @@ The irreversible deletion of a done or cancelled task's whole workspace and its 
 Claude temporary base, once cab has proved every repository delivered or still at its
 provisioned base. Task branches, change requests, results and conversations remain.
 The operator starts it with `task workspace-remove` or the task page's Remove workspace…
-action; cab derives every check itself. Automatic removal is planned. Work admitted afterwards gets a new
+action, and the automatic maintenance pass under the delivered, merged and disk limits;
+cab derives every check itself. Work admitted afterwards gets a new
 workspace generation, with a new workspace ID, starting at each repository's recorded
 commit; the removed generation's record and its results' commits stay readable.
 _Avoid_: Archive; removed files have no restore operation

@@ -1617,6 +1617,8 @@ test("the maintenance item resolves task names live, drops a missing task's bloc
           reason: "uncommitted",
         },
       ],
+      // One more blocker than the stored list holds.
+      total: 3,
     });
     const read = async (params?: URLSearchParams) =>
       (await api.readInbox(params)).data.items.filter(
@@ -1642,6 +1644,7 @@ test("the maintenance item resolves task names live, drops a missing task's bloc
       ],
     );
     assert.equal(item.dismissible, false);
+    assert.equal(item.moreBlockers, 1);
     assert.equal(
       item.reason,
       "A workspace past its retention was not removed.",

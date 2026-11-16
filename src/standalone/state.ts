@@ -975,7 +975,7 @@ export class ExecutionState {
           DROP TABLE task_archival_holds_untokened;`),
       );
     // Workspace recovery runs before this state is opened. Keep an archival hold when bounded Git
-    // work recorded unresolved filesystem effects, when its maintenance is unfinished, or when it
+    // work recorded unresolved filesystem effects, when its removal is unfinished, or when it
     // has no owner (written by an earlier build) and so nothing can prove it may be released.
     const workspaceColumns = this.db
       .prepare("PRAGMA table_info(task_workspace_bindings)")
@@ -991,9 +991,11 @@ export class ExecutionState {
         )
         .get()
     )
+      // Only a removal's: a held trim releases its hold, as running trim again is idempotent.
       kept.push(`task_archival_holds.ownerToken IN (
         SELECT operationId FROM workspace_maintenance_operations
-        WHERE json_extract(data, '$.state') IN ('active', 'held'))`);
+        WHERE json_extract(data, '$.kind') = 'remove'
+          AND json_extract(data, '$.state') IN ('active', 'held'))`);
     this.db.exec(
       `DELETE FROM task_archival_holds WHERE NOT (${kept.join(" OR ")})`,
     );
@@ -2245,7 +2247,7 @@ export class ExecutionState {
       const acquired =
         this.db
           .prepare(`INSERT INTO task_archival_holds (taskId, reason, ownerToken)
-          SELECT ?, 'Task archival in progress', ?
+          SELECT ?, 'Workspace maintenance in progress', ?
           WHERE NOT EXISTS (
             SELECT 1 FROM task_archival_holds WHERE taskId = ?
           ) AND ${archiveUnblockedClause} RETURNING taskId`)

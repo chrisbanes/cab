@@ -61,8 +61,15 @@ The operator CLI is outside the budget: it has no screens.
   reads a reused key back with `operation get` before sending.
 - A confirmation left open while the task got a new workspace names the old one, and the
   service refuses it; the new workspace is untouched.
-- A removal that stopped part way stays held with its operation ID and is not retried;
-  it needs reconciliation.
+- A trim that stopped part way (a crash, a cancelled shutdown or an unreadable file)
+  blocks nothing: the next turn is told some ignored or scratch files may be gone, and a
+  later trim or removal runs normally.
+- A removal that stopped part way stays held with its operation ID and is not retried.
+  The task shows "Workspace maintenance in progress" and cannot run, the workspace shows
+  as held, Remove workspace refuses because the workspace is held (a retry of the same
+  request names the operation), and the Inbox item lists it once its retention has
+  passed. cab has no command that reconciles it;
+  this is a known limit, and the workspace and its journal need inspecting by hand.
 
 ## Automatic maintenance
 
