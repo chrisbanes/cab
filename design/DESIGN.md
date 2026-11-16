@@ -150,11 +150,12 @@ fixed application dimensions.
 - **Shell:** a 232px sidebar (cab mark, installation name, Search work field
   with ⌘K, Overview, Inbox with an amber count, Tasks, the projects list with
   activity meta — a paused project shows the paused symbol and the word "Paused" as that meta,
-  and project names stay on one line with an ellipsis, the full name in the link's title — a capacity meter and the account menu), a 48px top bar
+  and project names stay on one line with an ellipsis, the full name in the link's title — a capacity meter and the account menu), a 48px top bar (`--top-bar-height`)
   (breadcrumb, connection status — Connected, Updates delayed or Disconnected — and
   New task with its key), then the page. Settings, Getting started, Approval and
-  delivery forms, the Theme choice and Sign out live in the account menu. Main content uses 20px padding and 12–16px gaps; multi-pane screens
-  run panes edge to edge with hairline dividers.
+  delivery forms, the Theme choice and Sign out live in the account menu. Main content uses 20px padding and 12–16px gaps and is at most 1200px wide
+  (`--page-max-width`); multi-pane screens run panes edge to edge with hairline
+  dividers, and the Board's columns alone use the full width.
 - **Breakpoints:** the production shell uses the navigation drawer through 1120 CSS
   pixels; the browser test checks 1119, 1120 and 1121px as well as 759, 760 and
   800px. Tablet widths show the drawer behind a 44px Open navigation button in the

@@ -285,7 +285,7 @@ p {
   display: flex;
   align-items: center;
   gap: var(--space-12);
-  height: 48px;
+  height: var(--top-bar-height);
   padding: 0 var(--space-20);
   border-bottom: 1px solid var(--line);
   background: var(--surface);
@@ -333,7 +333,7 @@ p {
 
   /* The Inbox panes fill the viewport below the 48px top bar, edge to edge. */
   .page-inbox.page-inbox {
-    height: calc(100dvh - 48px);
+    height: calc(100dvh - var(--top-bar-height));
     padding: 0;
   }
 
@@ -573,7 +573,7 @@ nav {
 
 .page {
   padding: var(--space-20);
-  max-width: 1200px;
+  max-width: var(--page-max-width);
 }
 
 .page-header {

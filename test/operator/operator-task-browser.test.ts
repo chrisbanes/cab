@@ -350,7 +350,7 @@ test("List and Board preserve identical filtered task IDs and never submit comma
   await page.getByRole("heading", { name: "All tasks", exact: true }).waitFor();
   assert.equal(await page.getByLabel("Filter tasks").inputValue(), "Literal");
   assert.deepEqual(await links(), list);
-  await page.getByRole("button", { name: "Paused · 1", exact: true }).click();
+  await page.getByRole("button", { name: "Waiting · 1", exact: true }).click();
   const boardScroll = await page
     .locator(".board-columns")
     .evaluate((el) => el.scrollLeft);
@@ -364,7 +364,7 @@ test("List and Board preserve identical filtered task IDs and never submit comma
   await page.getByRole("heading", { name: "All tasks", exact: true }).waitFor();
   assert.equal(
     await page
-      .getByRole("button", { name: "Paused · 1", exact: true })
+      .getByRole("button", { name: "Waiting · 1", exact: true })
       .getAttribute("aria-pressed"),
     "true",
   );
@@ -470,14 +470,16 @@ test("a closure-held task reads Held and a project-paused task reads Paused, sid
   await page.getByRole("button", { name: "Board", exact: true }).click();
   assert.equal(
     await page
-      .locator(`#column-Paused [data-task-id="${held.taskId}"] .task-reason`)
+      .locator(
+        `[id="column-Waiting"] [data-task-id="${held.taskId}"] .task-reason`,
+      )
       .first()
       .innerText(),
     "Held · closed at source",
   );
   assert.equal(
     await page
-      .locator(`#column-Paused [data-task-id="${paused.taskId}"]`)
+      .locator(`[id="column-Waiting"] [data-task-id="${paused.taskId}"]`)
       .count(),
     1,
   );
@@ -1269,7 +1271,7 @@ test("populated task List and Board keep the approved hierarchy at responsive wi
             .closest<HTMLElement>(".board-column")
             ?.getAttribute("aria-label"),
         ),
-      "Running tasks",
+      "In progress tasks",
       `${width}px preserves state-derived Board grouping`,
     );
     assert.equal(
@@ -1571,18 +1573,19 @@ for (const viewport of [
     await page
       .getByRole("heading", { name: "All tasks", exact: true })
       .waitFor();
-    const samples: Record<string, string> = {
-      Stopping: "Normal Stop observation",
-      Uncertain: "Uncertain execution",
-      Running: "Work running normally",
-      Done: "Completed result",
-      Cancelled: "Cancelled work",
-      Paused: "Paused work",
-      Draft: "Literal <script>malicious()</script>",
-      Waiting: "Ready but dependent",
-      Ready: "Ready selected",
-    };
-    for (const [column, title] of Object.entries(samples)) {
+    // Each State's sample, reached through the Board column that groups it.
+    const samples = [
+      ["Stopping", "In progress", "Normal Stop observation"],
+      ["Uncertain", "Needs you", "Uncertain execution"],
+      ["Running", "In progress", "Work running normally"],
+      ["Done", "Closed", "Completed result"],
+      ["Cancelled", "Closed", "Cancelled work"],
+      ["Paused", "Waiting", "Paused work"],
+      ["Draft", "Draft", "Literal <script>malicious()</script>"],
+      ["Waiting", "Waiting", "Ready but dependent"],
+      ["Ready", "Ready", "Ready selected"],
+    ] as const;
+    for (const [state, column, title] of samples) {
       const reach = page
         .getByRole("region", { name: `${column} tasks`, exact: true })
         .getByRole("link", { name: title, exact: true });
@@ -1614,12 +1617,12 @@ for (const viewport of [
         });
         assert.equal(focused, true, `${column} card is focused in the board`);
       }
-      if (column === "Running")
+      if (state === "Running")
         await page
           .locator(`[data-task-id="${ids.question.id}"]`)
           .getByText("Question needs an answer", { exact: true })
           .waitFor({ state: "visible" });
-      if (column === "Stopping")
+      if (state === "Stopping")
         assert.equal(
           await page
             .locator(`[data-task-id="${ids.uncertainStop.id}"]`)
@@ -1627,7 +1630,7 @@ for (const viewport of [
             .count(),
           1,
         );
-      if (column === "Done" || column === "Cancelled") {
+      if (state === "Done" || state === "Cancelled") {
         const terminal = page.getByRole("region", {
           name: `${column} tasks`,
           exact: true,
@@ -1638,7 +1641,7 @@ for (const viewport of [
         );
         assert.equal(await terminal.getByText(/Capacity is full/).count(), 0);
       }
-      await screenshot(page, `${viewport.width}-board-${column.toLowerCase()}`);
+      await screenshot(page, `${viewport.width}-board-${state.toLowerCase()}`);
     }
     f.service.domain().execute({
       type: "capacity.configure",
@@ -1714,10 +1717,10 @@ for (const viewport of [
           .count(),
         0,
       );
-      await page.getByRole("button", { name: /^Running · / }).click();
+      await page.getByRole("button", { name: /^In progress · / }).click();
       assert.equal(
         await page
-          .getByRole("button", { name: /^Running · / })
+          .getByRole("button", { name: /^In progress · / })
           .getAttribute("aria-pressed"),
         "true",
       );
@@ -1749,7 +1752,7 @@ for (const viewport of [
     await page.getByRole("button", { name: "Board", exact: true }).click();
     if (viewport.width < 760)
       await page
-        .getByRole("region", { name: "Stopping tasks", exact: true })
+        .getByRole("region", { name: "In progress tasks", exact: true })
         .getByRole("link", { name: "Normal Stop observation", exact: true })
         .waitFor({ state: "visible" });
     assert.deepEqual(

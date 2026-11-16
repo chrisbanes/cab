@@ -45,8 +45,10 @@ import { AttentionBar, type Requests } from "./task-attention.js";
 import { TaskToolbar } from "./task-filters.js";
 import { useMediaQuery } from "./use-media-query.js";
 import {
-  columns as allColumns,
-  columnCounts,
+  boardColumnCounts,
+  boardColumnOf,
+  visibleBoardColumns,
+  type BoardColumn,
   defaultTaskFilters,
   filterTasks,
   parseTaskFilters,
@@ -66,7 +68,6 @@ import {
   taskLeadLabel,
   sharedTaskReasons,
   sharedTaskReasonText,
-  visibleColumns,
   type TaskAggregate,
   type TaskColumn,
   type TaskFilters,
@@ -89,16 +90,19 @@ export const stateIcons: Record<TaskColumn, LucideIcon> = {
 /** A state's symbol and word in its colour; colour never carries the state alone. */
 function ColumnMark({
   column,
+  label = column,
   className = "task-state",
 }: {
   column: TaskColumn;
+  /** A Board column's name, marked with its first State. */
+  label?: string;
   className?: string;
 }) {
   const Icon = stateIcons[column];
   return (
     <span className={className} data-column={column}>
       <Icon aria-hidden="true" />
-      {column}
+      {label}
     </span>
   );
 }
@@ -178,10 +182,13 @@ export function TaskCard({
   task,
   request,
   shared,
+  showState = false,
 }: {
   task: TaskListSummary;
   request?: InboxItem | undefined;
   shared?: readonly string[];
+  /** Its column groups several States, so the card names its own. */
+  showState?: boolean;
 }) {
   const url = task.source?.url,
     lead = taskLeadLabel(task),
@@ -202,11 +209,9 @@ export function TaskCard({
           <a className="task-title" href={taskDetailHref(task)}>
             {task.title ?? "Title unavailable"}
           </a>
-          {/* The column names the state; a chip marks only what the column does not. */}
+          {/* A chip marks only what the column does not name. */}
+          {showState && <ColumnMark column={column} />}
           {readyButBlocked(task) && <ColumnMark column="Ready" />}
-          {column === "Uncertain" && (
-            <ColumnMark column="Uncertain" className="task-state phone-only" />
-          )}
         </div>
         <p className="metadata muted task-project-metadata">
           {task.project.name ?? "Project name unavailable"} ·{" "}
@@ -264,9 +269,9 @@ export function TaskBoard({
   tasks: TaskListSummary[];
   hiddenByReadiness?: TaskListSummary[];
   sharedReasons?: readonly [string, number][];
-  columns: readonly TaskColumn[];
+  columns: readonly BoardColumn[];
   /** The column a State filter names, shown first unless the operator already chose one. */
-  initial: TaskColumn | undefined;
+  initial: BoardColumn | undefined;
   requests: Requests;
   /** Phone: the toolbar row the column chips render into instead of above the board. */
   columnsTarget?: HTMLElement | null;
@@ -279,8 +284,8 @@ export function TaskBoard({
     // The visible columns change with the State filter, so a saved index may point past the end.
     selected = Math.min(stored, columns.length - 1);
   const board = useRef<HTMLDivElement>(null);
-  const counts = columnCounts(tasks);
-  const hiddenCounts = columnCounts(hiddenByReadiness);
+  const counts = boardColumnCounts(tasks),
+    hiddenCounts = boardColumnCounts(hiddenByReadiness);
   const firstRequest = new Map<string, InboxItem>();
   for (const item of requests.data?.items ?? [])
     if (isTaskInboxItem(item) && !firstRequest.has(item.taskId))
@@ -335,7 +340,7 @@ export function TaskBoard({
   useLayoutEffect(() => {
     const area = board.current,
       column = area?.querySelector<HTMLElement>(
-        `[id="column-${columns[selected]}"]`,
+        `[id="column-${columns[selected]?.name}"]`,
       );
     if (
       placed.current ||
@@ -359,11 +364,11 @@ export function TaskBoard({
       role="toolbar"
       aria-label="Board columns"
     >
-      {columns.map((column, index) => {
-        const risky = column === "Uncertain" && counts[column] > 0;
+      {columns.map(({ name }, index) => {
+        const risky = name === "Needs you" && counts[name] > 0;
         return (
           <Button
-            key={column}
+            key={name}
             type="button"
             variant="ghost"
             className="column-tab"
@@ -372,15 +377,13 @@ export function TaskBoard({
             onClick={() => {
               setSelected(index);
               document
-                .getElementById(`column-${column}`)
+                .getElementById(`column-${name}`)
                 ?.scrollIntoView({ block: "nearest", inline: "start" });
             }}
           >
             {risky && <CircleQuestionMark aria-hidden="true" />}
-            {column} · {counts[column]}
-            {hiddenCounts[column] > 0
-              ? ` (${hiddenCounts[column]} hidden)`
-              : ""}
+            {name} · {counts[name]}
+            {hiddenCounts[name] > 0 ? ` (${hiddenCounts[name]} hidden)` : ""}
           </Button>
         );
       })}
@@ -392,38 +395,45 @@ export function TaskBoard({
       <div className="board-columns" ref={board} onScroll={capture}>
         {columns.map((column, index) => (
           <section
-            key={column}
-            id={`column-${column}`}
+            key={column.name}
+            id={`column-${column.name}`}
             className={`board-column ${selected === index ? "selected-column" : ""}`}
-            data-empty={counts[column] ? undefined : "true"}
-            aria-label={`${column} tasks`}
+            data-empty={counts[column.name] ? undefined : "true"}
+            aria-label={`${column.name} tasks`}
           >
             <h2 className="board-column-heading">
-              <ColumnMark column={column} className="board-column-name" />
-              <span className="board-column-count">{counts[column]}</span>
-              {hiddenCounts[column] > 0 && (
+              <ColumnMark
+                column={column.states[0]}
+                label={column.name}
+                className="board-column-name"
+              />
+              <span className="board-column-count">{counts[column.name]}</span>
+              {hiddenCounts[column.name] > 0 && (
                 <span className="metadata muted">
-                  {hiddenCounts[column]} hidden by Ready filter
+                  {hiddenCounts[column.name]} hidden by Ready filter
                 </span>
               )}
             </h2>
-            {tasks
-              .filter((t) => taskColumn(t) === column)
-              .map((t) => (
-                <TaskCard
-                  key={t.id}
-                  task={t}
-                  request={firstRequest.get(t.id)}
-                  shared={sharedReasons.map(([reason]) => reason)}
-                />
-              ))}
-            {!counts[column] && (
-              <p className="metadata muted">
-                {column === "Ready"
-                  ? "None ready. Held Ready work is in Waiting."
-                  : "No tasks"}
-              </p>
-            )}
+            <div className="board-column-cards">
+              {tasks
+                .filter((t) => column.states.includes(taskColumn(t)))
+                .map((t) => (
+                  <TaskCard
+                    key={t.id}
+                    task={t}
+                    request={firstRequest.get(t.id)}
+                    shared={sharedReasons.map(([reason]) => reason)}
+                    showState={column.states.length > 1}
+                  />
+                ))}
+              {!counts[column.name] && (
+                <p className="metadata muted">
+                  {column.name === "Ready"
+                    ? "None ready. Held Ready work is in Waiting."
+                    : "No tasks"}
+                </p>
+              )}
+            </div>
           </section>
         ))}
       </div>
@@ -522,7 +532,13 @@ export function TaskViews({
   const work = (
     <section
       aria-label={projectId ? "Project tasks" : "Across your projects"}
-      className={overview ? "overview-panel" : undefined}
+      className={
+        overview
+          ? "overview-panel"
+          : filters.view === "board"
+            ? "board-page"
+            : undefined
+      }
     >
       <TaskToolbar
         filters={filters}
@@ -541,6 +557,14 @@ export function TaskViews({
         pending={state.pending}
         phone={phone}
         columnsSlot={phone && filters.view === "board" ? setSlot : undefined}
+        updated={
+          state.data
+            ? updatedLabel(
+                state.data.firstObservedAt,
+                state.data.lastObservedAt,
+              )
+            : undefined
+        }
       />
       {notice && <p className="metadata muted work-capacity">{notice}</p>}
       {sharedReasons.map(([reason, count]) => (
@@ -574,8 +598,8 @@ export function TaskViews({
           tasks={tasks}
           hiddenByReadiness={hiddenByReadiness}
           sharedReasons={sharedReasons}
-          columns={visibleColumns(filters.state)}
-          initial={allColumns.find((c) => c === filters.state)}
+          columns={visibleBoardColumns(filters.state)}
+          initial={boardColumnOf(filters.state)}
           requests={requests}
           columnsTarget={phone && filters.view === "board" ? slot : null}
         />
@@ -602,11 +626,6 @@ export function TaskViews({
             ))}
           </div>
         </>
-      )}
-      {state.data && (
-        <p className="metadata muted">
-          {updatedLabel(state.data.firstObservedAt, state.data.lastObservedAt)}
-        </p>
       )}
     </section>
   );

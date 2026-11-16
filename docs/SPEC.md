@@ -1709,7 +1709,10 @@ remembers the filters per device and restores them on a task view opened without
 any; Readiness defaults to Ready, so Draft tasks are shown by choosing Not Ready or
 Any readiness.
 
-Group board cards by cab work state, showing the task title, project, lead,
+Group board cards by cab work state into columns in the order work flows: Draft,
+Ready, In progress (Running, Stopping), Waiting (Waiting, Paused), Needs you
+(Uncertain, Not started) and Closed (Done, Cancelled). A card in a column with
+several states names its own. Show the task title, project, lead,
 source identity when imported, and the reason for waiting or intervention. Keep
 readiness and dependency holds distinct: a Ready task can still be blocked. Keep
 uncertain and stopping work visible rather than implying completion. Cards open
