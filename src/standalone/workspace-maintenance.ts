@@ -510,8 +510,17 @@ export class WorkspaceMaintenance {
                 ),
               ),
           };
+        } else if (unmeasured().length) {
+          // Effects brought known usage within the cap, but unknown usage leaves it unconfirmed.
+          cap = {
+            usage: null,
+            blockers: unmeasured().map((c) =>
+              blocker(c, "disk-cap", "unmeasured"),
+            ),
+          };
+          report.usage = "unknown";
         }
-        report.usage = cap.usage;
+        if (report.usage !== "unknown") report.usage = cap.usage;
       }
     }
     this.live();

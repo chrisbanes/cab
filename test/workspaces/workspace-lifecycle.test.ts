@@ -965,3 +965,67 @@ test("true reopen clears legacy merge facts without inventing an unknown histori
     f.close();
   }
 });
+
+test("a merged change request counts only for the pushed commit it merged", () => {
+  const { db, store, input } = fixture();
+  try {
+    // The work whose observations attribute pushes and merges to this generation.
+    const workId = randomUUID();
+    db.exec(`CREATE TABLE execution_intents (workId TEXT PRIMARY KEY, workspace TEXT);
+      CREATE TABLE task_execution_bindings (workId TEXT PRIMARY KEY, taskId TEXT)`);
+    db.prepare("INSERT INTO execution_intents VALUES (?,?)").run(
+      workId,
+      input.path,
+    );
+    db.prepare("INSERT INTO task_execution_bindings VALUES (?,?)").run(
+      workId,
+      input.taskId,
+    );
+    const first = "c".repeat(40),
+      second = "d".repeat(40);
+    const push = (repositoryId: string, commit: string, at: number) =>
+      store.recordPush(
+        input.taskId,
+        workId,
+        repositoryId,
+        randomUUID(),
+        commit,
+        at,
+      );
+    const merge = (
+      repositoryId: string,
+      head: string,
+      observation: string,
+      at: number,
+    ) =>
+      store.recordMerge(
+        input.taskId,
+        workId,
+        repositoryId,
+        `pr-${repositoryId}`,
+        true,
+        head,
+        observation,
+        at,
+      );
+    const allMerged = () => store.get(input.workspaceId)!.allMergedAt;
+    push("one", first, 10);
+    push("two", first, 10);
+    merge("one", first, "one-merged", 20);
+    merge("two", first, "two-merged", 30);
+    assert.equal(allMerged(), 30);
+    // New work after the merge clears it, and polling the old merged request does not restore it.
+    push("one", second, 40);
+    assert.equal(allMerged(), null);
+    merge("one", first, "one-merged", 50);
+    merge("one", first, "one-merged-repoll", 60);
+    assert.equal(allMerged(), null);
+    // A merge of the new head does; the first observation of that episode anchors it.
+    merge("one", second, "one-merged-again", 70);
+    assert.equal(allMerged(), 70);
+    merge("one", second, "one-merged-again-poll", 80);
+    assert.equal(allMerged(), 70);
+  } finally {
+    db.close();
+  }
+});

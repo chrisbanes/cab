@@ -3159,6 +3159,7 @@ export class DeliveryStore {
       observation.repositoryId,
       observation.nodeId,
       observation.state === "MERGED",
+      observation.headSha,
       binding.observationDigest,
       binding.observedAt,
     );
@@ -3312,6 +3313,7 @@ export class DeliveryStore {
       observation.repositoryId,
       observation.nodeId,
       observation.state === "MERGED",
+      observation.headSha,
       digest,
       binding.observedAt,
     );

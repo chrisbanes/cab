@@ -575,6 +575,32 @@ test("unknown usage is never zero: it never resolves the cap and names each unme
   assert.equal((await m.wake())?.attention, null);
 });
 
+test("a trim that brings known usage under the cap keeps unmeasured roots listed", async () => {
+  const w = fakeWorld(
+    [
+      candidate(1, { lastTurnEndedAt: 1 }),
+      candidate(2, { lastTurnEndedAt: 2 }),
+    ],
+    { 1: 11 * GB, 2: null },
+    { settings: { idleHours: "off" }, trimmed: { 1: 1 * GB } },
+  );
+  const report = await w.make().wake();
+  assert.deepEqual(w.calls, ["trim:disk:1"]);
+  assert.equal(report?.usage, "unknown");
+  assert.deepEqual(report?.attention, {
+    usage: null,
+    blockers: [
+      {
+        taskId: candidate(2).taskId,
+        workspaceId: wid(2),
+        condition: "disk-cap",
+        reason: "unmeasured",
+      },
+    ],
+    total: 1,
+  });
+});
+
 test("an unchanged root is not walked again until it is stale, and only a touched root is walked after an effect", async () => {
   const w = fakeWorld(
     [

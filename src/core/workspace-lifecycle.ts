@@ -372,12 +372,18 @@ export class WorkspaceLifecycleStore {
     });
   }
 
+  /**
+   * A change request observation. A merged one counts only when its head is the repository's
+   * latest confirmed push, so re-polling a request merged before later pushes never marks that
+   * later work merged. With no recorded push (legacy) the observation counts as before.
+   */
   recordMerge(
     taskId: string,
     workId: string,
     repositoryId: string,
     changeRequestId: string,
-    merged: boolean,
+    observedMerged: boolean,
+    headSha: string,
     observationId: string,
     at: number,
   ): void {
@@ -387,6 +393,11 @@ export class WorkspaceLifecycleStore {
     const current = generation.repositoryClocks.find(
       (r) => r.repositoryId === repositoryId,
     );
+    // shortcut: only an exact head match proves coverage, upgrade to an ancestry proof if
+    // hosts report merged heads that contain, but differ from, cab's last push.
+    const merged =
+      observedMerged &&
+      (current?.pushedCommit == null || current.pushedCommit === headSha);
     if (
       current?.changeRequestId === changeRequestId &&
       current.merged === merged
