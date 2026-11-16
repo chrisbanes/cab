@@ -1221,8 +1221,9 @@ stored before anything runs, same-key requests run one at a time, and the same k
 replays the original receipt, also after a restart or re-provisioning; the same key
 with other content, or a new key naming a replaced workspace, is a conflict. A
 refusal returns its reason, redacted under the task's exclusions, with no receipt; a
-refused request may be sent again. A removal held part way is reported with its
-operation ID and never run again under any key until it is reconciled. The task page's
+refused request may be sent again. A removal held part way is reported to the same
+key with its operation ID; a new key gets the general reason that execution is not
+settled or the workspace is held. Neither runs it again until it is reconciled. The task page's
 confirmation lists what goes (each worktree with its ignored files, scratch, other
 workspace-root files and the Claude temporary base) and what stays (the task branch at
 its pushed commit, change requests, results and conversations), and says removal

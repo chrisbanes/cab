@@ -588,10 +588,10 @@ anything is deleted; same-key requests run one at a time and replay the original
 `workspace-remove {taskId, workspaceId, operationId, removedAt, repositories}`
 receipt, also after a restart or a new workspace. A refusal is `409 conflict` with
 the redacted reason and no receipt; a removal held part way names its operation
-and is never run again. The key is reused while unresolved, its body is frozen
-(a different workspace under the same key is refused before sending) and a reused
-key is first read back with `operation get --type task.workspace.remove`, so a lost
-reply sends nothing more. Output prints the workspace, operation, time and each
+to the same key and is never run again. The key is chosen per task and workspace generation and
+reused while unresolved, so a new workspace gets a new key; its body is frozen, and
+a reused key is first read back with `operation get --type task.workspace.remove`,
+so a lost reply sends nothing more. Output prints the workspace, operation, time and each
 repository's pushed or base evidence, and that the task branch, change requests,
 results and conversations remain. `task show TASK_ID` is an alias of `task get`;
 both print the latest removal and trim records as `Workspace: Workspace removed

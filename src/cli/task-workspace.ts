@@ -118,15 +118,17 @@ export const taskWorkspaceCommands = new Map<string, WriteCommand>([
           );
         const command = { type, taskId, workspaceId };
         const scope = `task:${taskId}`;
-        // Keyed by task alone, so an unresolved attempt is reused; its frozen body then refuses
-        // to send a different workspace under the same key.
+        // Keyed by task and workspace: an unresolved attempt for this workspace is reused, and a
+        // new workspace generation gets a new key.
         const { key, digest, reused } = await chooseKey(
           ctx,
           session,
           { scope, type },
-          { type, taskId },
+          command,
         );
-        const match = (r: CommandReceipt) =>
+        const isReceipt = (
+          r: CommandReceipt,
+        ): r is Extract<CommandReceipt, { kind: "workspace-remove" }> =>
           r.kind === "workspace-remove" &&
           r.key === key &&
           r.taskId === taskId &&
@@ -140,11 +142,7 @@ export const taskWorkspaceCommands = new Map<string, WriteCommand>([
                 operationReadSchema,
               )
               .then((read) =>
-                // The original receipt stands even if the task has a new workspace since.
-                read.data.state === "recorded" &&
-                read.data.receipt.kind === "workspace-remove" &&
-                read.data.receipt.key === key &&
-                read.data.receipt.taskId === taskId
+                read.data.state === "recorded" && isReceipt(read.data.receipt)
                   ? read.data.receipt
                   : undefined,
               )
@@ -159,7 +157,7 @@ export const taskWorkspaceCommands = new Map<string, WriteCommand>([
           await ctx.journal
             .append(identity, digest, "recorded")
             .catch(() => undefined);
-        const { receipt, request } = recorded
+        const sent = recorded
           ? { receipt: recorded, request: identity }
           : await sendCommand(ctx, session, {
               scope,
@@ -169,23 +167,25 @@ export const taskWorkspaceCommands = new Map<string, WriteCommand>([
               resource: taskId,
               command: exactCommand(command, key),
               freezeBody: true,
-              match,
+              match: isReceipt,
             });
-        const removed =
-          receipt.kind === "workspace-remove"
-            ? receipt.workspaceId
-            : workspaceId;
+        const { request } = sent;
+        // sendCommand accepted it only through `isReceipt`.
+        const receipt = sent.receipt as Extract<
+          CommandReceipt,
+          { kind: "workspace-remove" }
+        >;
         const after = await readAfter(session, taskId);
+        // The task read names branches; without it, the receipt's commits in the same format.
         const evidence =
-          after?.workspace?.removal?.workspaceId === removed
+          after?.workspace?.removal?.workspaceId === workspaceId
             ? workspaceRecordLines(after).filter((line) =>
                 line.startsWith("  "),
               )
-            : receipt.kind === "workspace-remove"
-              ? receipt.repositories.map(
-                  (r) => `  ${r.repositoryId}: ${r.kind} ${r.commit}`,
-                )
-              : [];
+            : receipt.repositories.map(
+                (r) =>
+                  `  ${removalEvidenceText({ ...r, branch: null }, r.repositoryId)}`,
+              );
         return writeOutput({
           request,
           receipt,
@@ -193,13 +193,9 @@ export const taskWorkspaceCommands = new Map<string, WriteCommand>([
           effect: "completed",
           summary: `Removed the workspace of task ${taskId}`,
           lines: [
-            ["Workspace", removed],
-            ...(receipt.kind === "workspace-remove"
-              ? ([
-                  ["Removed", iso(receipt.removedAt)],
-                  ["Operation", receipt.operationId],
-                ] as [string, string][])
-              : []),
+            ["Workspace", workspaceId],
+            ["Removed", iso(receipt.removedAt)],
+            ["Operation", receipt.operationId],
           ],
           notes: [
             ...(evidence.length ? ["Evidence:", ...evidence] : []),

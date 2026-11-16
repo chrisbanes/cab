@@ -233,3 +233,51 @@ test("a lost removal reply is read back under its key with no second command", a
   assert.notEqual(JSON.parse(again.posts[0]!).key, key);
   assert.match(r.json().error.message, /This workspace was already removed\./);
 });
+
+test("after a lost reply and a new workspace, the next removal is a new request", async (t) => {
+  const o = await startCliOperator(t);
+  // Repository-free, so the new workspace needs no repository links.
+  const binding = await o.s.f.service.provisionTask(o.s.taskId, []);
+  o.d.execute({
+    type: "task.configure",
+    actor: "operator",
+    key: randomUUID(),
+    projectId: o.s.projectId,
+    taskId: o.s.taskId,
+    expectedVersion: Number(o.d.task(o.s.taskId).version),
+    state: "done",
+  } as never);
+  const lost = counting(true);
+  let r = await o.cli("rw", ["task", "workspace-remove", o.s.taskId], {
+    fetch: lost.fetch,
+  });
+  assert.equal(r.code, 6, r.err + r.out);
+  const stranded = r.json().error.request.key;
+  assert.equal(existsSync(binding.path), false);
+  // The task gets a new workspace generation before the operator retries.
+  const next = await o.s.f.service.provisionTask(o.s.taskId, []);
+  assert.notEqual(next.workspaceId, binding.workspaceId);
+  const again = counting();
+  r = await o.cli("rw", ["task", "workspace-remove", o.s.taskId], {
+    fetch: again.fetch,
+  });
+  assert.equal(r.code, 0, r.err + r.out);
+  assert.equal(r.json().data.reusedRequest, false);
+  assert.equal(again.posts.length, 1);
+  const sent = JSON.parse(again.posts[0]!);
+  assert.notEqual(sent.key, stranded);
+  assert.equal(sent.workspaceId, next.workspaceId);
+  assert.equal(existsSync(next.path), false);
+});
+
+test("a read-only credential cannot remove a workspace", async (t) => {
+  const o = await startCliOperator(t);
+  const { binding } = await workspace(o);
+  const sent = counting();
+  const r = await o.cli("ro", ["task", "workspace-remove", o.s.taskId], {
+    fetch: sent.fetch,
+  });
+  assert.equal(r.code, 3, r.err + r.out);
+  assert.deepEqual(sent.posts, []);
+  assert.equal(existsSync(binding.path), true);
+});

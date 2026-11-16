@@ -4813,7 +4813,7 @@ export class OperatorApi {
               repositories: (removal.repositories ?? []).map((r) => ({
                 repositoryId: r.repositoryId,
                 kind: r.kind,
-                branch: this.safe(r.branch, excluded, 1024),
+                branch: this.exact(r.branch, excluded, 1024),
                 commit: r.commit,
               })),
             }

@@ -237,3 +237,63 @@ test("a held removal reports its operation, redacted, and never runs again", asy
     state: "not-recorded",
   });
 });
+
+test("a request interrupted before its operation began loses its hold at restart and removes once", async (t) => {
+  for (const retry of ["same key", "new key"] as const) {
+    const w = await removable(t);
+    w.configure("done");
+    const body = w.command(w.binding.workspaceId);
+    const operationId = randomUUID();
+    // Reserved and holding, then stopped during planning: no maintenance operation exists.
+    startedOf(w.f.service).state.reserveWorkspaceRemoval(body, operationId);
+    w.f.seedPersistedState((db) =>
+      db
+        .prepare(
+          "INSERT INTO task_archival_holds (taskId, reason, ownerToken) VALUES (?, 'Workspace removal', ?)",
+        )
+        .run(w.taskId, operationId),
+    );
+    await w.s.restart();
+    const response = await w.post(
+      retry === "same key" ? body : w.command(w.binding.workspaceId),
+    );
+    assert.equal(response.status, 200, retry);
+    assert.equal(existsSync(w.binding.path), false, retry);
+    assert.deepEqual(
+      w
+        .lifecycle()
+        .operations(w.binding)
+        .map((o) => [o.kind, o.state]),
+      [["remove", "completed"]],
+      retry,
+    );
+  }
+});
+
+test("a reserved request whose removal completed records its receipt on replay", async (t) => {
+  const w = await removable(t);
+  w.configure("done");
+  const body = w.command(w.binding.workspaceId);
+  const operationId = randomUUID();
+  startedOf(w.f.service).state.reserveWorkspaceRemoval(body, operationId);
+  // The removal finished, but the receipt was never written (a crash before it).
+  const removed = await w.f.service.removeTaskWorkspace(w.taskId, "manual", {
+    workspaceId: w.binding.workspaceId,
+    operationId,
+  });
+  assert.equal(removed.outcome, "cleaned");
+  assert.equal(
+    JSON.parse(w.receiptRows()[0]!.receiptJson).kind,
+    "workspace-remove-pending",
+  );
+  const response = await w.post(body);
+  assert.equal(response.status, 200);
+  const receipt = await response.json();
+  assert.equal(receipt.operationId, operationId);
+  assert.equal(
+    receipt.removedAt,
+    w.lifecycle().removal(w.binding)?.completedAt,
+  );
+  assert.deepEqual(JSON.parse(w.receiptRows()[0]!.receiptJson), receipt);
+  assert.equal(w.lifecycle().operations(w.binding).length, 1);
+});

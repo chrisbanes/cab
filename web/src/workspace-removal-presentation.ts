@@ -34,8 +34,6 @@ export const workspaceRemovalCopy = {
   recorded:
     "Workspace removed. The task branch, results and conversations remain.",
   conflict: "Not removed: the task or its workspace changed since it was read.",
-  stale:
-    "This confirmation was for an earlier workspace. Close it and review the current one.",
 } as const;
 
 /**

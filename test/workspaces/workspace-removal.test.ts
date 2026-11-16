@@ -27,6 +27,7 @@ import { linkBindingRepositories } from "../fixtures/workspace-removal.js";
 import { captureNativeResult } from "../fixtures/native-result.js";
 import { createOperatorFixture } from "../fixtures/operator-web.js";
 import { startedOf } from "../fixtures/service-internals.js";
+import { OperatorApi } from "../../src/standalone/operator-api.js";
 import { tmpdir } from "../fixtures/temp.js";
 
 const git = (cwd: string, ...args: string[]) =>
@@ -496,6 +497,53 @@ test("committed work is pushed to the task branch before the workspace is remove
       .actions(taskId)
       .every((a) => a.state === "confirmed-success"),
     true,
+  );
+});
+
+test("the operator command pushes first and its receipt and task read name the pushed branch", async (t) => {
+  const w = await world(t);
+  const { taskId, binding, worktree } = await w.task();
+  const head = commitFile(worktree(), "work.txt");
+  w.finish(taskId);
+  const api = new OperatorApi(w.f.service, [w.f.directory]);
+  const key = randomUUID();
+  const receipt = await api.execute({
+    type: "task.workspace.remove",
+    key,
+    taskId,
+    workspaceId: binding.workspaceId,
+  });
+  assert.equal(receipt.kind, "workspace-remove");
+  assert.deepEqual(
+    receipt.kind === "workspace-remove" && receipt.repositories,
+    [{ repositoryId: "R1", kind: "pushed", commit: head }],
+  );
+  gone(binding);
+  const branch = w.branchOf(taskId)!.branch;
+  assert.equal(remoteRef(w.repositories[0]!.remote, branch), head);
+  const read = await api.readTask(taskId);
+  assert.deepEqual(read.data.workspace?.removal?.repositories, [
+    { repositoryId: "R1", kind: "pushed", branch, commit: head },
+  ]);
+  // A branch name the exclusions would change is withheld whole, never partly redacted.
+  const withheld = new OperatorApi(w.f.service, [w.f.directory]);
+  const exclusions = (
+    withheld as unknown as {
+      exclusions(
+        projectId: string,
+        taskId: string,
+      ): Promise<string[] | undefined>;
+    }
+  ).exclusions.bind(withheld);
+  Object.assign(withheld, {
+    exclusions: async (projectId: string, id: string) => [
+      ...((await exclusions(projectId, id)) ?? []),
+      branch.slice(-12),
+    ],
+  });
+  assert.deepEqual(
+    (await withheld.readTask(taskId)).data.workspace?.removal?.repositories,
+    [{ repositoryId: "R1", kind: "pushed", branch: null, commit: head }],
   );
 });
 
