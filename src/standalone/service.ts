@@ -145,9 +145,12 @@ import {
 } from "./claude.js";
 import {
   type MaintenanceCandidate,
+  type MaintenanceExpectation,
   type MaintenanceOutcome,
   type MaintenancePassReport,
+  type MaintenanceRefusal,
   maintenanceReason,
+  maintenanceStillDue,
   WorkspaceMaintenance,
   type WorkspaceMaintenanceOptions,
 } from "./workspace-maintenance.js";
@@ -6223,12 +6226,28 @@ export class StandaloneService {
   async removeTaskWorkspace(
     taskId: string,
     trigger: "manual" | "delivered" | "merged" | "disk",
-    /** An operator request's confirmed generation and reserved operation identity. */
-    request?: { workspaceId: string; operationId: string },
+    /**
+     * The confirmed generation and reserved operation identity; an automatic trigger also names
+     * what its pass decided from, which is re-derived here and never trusted.
+     */
+    request?: {
+      workspaceId: string;
+      operationId: string;
+      expected?: MaintenanceExpectation;
+    },
   ): Promise<WorkspaceCleanupResult> {
     const cause = z
       .enum(["manual", "delivered", "merged", "disk"])
       .parse(trigger);
+    const expected = request?.expected;
+    if (
+      cause !== "manual" &&
+      (expected?.trigger !== cause ||
+        expected.candidate.workspaceId !== request?.workspaceId)
+    )
+      throw new Error(
+        "An automatic workspace removal names the generation and trigger its pass decided from",
+      );
     return this.withProjectWrite(
       this.taskProject(taskId),
       "callback",
@@ -6250,7 +6269,7 @@ export class StandaloneService {
         const retained = (
           current: TaskWorkspaceBinding,
           reason: string,
-          code?: WorkspaceMaintenanceReason,
+          code?: MaintenanceRefusal,
         ): WorkspaceCleanupResult => ({
           outcome: "retained",
           binding: current,
@@ -6296,6 +6315,27 @@ export class StandaloneService {
             "unsettled",
           );
         const owner = { taskId, workspaceId: binding.workspaceId };
+        // Re-derived under this hold until destruction begins (the binding leaves `ready`);
+        // manual removal has no retention to re-derive.
+        let ineligible = false;
+        const eligible = () => {
+          if (
+            !expected ||
+            workspaceBindings.get(taskId)?.state !== "ready" ||
+            this.maintenanceEligible(taskId, expected, "remove")
+          )
+            return true;
+          ineligible = true;
+          return false;
+        };
+        const stale = (
+          result: WorkspaceCleanupResult,
+        ): WorkspaceCleanupResult =>
+          ineligible && result.outcome === "retained"
+            ? { ...result, code: "eligibility-changed" }
+            : result;
+        const changedReason =
+          "The workspace's maintenance eligibility changed since the pass decided";
         const attempt = () =>
           lifecycle.get(binding.workspaceId)
             ? lifecycle
@@ -6328,8 +6368,10 @@ export class StandaloneService {
                   deliveryStore.taskBranch(taskId, work.repositoryId)
                     ?.lastPushedSha ?? null,
               })),
-            ownership: () => blocked() === undefined,
+            ownership: () => blocked() === undefined && eligible(),
           });
+          if (!eligible())
+            return retained(binding, changedReason, "eligibility-changed");
           const refusal = blocked();
           if (refusal)
             return retained(binding, refusal, removalBlockerCodes[refusal]);
@@ -6343,7 +6385,9 @@ export class StandaloneService {
               "maintenance-held",
             );
           const plan = await workspaces.removalPlan(taskId, facts());
-          if (plan.outcome === "retained") return plan;
+          if (plan.outcome === "retained") return stale(plan);
+          if (!eligible())
+            return retained(binding, changedReason, "eligibility-changed");
           lifecycle.beginOperation(owner, {
             operationId,
             kind: "remove",
@@ -6353,6 +6397,10 @@ export class StandaloneService {
           // The archival hold, not the workspace lock, spans the push: delivery reads the workspace.
           for (const repository of plan.repositories) {
             if (repository.proof) continue;
+            if (!eligible()) {
+              lifecycle.refuseOperation(owner, operationId, changedReason);
+              return retained(binding, changedReason, "eligibility-changed");
+            }
             const caller: WorkspaceRemovalCaller = {
               actor: "service",
               purpose: "workspace-removal",
@@ -6403,14 +6451,16 @@ export class StandaloneService {
               );
             }
           }
-          return await workspaces.remove(taskId, {
-            ...facts(),
-            lifecycle,
-            operationId,
-            releaseClaudeBase: async () =>
-              (await releaseClaudeTemporaryBase(binding.path)).outcome ===
-              "complete",
-          });
+          return stale(
+            await workspaces.remove(taskId, {
+              ...facts(),
+              lifecycle,
+              operationId,
+              releaseClaudeBase: async () =>
+                (await releaseClaudeTemporaryBase(binding.path)).outcome ===
+                "complete",
+            }),
+          );
         } catch (error) {
           const current = attempt();
           if (current?.state === "active" && !current.effects.length)
@@ -6567,9 +6617,16 @@ export class StandaloneService {
   async trimTaskWorkspace(
     taskId: string,
     trigger: "manual" | "idle" | "disk",
-    /** The generation an automatic pass chose; a replaced workspace is refused. */
-    workspaceId?: string,
+    /**
+     * What an automatic pass decided from: its generation, re-derived here under the lease and
+     * never trusted. Required for automatic triggers.
+     */
+    expected?: MaintenanceExpectation,
   ): Promise<WorkspaceTrimResult> {
+    if (trigger !== "manual" && expected?.trigger !== trigger)
+      throw new Error(
+        "An automatic workspace trim names the generation and trigger its pass decided from",
+      );
     return this.withProjectWrite(
       this.taskProject(taskId),
       "callback",
@@ -6586,19 +6643,52 @@ export class StandaloneService {
           };
         try {
           const current = workspaceBindings.get(taskId);
-          if (workspaceId !== undefined && current?.workspaceId !== workspaceId)
+          if (
+            expected !== undefined &&
+            current?.workspaceId !== expected.candidate.workspaceId
+          )
             return {
               outcome: "refused",
               binding: current,
               reason: "The task's workspace was replaced",
             };
-          return await workspaces.trim(
+          const lifecycle = new WorkspaceLifecycleStore(this.cache!);
+          // Re-derived under this lease until the trim journals its operation, its first effect.
+          let ineligible = false;
+          const eligible = () => {
+            if (
+              !expected ||
+              (lifecycle.get(expected.candidate.workspaceId) &&
+                lifecycle
+                  .operations({
+                    taskId,
+                    workspaceId: expected.candidate.workspaceId,
+                  })
+                  .some((o) => o.operationId === owner)) ||
+              this.maintenanceEligible(taskId, expected, "trim")
+            )
+              return true;
+            ineligible = true;
+            return false;
+          };
+          if (!eligible())
+            return {
+              outcome: "refused",
+              binding: current,
+              reason:
+                "The workspace's maintenance eligibility changed since the pass decided",
+              code: "eligibility-changed",
+            };
+          const result = await workspaces.trim(
             taskId,
             trigger,
-            new WorkspaceLifecycleStore(this.cache!),
-            () => state.confirmArchive(taskId, owner),
+            lifecycle,
+            () => state.confirmArchive(taskId, owner) && eligible(),
             owner,
           );
+          return ineligible && result.outcome === "refused"
+            ? { ...result, code: "eligibility-changed" }
+            : result;
         } finally {
           // Trim effects are awaited before it returns or throws, so only Git uncertainty
           // recorded on the workspace can mean an unsettled child; that keeps the lease.
@@ -6631,7 +6721,7 @@ export class StandaloneService {
       run: () => Promise<{
         done: boolean;
         reason?: string;
-        code?: WorkspaceMaintenanceReason | undefined;
+        code?: MaintenanceRefusal | undefined;
       }>,
     ): Promise<MaintenanceOutcome> => {
       if (!live()) return { done: false, reason: "refused" };
@@ -6655,23 +6745,31 @@ export class StandaloneService {
     };
     return {
       candidates: () => (live() ? this.maintenanceCandidates() : []),
-      trim: (candidate, trigger) =>
+      trim: (candidate, trigger, measuredBytes) =>
         effect(async () => {
           const result = await this.trimTaskWorkspace(
             candidate.taskId,
             trigger,
-            candidate.workspaceId,
+            { candidate, trigger, measuredBytes },
           );
           return result.outcome === "trimmed"
             ? { done: true }
-            : { done: false, reason: result.reason };
+            : {
+                done: false,
+                reason: result.reason,
+                code: result.outcome === "refused" ? result.code : undefined,
+              };
         }),
-      remove: (candidate, trigger) =>
+      remove: (candidate, trigger, measuredBytes) =>
         effect(async () => {
           const result = await this.removeTaskWorkspace(
             candidate.taskId,
             trigger,
-            { workspaceId: candidate.workspaceId, operationId: randomUUID() },
+            {
+              workspaceId: candidate.workspaceId,
+              operationId: randomUUID(),
+              expected: { candidate, trigger, measuredBytes },
+            },
           );
           return result.outcome === "cleaned"
             ? { done: true }
@@ -6708,75 +6806,108 @@ export class StandaloneService {
 
   /** Every task workspace generation on disk, as stored facts. */
   private maintenanceCandidates(): MaintenanceCandidate[] {
-    const { workspaceBindings, domain, deliveryStore } = this.started();
     const lifecycle = new WorkspaceLifecycleStore(this.cache!);
-    const candidates: MaintenanceCandidate[] = [];
-    for (const binding of workspaceBindings.list()) {
-      if (binding.state === "archived" || binding.state === "provisioning")
-        continue;
-      const { taskId } = binding;
-      let task: ReturnType<typeof domain.task>;
-      try {
-        task = domain.task(taskId);
-      } catch {
-        continue;
-      }
-      const state = String(task.state);
-      const recorded = lifecycle.get(binding.workspaceId);
-      const generation = recorded?.taskId === taskId ? recorded : undefined;
-      const terminal = state === "done" || state === "cancelled";
-      const lastTrim = generation
-        ? Math.max(
-            -1,
-            ...lifecycle
-              .operations(generation)
-              .filter((o) => o.kind === "trim" && o.state === "completed")
-              .map((o) => o.completedAt!),
-          )
-        : -1;
-      const ended = generation?.lastTurnEndedAt ?? null;
-      // Other generations are read only when a recorded push needs attributing.
-      let generations: ReturnType<typeof lifecycle.forTask> | undefined;
-      const lastPushAt = generation?.lastPushAt ?? null;
-      candidates.push({
-        taskId,
-        workspaceId: binding.workspaceId,
-        roots: [
-          { path: binding.path, optional: false },
-          { path: claudeTemporaryBase(binding.path), optional: true },
-        ],
-        writable: this.writableTask(taskId),
-        terminal,
-        terminalAt: terminal ? (generation?.terminal?.at ?? null) : null,
-        lastTurnEndedAt: ended,
-        trimmedSinceTurn: ended !== null && lastTrim >= ended,
-        lastPushAt,
-        // A push the delivery store knows but no generation's clock recorded predates the clock.
-        pushUnknown: binding.repositories.some((repository) => {
-          const pushed = deliveryStore.taskBranch(
-            taskId,
-            repository.repositoryId,
-          )?.lastPushedSha;
-          if (!pushed) return false;
-          generations ??= lifecycle.forTask(taskId);
-          return !generations.some((g) =>
-            g.repositoryClocks.some(
-              (c) =>
-                c.repositoryId === repository.repositoryId &&
-                c.pushedCommit === pushed,
-            ),
-          );
-        }),
-        allMergedAt: terminal ? (generation?.allMergedAt ?? null) : null,
-        fingerprint: JSON.stringify([
-          task.version,
-          deliveryStore.configuration(String(task.projectId)).version,
-          ended,
-          lastPushAt,
-        ]),
-      });
+    return this.started()
+      .workspaceBindings.list()
+      .flatMap(
+        (binding) => this.maintenanceCandidate(binding, lifecycle) ?? [],
+      );
+  }
+
+  /**
+   * Whether an automatic effect is still due for the task's current generation, from current
+   * stored facts and current settings, by the pass's own rules.
+   */
+  private maintenanceEligible(
+    taskId: string,
+    expected: MaintenanceExpectation,
+    kind: "trim" | "remove",
+  ): boolean {
+    const binding = this.started().workspaceBindings.get(taskId);
+    const current = binding
+      ? this.maintenanceCandidate(
+          binding,
+          new WorkspaceLifecycleStore(this.cache!),
+        )
+      : undefined;
+    return maintenanceStillDue(
+      current,
+      expected,
+      kind,
+      this.workspaceMaintenance,
+      (this.options.maintenancePass?.now ?? Date.now)(),
+    );
+  }
+
+  /** One task workspace generation as stored facts; undefined when not maintainable. */
+  private maintenanceCandidate(
+    binding: TaskWorkspaceBinding,
+    lifecycle: WorkspaceLifecycleStore,
+  ): MaintenanceCandidate | undefined {
+    const { domain, deliveryStore } = this.started();
+    if (binding.state === "archived" || binding.state === "provisioning")
+      return undefined;
+    const { taskId } = binding;
+    let task: ReturnType<typeof domain.task>;
+    try {
+      task = domain.task(taskId);
+    } catch {
+      return undefined;
     }
-    return candidates;
+    const state = String(task.state);
+    const recorded = lifecycle.get(binding.workspaceId);
+    const generation = recorded?.taskId === taskId ? recorded : undefined;
+    const terminal = state === "done" || state === "cancelled";
+    const lastTrim = generation
+      ? Math.max(
+          -1,
+          ...lifecycle
+            .operations(generation)
+            .filter((o) => o.kind === "trim" && o.state === "completed")
+            .map((o) => o.completedAt!),
+        )
+      : -1;
+    const ended = generation?.lastTurnEndedAt ?? null;
+    // Other generations are read only when a recorded push needs attributing.
+    let generations: ReturnType<typeof lifecycle.forTask> | undefined;
+    const lastPushAt = generation?.lastPushAt ?? null;
+    return {
+      taskId,
+      workspaceId: binding.workspaceId,
+      roots: [
+        { path: binding.path, optional: false },
+        { path: claudeTemporaryBase(binding.path), optional: true },
+      ],
+      writable: this.writableTask(taskId),
+      terminal,
+      terminalAt: terminal ? (generation?.terminal?.at ?? null) : null,
+      lastTurnEndedAt: ended,
+      trimmedSinceTurn: ended !== null && lastTrim >= ended,
+      lastPushAt,
+      // A push the delivery store knows but no generation's clock recorded predates the clock.
+      pushUnknown: binding.repositories.some((repository) => {
+        const pushed = deliveryStore.taskBranch(
+          taskId,
+          repository.repositoryId,
+        )?.lastPushedSha;
+        if (!pushed) return false;
+        generations ??= lifecycle.forTask(taskId);
+        return !generations.some((g) =>
+          g.repositoryClocks.some(
+            (c) =>
+              c.repositoryId === repository.repositoryId &&
+              c.pushedCommit === pushed,
+          ),
+        );
+      }),
+      allMergedAt: terminal ? (generation?.allMergedAt ?? null) : null,
+      fingerprint: JSON.stringify([
+        task.version,
+        deliveryStore.configuration(String(task.projectId)).version,
+        ended,
+        lastPushAt,
+      ]),
+    };
   }
 
   /** A replacement keeps the durable assignment and its captured revisions. */

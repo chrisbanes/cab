@@ -290,8 +290,7 @@ async function world(t: TestContext, repositoryCount = 1) {
     /** Links the project to exactly `binding`'s repositories (or none). */
     link: (binding: Pick<TaskWorkspaceBinding, "repositories">) =>
       linkBindingRepositories(f, projectId, binding),
-    remove: (taskId: string, trigger: "manual" | "delivered" = "manual") =>
-      f.service.removeTaskWorkspace(taskId, trigger),
+    remove: (taskId: string) => f.service.removeTaskWorkspace(taskId, "manual"),
   };
 }
 
@@ -316,13 +315,13 @@ test("a done or cancelled task's clean workspace is removed with its Claude base
     mkdirSync(base, { mode: 0o700 });
     writeFileSync(join(binding.path, "evidence.txt"), "root file\n");
     w.finish(taskId, state);
-    const removed = await w.remove(taskId, "delivered");
+    const removed = await w.remove(taskId);
     assert.equal(removed.outcome, "cleaned", JSON.stringify(removed));
     if (removed.outcome !== "cleaned") return;
     assert.equal(removed.binding.state, "archived");
     gone(binding);
     assert.equal(existsSync(base), false);
-    assert.equal(removed.operation.trigger, "delivered");
+    assert.equal(removed.operation.trigger, "manual");
     assert.deepEqual(removed.operation.repositories, [
       {
         kind: "base",

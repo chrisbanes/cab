@@ -1302,9 +1302,17 @@ Manual removal is independent of the limits.
 
 The automatic maintenance pass applies them. It starts after startup recovery and wakes
 once a minute; one pass runs at a time and new tasks never wait for it. A pass reads
-stored facts only, awaits each effect through the trim and removal entry points, which
-derive every safety check again for the generation it chose, and yields between
-candidates. In order, it:
+stored facts only, reads them again after each effect and decides each next effect from
+that latest read, and yields between candidates. Its decisions never authorize an
+effect: under the effect's archival hold, the trim and removal entry points derive every
+safety check again for the generation it chose, and re-derive its trigger from current
+stored facts and the service's current limits by the pass's own rules: the retention or
+idle limit has passed, or the latest measured usage is still over the cap. They check
+again before the first deletion when the effect awaited Git or a push in between. A
+turn end, push, reopening, terminal transition or merge since the pass decided refuses
+the effect, as does a limit turned off or raised; that refusal is not listed and does
+not wait, and the next pass decides again. Manual removal has no trigger to re-derive.
+In order, it:
 
 - removes a done or cancelled task's workspace once its delivered retention has passed
   since the task's last confirmed push, or since it became terminal when nothing was
@@ -1332,8 +1340,9 @@ candidates. In order, it:
   ended turn;
 - over the disk cap, trims eligible workspaces oldest idle first, then removes done or
   cancelled ones oldest idle first while usage stays over the cap, measuring the trimmed
-  workspace again after each trim and dropping a removed one. Workspaces of unknown idle
-  time or unmeasured size are not ranked.
+  workspace again after each trim and dropping a removed one, and stopping at the first
+  measurement within the cap. Workspaces of unknown idle time or unmeasured size are not
+  ranked.
 
 A refused trim or removal is not tried again while its task version, delivery policy,
 last turn end and last push are unchanged: it waits 5 minutes, then twice as long after
@@ -1356,17 +1365,19 @@ Workspaces of archived or deleting projects are not trimmed or removed. Shutdown
 new candidates, cancels a measurement in flight and drains the effect in flight before
 the database closes.
 
-While usage stays over the cap after a pass, or a workspace past its retention was
-refused, the Inbox has exactly one installation item, Workspace maintenance. It belongs
-to no project, so project filters exclude it, and it lists each blocking workspace by
-task with cab's fixed reason (open task, unsettled execution, uncommitted work, pending
-result work, refused push, unproved history, unsettled delivery, held maintenance,
-read-only project, unknown time, unmeasured size, automatic removal off), never a path
-or Git output. Task names are resolved on each read; a deleted task's entry is dropped,
-and project deletion prunes its tasks' entries in the same transaction. A later pass
-refreshes the same item in place; it cannot be dismissed and resolves once both
-conditions clear, and a recurrence reactivates the same item. Each task link opens the
-task page; nothing is removed from the Inbox.
+While usage stays over the cap after a pass, or a workspace still past its retention at
+the end of the pass was refused, the Inbox has exactly one installation item, Workspace
+maintenance. It belongs to no project, so project filters exclude it, and it lists each
+blocking workspace by task with cab's fixed reason (open task, unsettled execution,
+uncommitted work, pending result work, refused push, unproved history, unsettled
+delivery, held maintenance, read-only project, unknown time, unmeasured size, automatic
+removal off), never a path or Git output. The item reflects the facts the pass read
+last: a workspace whose facts changed under an effect is left for the next pass to list.
+Task names are resolved on each read; a deleted task's entry is dropped, and project
+deletion prunes its tasks' entries in the same transaction. A later pass refreshes the
+same item in place; it cannot be dismissed and resolves once both conditions clear, and
+a recurrence reactivates the same item. Each task link opens the task page; nothing is
+removed from the Inbox.
 
 Every Git subprocess the service starts (workspace provisioning, cleanup and
 identity checks, file and comparison reads, setup probes and repository

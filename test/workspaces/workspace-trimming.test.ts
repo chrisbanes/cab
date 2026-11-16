@@ -840,7 +840,7 @@ test("the service trims only settled execution and the next turn's context repor
   write(join(workspace, "evidence", "kept.md"));
 
   // A running turn holds execution, so trimming refuses and deletes nothing.
-  const busy = await service.trimTaskWorkspace(taskId, "idle");
+  const busy = await service.trimTaskWorkspace(taskId, "manual");
   assert.equal(busy.outcome, "refused");
   assert.ok(existsSync(join(scratch, "cache", "file")));
 
@@ -849,7 +849,7 @@ test("the service trims only settled execution and the next turn's context repor
     () => service.list().some((i) => i.state === "completed"),
     describe,
   );
-  const trimmed = await service.trimTaskWorkspace(taskId, "idle");
+  const trimmed = await service.trimTaskWorkspace(taskId, "manual");
   assert.equal(
     trimmed.outcome,
     "trimmed",

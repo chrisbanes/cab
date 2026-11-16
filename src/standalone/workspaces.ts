@@ -1,4 +1,5 @@
 import type { WorkspaceMaintenanceReason } from "../core/inbox-lifecycle.js";
+import type { MaintenanceRefusal } from "./workspace-maintenance.js";
 import {
   initializedWorkspaceLifecycle,
   unfinishedOperation,
@@ -294,7 +295,7 @@ export type WorkspaceCleanupResult =
       binding: TaskWorkspaceBinding;
       reason: string;
       /** cab's fixed code for the refusal, where the refusing site names one. */
-      code?: WorkspaceMaintenanceReason;
+      code?: MaintenanceRefusal;
     };
 
 /** Trimmed: every effect settled after readback. Held: effects may have run; the journal says which. */
@@ -308,6 +309,8 @@ export type WorkspaceTrimResult =
       outcome: "refused";
       binding: TaskWorkspaceBinding | undefined;
       reason: string;
+      /** Set when an automatic trim's re-derived eligibility no longer holds. */
+      code?: "eligibility-changed";
     }
   | {
       outcome: "held";

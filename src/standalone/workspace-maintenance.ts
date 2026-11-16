@@ -47,25 +47,47 @@ export interface MaintenanceCandidate {
   fingerprint: string;
 }
 
+/**
+ * An automatic effect's refusal: a fixed blocker code, or `eligibility-changed` when the
+ * service's re-derivation no longer supports the effect. That one is never a blocker and never
+ * backs off; the next pass decides again from current facts.
+ */
+export type MaintenanceRefusal =
+  | WorkspaceMaintenanceReason
+  | "eligibility-changed";
+
 export type MaintenanceOutcome =
   | { done: true }
-  | { done: false; reason: WorkspaceMaintenanceReason };
+  | { done: false; reason: MaintenanceRefusal };
+
+/** What a pass decided an automatic effect from; the service re-derives it under its hold. */
+export interface MaintenanceExpectation {
+  /** The pass's snapshot: only its identity and clock basis are compared, never trusted. */
+  candidate: MaintenanceCandidate;
+  trigger: "idle" | "disk" | "delivered" | "merged";
+  /** Disk only: the latest measured usage the effect is meant to relieve. */
+  measuredBytes?: number | undefined;
+}
 
 export interface WorkspaceMaintenanceHost {
   candidates(): MaintenanceCandidate[];
+  /** `measuredBytes` is the latest measured usage, for a disk trigger. */
   trim(
     candidate: MaintenanceCandidate,
     trigger: "idle" | "disk",
+    measuredBytes?: number,
   ): Promise<MaintenanceOutcome>;
   remove(
     candidate: MaintenanceCandidate,
     trigger: "delivered" | "merged" | "disk",
+    measuredBytes?: number,
   ): Promise<MaintenanceOutcome>;
   /** Refreshes the installation Inbox item, or resolves it with null. */
   report(attention: WorkspaceMaintenanceAttention | null): void;
 }
 
 export interface WorkspaceMaintenanceOptions {
+  /** Read at each decision, never cached across a pass. */
   settings: WorkspaceMaintenanceSettings;
   host: WorkspaceMaintenanceHost;
   measure(
@@ -92,6 +114,81 @@ export interface MaintenancePassReport {
 
 const hours = (limit: number | "off") =>
   limit === "off" ? null : limit * 3_600_000;
+
+/** Both retentions off disables every automatic removal, disk-triggered ones included. */
+export const removalOn = (settings: WorkspaceMaintenanceSettings) =>
+  settings.deliveredRetentionHours !== "off" ||
+  settings.mergedRetentionHours !== "off";
+
+export const capBytes = (settings: WorkspaceMaintenanceSettings) =>
+  settings.diskCapGb === "off"
+    ? null
+    : settings.diskCapGb * definitions.diskCapGb.multiplier;
+
+/** A trim would free something new and the workspace has been idle for the idle limit. */
+export function idleDue(
+  candidate: MaintenanceCandidate,
+  settings: WorkspaceMaintenanceSettings,
+  now: number,
+): boolean {
+  const idle = hours(settings.idleHours);
+  return (
+    idle !== null &&
+    candidate.lastTurnEndedAt !== null &&
+    !candidate.trimmedSinceTurn &&
+    now - candidate.lastTurnEndedAt >= idle
+  );
+}
+
+/** The stored facts an automatic decision rests on; a turn, push, reopen or merge changes them. */
+const basis = (c: MaintenanceCandidate) =>
+  JSON.stringify([
+    c.taskId,
+    c.workspaceId,
+    c.terminal,
+    c.terminalAt,
+    c.lastTurnEndedAt,
+    c.lastPushAt,
+    c.pushUnknown,
+    c.allMergedAt,
+    c.fingerprint,
+  ]);
+
+/**
+ * Whether an automatic effect is still due, re-derived from `current` stored facts and current
+ * settings with the same rules the pass uses. Any change to the facts the pass decided from
+ * refuses, even one that would leave the effect due: the next pass decides again.
+ */
+export function maintenanceStillDue(
+  current: MaintenanceCandidate | undefined,
+  expected: MaintenanceExpectation,
+  kind: "trim" | "remove",
+  settings: WorkspaceMaintenanceSettings,
+  now: number,
+): boolean {
+  if (!current || basis(current) !== basis(expected.candidate)) return false;
+  switch (expected.trigger) {
+    case "idle":
+      return kind === "trim" && idleDue(current, settings, now);
+    case "delivered":
+    case "merged": {
+      const due = retentionDue(current, settings, now);
+      return (
+        kind === "remove" &&
+        due !== null &&
+        due !== "unknown" &&
+        due.trigger === expected.trigger
+      );
+    }
+    case "disk": {
+      const cap = capBytes(settings);
+      if (cap === null || !((expected.measuredBytes ?? 0) > cap)) return false;
+      return kind === "trim"
+        ? current.lastTurnEndedAt !== null && !current.trimmedSinceTurn
+        : removalOn(settings) && current.terminal;
+    }
+  }
+}
 
 /**
  * The automatic removal a terminal candidate is due, if any: delivered retention from its last
@@ -295,7 +392,7 @@ export class WorkspaceMaintenance {
     this.live();
     const outcome = await run();
     if (outcome.done) this.refusals.delete(key);
-    else {
+    else if (outcome.reason !== "eligibility-changed") {
       const delay =
         prior && same
           ? Math.min(prior.delay * 2, REFUSAL_RETRY_MAX_MS)
@@ -313,9 +410,6 @@ export class WorkspaceMaintenance {
   private async pass(): Promise<MaintenancePassReport> {
     const { settings, host } = this.options;
     const now = this.now();
-    const removalOn =
-      settings.deliveredRetentionHours !== "off" ||
-      settings.mergedRetentionHours !== "off";
     const report: MaintenancePassReport = {
       removed: [],
       trimmed: [],
@@ -329,19 +423,27 @@ export class WorkspaceMaintenance {
       condition: "disk-cap" | "retention",
       reason: WorkspaceMaintenanceReason,
     ) => ({ taskId: c.taskId, workspaceId: c.workspaceId, condition, reason });
+    const isBlocker = (
+      reason: MaintenanceRefusal,
+    ): reason is WorkspaceMaintenanceReason => reason !== "eligibility-changed";
     const step = async () => {
       await yieldLoop();
       this.live();
     };
-    // Stored facts are read once, then again only after an effect changed them.
+    // Facts can change while an effect awaits, so they are read again after every effect and
+    // each decision uses the latest read. The service still re-derives each one under its hold.
     let candidates = host.candidates();
-    const changed = (outcome: MaintenanceOutcome) => {
-      if (outcome.done) candidates = host.candidates();
+    const refresh = () => {
+      candidates = host.candidates();
     };
+    const latest = (workspaceId: string) =>
+      candidates.find((c) => c.workspaceId === workspaceId);
 
     // Retention: a terminal workspace past its delivered or merged limit.
-    if (removalOn)
-      for (const candidate of [...candidates]) {
+    if (removalOn(settings))
+      for (const { workspaceId } of [...candidates]) {
+        const candidate = latest(workspaceId);
+        if (!candidate) continue;
         const due = retentionDue(candidate, settings, now);
         if (due === "unknown") {
           report.gaps.push({
@@ -356,41 +458,43 @@ export class WorkspaceMaintenance {
               host.remove(candidate, due.trigger),
             )
           : { done: false as const, reason: "project-read-only" as const };
-        changed(outcome);
+        if (!("skipped" in outcome)) refresh();
         if (outcome.done)
           report.removed.push({
             workspaceId: candidate.workspaceId,
             trigger: due.trigger,
           });
-        else retention.push(blocker(candidate, "retention", outcome.reason));
+        else if (isBlocker(outcome.reason))
+          retention.push(blocker(candidate, "retention", outcome.reason));
         await step();
       }
 
     // Idle: one trim attempt per last-ended-turn epoch.
-    const idle = hours(settings.idleHours);
-    if (idle !== null)
-      for (const candidate of [...candidates]) {
-        const ended = candidate.lastTurnEndedAt;
+    if (settings.idleHours !== "off")
+      for (const { workspaceId } of [...candidates]) {
+        const candidate = latest(workspaceId);
+        const ended = candidate?.lastTurnEndedAt ?? null;
         if (
+          !candidate ||
           ended === null ||
-          candidate.trimmedSinceTurn ||
           !candidate.writable ||
-          now - ended < idle ||
+          !idleDue(candidate, settings, now) ||
           this.idleAttempted.get(candidate.workspaceId) === ended
         )
           continue;
         const outcome = await this.attempt("trim", candidate, now, () =>
           host.trim(candidate, "idle"),
         );
-        // A refusal that may clear by itself (a running turn, a hold) backs off and retries in
+        // A refusal that may clear by itself (a running turn, a hold, changed facts) retries in
         // this epoch; success or any other refusal ends the epoch.
         if (
           outcome.done ||
           (outcome.reason !== "unsettled" &&
-            outcome.reason !== "maintenance-held")
+            outcome.reason !== "maintenance-held" &&
+            outcome.reason !== "eligibility-changed")
         )
           this.idleAttempted.set(candidate.workspaceId, ended);
-        changed(outcome);
+        if (!("skipped" in outcome)) refresh();
         if (outcome.done)
           report.trimmed.push({
             workspaceId: candidate.workspaceId,
@@ -399,13 +503,13 @@ export class WorkspaceMaintenance {
         await step();
       }
 
-    // Disk cap: trim oldest idle first, then remove terminal ones, remeasuring after each.
+    // Disk cap: trim oldest idle first, then remove terminal ones, remeasuring after each and
+    // stopping once the latest measurement is within the cap.
     let cap: Pick<WorkspaceMaintenanceAttention, "usage" | "blockers"> = {
       usage: null,
       blockers: [],
     };
-    if (settings.diskCapGb !== "off") {
-      const capBytes = settings.diskCapGb * definitions.diskCapGb.multiplier;
+    if (capBytes(settings) !== null) {
       let sizes = await this.measure(candidates, now);
       const total = () =>
         candidates.reduce((sum, c) => sum + (sizes.get(c.workspaceId) ?? 0), 0);
@@ -415,7 +519,10 @@ export class WorkspaceMaintenance {
       const remeasure = async () => {
         sizes = await this.measure(candidates, now);
       };
-      const over = () => total() > capBytes;
+      const over = () => {
+        const limit = capBytes(settings);
+        return limit !== null && total() > limit;
+      };
       if (!over() && unmeasured().length) {
         // Known usage is under the cap but some is unknown, so the cap is unconfirmed: name each
         // unmeasured workspace instead of resolving the condition.
@@ -428,71 +535,94 @@ export class WorkspaceMaintenance {
         };
       } else if (over()) {
         const refused = new Map<string, WorkspaceMaintenanceReason>();
+        // Workspaces whose facts changed under an effect: named by the next pass, not this one.
+        const changed = new Set<string>();
         const ranked = () =>
           candidates
             .filter(
               (c) =>
                 c.lastTurnEndedAt !== null && sizes.get(c.workspaceId) !== null,
             )
-            .sort(idleOrder);
-        for (const candidate of ranked()) {
+            .sort(idleOrder)
+            .map((c) => c.workspaceId);
+        const settle = async (
+          candidate: MaintenanceCandidate,
+          kind: "trim" | "remove",
+          outcome: MaintenanceOutcome & { skipped?: true },
+        ) => {
+          if (outcome.done)
+            report[kind === "trim" ? "trimmed" : "removed"].push({
+              workspaceId: candidate.workspaceId,
+              trigger: "disk",
+            });
+          else if (isBlocker(outcome.reason))
+            refused.set(candidate.workspaceId, outcome.reason);
+          else changed.add(candidate.workspaceId);
+          if (!("skipped" in outcome)) {
+            refresh();
+            await remeasure();
+          }
+          await step();
+        };
+        for (const workspaceId of ranked()) {
           if (!over()) break;
+          const candidate = latest(workspaceId);
           if (
+            !candidate ||
+            candidate.lastTurnEndedAt === null ||
             candidate.trimmedSinceTurn ||
-            !(sizes.get(candidate.workspaceId) ?? 0)
+            !(sizes.get(workspaceId) ?? 0)
           )
             continue;
           if (!candidate.writable) {
-            refused.set(candidate.workspaceId, "project-read-only");
+            refused.set(workspaceId, "project-read-only");
             continue;
           }
-          const outcome = await this.attempt("trim", candidate, now, () =>
-            host.trim(candidate, "disk"),
+          const pressure = total();
+          await settle(
+            candidate,
+            "trim",
+            await this.attempt("trim", candidate, now, () =>
+              host.trim(candidate, "disk", pressure),
+            ),
           );
-          if (outcome.done)
-            report.trimmed.push({
-              workspaceId: candidate.workspaceId,
-              trigger: "disk",
-            });
-          else refused.set(candidate.workspaceId, outcome.reason);
-          if (!("skipped" in outcome)) {
-            changed(outcome);
-            await remeasure();
-          }
-          await step();
         }
-        for (const candidate of ranked()) {
+        for (const workspaceId of ranked()) {
           if (!over()) break;
-          if (!candidate.terminal || refused.has(candidate.workspaceId))
+          const candidate = latest(workspaceId);
+          if (
+            !candidate?.terminal ||
+            refused.has(workspaceId) ||
+            changed.has(workspaceId)
+          )
             continue;
-          if (!removalOn) {
-            refused.set(candidate.workspaceId, "removal-off");
+          if (!removalOn(settings)) {
+            refused.set(workspaceId, "removal-off");
             continue;
           }
           if (!candidate.writable) {
-            refused.set(candidate.workspaceId, "project-read-only");
+            refused.set(workspaceId, "project-read-only");
             continue;
           }
-          const outcome = await this.attempt("remove", candidate, now, () =>
-            host.remove(candidate, "disk"),
+          const pressure = total();
+          await settle(
+            candidate,
+            "remove",
+            await this.attempt("remove", candidate, now, () =>
+              host.remove(candidate, "disk", pressure),
+            ),
           );
-          if (outcome.done)
-            report.removed.push({
-              workspaceId: candidate.workspaceId,
-              trigger: "disk",
-            });
-          else refused.set(candidate.workspaceId, outcome.reason);
-          if (!("skipped" in outcome)) {
-            changed(outcome);
-            await remeasure();
-          }
-          await step();
         }
-        if (over()) {
+        const limit = capBytes(settings);
+        if (over() && limit !== null) {
           cap = {
-            usage: { measuredBytes: total(), capBytes },
+            usage: { measuredBytes: total(), capBytes: limit },
             blockers: candidates
-              .filter((c) => (sizes.get(c.workspaceId) ?? 1) > 0)
+              .filter(
+                (c) =>
+                  (sizes.get(c.workspaceId) ?? 1) > 0 &&
+                  !changed.has(c.workspaceId),
+              )
               .map((c) =>
                 blocker(
                   c,
@@ -524,7 +654,16 @@ export class WorkspaceMaintenance {
       }
     }
     this.live();
-    const all = [...retention, ...cap.blockers];
+    // A retention refusal is reported only while the latest facts still have it due; one whose
+    // facts changed since (reopened, pushed, removed) is decided again by the next pass.
+    const all = [
+      ...retention.filter((b) => {
+        const c = latest(b.workspaceId);
+        const due = c && retentionDue(c, settings, now);
+        return !!due && due !== "unknown";
+      }),
+      ...cap.blockers,
+    ];
     const attention =
       cap.usage || all.length
         ? {

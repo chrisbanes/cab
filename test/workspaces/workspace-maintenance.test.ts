@@ -21,7 +21,10 @@ import { WorkspaceLifecycleStore } from "../../src/core/workspace-lifecycle.js";
 import type { WorkspaceMaintenanceSettings } from "../../src/operator/workspace-maintenance-settings.js";
 import { claudeTemporaryBase } from "../../src/standalone/claude.js";
 import { OperatorApi } from "../../src/standalone/operator-api.js";
-import type { StandaloneServiceOptions } from "../../src/standalone/service.js";
+import type {
+  StandaloneService,
+  StandaloneServiceOptions,
+} from "../../src/standalone/service.js";
 import {
   type MaintenanceCandidate,
   type MaintenanceOutcome,
@@ -88,6 +91,8 @@ function fakeWorld(
     refuse?: Record<string, MaintenanceOutcome & { done: false }>;
     /** Bytes a trim leaves, by candidate number; default: unchanged. */
     trimmed?: Record<number, number>;
+    /** Runs while an effect is in flight, as other service work may. */
+    during?: (call: string, list: MaintenanceCandidate[]) => void;
   } = {},
 ) {
   const list = [...candidates];
@@ -95,6 +100,8 @@ function fakeWorld(
     Object.entries(sizes).map(([n, bytes]) => [wid(Number(n)), bytes]),
   );
   const calls: string[] = [];
+  /** The measured usage each disk-triggered effect was given. */
+  const pressures: number[] = [];
   const reports: Array<WorkspaceMaintenanceAttention | null> = [];
   const clock = { now: 0 };
   let measured = 0;
@@ -106,6 +113,7 @@ function fakeWorld(
     trigger: string,
   ): Promise<MaintenanceOutcome> => {
     calls.push(`${kind}:${trigger}:${number(c)}`);
+    options.during?.(calls.at(-1)!, list);
     const refused = options.refuse?.[`${kind}:${number(c)}`];
     if (refused) return refused;
     if (kind === "remove") {
@@ -123,8 +131,14 @@ function fakeWorld(
       settings: settings({ ...options.settings, ...extra }),
       host: {
         candidates: () => [...list],
-        trim: (c, trigger) => effect("trim", c, trigger),
-        remove: (c, trigger) => effect("remove", c, trigger),
+        trim: (c, trigger, bytes) => {
+          if (bytes !== undefined) pressures.push(bytes);
+          return effect("trim", c, trigger);
+        },
+        remove: (c, trigger, bytes) => {
+          if (bytes !== undefined) pressures.push(bytes);
+          return effect("remove", c, trigger);
+        },
         report: (attention) => {
           reports.push(attention);
         },
@@ -143,6 +157,7 @@ function fakeWorld(
     list,
     table,
     calls,
+    pressures,
     reports,
     clock,
     measured: () => measured,
@@ -407,8 +422,53 @@ test("when trimming is not enough it removes terminal workspaces oldest idle fir
     "trim:disk:4",
     "remove:disk:2",
   ]);
+  // Each effect carries the latest measurement, and the first one within the cap stops the loop.
+  assert.deepEqual(
+    w.pressures,
+    [13, 13, 13, 13, 13].map((n) => n * GB),
+  );
   assert.equal(w.total(), 10 * GB);
   assert.equal(report?.attention, null);
+});
+
+test("each decision uses facts read after the previous effect, never the pass's first snapshot", async () => {
+  const w = fakeWorld(
+    [
+      candidate(1, { terminal: true, terminalAt: 0 }),
+      candidate(2, { terminal: true, terminalAt: 0 }),
+    ],
+    {},
+    {
+      // While 1 is removed, 2 is reopened, pushed and completed: its delivered clock restarts.
+      during: (call, list) => {
+        if (call !== "remove:delivered:1") return;
+        const i = list.findIndex((c) => c.workspaceId === wid(2));
+        list[i] = { ...list[i]!, lastPushAt: 25 * H, fingerprint: "facts-2" };
+      },
+    },
+  );
+  w.clock.now = 25 * H;
+  const report = await w.make().wake();
+  assert.deepEqual(w.calls, ["remove:delivered:1"]);
+  assert.deepEqual(report?.removed, [
+    { workspaceId: wid(1), trigger: "delivered" },
+  ]);
+  assert.equal(report?.attention, null);
+});
+
+test("a changed-eligibility refusal is never a blocker and never backs off", async () => {
+  const w = fakeWorld(
+    [candidate(1, { terminal: true, terminalAt: 0 })],
+    {},
+    {
+      refuse: { "remove:1": { done: false, reason: "eligibility-changed" } },
+    },
+  );
+  w.clock.now = 25 * H;
+  const world = w.make();
+  assert.equal((await world.wake())?.attention, null);
+  await world.wake();
+  assert.deepEqual(w.calls, ["remove:delivered:1", "remove:delivered:1"]);
 });
 
 test("refused candidates leave residual pressure named by one attention report", async () => {
@@ -855,7 +915,10 @@ async function serviceWorld(
     name: "Maintenance",
     leadProfileId: null,
   });
-  const task = async (title = "Maintained task") => {
+  const task = async (
+    title = "Maintained task",
+    sources: Parameters<typeof f.service.provisionTask>[1] = [],
+  ) => {
     const taskId = randomUUID();
     domain.execute({
       type: "task.create",
@@ -866,7 +929,7 @@ async function serviceWorld(
       title,
       outcome: "O",
     });
-    const binding = await f.service.provisionTask(taskId, []);
+    const binding = await f.service.provisionTask(taskId, sources);
     assert.equal(binding.state, "ready", binding.reason ?? "");
     return { taskId, binding };
   };
@@ -890,10 +953,24 @@ async function serviceWorld(
     (await api().readInbox(params)).data.items.filter(
       (i) => i.kind === "workspace-maintenance",
     );
+  /** A confirmed ordinary push recorded now, on the test clock. */
+  const pushed = (binding: { taskId: string; workspaceId: string }) => {
+    const at = Date.now() + clock.offset;
+    lifecycle().observe(binding, {
+      kind: "push",
+      eventId: `push:${randomUUID()}`,
+      at,
+      repositoryId: "R1",
+      commit: randomUUID().replaceAll("-", "").padEnd(40, "0"),
+      removalOperationId: null,
+    });
+    return at;
+  };
   return {
     f,
     clock,
     sizes,
+    pushed,
     measures: () => measures,
     domain,
     projectId,
@@ -1442,6 +1519,280 @@ test("final service checks refuse what a stale snapshot chose: a reopened task a
   assert.equal(existsSync(reopened.binding.path), true);
   assert.equal(existsSync(join(outside, "sentinel")), true);
   assert.equal(existsSync(`${swapped.binding.path}.moved`), true);
+});
+
+/**
+ * The service's applied limits, which every automatic decision reads at effect time. Settings
+ * apply only on start; tests write them to stand in for a limit that differs by then.
+ */
+const liveLimits = (service: StandaloneService) =>
+  service.workspaceMaintenance as {
+    -readonly [K in keyof WorkspaceMaintenanceSettings]: WorkspaceMaintenanceSettings[K];
+  };
+
+/** A one-repository source, so a generation has a repository to push and merge. */
+function sourceRepository(t: TestContext) {
+  const path = mkdtempSync(join(tmpdir(), "cab-maintenance-source-"));
+  t.after(() => rmSync(path, { recursive: true, force: true }));
+  const git = (...args: string[]) =>
+    execFileSync(
+      "git",
+      [
+        "-C",
+        path,
+        "-c",
+        "user.name=M",
+        "-c",
+        "user.email=m@example.invalid",
+      ].concat(args),
+      { env: { ...process.env, GIT_CONFIG_GLOBAL: "/dev/null" } },
+    );
+  git("init", "--quiet", "--initial-branch=main");
+  writeFileSync(join(path, "README.md"), "R1\n");
+  git("add", ".");
+  git("commit", "--quiet", "-m", "base");
+  return [{ repositoryId: "R1", path, ref: "main" }];
+}
+
+/**
+ * Holds the service's next call of an automatic entry point after the pass decided and before
+ * the service takes its hold, so stored facts or settings can change in between.
+ */
+function holdNextEffect(
+  service: StandaloneService,
+  method: "removeTaskWorkspace" | "trimTaskWorkspace",
+) {
+  const { held, release } = gate();
+  let reached!: () => void;
+  const entered = new Promise<void>((resolve) => {
+    reached = resolve;
+  });
+  const original = service[method] as (...args: unknown[]) => Promise<unknown>;
+  Object.assign(service, {
+    [method]: async (...args: unknown[]) => {
+      Reflect.deleteProperty(service, method);
+      reached();
+      await held;
+      return original.apply(service, args);
+    },
+  });
+  return { entered, release };
+}
+
+/** Holds the first removal's Git inspection, which runs under the service's archival hold. */
+function holdRemovalInspection(service: StandaloneService) {
+  const workspaces = startedOf(service).workspaces;
+  const plan = workspaces.removalPlan.bind(workspaces);
+  const { held, release } = gate();
+  const hold = { taskId: undefined as string | undefined, release };
+  let reached!: () => void;
+  const entered = new Promise<void>((resolve) => {
+    reached = resolve;
+  });
+  workspaces.removalPlan = async (taskId, input) => {
+    if (hold.taskId === undefined) {
+      hold.taskId = taskId;
+      reached();
+      await held;
+    }
+    return plan(taskId, input);
+  };
+  return Object.assign(hold, { entered });
+}
+
+/** Runs a pass whose next automatic effect waits while `change` runs. */
+async function passWith(
+  w: Awaited<ReturnType<typeof serviceWorld>>,
+  method: "removeTaskWorkspace" | "trimTaskWorkspace",
+  change: () => void,
+) {
+  const hold = holdNextEffect(w.f.service, method);
+  const pass = w.pass();
+  await hold.entered;
+  change();
+  hold.release();
+  return pass;
+}
+
+test("an expired removal refuses when the task is reopened before the service acts", async (t) => {
+  const w = await serviceWorld(t);
+  const { taskId, binding } = await w.task();
+  finishTask(w.f.service, taskId);
+  w.clock.offset = 25 * H;
+  const report = await passWith(w, "removeTaskWorkspace", () =>
+    finishTask(w.f.service, taskId, "open"),
+  );
+  assert.deepEqual(report?.removed, []);
+  assert.equal(report?.attention, null);
+  assert.equal(existsSync(binding.path), true);
+  assert.equal(
+    w.f.service.taskWorkspaceRecords(taskId).binding?.state,
+    "ready",
+  );
+});
+
+test("an expired removal refuses after a new push and completion, until the new retention passes", async (t) => {
+  const w = await serviceWorld(t);
+  const { taskId, binding } = await w.task("Pushed again", sourceRepository(t));
+  finishTask(w.f.service, taskId);
+  w.clock.offset = 25 * H;
+  let pushedAt = 0;
+  const refused = await passWith(w, "removeTaskWorkspace", () => {
+    finishTask(w.f.service, taskId, "open");
+    pushedAt = w.pushed(binding);
+    finishTask(w.f.service, taskId);
+  });
+  assert.deepEqual(refused?.removed, []);
+  assert.equal(refused?.attention, null);
+  assert.equal(existsSync(binding.path), true);
+  w.clock.offset = pushedAt + 24 * H - 1 - Date.now();
+  assert.deepEqual((await w.pass())?.removed, []);
+  assert.equal(existsSync(binding.path), true);
+  w.clock.offset = pushedAt + 24 * H - Date.now();
+  assert.deepEqual((await w.pass())?.removed, [
+    { workspaceId: binding.workspaceId, trigger: "delivered" },
+  ]);
+  assert.equal(existsSync(binding.path), false);
+});
+
+test("a merged removal refuses when a new push leaves the repository unmerged", async (t) => {
+  const w = await serviceWorld(t, {
+    settings: { deliveredRetentionHours: 1_000 },
+  });
+  const { taskId, binding } = await w.task("Merged", sourceRepository(t));
+  finishTask(w.f.service, taskId);
+  w.lifecycle().observe(binding, {
+    kind: "merge",
+    eventId: `merge:${randomUUID()}`,
+    at: Date.now(),
+    repositoryId: "R1",
+    changeRequestId: "R1-pr",
+    merged: true,
+  });
+  w.clock.offset = 2 * H;
+  // The push lands while the removal's Git inspection runs under its hold.
+  const hold = holdRemovalInspection(w.f.service);
+  const pass = w.pass();
+  await hold.entered;
+  w.pushed(binding);
+  hold.release();
+  const report = await pass;
+  assert.deepEqual(report?.removed, []);
+  assert.equal(report?.attention, null);
+  assert.equal(existsSync(binding.path), true);
+  assert.equal(w.lifecycle().current(taskId)?.allMergedAt, null);
+});
+
+test("an expired removal refuses when retention is turned off or raised before the service acts, and is not backed off", async (t) => {
+  const w = await serviceWorld(t);
+  const { taskId, binding } = await w.task();
+  finishTask(w.f.service, taskId);
+  w.clock.offset = 25 * H;
+  const limits = liveLimits(w.f.service);
+  for (const deliveredRetentionHours of ["off", 48] as const) {
+    const report = await passWith(w, "removeTaskWorkspace", () => {
+      limits.deliveredRetentionHours = deliveredRetentionHours;
+    });
+    assert.deepEqual(report?.removed, [], String(deliveredRetentionHours));
+    assert.equal(existsSync(binding.path), true);
+    limits.deliveredRetentionHours = 24;
+  }
+  // The refusals recorded no backoff, so the restored limit removes it on the next pass.
+  assert.deepEqual((await w.pass())?.removed, [
+    { workspaceId: binding.workspaceId, trigger: "delivered" },
+  ]);
+  assert.equal(existsSync(binding.path), false);
+});
+
+test("an idle trim refuses when a new turn ends before the service acts, and trims in the new epoch", async (t) => {
+  const w = await serviceWorld(t, { settings: { idleHours: 24 } });
+  const { taskId, binding } = await w.task();
+  const cache = join(binding.path, "scratch", "cache.bin");
+  writeFileSync(cache, "x");
+  w.turnEnded(binding, Date.now());
+  w.clock.offset = 25 * H;
+  let ended = 0;
+  const report = await passWith(w, "trimTaskWorkspace", () => {
+    ended = Date.now() + w.clock.offset;
+    w.turnEnded(binding, ended);
+  });
+  assert.deepEqual(report?.trimmed, []);
+  assert.equal(existsSync(cache), true);
+  assert.equal(w.f.service.taskWorkspaceRecords(taskId).trim, undefined);
+  w.clock.offset = ended + 24 * H - Date.now();
+  assert.deepEqual((await w.pass())?.trimmed, [
+    { workspaceId: binding.workspaceId, trigger: "idle" },
+  ]);
+  assert.equal(existsSync(cache), false);
+});
+
+test("cap effects refuse when the cap is raised or turned off before the service acts", async (t) => {
+  const w = await serviceWorld(t, { settings: { diskCapGb: 1 } });
+  const limits = liveLimits(w.f.service);
+  const open = await w.task("Open and large");
+  const cache = join(open.binding.path, "scratch", "cache.bin");
+  writeFileSync(cache, "x");
+  w.turnEnded(open.binding, Date.now());
+  w.sizes.set(open.binding.workspaceId, 2 * GB);
+  const trim = await passWith(w, "trimTaskWorkspace", () => {
+    limits.diskCapGb = 10;
+  });
+  assert.deepEqual(trim?.trimmed, []);
+  assert.equal(existsSync(cache), true);
+  assert.equal(trim?.attention, null);
+
+  limits.diskCapGb = 1;
+  w.sizes.delete(open.binding.workspaceId);
+  const done = await w.task("Done and large");
+  finishTask(w.f.service, done.taskId);
+  w.turnEnded(done.binding, Date.now());
+  // Already trimmed for this turn, so the cap goes straight to removal.
+  assert.equal(
+    (await w.f.service.trimTaskWorkspace(done.taskId, "manual")).outcome,
+    "trimmed",
+  );
+  w.sizes.set(done.binding.workspaceId, 2 * GB);
+  const removal = await passWith(w, "removeTaskWorkspace", () => {
+    limits.diskCapGb = "off";
+  });
+  assert.deepEqual(removal?.removed, []);
+  assert.equal(existsSync(done.binding.path), true);
+  assert.equal(
+    w.f.service.taskWorkspaceRecords(done.taskId).binding?.state,
+    "ready",
+  );
+});
+
+test("while one removal awaits Git, another expired workspace reopened, pushed and completed is kept until its own new retention passes", async (t) => {
+  const w = await serviceWorld(t);
+  const first = await w.task("First", sourceRepository(t));
+  const second = await w.task("Second", sourceRepository(t));
+  for (const { taskId } of [first, second]) finishTask(w.f.service, taskId);
+  w.clock.offset = 25 * H;
+  const hold = holdRemovalInspection(w.f.service);
+  const pass = w.pass();
+  await hold.entered;
+  const [removing, changed] =
+    hold.taskId === first.taskId ? [first, second] : [second, first];
+  finishTask(w.f.service, changed.taskId, "open");
+  const pushedAt = w.pushed(changed.binding);
+  finishTask(w.f.service, changed.taskId);
+  hold.release();
+  const report = await pass;
+  assert.deepEqual(report?.removed, [
+    { workspaceId: removing.binding.workspaceId, trigger: "delivered" },
+  ]);
+  assert.equal(report?.attention, null);
+  assert.equal(existsSync(removing.binding.path), false);
+  assert.equal(existsSync(changed.binding.path), true);
+  w.clock.offset = pushedAt + 24 * H - 1 - Date.now();
+  assert.deepEqual((await w.pass())?.removed, []);
+  assert.equal(existsSync(changed.binding.path), true);
+  w.clock.offset = pushedAt + 24 * H - Date.now();
+  assert.deepEqual((await w.pass())?.removed, [
+    { workspaceId: changed.binding.workspaceId, trigger: "delivered" },
+  ]);
+  assert.equal(existsSync(changed.binding.path), false);
 });
 
 test("shutdown cancels a measurement in flight and closes the database after the pass drains", async (t) => {
