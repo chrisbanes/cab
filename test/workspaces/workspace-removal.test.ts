@@ -1051,7 +1051,10 @@ test("a commit lost from the managed repository is fetched from its task branch 
 
   // The task branch moved after removal: the fetch does not return the recorded commit.
   const moved = await w.task();
-  const recorded = commitFile(moved.worktree(), "work.txt");
+  // Distinct content: an identical file, parent and second-resolution timestamp would make this
+  // the first task's commit, whose loss would break the refs that still name it.
+  const recorded = commitFile(moved.worktree(), "moved.txt");
+  assert.notEqual(recorded, head);
   w.finish(moved.taskId);
   assert.equal((await w.remove(moved.taskId)).outcome, "cleaned");
   const remote = w.repositories[0]!.remote;
