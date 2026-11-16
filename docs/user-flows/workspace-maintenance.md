@@ -82,8 +82,10 @@ refused, the Inbox has one Workspace maintenance item:
    Past retention, not removed, each by task and project with cab's reason, such as
    uncommitted work or unsettled execution.
 3. A task link opens that task's page only; Back returns to the item with the Inbox
-   filter and other drafts as they were. Resolving the reason there (committing, ending
-   a hold or removing the workspace by hand) lets the next pass act.
+   filter and other drafts as they were. After a refusal, cab waits before trying the
+   same workspace again: from 5 minutes, doubling to an hour, unless the task, its
+   delivery policy, a turn or a push changes first. Removing the workspace by hand acts
+   at once.
 4. The next pass refreshes the same item. Once usage is within the limit and no expired
    workspace is refused it resolves on its own; it cannot be dismissed. A recurrence
    brings the same item back, with one new notification.
