@@ -1311,7 +1311,7 @@ idle limit has passed, or the latest measured usage is still over the cap. They 
 again before the first deletion when the effect awaited Git or a push in between. A
 turn end, push, reopening, terminal transition or merge since the pass decided refuses
 the effect. Each effect reads the service's current limits, which change only when the
-service restarts. That refusal is not listed and does not wait, and the next pass decides
+service restarts. Such a refusal is not listed and does not wait, and the next pass decides
 again. Manual removal has no trigger to re-derive.
 In order, it:
 
