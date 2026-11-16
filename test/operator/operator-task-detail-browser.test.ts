@@ -478,8 +478,9 @@ test("Task detail Back returns to the originating Board entry", async (_t, j) =>
   const a = await seed(f);
   const web = await j.start("fixture.web", () => f.startWeb());
   browser = await j.start("browser.launch", () => chromium.launch());
+  // The narrowest width with the sidebar shell, so the board's columns overflow it.
   const page = await browser.newPage({
-    viewport: { width: 1366, height: 900 },
+    viewport: { width: 1121, height: 900 },
   });
   j.observe(page);
   page.setDefaultTimeout(5000);
@@ -539,9 +540,10 @@ test("Task detail Back returns to the originating Board entry", async (_t, j) =>
   await card.waitFor();
   assert.equal(await board.evaluate((e) => e.scrollLeft), searchScroll);
   // With the sidebar hidden, Search work's shortcut navigates directly to Search.
-  await page.setViewportSize({ width: 1024, height: 900 });
+  // The narrower board overflows further, so its far end differs from the position above.
+  await page.setViewportSize({ width: 800, height: 900 });
   const shortcutScroll = await board.evaluate((e) => {
-    e.scrollLeft = 300;
+    e.scrollLeft = e.scrollWidth;
     const offset = e.scrollLeft;
     document.dispatchEvent(
       new KeyboardEvent("keydown", {

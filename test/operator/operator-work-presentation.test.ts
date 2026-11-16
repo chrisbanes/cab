@@ -10,6 +10,7 @@ import {
 import {
   activeColumns,
   attentionCandidate,
+  boardColumns,
   capacityNotice,
   columnCounts,
   columns,
@@ -23,6 +24,7 @@ import {
   taskReasonItems,
   taskReasons,
   taskRouteSubtitle,
+  visibleBoardColumns,
   visibleColumns,
 } from "../../web/src/tasks.js";
 import {
@@ -34,6 +36,19 @@ import {
 import { summary, type Overrides } from "../fixtures/task-summary.js";
 import { closureSuffix } from "../../src/cli/task-write.js";
 import { waitLabels } from "../../src/operator/wait-reasons.js";
+
+test("board columns group every State exactly once, in the order work flows", () => {
+  const grouped = boardColumns.flatMap((c) => c.states);
+  assert.deepEqual([...grouped].sort(), [...columns].sort());
+  assert.equal(new Set(grouped).size, columns.length);
+  const names = (state: string) =>
+    visibleBoardColumns(state).map((c) => c.name);
+  const active = ["Draft", "Ready", "In progress", "Waiting", "Needs you"];
+  assert.deepEqual(names(""), active);
+  assert.deepEqual(names("Stopping"), active);
+  assert.deepEqual(names("Done"), [...active, "Closed"]);
+  assert.deepEqual(names("all"), [...active, "Closed"]);
+});
 
 test("closure and dependency copy remains accurate for either issue tracker", () => {
   for (const jira of [false, true]) {

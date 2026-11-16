@@ -66,22 +66,48 @@
   }
 }
 
-/* Reset filters sits on the More filters line, so it never crowds the toolbar row. */
+/* Reset filters sits on the More filters line, beside what it resets, never under Refresh. */
 .work-more-row {
   display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: var(--space-12);
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-8) var(--space-12);
 }
 
 .work-more {
-  flex: 1 1 auto;
-  min-width: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-4);
+  padding: 0;
+  border: 0;
+  background: none;
+  cursor: pointer;
 }
 
-.work-more > summary {
-  display: inline-block;
-  cursor: pointer;
+.work-more svg {
+  width: 14px;
+  height: 14px;
+  flex: none;
+}
+
+.work-more[aria-expanded="true"] svg {
+  rotate: 90deg;
+}
+
+.work-refresh {
+  flex: none;
+}
+
+/* An icon-only control is a 44px target below the sidebar shell, as in the task strip. */
+@media (max-width: 1120px) {
+  .work-refresh {
+    width: 44px;
+    height: 44px;
+  }
+}
+
+.work-more-fields[hidden] {
+  display: none;
 }
 
 .work-more-fields {
@@ -673,6 +699,8 @@
   align-items: stretch;
   gap: 10px;
   overflow-x: auto;
+  /* A trackpad swipe past either end scrolls nothing rather than navigating back. */
+  overscroll-behavior-x: contain;
   max-width: 100%;
   padding-bottom: var(--space-8);
 }
@@ -683,13 +711,15 @@
   flex-direction: column;
   gap: var(--space-8);
   min-width: var(--board-column-min);
+  /* Wide screens leave space after the last column rather than stretching cards. */
+  max-width: 360px;
   padding: var(--space-8);
   border: 1px solid var(--border);
   border-radius: var(--radius-xl);
   background: var(--surface);
 }
 
-#column-Uncertain:not([data-empty]) {
+[id="column-Needs you"]:not([data-empty]) {
   border-color: var(--risk-border);
 }
 
@@ -736,14 +766,66 @@
   font-weight: var(--weight-regular);
 }
 
-.board-column > p {
+.board-column-cards {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: var(--space-8);
+  min-height: 0;
+}
+
+.board-column-cards > p {
   margin: 0 var(--space-4);
+}
+
+/* Tasks and project Board, like the Inbox: the page fills the space below the top bar
+   without scrolling and each column scrolls its own cards, so the board's horizontal
+   scrollbar stays in view. */
+@media (min-width: 760px) {
+  .page:has(> .board-page) {
+    display: flex;
+    flex-direction: column;
+    height: calc(100dvh - var(--top-bar-height));
+    /* The columns run to the bottom; the board keeps a strip for its scrollbar. */
+    padding-bottom: 0;
+    /* Wide screens show more columns rather than a capped board. */
+    max-width: none;
+  }
+
+  /* Only the columns grow and use the full width; everything else keeps the capped
+     page's content width. */
+  .page:has(> .board-page) > :not(.board-page),
+  .board-page > :not(.task-board) {
+    flex: none;
+    max-width: calc(var(--page-max-width) - 2 * var(--space-20));
+  }
+
+  .board-page,
+  .board-page > .task-board {
+    display: flex;
+    flex: 1;
+    flex-direction: column;
+    min-height: 0;
+  }
+
+  .board-page .board-columns {
+    flex: 1;
+    /* A short window scrolls the page rather than crushing the columns. */
+    min-height: 280px;
+  }
+
+  .board-page .board-column-cards {
+    overflow-y: auto;
+    /* Room for card focus rings inside the scroll area. */
+    margin: -4px;
+    padding: 4px;
+  }
 }
 
 /* An empty column is a narrow labelled column; its text stays horizontal. */
 @media (min-width: 760px) {
   .board-column[data-empty="true"] {
-    flex: 0 0 120px;
+    flex: 0 0 160px;
     min-width: 0;
   }
 
@@ -795,10 +877,6 @@
   height: 18px;
   padding: 0 5px;
   font-size: 11px;
-}
-
-.task-card .task-state.phone-only {
-  display: none;
 }
 
 .task-card .task-title::after {
@@ -888,6 +966,7 @@
     order: 3;
   }
 
+  .work-toolbar .work-updated,
   .work-toolbar .work-refresh {
     order: 4;
   }
@@ -1010,10 +1089,6 @@
     box-shadow: none;
   }
 
-  .task-card .task-state.phone-only {
-    display: inline-flex;
-  }
-
   .board-columns {
     display: block;
     overflow: visible;
@@ -1021,6 +1096,7 @@
 
   .board-column {
     display: none;
+    max-width: none;
   }
 
   .board-column.selected-column {

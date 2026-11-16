@@ -27,6 +27,47 @@ export function visibleColumns(state: string): readonly TaskColumn[] {
   const extra = columns.find((c) => c === state && !isActiveColumn(c));
   return extra ? [...activeColumns, extra] : activeColumns;
 }
+export type BoardColumnName =
+  | "Draft"
+  | "Ready"
+  | "In progress"
+  | "Waiting"
+  | "Needs you"
+  | "Closed";
+export interface BoardColumn {
+  name: BoardColumnName;
+  states: readonly [TaskColumn, ...TaskColumn[]];
+}
+/**
+ * The Board's columns, in the order work flows. Each groups one or more States; a card
+ * in a column with several States shows its own.
+ */
+export const boardColumns: readonly BoardColumn[] = [
+  { name: "Draft", states: ["Draft"] },
+  { name: "Ready", states: ["Ready"] },
+  { name: "In progress", states: ["Running", "Stopping"] },
+  { name: "Waiting", states: ["Waiting", "Paused"] },
+  { name: "Needs you", states: ["Uncertain", "Not started"] },
+  { name: "Closed", states: ["Done", "Cancelled"] },
+];
+/** The Board column holding a State, if `state` names one. */
+export const boardColumnOf = (state: string) =>
+  boardColumns.find((c) => (c.states as readonly string[]).includes(state));
+/** The Board columns holding any State that `visibleColumns` shows. */
+export function visibleBoardColumns(state: string): readonly BoardColumn[] {
+  const states = visibleColumns(state);
+  return boardColumns.filter((c) => c.states.some((s) => states.includes(s)));
+}
+/** Tasks per Board column: the sum of its States' counts. */
+export function boardColumnCounts(tasks: readonly TaskListSummary[]) {
+  const byState = columnCounts(tasks);
+  return Object.fromEntries(
+    boardColumns.map((c) => [
+      c.name,
+      c.states.reduce((total, state) => total + byState[state], 0),
+    ]),
+  ) as Record<BoardColumnName, number>;
+}
 export function columnCounts(tasks: readonly TaskListSummary[]) {
   const counts = Object.fromEntries(columns.map((c) => [c, 0])) as Record<
     TaskColumn,

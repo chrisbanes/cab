@@ -8,7 +8,7 @@ export { until };
 /** Search, Source and Readiness live in the closed "More filters" disclosure. */
 export async function openMoreFilters(page: Page) {
   await page.locator(".work-more").waitFor();
-  const closed = page.locator(".work-more:not([open]) > summary");
+  const closed = page.locator('.work-more[aria-expanded="false"]');
   if (await closed.count()) await closed.click();
 }
 export async function seedCatalog(

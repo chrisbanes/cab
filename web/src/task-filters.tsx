@@ -1,7 +1,9 @@
+import { ChevronRight, RotateCw } from "lucide-react";
 import { useEffect, useState } from "react";
 import type { Workspace } from "../../src/operator/contracts.js";
 import { workspaceLabels } from "../../src/operator/project-labels.js";
 import { Button } from "./components.js";
+import { Button as PrimitiveButton } from "./ui/button.js";
 import { Input } from "./ui/input.js";
 import { NativeSelect } from "./ui/native-select.js";
 import {
@@ -29,6 +31,7 @@ export function TaskToolbar({
   pending,
   phone = false,
   columnsSlot,
+  updated,
 }: {
   filters: TaskFilters;
   update: (patch: Partial<TaskFilters>) => void;
@@ -50,6 +53,8 @@ export function TaskToolbar({
   phone?: boolean | undefined;
   /** Phone Board: receives the element the column chips are portalled into. */
   columnsSlot?: ((element: HTMLElement | null) => void) | undefined;
+  /** When the shown tasks were last read, beside the Refresh that reads them again. */
+  updated?: string | undefined;
 }) {
   const labels = workspaceLabels(workspace);
   const hiddenActive = activeFilterCount({
@@ -149,15 +154,24 @@ export function TaskToolbar({
         </Button>
       )
     );
+  const updatedLine = updated && (
+    <p className="metadata muted work-updated">{updated}</p>
+  );
   const refreshButton = (
-    <Button
-      variant="secondary"
-      className="work-refresh"
+    <PrimitiveButton
+      variant="outline"
+      size="icon"
+      className="control work-refresh"
       onClick={refresh}
       disabled={pending}
+      aria-label="Refresh tasks"
+      title="Refresh tasks"
     >
-      Refresh tasks
-    </Button>
+      <RotateCw
+        aria-hidden="true"
+        className={pending ? "motion-safe:animate-spin" : undefined}
+      />
+    </PrimitiveButton>
   );
   const slot = columnsSlot && (
     <div className="work-columns" ref={columnsSlot} />
@@ -184,6 +198,7 @@ export function TaskToolbar({
             </div>
             {countLine}
             {switchView}
+            {updatedLine}
             {refreshButton}
           </>
         ) : (
@@ -191,61 +206,64 @@ export function TaskToolbar({
             {switchView}
             {selects}
             {countLine}
+            {updatedLine}
             {refreshButton}
           </>
         )}
       </div>
+      {/* A disclosure button rather than <summary>, so Reset can share its line. */}
       <div className="work-more-row">
-        <details
-          className="work-more"
-          open={open}
-          onToggle={(e) => setOpen(e.currentTarget.open)}
+        <button
+          type="button"
+          className="metadata muted work-more"
+          aria-expanded={open}
+          aria-controls="task-more-fields"
+          onClick={() => setOpen(!open)}
         >
-          <summary className="metadata muted">
-            More filters{hiddenActive > 0 && ` · ${hiddenActive} active`}
-          </summary>
-          <div className="work-more-fields">
-            <label className="field body" htmlFor="task-search">
-              Filter tasks
-              <Input
-                id="task-search"
-                value={filters.q}
-                maxLength={512}
-                onChange={(e) => update({ q: e.target.value })}
-              />
-            </label>
-            <label className="field body" htmlFor="task-source">
-              Source
-              <NativeSelect
-                id="task-source"
-                aria-label="Source"
-                value={filters.source}
-                onChange={(e) => update({ source: e.target.value })}
-              >
-                <option value="">All sources</option>
-                <option value="local">Local</option>
-                <option value="github">Imported</option>
-              </NativeSelect>
-            </label>
-            <label className="field body" htmlFor="task-ready">
-              Readiness
-              <NativeSelect
-                id="task-ready"
-                aria-label="Readiness"
-                value={filters.ready}
-                onChange={(e) =>
-                  update({ ready: e.target.value as TaskFilters["ready"] })
-                }
-              >
-                <option value="yes">Ready</option>
-                <option value="no">Not Ready</option>
-                <option value="any">Any readiness</option>
-              </NativeSelect>
-            </label>
-          </div>
-        </details>
+          <ChevronRight aria-hidden="true" />
+          More filters{hiddenActive > 0 && ` · ${hiddenActive} active`}
+        </button>
         {showDrafts}
         {resetButton}
+      </div>
+      <div id="task-more-fields" className="work-more-fields" hidden={!open}>
+        <label className="field body" htmlFor="task-search">
+          Filter tasks
+          <Input
+            id="task-search"
+            value={filters.q}
+            maxLength={512}
+            onChange={(e) => update({ q: e.target.value })}
+          />
+        </label>
+        <label className="field body" htmlFor="task-source">
+          Source
+          <NativeSelect
+            id="task-source"
+            aria-label="Source"
+            value={filters.source}
+            onChange={(e) => update({ source: e.target.value })}
+          >
+            <option value="">All sources</option>
+            <option value="local">Local</option>
+            <option value="github">Imported</option>
+          </NativeSelect>
+        </label>
+        <label className="field body" htmlFor="task-ready">
+          Readiness
+          <NativeSelect
+            id="task-ready"
+            aria-label="Readiness"
+            value={filters.ready}
+            onChange={(e) =>
+              update({ ready: e.target.value as TaskFilters["ready"] })
+            }
+          >
+            <option value="yes">Ready</option>
+            <option value="no">Not Ready</option>
+            <option value="any">Any readiness</option>
+          </NativeSelect>
+        </label>
       </div>
     </div>
   );
