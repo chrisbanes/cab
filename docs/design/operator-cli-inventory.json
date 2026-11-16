@@ -732,6 +732,20 @@
       "gap": "Real host journey in the CLI8 live record: installed from npm pack outside the checkout, loopback HTTP, live Codex (2 turns), scripted external client; other denial/revision/retry cases from the cited deterministic suites. Not run from a second machine over private HTTPS: prerequisite unavailable (no second trusted machine was granted)."
     },
     {
+      "id": "task show",
+      "kind": "command",
+      "area": "task",
+      "scenarios": ["CLI01"],
+      "evidence": ["test/operator/operator-cli-workspace-remove.test.ts"],
+      "effect": "The same read and output as task get, including the latest workspace trim and removal records with their time, trigger and per-repository evidence.",
+      "denial": "As task get.",
+      "revision": "n/a: idempotent read; no receipt",
+      "retry": "n/a: idempotent read; no receipt",
+      "observation": "synthetic",
+      "state": "bounded",
+      "gap": "An alias of task get exercised through the in-process CLI against a real loopback service; task get carries the live evidence."
+    },
+    {
       "id": "task messages",
       "kind": "command",
       "area": "task",
@@ -987,6 +1001,24 @@
       "observation": "synthetic",
       "state": "bounded",
       "gap": "Exercised through the in-process CLI and the operator API against a real loopback service with a controlled Git executable, not through the installed binary; no live journey."
+    },
+    {
+      "id": "task workspace-remove",
+      "kind": "command",
+      "area": "task",
+      "scenarios": ["CLI04"],
+      "evidence": [
+        "test/operator/operator-cli-workspace-remove.test.ts",
+        "test/workspaces/workspace-remove-command.test.ts",
+        "test/workspaces/workspace-removal.test.ts"
+      ],
+      "effect": "Removes a done or cancelled task's current workspace once the service proves it safe (pushing committed work first) and prints each repository's pushed or base evidence (effect completed); it cannot be undone.",
+      "denial": "Any check that fails exits 4 with the service's named reason and no receipt; a task without a workspace exits 4 with nothing sent; a read-only credential exits 3.",
+      "revision": "The command names the workspace generation the CLI read; a later workspace is never removed by it, and the service refuses a replaced one.",
+      "retry": "A lost reply is reused by key and read back with operation get, sending nothing more; a held partial removal reports its operation instead of deleting again.",
+      "observation": "synthetic",
+      "state": "bounded",
+      "gap": "Exercised through the in-process CLI and the operator API against a real loopback service with real local Git, not through the installed binary; no live journey."
     },
     {
       "id": "assignment get",

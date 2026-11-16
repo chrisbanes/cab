@@ -158,6 +158,37 @@ of a suite that starts a service, such as
 the service refuses that data directory, so pass the resolved `/private/var/...`
 path as the runner does.
 
+### Workspace lifetime qualification
+
+Workspace generations and attributable lifecycle clocks are persisted, and the
+automatic maintenance pass applies the four installation limits. Its policy, cap
+ordering and Inbox item are tested with a fake clock and size table in
+`test/workspaces/workspace-maintenance.test.ts`, which also measures a real disposable
+tree in the worker and holds a measurement and a Git child to show coordination goes
+on meanwhile; `test/operator/operator-workspace-maintenance-browser.test.ts` covers
+the Inbox item in Chromium. The service tests inject the measurement, clock and wake
+through the test-only `maintenancePass` option, never sleeping on real time.
+
+`test/execution/workspace-environment-qualification/runtime-contract.mjs` qualifies
+per-thread Codex scratch environment and historical resume at a new cwd, plus Claude
+per-query scratch with its existing managed temporary base. Its live run passed for
+both runtimes; the records are in
+[`docs/evidence/1727-workspace-lifecycle-2026-11-15/`](evidence/1727-workspace-lifecycle-2026-11-15/)
+(Codex in `t1-runtime-qualification.md`, Claude in
+`t1-runtime-qualification-attempt-3.md`). Its deterministic tests cover request capture,
+crossed-path sensitivity, production SQLite admission and terminal identity through
+restart, and retained uncertainty without redispatch; they alone do not prove real
+runtime behavior.
+The live command refuses before runtime/auth initialization unless it receives
+`--live --one-attempt --grant-file FILE` and the separately authorized grant digest
+in `CAB_WORKSPACE_QUALIFICATION_AUTHORIZED_GRANT_SHA256`. A grant names exact binary
+hashes, models, native disposable configuration homes, fixture and evidence roots,
+expiry and the 15-minute ceiling. It names both runtimes with eight turns, or Claude
+alone with four when an earlier Codex pass is reused. A grant file or its digest is not itself
+permission: the controller must authorize those exact resources separately. No live
+grant is bundled, and an existing checkpoint refuses a new attempt. Unknown execution
+or shutdown settlement retains its identities and fixture data for reconciliation.
+
 ### Running the check in a cab-managed workspace
 
 Agents run the full check in their cab-managed task workspaces. A task's checkout
@@ -172,14 +203,18 @@ so the check there runs with the service profile: `npm ci`, then
 environment:
 
 - **Codex:** the sandbox writes only the task workspace and the managed repository's
-  Git roots; the OS temp root, `/tmp` and `~/.npm` are not writable. Set `TMPDIR`
-  and `npm_config_cache` to directories in the task workspace outside the checkout,
-  for example `../tmp` and `../npm-cache` from `repo-1`, before `npm ci`. Tests listen
-  on loopback, and Codex allows that only with the project's command network access
-  on.
-- **Claude:** the sandbox already points `TMPDIR` at the task's private temporary
-  directory. Set `npm_config_cache` as for Codex. Loopback listening needs the
-  project's local listening setting on.
+  Git roots; the OS temp root, `/tmp` and `~/.npm` are not writable. Every task turn
+  sets `CAB_SCRATCH_DIR` to the task's `scratch` directory and `TMPDIR` to the same
+  directory. Set `npm_config_cache="$CAB_SCRATCH_DIR/npm"` before `npm ci`. Tests
+  listen on loopback, and Codex allows that only with the project's command network
+  access on.
+- **Claude:** every task turn sets `CAB_SCRATCH_DIR` as for Codex; the sandbox points
+  `TMPDIR` at the task's private temporary directory. Set `npm_config_cache` as for
+  Codex. Loopback listening needs the project's local listening setting on.
+
+Keep temporary files and caches under `$CAB_SCRATCH_DIR`, not in the checkout. Scratch
+is the task's own disposable space: its contents survive between turns, but cab does
+not preserve them as work.
 
 Tests that need host access a sandbox denies check it once, before they run, and
 skip with the reason (`# SKIP process identity is unavailable here: ...` or
@@ -317,8 +352,9 @@ synchronously persists the Stop hold and returns a bounded observation; only
 exact execution identities and never replays an ambiguous generation. Held-turn release
 frees only the exact generation's writer and capacity holds.
 `replaceConversation` keeps assignment snapshots while advancing its conversation
-revision, and `recordTaskResult` rejects early or stale results. `archiveTask`
-requires delivery and preservation evidence and refuses unresolved task work.
+revision, and `recordTaskResult` rejects early or stale results.
+`removeTaskWorkspace` takes only a trigger, derives every safety fact itself and
+refuses unresolved task work.
 These service contracts do not provide physical process containment. An untracked
 detached child may overlap a later writer after qualified normal success.
 
@@ -747,7 +783,7 @@ name, version and preview digest. The service rechecks every confirmation atomic
      assignment version), which resumes the lead of an open task subject to
      admission, pause, Stop, dependency and capacity holds. A done task is never
      reopened.
-   - `inbox list [--status actionable|resolved|dismissed] [--kind question|approval|result-review|intervention|runtime] [--project ID] [--limit N]
+   - `inbox list [--status actionable|resolved|dismissed] [--kind question|approval|result-review|intervention|runtime|workspace-maintenance] [--project ID] [--limit N]
      [--cursor TOKEN]` pages server-side (at most 100). Interventions name `task get`. A
      `runtime` row (an execution runtime whose automatic restarts are exhausted) names the
      runtime and `runtime list`; it has no task, so `--project` excludes it.
@@ -796,6 +832,13 @@ name, version and preview digest. The service rechecks every confirmation atomic
      judgement (interrupted cleanup, a path or repository mismatch, uncertain Git),
      exit with the conflict code and the reason, recording nothing. The service
      also rechecks such holds at startup and before admitting a turn.
+   - `task workspace-remove TASK_ID` removes a done or cancelled task's workspace
+     (effect `completed`) once the service proves it safe, pushing committed work
+     first. It cannot be undone; the task branch, change requests, results and
+     conversations remain. It is the receipted `task.workspace.remove` command,
+     naming only the current workspace; any failing check exits with the conflict
+     code and the reason, recording nothing. `task show TASK_ID` is `task get`;
+     both print the latest removal and trim records.
 
    Output names the effect (`data.effect`): `saved`, `queued` (admission and holds
    still decide), `cancellation-requested` or `none`. These writes reuse a journal

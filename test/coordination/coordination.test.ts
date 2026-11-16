@@ -1,3 +1,6 @@
+import { randomUUID } from "node:crypto";
+import { WorkspaceLifecycleStore } from "../../src/core/workspace-lifecycle.js";
+import { SqliteWorkspaceBindingStore } from "../../src/standalone/workspaces.js";
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import { mkdtempSync, rmSync } from "node:fs";
@@ -2809,6 +2812,16 @@ for (const prior of [
           "UPDATE execution_intents SET state = 'completed' WHERE workId = 'final-lead'",
         )
         .run();
+      const workspaceId = randomUUID(),
+        bindings = new SqliteWorkspaceBindingStore(f.db);
+      bindings.createOrGet(
+        taskA,
+        workspaceId,
+        `/fixture/finalization/${taskA}`,
+        [],
+      );
+      bindings.update(taskA, "ready", null);
+      const lifecycle = new WorkspaceLifecycleStore(f.db);
       const outcome = f.coordination.finalizeTaskCompletion({
         requestId: requested.text.split(" ").at(-1)!,
         workId: "final-lead",
@@ -2817,6 +2830,10 @@ for (const prior of [
       const expected = prior === "completed";
       assert.equal(outcome.completed, expected, outcome.reasons.join(", "));
       assert.equal(f.domain.task(taskA).state, expected ? "done" : "open");
+      assert.equal(
+        lifecycle.get(workspaceId)?.terminal?.status ?? null,
+        expected ? "done" : null,
+      );
       assert.equal(
         f.db
           .prepare(

@@ -360,6 +360,30 @@ A local task's holds the project's repository links; an imported task's holds it
 repository.
 _Avoid_: Conversation when referring to a task's working files
 
+**Task scratch**:
+The `scratch` directory in a task workspace root, outside its repositories. Every task
+turn gets it as `CAB_SCRATCH_DIR`, and Codex also as `TMPDIR`. It holds disposable
+temporary files and caches; cab never treats its contents as work.
+_Avoid_: Temporary base, which is Claude's per-workspace directory outside the workspace
+
+**Workspace trimming**:
+The service-internal operation that deletes Git-reported ignored worktree files and
+scratch contents, keeping worktrees, tracked and non-ignored work, the scratch directory
+itself and other workspace-root files. The automatic maintenance pass runs it after
+the idle limit and under the disk cap.
+_Avoid_: Archive; Project archive is restorable
+
+**Workspace removal**:
+The irreversible deletion of a done or cancelled task's whole workspace and its owned
+Claude temporary base, once cab has proved every repository delivered or still at its
+provisioned base. Task branches, change requests, results and conversations remain.
+The operator starts it with `task workspace-remove` or the task page's Remove workspace…
+action, and the automatic maintenance pass under the delivered, merged and disk limits;
+cab derives every check itself. Work admitted afterwards gets a new
+workspace generation, with a new workspace ID, starting at each repository's recorded
+commit; the removed generation's record and its results' commits stay readable.
+_Avoid_: Archive; removed files have no restore operation
+
 **Task branch**:
 The one branch cab assigns a task in each repository and pushes its commits
 to; agents cannot choose or push it. A change request for the task uses it as its head.

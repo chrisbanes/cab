@@ -1,3 +1,5 @@
+import { WorkspaceLifecycleStore } from "../../src/core/workspace-lifecycle.js";
+import { SqliteWorkspaceBindingStore } from "../../src/standalone/workspaces.js";
 import assert from "node:assert/strict";
 import { createHash, randomUUID } from "node:crypto";
 import { mkdtempSync, rmSync } from "node:fs";
@@ -875,6 +877,16 @@ for (const mode of ["skip", "done"] as const)
     const w = closedIssueWorld(mode);
     try {
       const taskId = String(w.observe({})?.id);
+      const workspaceId = randomUUID(),
+        bindings = new SqliteWorkspaceBindingStore(w.db),
+        lifecycle = new WorkspaceLifecycleStore(w.db);
+      bindings.createOrGet(
+        taskId,
+        workspaceId,
+        `/fixture/provider/${taskId}`,
+        [],
+      );
+      bindings.update(taskId, "ready", null);
       w.observe({ state: "closed" });
       assert.equal(w.hold()?.reason, "closed");
       assert.equal(
@@ -943,10 +955,13 @@ for (const mode of ["skip", "done"] as const)
       assert.equal(done.state, "done");
       assert.equal(Number(done.version), version + 1);
       assert.equal(w.completion(taskId), true);
+      const episode = lifecycle.get(workspaceId)!.terminal!;
+      assert.equal(episode.status, "done");
       assert.deepEqual([w.hold()?.active, w.hold()?.reason], [1, "closed"]);
       // A provider completion after import reopens with its closure hold retained.
       assert.equal(w.observe({ state: "open" })?.state, "open");
       assert.equal(w.completion(taskId), false);
+      assert.equal(lifecycle.get(workspaceId)?.terminal, null);
       assert.equal(w.hold()?.reason, "closed");
       // Closed again, it completes again once settled.
       w.observe({ state: "closed" });

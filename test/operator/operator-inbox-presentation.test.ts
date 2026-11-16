@@ -20,7 +20,12 @@ import type {
   RuntimeInboxItem,
   TaskInboxItem,
   TaskRead,
+  WorkspaceMaintenanceInboxItem,
 } from "../../src/operator/contracts.js";
+import {
+  maintenanceInboxReason,
+  moreBlockersText,
+} from "../../src/operator/workspace-maintenance-copy.js";
 import { orderWaits } from "../../src/operator/wait-reasons.js";
 
 const minute = 60_000;
@@ -223,6 +228,67 @@ test("a runtime item counts toward the total and its kind but under no project",
   assert.equal(counts.total, 3);
   assert.deepEqual(counts.project, { [p]: 1 });
   assert.deepEqual(counts.kind, { runtime: 2, question: 1 });
+});
+
+const maintenanceItem = (): WorkspaceMaintenanceInboxItem => ({
+  id: "workspace-maintenance",
+  kind: "workspace-maintenance",
+  urgency: 0,
+  createdAt: 2_000,
+  headline: "Workspace maintenance needs attention",
+  reason: maintenanceInboxReason(
+    { measuredBytes: 12_300_000_000, capBytes: 10_000_000_000 },
+    [{ condition: "retention", reason: "unsettled" }],
+  ),
+  usage: { measuredBytes: 12_300_000_000, capBytes: 10_000_000_000 },
+  blockers: [],
+  moreBlockers: 0,
+  destination: "/inbox?request=workspace-maintenance",
+  dismissible: false,
+});
+
+test("the maintenance item is named by its kind, says what is unresolved and belongs to no project", () => {
+  const maintenance = maintenanceItem();
+  assert.equal(requestKindLabel(maintenance.kind), "Workspace maintenance");
+  assert.equal(requestActionLabel(maintenance), "Review blocking workspaces");
+  assert.deepEqual(requestHeading(maintenance), {
+    title: "Workspace maintenance needs attention",
+    subtitle: null,
+    reason:
+      "Task workspaces use 12.3 GB, over the 10.0 GB disk limit; a workspace past its retention was not removed.",
+  });
+  assert.equal(
+    maintenanceInboxReason(null, [
+      { condition: "retention", reason: "unsettled" },
+    ]),
+    "A workspace past its retention was not removed.",
+  );
+  // An unknown size never reads as resolved, and an emptied list still reads truthfully.
+  assert.equal(
+    maintenanceInboxReason(null, [
+      { condition: "disk-cap", reason: "unmeasured" },
+    ]),
+    "The disk usage of some workspaces could not be measured, so the disk limit is unconfirmed.",
+  );
+  assert.equal(
+    maintenanceInboxReason(null, []),
+    "No blocking workspace remains; the next pass resolves this item.",
+  );
+  // Blockers beyond the stored bound are counted, never silently cut.
+  assert.equal(moreBlockersText(0), null);
+  assert.equal(moreBlockersText(1), "And 1 more workspace not listed.");
+  assert.equal(moreBlockersText(5), "And 5 more workspaces not listed.");
+  const p = randomUUID(),
+    counts = filterCounts([maintenance, item("question", p)]);
+  assert.deepEqual(counts.project, { [p]: 1 });
+  assert.deepEqual(counts.kind, { "workspace-maintenance": 1, question: 1 });
+  // It leads the Intervention group with runtime problems.
+  assert.deepEqual(
+    queueGroups([item("question", p), maintenance]).map((g) =>
+      g.items.map((i) => i.kind),
+    ),
+    [["workspace-maintenance"], ["question"]],
+  );
 });
 
 test("filter counts add up per project and per kind", () => {

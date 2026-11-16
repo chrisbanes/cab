@@ -1021,6 +1021,46 @@ start ends with the first complete Inbox read, or after three partial reads in a
   covers Chrome on the host only. Phone delivery and other-device delivery are not qualified
   ([#1150](https://github.com/chrisbanes/cab/issues/1150)).
 
+## Workspace maintenance configuration
+
+These installation-wide limits are validated and loaded on service start, and the
+automatic maintenance pass applies them from then on: it wakes once a minute, trims a
+workspace after its idle limit, removes a done or cancelled task's workspace after its
+delivered or merged retention, and over the disk cap trims and then removes eligible
+workspaces oldest idle first. When usage stays over the cap or a workspace past its
+retention is refused, one Workspace maintenance Inbox item names each blocking task and
+reason until both clear; it cannot be dismissed. Manual
+removal (`cab task workspace-remove` or the task page's Remove workspace…) works
+whatever the limits.
+
+| Install/upgrade or render flag | Service environment | Default |
+| --- | --- | --- |
+| `--workspace-idle-hours` | `CAB_WORKSPACE_IDLE_HOURS` | 24 hours |
+| `--workspace-delivered-retention-hours` | `CAB_WORKSPACE_DELIVERED_RETENTION_HOURS` | 24 hours |
+| `--workspace-merged-retention-hours` | `CAB_WORKSPACE_MERGED_RETENTION_HOURS` | 1 hour |
+| `--workspace-disk-cap-gb` | `CAB_WORKSPACE_DISK_CAP_GB` | 10 decimal GB |
+
+Each takes a positive whole integer whose conversion remains a safe integer, or exact
+`off`. A decimal GB is 1,000,000,000 bytes. Blank, zero, negative, fractional and
+unknown values refuse startup or installation. `service install` and `service upgrade`
+record explicit values in the protected installation record and render them into the
+LaunchAgent environment. Omitted upgrade options preserve saved values; `off` survives
+an upgrade. LaunchDaemon installation and the low-level `render-launch-agent` command
+accept the same four flags. A daemon verification re-run uses its recorded values and
+refuses a supplied change. Changing a daemon's limits requires uninstalling and
+installing that daemon again, with the usual stopped-job checks and retained data.
+
+For example, `cab service upgrade STATE/versions/V --workspace-idle-hours 48
+--workspace-delivered-retention-hours off` loads those desired values after restart.
+An activation-file failure restores the prior installation record where possible,
+keeps the job stopped and reports an unconfirmed restoration if it cannot establish
+that result; it does not run an older binary after a migration. With both retentions
+off nothing is removed automatically, including over the disk cap, while disk trimming
+still runs; with the disk cap off nothing is measured. No per-project override exists.
+A failed pass is recorded as a `workspace-maintenance` diagnostic (`errorCode`
+`workspace-maintenance-failed`) and retried on the next wake; it never stops the
+service.
+
 ## Execution diagnostic retention
 
 Execution diagnostics expire after `CAB_DIAGNOSTIC_RETENTION_DAYS` days

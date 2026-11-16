@@ -1,3 +1,4 @@
+import { initializedWorkspaceLifecycle } from "../core/workspace-lifecycle.js";
 import { initializeReasoningSummaryStorage } from "../core/reasoning-summary-storage.js";
 import {
   ProjectArchivedError,
@@ -16,7 +17,10 @@ import {
   TaskNotOpenError,
 } from "../core/domain.js";
 import { executionIntentStateSchema } from "../core/execution-runtime.js";
-import type { CommandReceipt } from "../operator/contracts.js";
+import {
+  type CommandReceipt,
+  commandReceiptSchema,
+} from "../operator/contracts.js";
 import {
   archivedResumeRejectionSchema,
   historicalPreTurnAdoptionSchema,
@@ -75,6 +79,27 @@ export type WorkspaceRecheckReceipt = Extract<
   CommandReceipt,
   { kind: "workspace-recheck" }
 >;
+export type WorkspaceRemoveReceipt = Extract<
+  CommandReceipt,
+  { kind: "workspace-remove" }
+>;
+type WorkspaceRemoveCommand = {
+  key: string;
+  taskId: string;
+  workspaceId: string;
+};
+const workspaceRemoveDigest = (command: WorkspaceRemoveCommand) =>
+  materialDigest({
+    type: "task.workspace.remove",
+    taskId: command.taskId,
+    workspaceId: command.workspaceId,
+  });
+const workspaceRemovePending = z
+  .object({
+    kind: z.literal("workspace-remove-pending"),
+    operationId: z.string().uuid(),
+  })
+  .strict();
 export type DraftTurnReceipt = Extract<CommandReceipt, { kind: "draft-turn" }>;
 export type StartAgainReceipt = Extract<
   CommandReceipt,
@@ -507,6 +532,11 @@ const processIdentitySchema = z.object({
   bootId: z.string().min(1).max(128),
 });
 
+/** One DDL for a fresh start and the rebuild that adds the owner, so both spell the same schema. */
+const archivalHoldsTable = `CREATE TABLE IF NOT EXISTS task_archival_holds (
+      taskId TEXT PRIMARY KEY, reason TEXT NOT NULL, ownerToken TEXT
+    )`;
+
 // Binds the task id three times: ambiguity hold, writer hold, execution bindings.
 const archiveUnblockedClause = `NOT EXISTS (
             SELECT 1 FROM task_writer_ambiguity_holds WHERE taskId = ?
@@ -592,9 +622,7 @@ export class ExecutionState {
     CREATE TABLE IF NOT EXISTS task_writer_ambiguity_holds (
       taskId TEXT PRIMARY KEY, reason TEXT NOT NULL
     );
-    CREATE TABLE IF NOT EXISTS task_archival_holds (
-      taskId TEXT PRIMARY KEY, reason TEXT NOT NULL
-    );
+    ${archivalHoldsTable};
     CREATE TABLE IF NOT EXISTS task_execution_results (
       workId TEXT PRIMARY KEY REFERENCES task_execution_bindings(workId),
       payload TEXT NOT NULL
@@ -931,19 +959,46 @@ export class ExecutionState {
     // Earlier builds kept Stop targets after a receipt reconciled their work.
     this.db.exec(`DELETE FROM execution_stop_targets
       WHERE workId IN (SELECT workId FROM execution_intents WHERE state = 'reconciled')`);
-    // Workspace recovery runs before this state is opened. Keep the archival
-    // hold only when bounded Git work recorded unresolved filesystem effects.
+    // A hold written before holds carried an owner stays tokenless: no operation can release it.
+    if (
+      !(
+        this.db.prepare("PRAGMA table_info(task_archival_holds)").all() as {
+          name: string;
+        }[]
+      ).some(({ name }) => name === "ownerToken")
+    )
+      transaction(this.db, () =>
+        this.db.exec(`ALTER TABLE task_archival_holds RENAME TO task_archival_holds_untokened;
+          ${archivalHoldsTable};
+          INSERT INTO task_archival_holds (taskId, reason)
+            SELECT taskId, reason FROM task_archival_holds_untokened;
+          DROP TABLE task_archival_holds_untokened;`),
+      );
+    // Workspace recovery runs before this state is opened. Keep an archival hold when bounded Git
+    // work recorded unresolved filesystem effects, when its removal is unfinished, or when it
+    // has no owner (written by an earlier build) and so nothing can prove it may be released.
     const workspaceColumns = this.db
       .prepare("PRAGMA table_info(task_workspace_bindings)")
       .all() as Array<{ name: string }>;
+    const kept = ["task_archival_holds.ownerToken IS NULL"];
     if (workspaceColumns.some(({ name }) => name === "gitUncertain"))
-      this.db.exec(`DELETE FROM task_archival_holds
-        WHERE NOT EXISTS (
-          SELECT 1 FROM task_workspace_bindings binding
-          WHERE binding.taskId = task_archival_holds.taskId
-            AND binding.gitUncertain = 1
-        )`);
-    else this.db.exec("DELETE FROM task_archival_holds");
+      kept.push(`EXISTS (SELECT 1 FROM task_workspace_bindings binding
+        WHERE binding.taskId = task_archival_holds.taskId AND binding.gitUncertain = 1)`);
+    if (
+      this.db
+        .prepare(
+          "SELECT 1 FROM sqlite_master WHERE type='table' AND name='workspace_maintenance_operations'",
+        )
+        .get()
+    )
+      // Only a removal's: a held trim releases its hold, as running trim again is idempotent.
+      kept.push(`task_archival_holds.ownerToken IN (
+        SELECT operationId FROM workspace_maintenance_operations
+        WHERE json_extract(data, '$.kind') = 'remove'
+          AND json_extract(data, '$.state') IN ('active', 'held'))`);
+    this.db.exec(
+      `DELETE FROM task_archival_holds WHERE NOT (${kept.join(" OR ")})`,
+    );
     this.db.exec(`INSERT OR IGNORE INTO task_writer_ambiguity_holds (taskId, reason)
       SELECT taskId, reason FROM task_writer_holds
       WHERE reason = 'Legacy work revision order is ambiguous'
@@ -1238,6 +1293,105 @@ export class ExecutionState {
     });
   }
 
+  /**
+   * The removal request stored under this key: its receipt, or the operation it reserved before
+   * any effect. Other content under the same key conflicts.
+   */
+  workspaceRemovalRequest(
+    command: WorkspaceRemoveCommand,
+  ):
+    | { receipt: WorkspaceRemoveReceipt }
+    | { pending: { operationId: string } }
+    | undefined {
+    const id = z.string().uuid().parse(command.taskId);
+    const key = z.string().uuid().parse(command.key);
+    const stored = this.db
+      .prepare(
+        "SELECT payloadHash, receiptJson FROM task_control_receipts WHERE taskId = ? AND key = ?",
+      )
+      .get(id, key) as { payloadHash: string; receiptJson: string } | undefined;
+    if (!stored) return undefined;
+    if (stored.payloadHash !== workspaceRemoveDigest(command))
+      throw new DomainConflictError("Request key reused for other content");
+    const value = JSON.parse(stored.receiptJson) as unknown;
+    const pending = workspaceRemovePending.safeParse(value);
+    if (pending.success)
+      return { pending: { operationId: pending.data.operationId } };
+    const receipt = commandReceiptSchema.parse(value);
+    if (receipt.kind !== "workspace-remove")
+      throw new DomainConflictError("Request key reused for other content");
+    return { receipt };
+  }
+
+  /** Persists the request and its operation before removal runs, replacing only a pending one. */
+  reserveWorkspaceRemoval(
+    command: WorkspaceRemoveCommand,
+    operationId: string,
+  ): void {
+    transaction(this.db, () => {
+      const stored = this.workspaceRemovalRequest(command);
+      if (stored && "receipt" in stored)
+        throw new DomainConflictError("Removal request already recorded");
+      this.db
+        .prepare(
+          "INSERT OR REPLACE INTO task_control_receipts (taskId, key, payloadHash, receiptJson, createdAt) VALUES (?, ?, ?, ?, ?)",
+        )
+        .run(
+          command.taskId,
+          command.key,
+          workspaceRemoveDigest(command),
+          JSON.stringify({ kind: "workspace-remove-pending", operationId }),
+          Date.now(),
+        );
+    });
+  }
+
+  /** Frees a reserved request whose removal stopped before deleting anything. */
+  releaseWorkspaceRemoval(command: WorkspaceRemoveCommand): void {
+    this.db
+      .prepare(
+        "DELETE FROM task_control_receipts WHERE taskId = ? AND key = ? AND payloadHash = ? AND json_extract(receiptJson, '$.kind') = 'workspace-remove-pending'",
+      )
+      .run(command.taskId, command.key, workspaceRemoveDigest(command));
+  }
+
+  /** Records the receipt of the reserved removal once its operation completed. */
+  completeWorkspaceRemoval(
+    command: WorkspaceRemoveCommand,
+    operation: {
+      operationId: string;
+      completedAt: number | null;
+      repositories:
+        | { repositoryId: string; kind: "pushed" | "base"; commit: string }[]
+        | null;
+    },
+  ): WorkspaceRemoveReceipt {
+    return transaction(this.db, () => {
+      const stored = this.workspaceRemovalRequest(command);
+      if (stored && "receipt" in stored) return stored.receipt;
+      if (stored?.pending.operationId !== operation.operationId)
+        throw new DomainConflictError("Removal request identity changed");
+      const receipt: WorkspaceRemoveReceipt = {
+        kind: "workspace-remove",
+        key: command.key,
+        recorded: true,
+        taskId: command.taskId,
+        workspaceId: command.workspaceId,
+        operationId: operation.operationId,
+        removedAt: z.number().int().nonnegative().parse(operation.completedAt),
+        repositories: (operation.repositories ?? []).map(
+          ({ repositoryId, kind, commit }) => ({ repositoryId, kind, commit }),
+        ),
+      };
+      this.db
+        .prepare(
+          "UPDATE task_control_receipts SET receiptJson = ? WHERE taskId = ? AND key = ?",
+        )
+        .run(JSON.stringify(receipt), command.taskId, command.key);
+      return receipt;
+    });
+  }
+
   /** Operator cancellation is terminal task state, not an operator Stop hold. */
   cancelTask(
     command: { key: string; taskId: string; expectedVersion: number },
@@ -1297,6 +1451,10 @@ export class ExecutionState {
             "UPDATE domain_tasks SET state='cancelled', version=version+1 WHERE id=?",
           )
           .run(command.taskId);
+        initializedWorkspaceLifecycle(this.db)?.taskStateChanged(
+          command.taskId,
+          "cancelled",
+        );
         return {
           ...base,
           kind: "task-cancel" as const,
@@ -2080,18 +2238,20 @@ export class ExecutionState {
     return row?.reason;
   }
 
-  beginArchive(taskId: string): boolean {
+  /** Acquires the archival hold for `ownerToken`, the durable identity of the operation using it. */
+  beginArchive(taskId: string, ownerToken: string): boolean {
     assertOwnedTaskWritable(this.db, taskId);
     const id = z.string().uuid().parse(taskId);
+    const owner = z.string().uuid().parse(ownerToken);
     return transaction(this.db, () => {
       const acquired =
         this.db
-          .prepare(`INSERT INTO task_archival_holds (taskId, reason)
-          SELECT ?, 'Task archival in progress'
+          .prepare(`INSERT INTO task_archival_holds (taskId, reason, ownerToken)
+          SELECT ?, 'Workspace maintenance in progress', ?
           WHERE NOT EXISTS (
             SELECT 1 FROM task_archival_holds WHERE taskId = ?
           ) AND ${archiveUnblockedClause} RETURNING taskId`)
-          .get(id, id, id, id, id) !== undefined;
+          .get(id, owner, id, id, id, id) !== undefined;
       return acquired;
     });
   }
@@ -2114,24 +2274,31 @@ export class ExecutionState {
     );
   }
 
-  confirmArchive(taskId: string): boolean {
+  /** The hold is still `ownerToken`'s and execution is still settled. */
+  confirmArchive(taskId: string, ownerToken: string): boolean {
     const id = z.string().uuid().parse(taskId);
-    return transaction(this.db, () => {
-      const confirmed =
-        this.db
-          .prepare(`SELECT 1 FROM task_archival_holds archival
-          WHERE archival.taskId = ?
+    const owner = z.string().uuid().parse(ownerToken);
+    // One statement, so it is atomic inside a caller's transaction too.
+    return (
+      this.db
+        .prepare(`SELECT 1 FROM task_archival_holds archival
+          WHERE archival.taskId = ? AND archival.ownerToken = ?
           AND ${archiveUnblockedClause}`)
-          .get(id, id, id, id) !== undefined;
-      return confirmed;
-    });
+        .get(id, owner, id, id, id) !== undefined
+    );
   }
 
-  endArchive(taskId: string): void {
+  /** Releases only the hold `ownerToken` owns; another or a tokenless hold stays. */
+  endArchive(taskId: string, ownerToken: string): void {
     assertOwnedTaskWritable(this.db, taskId);
     this.db
-      .prepare("DELETE FROM task_archival_holds WHERE taskId = ?")
-      .run(z.string().uuid().parse(taskId));
+      .prepare(
+        "DELETE FROM task_archival_holds WHERE taskId = ? AND ownerToken = ?",
+      )
+      .run(
+        z.string().uuid().parse(taskId),
+        z.string().uuid().parse(ownerToken),
+      );
   }
 
   bindTask(
@@ -3171,6 +3338,29 @@ export class ExecutionState {
           "UPDATE runtime_terminal_evidence SET conflicted = 1 WHERE threadId = ? AND turnId = ?",
         )
         .run(row.threadId, turnId);
+    this.recordWorkspaceTurnEnd(row.threadId, turnId);
+  }
+
+  private recordWorkspaceTurnEnd(threadId: string, turnId: string): void {
+    const raw = this.db
+      .prepare(
+        "SELECT * FROM runtime_terminal_evidence WHERE threadId=? AND turnId=?",
+      )
+      .get(threadId, turnId);
+    if (!raw) return;
+    const evidence = parseRuntimeTerminalEvidence(raw);
+    if (
+      !evidence.conflicted &&
+      evidence.workId &&
+      evidence.firstStatus &&
+      evidence.firstObservedAt !== null
+    )
+      initializedWorkspaceLifecycle(this.db)?.recordTurnEnd(
+        evidence.workId,
+        threadId,
+        turnId,
+        evidence.firstObservedAt,
+      );
   }
 
   /** Bounded failure classification of a work's latest terminal turn when it failed, else null. */
@@ -3447,6 +3637,7 @@ export class ExecutionState {
               WHERE workId = ? AND threadId = ? AND turnId = ?`)
             .run(workId, value.threadId, value.turnId);
       }
+      this.recordWorkspaceTurnEnd(value.threadId, value.turnId);
     });
     const record = this.db
       .prepare(

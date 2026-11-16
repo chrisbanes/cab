@@ -1174,13 +1174,211 @@ verified exit of its exact process or its 30-minute quiet period, once no indepe
 hold remains. Otherwise a timer, expired lease, quiet interval, empty terminal list,
 acknowledged Stop or operator acknowledgement cannot release them. Conversation replacement and archival
 do not automatically delete
-workspaces. Retain until operator archival by default; automatic cleanup requires
-confirmed delivery and preservation checks for uncommitted work, handoffs and
-reconciliation evidence, and refuses while a result's uncommitted changes are
-neither committed nor delivered (see [Result workspace identity](#result-workspace-identity)). Missing workspaces hold affected execution visibly.
+workspaces. Workspaces are retained until the operator removes one or the automatic
+maintenance pass trims or removes it under the installation limits (see below).
+
+Trimming is a service-internal operation with no CLI, API or UI entry point; the
+automatic maintenance pass is its only caller. It takes the archival lease at any task status, so it refuses while
+execution is unsettled or the workspace is held. For each repository it lists Git's
+ignored untracked files with `git status --ignored=traditional --untracked-files=all`,
+which names each ignored file and reports a directory only when Git did not enumerate
+it. A nested Git repository, a submodule, an unsafe or non-UTF-8 path, or a listing
+Git cannot complete refuses the trim before anything is deleted. Each listed file or
+link is unlinked without following it, only after every parent below the worktree is
+checked to be a real directory, and only directories left empty are removed. Tracked
+files under ignored parents, non-ignored untracked files, root `evidence/`, legacy
+root `tmp/` and `npm-cache/`, and other workspace-root files survive. Scratch contents
+are deleted and the scratch directory is kept. Settled ownership and the workspace
+binding are rechecked before each repository and the scratch directory. Each effect
+is journaled before it runs and settled after a readback. The trim's trigger and start
+time are journaled when it begins; its completion time is recorded only when every
+effect succeeded. A cancellation, error, crash or ownership change leaves the journal
+held with its reason, as the record that the trim did not finish. A held trim deleted
+only disposable files, so it blocks nothing: it keeps no archival lease, across a
+restart too, and a later trim (running it again is idempotent) or removal (which
+derives every check itself) proceeds. Only an uncertain Git outcome holds the workspace
+and keeps the archival lease; every other outcome, including a refusal, releases it.
+Until a turn of the task ends after a trim, each turn's context carries one line with
+the trim time and guidance to rebuild ignored and scratch files; a trim that stopped
+part-way says those files may be missing instead.
+
+Generation metadata and attributable
+terminal, turn-end, confirmed-push and merge observations are stored independently
+of the current binding. Legacy facts without an attributable timestamp stay unknown;
+mutable update times and migration time do not establish age. Duplicate observations
+do not move an episode's anchor. These facts never release execution ownership.
+An interrupted or held removal journal stays held for reconciliation, even if a path is
+absent or its retention has expired, because it may have deleted part of the workspace.
+It keeps the task's archival hold, so the task is held with "Workspace maintenance in
+progress", the workspace shows as held, a later removal refuses because the workspace
+is held, and the Workspace maintenance Inbox item lists it once its retention has
+passed. cab has no command that reconciles it: this is a known limit,
+and the operator must inspect the workspace and the journal by hand.
+
+Removal is a service operation that takes only the task and a trigger (manual,
+delivered retention, merged retention or disk limit); callers assert no safety fact
+and there is no force override. The operator reaches it through
+`task workspace-remove TASK_ID` and the task page's Remove workspace… action, both the
+authenticated, receipted `task.workspace.remove {key, taskId, workspaceId}` command,
+whose trigger is always manual. `workspaceId` fences the command to the workspace
+generation the operator confirmed: once the task has another workspace, the command is
+refused and never removes the newer one. The request and its operation identity are
+stored before anything runs, same-key requests run one at a time, and the same key
+replays the original receipt, also after a restart or re-provisioning; the same key
+with other content, or a new key naming a replaced workspace, is a conflict. A
+refusal returns its reason, redacted under the task's exclusions, with no receipt; a
+refused request may be sent again. A removal held part way is reported to the same
+key with its operation ID; a new key gets the general reason that execution is not
+settled or the workspace is held. Neither runs it again until it is reconciled. The task page's
+confirmation lists what goes (each worktree with its ignored files, scratch, other
+workspace-root files and the Claude temporary base) and what stays (the task branch at
+its pushed commit, change requests, results and conversations), and says removal
+cannot be undone. The task read, task page and `task show` (an alias of `task get`)
+show the latest removal as "Workspace removed TIME (manual / delivered retention /
+merged retention / disk limit)" with each repository's pushed branch and commit or
+untouched base, and the latest trim as "Trimmed TIME (manual / idle limit / disk
+limit)"; both records survive re-provisioning. These reads carry no paths or sizes.
+Removal, manual or automatic, applies only to a done or cancelled
+task. It takes the archival lease under its own operation identity and refuses unless
+execution is settled, no cab callback is running, no delivery action of the task is
+unsettled and no result's uncommitted changes are left neither committed nor
+delivered (see [Result workspace identity](#result-workspace-identity)). Every
+repository is checked before any is deleted: a modified, staged or deleted tracked
+file or an untracked file Git does not ignore refuses, ignored files do not, and a
+nested repository, submodule or task branch changed outside cab refuses. HEAD must
+equal or be an ancestor of the task branch's last push, or have no commits beyond its
+provisioned base, proved from rehashed commit objects rather than refs or a commit
+graph. Committed work beyond the last push is pushed first through normal delivery, as
+a service caller bound to the task, workspace generation, removal operation and policy
+version that may request only `branch.push`; the repository's push grant, its approval
+mode, the target-conflict check and outside-change refusal apply as for an agent, and
+the service gives no approval. A refused push keeps the whole workspace and names the
+delivery's reason; a push that already succeeded in another repository stays recorded
+and is not repeated. A removal push is recorded without restarting the delivered
+retention clock. Every repository is then proved again. Each worktree removal (never
+forced), the root deletion and the Claude temporary base release are journaled before
+they run and settled only after readback shows them gone; the completed record, with
+each repository's pushed commit or base, and the archived binding are written
+together, and asking again returns that record. A failure or uncertain Git outcome
+after an effect started holds the workspace and the journal, keeps the lease and is
+never reported as removal; after a restart it stays held with nothing more deleted.
+A task whose workspace was removed gets a new one, under a new workspace ID and path,
+when it is provisioned again or for a turn that admission would accept, as after the
+task is reopened. Before provisioning, admission checks the turn's task and assignment
+revisions and state, draft text, recovery continuation, previous work and its harness
+home, and any workspace the request already recorded; a turn refused there provisions
+nothing. Capacity, writer and submission checks follow provisioning, as for any turn. Each repository starts at its removal record's commit: the task branch's last
+confirmed push, or the provisioned base when it had no task commits, never a branch's
+current tip. The task keeps its repositories, each source must still match its
+recorded Git identity, and the project must still link each repository exactly, verified
+as a first workspace's links are, for a local or imported task. A
+commit missing from the managed repository is fetched from the recorded branch through
+the code host's isolated branch fetch where one is configured, and only exactly the
+recorded commit is accepted; otherwise the removed binding stays and admission waits
+with the reason. Concurrent provisioning and admissions create one workspace. Only a
+workspace with a completed removal record is replaced; a missing, held or interrupted
+workspace is not. The removed generation and its record are retained. A conversation
+that ran there resumes in the new workspace, with its working directory and scratch,
+rather than starting again, and a queued request that recorded the removed workspace
+runs in the new one; a continuation from any other workspace is still held.
+Missing workspaces hold affected execution visibly.
+Each task workspace root has a `scratch` directory, created when the workspace is
+provisioned or, for an older workspace, before its next turn. An occupied scratch path
+that is not a real directory refuses the turn and is left as it is. Every task turn on
+either runtime gets the directory as `CAB_SCRATCH_DIR`; Codex turns also get it as
+`TMPDIR`, set per thread rather than for the whole App Server. Project drafting turns
+get no scratch.
 A workspace held only because Git could not read its worktree identity is rechecked
 at startup, before admitting a turn and by `task workspace-recheck`, and returns to
 ready once the check passes; every other workspace hold still needs a person.
+
+The service loads four installation-wide workspace maintenance settings: idle hours
+(default 24), delivered retention hours (24), merged retention hours (1) and disk cap
+in decimal GB (10). Each accepts a positive safe whole integer or exact `off`, and
+its conversion to milliseconds or bytes must remain safe. Invalid values refuse
+startup. The supported installation and low-level LaunchAgent render paths preserve
+explicit values, including `off`; an omitted upgrade option keeps its recorded value.
+Manual removal is independent of the limits.
+
+The automatic maintenance pass applies them. It starts after startup recovery and wakes
+once a minute; one pass runs at a time and new tasks never wait for it. A pass reads
+stored facts only, reads them again after each effect and decides each next effect from
+that latest read, and yields between candidates. Its decisions never authorize an
+effect: under the effect's archival hold, the trim and removal entry points derive every
+safety check again for the generation it chose, and re-derive its trigger from current
+stored facts and the service's current limits by the pass's own rules: the retention or
+idle limit has passed, or the latest measured usage is still over the cap. They check
+again before the first deletion when the effect awaited Git or a push in between. A
+turn end, push, reopening, terminal transition or merge since the pass decided refuses
+the effect. Each effect reads the service's current limits, which change only when the
+service restarts. Such a refusal is not listed and does not wait, and the next pass decides
+again. Manual removal has no trigger to re-derive.
+In order, it:
+
+- removes a done or cancelled task's workspace once its delivered retention has passed
+  since the task's last confirmed push, or since it became terminal when nothing was
+  pushed, or once its merged retention has passed since cab first observed every
+  repository's change request merged at cab's last confirmed push to it, whichever
+  expires first (merged on an exact tie). A later push makes that repository unmerged
+  again until its change request is observed merged at the new head.
+  A push made by removal does not restart the clock. An adoption of an outside head and
+  an automatic stack rebase each make the new head the task branch's confirmed push.
+  Each fact belongs to one workspace generation: a turn end and a confirmed push to the
+  generation the work ran in, a stack rebase to the task's current generation, a
+  removal's push to the generation it removed, and a terminal or reopening transition
+  to the task's current generation, including one provisioned again that is not yet
+  ready. A change request observation belongs to the
+  current generation, unless that generation's removal has completed or the observed
+  head is a confirmed push that only a replaced generation holds. A repository of a
+  generation provisioned again starts holding the confirmed push it starts at, as a
+  removed generation of the task recorded it, so a merge at that commit, or at a later
+  push of its own to the same change request, counts for it.
+  A removed generation's clocks are history: no later observation marks it merged, and
+  no fact about it moves its replacement's clocks. A workspace whose needed time fact
+  predates cab's records is never expired and raises no attention; it stays until it is
+  removed by hand;
+- trims a workspace once its idle limit has passed since its last turn ended, once per
+  ended turn;
+- over the disk cap, trims eligible workspaces oldest idle first, then removes done or
+  cancelled ones oldest idle first while usage stays over the cap, measuring the trimmed
+  workspace again after each trim and dropping a removed one, and stopping at the first
+  measurement within the cap. Workspaces of unknown idle time or unmeasured size are not
+  ranked.
+
+A refused trim or removal is not tried again while its task version, delivery policy,
+last turn end and last push are unchanged: it waits 5 minutes, then twice as long after
+each further refusal, up to an hour, and is still listed meanwhile. A changed fact or a
+service restart retries it at once.
+
+Disk usage is the allocated bytes of each task workspace root and its Claude temporary
+base, measured in a worker thread that has only the paths: links are not followed and
+an inode reached twice in one measurement counts once. A root is walked again only when
+its last measurement is 15 minutes old, its last turn ended or it was trimmed since,
+or its size was unknown; a hard link between roots measured at different times may
+count twice. Managed repositories, drafting workspaces and other
+installation directories are not counted, and a measurement error is unknown usage,
+never zero. When known usage is within the cap but some root could not be measured, the
+cap is unconfirmed: the pass does not resolve it and lists each such workspace as
+unmeasured. Each limit set to `off` disables only its trigger. With both retentions off
+nothing is removed automatically, including over the cap, while cap trimming still
+runs; with the disk cap off nothing is measured and no cap attention is raised.
+Workspaces of archived or deleting projects are not trimmed or removed. Shutdown stops
+new candidates, cancels a measurement in flight and drains the effect in flight before
+the database closes.
+
+While usage stays over the cap after a pass, or a workspace still past its retention at
+the end of the pass was refused, the Inbox has exactly one installation item, Workspace
+maintenance. It belongs to no project, so project filters exclude it, and it lists each
+blocking workspace by task with cab's fixed reason (open task, unsettled execution,
+uncommitted work, pending result work, refused push, unproved history, unsettled
+delivery, held maintenance, read-only project, unknown time, unmeasured size, automatic
+removal off), never a path or Git output. The item reflects the facts the pass read
+last: a workspace whose facts changed under an effect is left for the next pass to list.
+Task names are resolved on each read; a deleted task's entry is dropped, and project
+deletion prunes its tasks' entries in the same transaction. A later pass refreshes the
+same item in place; it cannot be dismissed and resolves once both conditions clear, and
+a recurrence reactivates the same item. Each task link opens the task page; nothing is
+removed from the Inbox.
 
 Every Git subprocess the service starts (workspace provisioning, cleanup and
 identity checks, file and comparison reads, setup probes and repository
@@ -1421,7 +1619,8 @@ budget the interface must meet: [first run to first task](user-flows/first-run.m
 [approve an exact action](user-flows/approve-action.md),
 [inspect changes and reply](user-flows/inspect-changes.md),
 [review a result](user-flows/review-result.md),
-[unblock waiting work](user-flows/unblock-work.md) and
+[unblock waiting work](user-flows/unblock-work.md),
+[remove a finished task's workspace](user-flows/workspace-maintenance.md) and
 [triage an uncertain execution](user-flows/triage-uncertainty.md). A flow's
 budget never overrides the rules in this specification; it bounds the path to them.
 
@@ -1881,7 +2080,8 @@ Codex's ([ADR-1008](adr/1008-claude-code-execution-harness.md)):
   unsandboxed retry. At `escalate-approval`, a command runs outside it only after the
   operator approves it.
 - A sandbox self-test runs before each turn; if it fails, the work waits visibly.
-- Each task has its own sandbox temporary directory (`CLAUDE_CODE_TMPDIR`).
+- Each task has its own sandbox temporary directory (`CLAUDE_CODE_TMPDIR`); its shell
+  sees `TMPDIR` as the CLI's per-user directory inside it.
 - File-editing tools are confined by the hook, not by the OS sandbox.
 - Claude loads trusted native user/project/plugin configuration alongside cab instructions.
 - Agents ask questions only through `cab_ask_question`.
@@ -2708,9 +2908,20 @@ cannot be established.
 
 A linked artifact file is served from the workspace while its bytes still match
 the recorded size and SHA-256 (`x-cab-evidence-source: recorded-workspace`).
-Once the workspace copy has moved on or the workspace is cleaned, it is read from
+Once the workspace copy has moved on or the workspace is removed, it is read from
 the commit its result recorded, in the repository that owns the worktree
-(`recorded-commit`), with the same size, hash and image checks. A file that was
+(`recorded-commit`), with the same size, hash and image checks. A result belongs to
+the workspace generation its work ran in: after a removed workspace is replaced, its
+artifacts are read only from that generation's repositories at the recorded commit,
+never from the new workspace or from whichever repository a later workspace places at
+the same relative path, and once a workspace has been replaced, a result whose
+generation cannot be attributed is not read from a commit. A workspace-file review
+anchor captured in a removed generation keeps its retained excerpt and reports an
+unknown status rather than being compared with the new workspace. A gap anchor, which
+records no root, is attributed by its work or, failing that, by its capture time against
+each generation's creation and completed removal: it reads as a gap in the current
+generation and as unavailable when it belongs to a removed one or cannot be attributed. Managed repositories keep automatic garbage collection off, so a
+removed workspace's commits stay readable. A file that was
 never committed and has changed since is not served. Both reads apply the current
 policy first and again after reading: a repository the project no longer links
 or an excluded or control path is withheld, and a policy change during the read
@@ -3164,8 +3375,9 @@ alerts. Browser notifications are opt-in Web Push, turned on per browser in Sett
 Notifications; nothing is sent until then. While a browser is subscribed the service
 reads the same Inbox every 15 seconds and sends one push per newly seen alert to each
 active browser: a question or approval once per interaction, an intervention once per
-task and problem, and a runtime whose restarts ran out once per exhaustion episode,
-naming only the runtime. An alert already in the Inbox when the first browser subscribes
+task and problem, a runtime whose restarts ran out once per exhaustion episode,
+naming only the runtime, and workspace maintenance once per active episode with fixed
+text, not again when the same item is refreshed. An alert already in the Inbox when the first browser subscribes
 sends nothing (the first complete Inbox read, or the third partial read in a row, ends that
 silent start), an unchanged alert is never sent again, and a request that resolves and
 later returns is new. An alert is recorded before it is sent, so a crash can lose a push

@@ -32,6 +32,8 @@ import {
   unpublish,
 } from "../fixtures/service-internals.js";
 
+const leaseOwner = "60000000-0000-4000-8000-000000000001";
+
 interface RecoveryApi {
   recoveryView(): RecoveryRecord[];
 }
@@ -73,7 +75,7 @@ test("legacy interrupted archive recovery clears its ordinary transient hold", a
     );
     assert.equal(created.gitUncertain, false);
     bindings.update(taskId, "archiving", "Workspace cleanup in progress");
-    assert.equal(state.beginArchive(taskId), true);
+    assert.equal(state.beginArchive(taskId, leaseOwner), true);
 
     await new WorkspaceManager(bindings, workspaceRoot).recover();
     const recovered = bindings.get(taskId);

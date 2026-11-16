@@ -1591,3 +1591,95 @@ test("a requested result review is one urgency-1 Inbox item that filters, dismis
     await f.close();
   }
 });
+
+test("the maintenance item resolves task names live, drops a missing task's blocker and is not dismissible", async () => {
+  const f = await createOperatorFixture();
+  try {
+    const a = await seedOwnQuestion(f),
+      api = new OperatorApi(f.service, [f.directory]);
+    const workspaceId = randomUUID();
+    // The start-up pass settles first, so it cannot resolve the seeded item.
+    await f.service.runWorkspaceMaintenance();
+    f.service.inboxLifecycle().refreshWorkspaceMaintenance({
+      usage: null,
+      blockers: [
+        {
+          taskId: a.taskId,
+          workspaceId,
+          condition: "retention",
+          reason: "unsettled",
+        },
+        // A late snapshot of a task that no longer exists is never shown.
+        {
+          taskId: randomUUID(),
+          workspaceId: randomUUID(),
+          condition: "retention",
+          reason: "uncommitted",
+        },
+      ],
+      // One more blocker than the stored list holds.
+      total: 3,
+    });
+    const read = async (params?: URLSearchParams) =>
+      (await api.readInbox(params)).data.items.filter(
+        (i) => i.kind === "workspace-maintenance",
+      );
+    const [item] = await read();
+    assert.ok(item?.kind === "workspace-maintenance");
+    inboxReadSchema.parse(await api.readInbox());
+    assert.deepEqual(
+      item.blockers.map((b) => [
+        b.taskId,
+        b.workspaceId,
+        b.reasonText,
+        b.destination,
+      ]),
+      [
+        [
+          a.taskId,
+          workspaceId,
+          "Task execution is not settled or the workspace is held",
+          `/tasks/${a.taskId}`,
+        ],
+      ],
+    );
+    assert.equal(item.dismissible, false);
+    assert.equal(item.moreBlockers, 1);
+    assert.equal(
+      item.reason,
+      "A workspace past its retention was not removed.",
+    );
+    // Project filters exclude the installation item.
+    assert.deepEqual(
+      await read(new URLSearchParams({ project: a.projectId })),
+      [],
+    );
+    // Names are resolved on each read.
+    const task = f.service.domain().task(a.taskId);
+    f.service.domain().execute({
+      type: "task.configure",
+      actor: "operator",
+      key: randomUUID(),
+      projectId: a.projectId,
+      taskId: a.taskId,
+      expectedVersion: Number(task.version),
+      title: "Renamed task",
+    } as never);
+    assert.equal(
+      (await read())[0]?.kind === "workspace-maintenance" &&
+        (await read())[0]?.blockers[0]?.taskTitle,
+      "Renamed task",
+    );
+    await assert.rejects(
+      api.execute({
+        type: "inbox.dismiss",
+        key: randomUUID(),
+        itemId: item.id,
+        expectedRevision: item.lifecycle!.revision,
+      }),
+    );
+    assert.equal((await read()).length, 1);
+  } finally {
+    await f.close();
+  }
+});

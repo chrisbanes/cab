@@ -72,6 +72,16 @@ agent's instructions from selected operator feedback). Accepting one is an ordin
 `project` or `profile` configure, which the CLI already prepares and applies, with
 `--restore-revision` to restore earlier wording.
 
+Service install and upgrade accept `--workspace-idle-hours`,
+`--workspace-delivered-retention-hours`, `--workspace-merged-retention-hours` and
+`--workspace-disk-cap-gb`, each with a positive safe whole integer or `off`.
+Omitted upgrade options retain the protected installation's values; output reports
+the desired loaded limits, which the automatic maintenance pass applies from service
+start. `inbox list` shows its one Workspace maintenance item with the task, workspace
+and reason of each blocking workspace. Manual
+removal (`task workspace-remove`) and the `task show` records work whatever the limits.
+See the [maintenance configuration](../operations/standalone-macos.md#workspace-maintenance-configuration).
+
 ## Diagnostic evidence
 
 Add richer bounded capture for future executions: cab-supplied instructions
@@ -569,11 +579,31 @@ receipt replay; `task.resume` still clears an existing Stop on such a task. The 
 CLI reuses a journal key only while it is unresolved (latest state `sending` or
 `unknown`, never after `recorded` or a definite rejection); the output reports
 reuse and, for Stop and Resume, whether Stop is in effect after a possible replay.
+`task workspace-remove TASK_ID [--request-id UUID]` sends the receipted
+`task.workspace.remove {key, taskId, workspaceId}`. The CLI reads the task only to
+name its current workspace generation (`workspace.workspaceId` in the task read);
+the body carries no safety facts, force or trigger, and the service derives every
+removal check, records the trigger as manual and refuses a workspace that is no
+longer current. The request and its maintenance operation are stored before
+anything is deleted; same-key requests run one at a time and replay the original
+`workspace-remove {taskId, workspaceId, operationId, removedAt, repositories}`
+receipt, also after a restart or a new workspace. A refusal is `409 conflict` with
+the redacted reason and no receipt; a removal held part way names its operation
+to the same key and is never run again. The key is chosen per task and workspace generation and
+reused while unresolved, so a new workspace gets a new key; its body is frozen, and
+a reused key is first read back with `operation get --type task.workspace.remove`,
+so a lost reply sends nothing more. Output prints the workspace, operation, time and each
+repository's pushed or base evidence, and that the task branch, change requests,
+results and conversations remain. `task show TASK_ID` is an alias of `task get`;
+both print the latest removal and trim records as `Workspace: Workspace removed
+TIME (manual|delivered retention|merged retention|disk limit)` with one evidence
+line per repository, and `Workspace: Trimmed TIME (manual|idle limit|disk limit)`.
+They never print workspace paths, sizes or archive terminology.
 `operation get` does not read these types: domain task receipts do not record
 which task command produced them, so an uncertain outcome is settled by retrying
 the same command with its key and checked with `task get`, `question get` or
 `approval get`. `GET /api/operator/inbox` accepts `limit` (1–100, default 100),
-`kind` (`question|approval|result-review|intervention|runtime`), `status`
+`kind` (`question|approval|result-review|intervention|runtime|workspace-maintenance`), `status`
 (`actionable|resolved|dismissed`, default `actionable`) and `project`, each at most once and
 applied before paging; a cursor from other parameters is `409`. A `runtime` item carries `harness` and `since` instead of task fields.
 Every item carries durable lifecycle status/revision and resolution/dismissal metadata.

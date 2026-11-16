@@ -4,12 +4,14 @@ import {
   questionReadSchema,
   type InboxItem,
   type RuntimeInboxItem,
+  type WorkspaceMaintenanceInboxItem,
   type TaskInboxItem,
   type Session,
   type TaskListSummary,
   type Workspace,
 } from "../../src/operator/contracts.js";
 import type { OperatorClient } from "./api.js";
+import { isTaskInboxItem } from "../../src/operator/attention.js";
 import {
   ActionLink,
   ProjectName,
@@ -155,7 +157,7 @@ export function NeedsYou({
             <RequestCard
               key={item.id}
               item={item}
-              task={item.kind === "runtime" ? undefined : byId.get(item.taskId)}
+              task={isTaskInboxItem(item) ? byId.get(item.taskId) : undefined}
               operator={operator}
               observedAt={requests.fetchedAt}
               onRecorded={() => {
@@ -186,21 +188,28 @@ export function NeedsYou({
   );
 }
 
-/** A runtime whose restarts ran out: the one card with no task, linking to runtime settings. */
-function RuntimeCard({ item }: { item: RuntimeInboxItem }) {
-  const Icon = requestKindIcons.runtime,
+/**
+ * An installation problem with no task: a runtime whose restarts ran out (linking to runtime
+ * settings) or workspace maintenance that needs attention (linking to its Inbox item).
+ */
+function RuntimeCard({
+  item,
+}: {
+  item: RuntimeInboxItem | WorkspaceMaintenanceInboxItem;
+}) {
+  const Icon = requestKindIcons[item.kind],
     headline = `overview-${item.id}-headline`;
   return (
     <li
       className="overview-card"
       data-request-id={item.id}
-      data-kind="runtime"
+      data-kind={item.kind}
       data-tone="risk"
     >
       <div className="overview-card-top">
         <span className="overview-badge" data-tone="risk">
           <Icon aria-hidden="true" />
-          Runtime
+          {requestKindLabel(item.kind)}
         </span>
         <span className="metadata muted identifier">
           {clockLabel(item.createdAt)} · {ageLabel(item.createdAt, Date.now())}
@@ -235,7 +244,8 @@ function RequestCard({
   observedAt: number | null;
   onRecorded: () => void;
 }) {
-  if (item.kind === "runtime") return <RuntimeCard item={item} />;
+  if (item.kind === "runtime" || item.kind === "workspace-maintenance")
+    return <RuntimeCard item={item} />;
   const evidence = task && interventionEvidence(task),
     uncertain =
       item.kind === "intervention" && Boolean(evidence?.ownershipHeld),

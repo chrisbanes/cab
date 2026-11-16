@@ -1,3 +1,4 @@
+import { join } from "node:path";
 import { setImmediate as yieldEventLoop } from "node:timers/promises";
 import { z } from "zod";
 import { registerPrArgumentsSchema } from "../../../src/core/delivery.js";
@@ -93,9 +94,14 @@ export function bindStackRuntime(
     const scopes = m.authority.runtime.filter(
       (scope) => scope.workspace === workspace,
     );
+    // A task turn's scratch must be its workspace's child; the pinned digest covers the rest.
+    const { scratchDirectory, ...pinned } = settings ?? {};
     if (
       scopes.length !== 1 ||
-      materialHash(settings ?? null) !== scopes[0]!.settingsSha256
+      (scratchDirectory !== undefined &&
+        scratchDirectory !== join(workspace, "scratch")) ||
+      materialHash(settings === undefined ? null : pinned) !==
+        scopes[0]!.settingsSha256
     )
       throw Error("v2-runtime-workspace-or-settings");
     return scopes[0]!;

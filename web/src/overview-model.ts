@@ -9,6 +9,7 @@ import {
   projectLabel,
   projectLabels,
 } from "../../src/operator/project-labels.js";
+import { isTaskInboxItem } from "../../src/operator/attention.js";
 import { inboxSummaryOf } from "./request-presentation.js";
 import {
   columnCounts,
@@ -53,7 +54,7 @@ export function orderAttention(
 ) {
   const uncertain = new Set(tasks?.filter(isUncertain).map((t) => t.id));
   const rank = (item: InboxItem) =>
-    item.kind === "runtime"
+    !isTaskInboxItem(item)
       ? -1
       : item.kind !== "intervention"
         ? 2
@@ -71,7 +72,9 @@ export function orderAttention(
 export const requestPlace = (item: InboxItem) =>
   item.kind === "runtime"
     ? `${executionHarnessLabels[item.harness]} runtime`
-    : `${item.projectName ?? "Unavailable project"} / ${item.taskTitle ?? "Unavailable task"}`;
+    : item.kind === "workspace-maintenance"
+      ? "Workspace maintenance"
+      : `${item.projectName ?? "Unavailable project"} / ${item.taskTitle ?? "Unavailable task"}`;
 
 /** The dashed row after the cards: how many requests remain and the first two by name. */
 export function furtherRequests(items: readonly InboxItem[], shown: number) {

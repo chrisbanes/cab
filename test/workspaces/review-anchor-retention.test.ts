@@ -6,6 +6,7 @@ import type { DatabaseSync } from "node:sqlite";
 import { test } from "node:test";
 import { retainedEvidenceLimits } from "../../src/core/retained-evidence.js";
 import { SqliteWorkspaceComparisonStore } from "../../src/standalone/comparison-store.js";
+import { OperatorApi } from "../../src/standalone/operator-api.js";
 import type {
   WorkspaceComparisonContent,
   WorkspaceComparisonEntry,
@@ -16,6 +17,7 @@ import type {
 } from "../../src/standalone/workspace-comparison.js";
 import { createOperatorFixture } from "../fixtures/operator-web.js";
 import { seedReviewTask } from "../fixtures/task-review.js";
+import { finishTask } from "../fixtures/workspace-removal.js";
 
 function digest(bytes: Uint8Array | string): string {
   return createHash("sha256").update(bytes).digest("hex");
@@ -398,13 +400,8 @@ test("no-result draft captures exact text and comparison sides, seals, discards,
     false,
   );
 
-  const archived = await f.service.archiveTask(task.taskId, {
-    deliveryConfirmed: true,
-    writerOwnershipResolved: true,
-    handoffsPreserved: true,
-    reconciliationEvidencePreserved: true,
-    workspaceContentsPreserved: true,
-  });
+  finishTask(f.service, task.taskId);
+  const archived = await f.service.removeTaskWorkspace(task.taskId, "manual");
   assert.equal(archived.outcome, "cleaned");
   await assert.rejects(readFile(join(workspace.path, "notes.txt")));
   await f.reopen();
@@ -850,4 +847,119 @@ test("stored anchor rows in today's shape still read back through the derived sc
     originRoot,
   });
   assert.deepEqual(store.reviewAnchor(task.taskId, gapId), { anchor: gap });
+});
+
+test("a workspace-file anchor is never compared with a later workspace generation", async (t) => {
+  const f = await createOperatorFixture();
+  t.after(() => f.close());
+  const task = await seedReviewTask(f, "Anchor rebind", "Review exact lines");
+  const workspace = (await f.service.taskWorkspace(task.taskId))!;
+  assert.equal(workspace.state, "ready");
+  const original = Buffer.from("first\nsecond\nthird\n");
+  await writeFile(join(workspace.path, "notes.txt"), original);
+  const staged = await f.service.stageReviewAnchorDraft({
+    taskId: task.taskId,
+    operationId: randomUUID(),
+    anchors: [
+      {
+        taskId: task.taskId,
+        repositoryId: null,
+        path: "notes.txt",
+        sourceKind: "workspace-file" as const,
+        context: "workspace" as const,
+        side: "file" as const,
+        startLine: 1,
+        endLine: 2,
+        contentSha256: digest(original),
+      },
+    ],
+  });
+  const [anchorId] = staged.anchorIds;
+  assert.ok(anchorId);
+  const excerpt = Buffer.from("first\nsecond\n");
+  const read = async () => {
+    const { data } = await new OperatorApi(f.service, [
+      f.directory,
+    ]).readRetainedReviewAnchor(task.taskId, anchorId);
+    assert.equal(data.state, "available");
+    assert.deepEqual(
+      f.service.retainedEvidence().reviewAnchor(task.taskId, anchorId)?.bytes,
+      excerpt,
+    );
+    return data.state === "available" ? data.status : undefined;
+  };
+  assert.equal(await read(), "current");
+
+  finishTask(f.service, task.taskId);
+  const removed = await f.service.removeTaskWorkspace(task.taskId, "manual");
+  assert.equal(removed.outcome, "cleaned");
+  assert.equal(await read(), "unknown");
+
+  const again = await f.service.provisionTask(task.taskId);
+  assert.equal(again.state, "ready", again.reason ?? "");
+  assert.notEqual(again.workspaceId, workspace.workspaceId);
+  // The new generation's file at the same path decides nothing about the old anchor.
+  await writeFile(join(again.path, "notes.txt"), original);
+  assert.equal(await read(), "unknown");
+  await writeFile(join(again.path, "notes.txt"), "different\n");
+  assert.equal(await read(), "unknown");
+
+  await f.reopen();
+  assert.equal(await read(), "unknown");
+});
+
+test("a gap anchor reads as a gap only in the generation it was captured in", async (t) => {
+  const f = await createOperatorFixture();
+  t.after(() => f.close());
+  const task = await seedReviewTask(f, "Gap rebind", "Keep bounded context");
+  const bytes = Buffer.alloc(
+    retainedEvidenceLimits.maxReviewAnchorBytes + 1,
+    0x61,
+  );
+  /** Stages a quota-gap anchor of `large.txt` in the task's current workspace. */
+  const gap = async () => {
+    const workspace = (await f.service.taskWorkspace(task.taskId))!;
+    await writeFile(join(workspace.path, "large.txt"), bytes);
+    const staged = await f.service.stageReviewAnchorDraft({
+      taskId: task.taskId,
+      operationId: randomUUID(),
+      anchors: [
+        {
+          taskId: task.taskId,
+          repositoryId: null,
+          path: "large.txt",
+          sourceKind: "workspace-file",
+          context: "workspace",
+          side: "file",
+          startLine: 1,
+          endLine: 1,
+          contentSha256: digest(bytes),
+        },
+      ],
+    });
+    assert.equal(staged.anchorStates[0]?.state, "gap");
+    return staged.anchorIds[0]!;
+  };
+  const state = async (anchorId: string) => {
+    const { data } = await new OperatorApi(f.service, [
+      f.directory,
+    ]).readRetainedReviewAnchor(task.taskId, anchorId);
+    return data.state;
+  };
+  const old = await gap();
+  assert.equal(await state(old), "gap");
+  finishTask(f.service, task.taskId);
+  assert.equal(
+    (await f.service.removeTaskWorkspace(task.taskId, "manual")).outcome,
+    "cleaned",
+  );
+  const again = await f.service.provisionTask(task.taskId);
+  assert.equal(again.state, "ready", again.reason ?? "");
+  const fresh = await gap();
+  // The old anchor's root is not the new workspace's; the new one's is.
+  assert.equal(await state(old), "unavailable");
+  assert.equal(await state(fresh), "gap");
+  await f.reopen();
+  assert.equal(await state(old), "unavailable");
+  assert.equal(await state(fresh), "gap");
 });

@@ -24,12 +24,68 @@ const rowSchema = inboxLifecycleSchema.extend({
     "intervention",
     "runtime",
     "result-review",
+    "workspace-maintenance",
   ]),
   sourceKey: z.string(),
   dataJson: z.string(),
   obsolete: z.union([z.literal(0), z.literal(1)]),
 });
 export type InboxEpisode = z.infer<typeof rowSchema>;
+
+/** The installation's one workspace maintenance episode: a fixed id and source key. */
+export const workspaceMaintenanceInboxId = "workspace-maintenance";
+
+/** Why a workspace blocks maintenance: cab's own fixed codes, never paths or Git output. */
+export const workspaceMaintenanceReasons = [
+  "task-open",
+  "unsettled",
+  "uncommitted",
+  "pending-result",
+  "push-refused",
+  "history",
+  "delivery-unsettled",
+  "maintenance-held",
+  "project-read-only",
+  "clock-unknown",
+  "unmeasured",
+  "removal-off",
+  "refused",
+] as const;
+export type WorkspaceMaintenanceReason =
+  (typeof workspaceMaintenanceReasons)[number];
+/**
+ * Stored blockers are bounded: retention blockers first, then disk-cap ones, each in the pass's
+ * candidate order; `total` counts every blocker, listed or not.
+ */
+export const workspaceMaintenanceBlockerLimit = 50;
+export const workspaceMaintenanceAttentionSchema = z
+  .strictObject({
+    /** Set while measured usage stays over the disk cap after a pass. */
+    usage: z
+      .strictObject({
+        measuredBytes: z.number().int().nonnegative().safe(),
+        capBytes: z.number().int().positive().safe(),
+      })
+      .nullable(),
+    blockers: z
+      .array(
+        z.strictObject({
+          taskId: z.uuid(),
+          workspaceId: z.uuid(),
+          condition: z.enum(["disk-cap", "retention"]),
+          reason: z.enum(workspaceMaintenanceReasons),
+        }),
+      )
+      .max(workspaceMaintenanceBlockerLimit),
+    /** Every blocker the pass found; absent means exactly those listed. */
+    total: z.number().int().nonnegative().safe().optional(),
+  })
+  .refine((a) => a.total === undefined || a.total >= a.blockers.length, {
+    message: "Blocker total is below the listed blockers",
+  });
+export type WorkspaceMaintenanceAttention = z.infer<
+  typeof workspaceMaintenanceAttentionSchema
+>;
 
 /** Visibility is independent of answers, scheduling and execution ownership. */
 export class InboxLifecycle {
@@ -94,6 +150,88 @@ export class InboxLifecycle {
     );
   }
 
+  /**
+   * Refreshes the installation's maintenance episode in place: inserts it, updates its blockers,
+   * or reactivates the same item after it resolved. Question and approval rows never come here.
+   */
+  refreshWorkspaceMaintenance(
+    attention: WorkspaceMaintenanceAttention,
+    at = Date.now(),
+  ): InboxEpisode {
+    const data = JSON.stringify(
+      workspaceMaintenanceAttentionSchema.parse(attention),
+    );
+    return transaction(this.db, () => {
+      const row = this.get(workspaceMaintenanceInboxId);
+      if (!row)
+        this.db
+          .prepare(`INSERT INTO inbox_lifecycle
+          (id,taskId,kind,sourceKey,dataJson,status,revision,createdAt)
+          VALUES (?,NULL,'workspace-maintenance',?,?,'actionable',1,?)`)
+          .run(
+            workspaceMaintenanceInboxId,
+            workspaceMaintenanceInboxId,
+            data,
+            at,
+          );
+      else if (row.kind !== "workspace-maintenance" || row.taskId !== null)
+        throw new DomainConflictError("Maintenance Inbox identity is taken");
+      else if (row.status !== "actionable")
+        // A recurrence is a new active episode of the same item: its createdAt starts it.
+        this.db
+          .prepare(`UPDATE inbox_lifecycle SET status='actionable',dataJson=?,createdAt=?,
+          revision=revision+1,resolvedAt=NULL,resolution=NULL,dismissedAt=NULL,note=NULL,obsolete=0
+          WHERE id=?`)
+          .run(data, at, row.id);
+      else if (row.dataJson !== data)
+        this.db
+          .prepare(
+            "UPDATE inbox_lifecycle SET dataJson=?,revision=revision+1 WHERE id=?",
+          )
+          .run(data, row.id);
+      return this.get(workspaceMaintenanceInboxId)!;
+    });
+  }
+
+  /** The maintenance episode's validated data, or undefined while it was never raised. */
+  workspaceMaintenance():
+    | { row: InboxEpisode; attention: WorkspaceMaintenanceAttention }
+    | undefined {
+    const row = this.get(workspaceMaintenanceInboxId);
+    if (row?.kind !== "workspace-maintenance") return undefined;
+    return {
+      row,
+      attention: workspaceMaintenanceAttentionSchema.parse(
+        JSON.parse(row.dataJson),
+      ),
+    };
+  }
+
+  /** Inside project deletion's transaction: drops the deleted tasks' blocker references only. */
+  pruneWorkspaceMaintenance(taskIds: readonly string[]): void {
+    const current = this.workspaceMaintenance();
+    if (!current) return;
+    const deleted = new Set(taskIds);
+    const blockers = current.attention.blockers.filter(
+      (b) => !deleted.has(b.taskId),
+    );
+    const pruned = current.attention.blockers.length - blockers.length;
+    if (!pruned) return;
+    const { total } = current.attention;
+    this.db
+      .prepare(
+        "UPDATE inbox_lifecycle SET dataJson=?,revision=revision+1 WHERE id=?",
+      )
+      .run(
+        JSON.stringify({
+          ...current.attention,
+          blockers,
+          ...(total === undefined ? {} : { total: total - pruned }),
+        }),
+        current.row.id,
+      );
+  }
+
   resolve(id: string, reason: string, obsolete = false) {
     this.db
       .prepare(`UPDATE inbox_lifecycle SET status='resolved',resolution=?,resolvedAt=?,obsolete=?,revision=revision+1
@@ -115,6 +253,11 @@ export class InboxLifecycle {
     )
       throw new DomainConflictError(
         "Inbox item changed; refresh before trying again",
+      );
+    // Dismissal must not hide an unresolved disk or retention warning; it clears when resolved.
+    if (row.kind === "workspace-maintenance")
+      throw new DomainConflictError(
+        "Workspace maintenance attention clears once resolved and cannot be dismissed",
       );
     this.db
       .prepare(

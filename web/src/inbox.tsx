@@ -47,9 +47,14 @@ import {
   InterventionDetail,
   RuntimeDetail,
   useInboxTask,
+  WorkspaceMaintenanceDetail,
 } from "./inbox-detail.js";
 import { InboxContext } from "./inbox-context.js";
-import { inboxSelectionHref } from "../../src/operator/attention.js";
+import {
+  inboxSelectionHref,
+  isTaskInboxItem,
+} from "../../src/operator/attention.js";
+import { workspaceMaintenanceInboxId } from "../../src/core/inbox-lifecycle.js";
 import { closeResolvedNotifications } from "./notifications.js";
 import { shortcutApplies } from "./focus-mode.js";
 import { QuestionResponse } from "./question-response.js";
@@ -226,15 +231,18 @@ export function Inbox({
     // A wide layout without a request in the URL shows the last chosen one, else the one it opened itself.
     implicit = !urlId && !single ? (state.selected ?? state.auto) : null,
     selectedId = urlId ?? implicit?.id ?? null,
-    // A runtime item belongs to no task: its id alone selects it.
-    runtimeId = Boolean(selectedId?.startsWith("runtime:")),
+    // A runtime or maintenance item belongs to no task: its id alone selects it.
+    runtimeId = Boolean(
+      selectedId?.startsWith("runtime:") ||
+        selectedId === workspaceMaintenanceInboxId,
+    ),
     taskId =
       urlTask ??
-      (implicit?.kind === "runtime" ? null : implicit?.taskId) ??
+      (implicit && isTaskInboxItem(implicit) ? implicit.taskId : null) ??
       null;
   const sameRequest = (item: InboxItem) =>
     item.id === selectedId &&
-    (item.kind === "runtime" || item.taskId === taskId);
+    (!isTaskInboxItem(item) || item.taskId === taskId);
   const items = resource.state.data?.items ?? [],
     current = items.find(sameRequest);
   if (current && urlId) state.selected = current;
@@ -251,7 +259,7 @@ export function Inbox({
     items.filter(
       (item) =>
         (!state.project ||
-          (item.kind !== "runtime" && item.projectId === state.project)) &&
+          (isTaskInboxItem(item) && item.projectId === state.project)) &&
         (!state.kind || item.kind === state.kind),
     ),
   ).flatMap((group) => group.items);
@@ -345,7 +353,7 @@ export function Inbox({
     ),
     recorded = Boolean(
       selected &&
-        selected.kind !== "runtime" &&
+        isTaskInboxItem(selected) &&
         questions.recordedHere(selected.taskId, selected.id),
     );
   const subtitle =
@@ -362,10 +370,11 @@ export function Inbox({
               : `${count} unresolved across ${projectCount} project${projectCount === 1 ? "" : "s"}`;
   const detailTitle = single && selected ? heading : null,
     detailSubtitle =
-      (selected?.kind === "runtime" ? null : selected?.projectName) ??
+      (selected && isTaskInboxItem(selected) ? selected.projectName : null) ??
       undefined,
-    detailTask = selected?.kind === "runtime" ? undefined : selected?.taskId,
-    detailRuntime = selected?.kind === "runtime";
+    detailTask =
+      selected && isTaskInboxItem(selected) ? selected.taskId : undefined,
+    detailRuntime = Boolean(selected && !isTaskInboxItem(selected));
   useEffect(() => {
     onHeader?.(
       detailTitle && (detailTask || detailRuntime)
@@ -408,9 +417,9 @@ export function Inbox({
     projects = [
       ...new Map(
         loaded.flatMap((item) =>
-          item.kind === "runtime"
-            ? []
-            : [[item.projectId, item.projectName] as const],
+          isTaskInboxItem(item)
+            ? [[item.projectId, item.projectName] as const]
+            : [],
         ),
       ),
     ],
@@ -470,11 +479,11 @@ export function Inbox({
           <span className="inbox-row-reason">{heading.reason}</span>
         )}
         <span className="inbox-row-action">{requestActionLabel(item)} →</span>
-        {((item.kind !== "runtime" && item.requesterName) ||
+        {((isTaskInboxItem(item) && item.requesterName) ||
           item.createdAt !== null) && (
           <span className="inbox-row-meta">
-            {item.kind !== "runtime" && item.requesterName}
-            {item.kind !== "runtime" &&
+            {isTaskInboxItem(item) && item.requesterName}
+            {isTaskInboxItem(item) &&
               item.requesterName &&
               item.createdAt !== null &&
               " · "}
@@ -544,7 +553,7 @@ export function Inbox({
       .find((el) => el.dataset.recordId === selectedId)
       ?.scrollIntoView({ block: "nearest" });
   }, [selectedId]);
-  const meta = selected && selected.kind !== "runtime" && (
+  const meta = selected && isTaskInboxItem(selected) && (
     <div className="inbox-detail-meta">
       {requestIdentity(selected) && (
         <p className="inbox-identity">{requestIdentity(selected)}</p>
@@ -640,6 +649,10 @@ export function Inbox({
               </option>
               <option value="runtime">
                 Runtime · {counts.kind.runtime ?? 0}
+              </option>
+              <option value="workspace-maintenance">
+                Workspace maintenance ·{" "}
+                {counts.kind["workspace-maintenance"] ?? 0}
               </option>
             </NativeSelect>
             {queueRefresh && (
@@ -739,7 +752,7 @@ export function Inbox({
                 )}
                 {!single && (
                   <span className="inbox-detail-tools">
-                    {selected.kind !== "runtime" && (
+                    {isTaskInboxItem(selected) && (
                       <a
                         className="inbox-open-task"
                         href={`/tasks/${selected.taskId}`}
@@ -908,6 +921,8 @@ export function Inbox({
                 <ApprovalDetail item={selected} resource={task} />
               ) : selected?.kind === "runtime" ? (
                 <RuntimeDetail item={selected} />
+              ) : selected?.kind === "workspace-maintenance" ? (
+                <WorkspaceMaintenanceDetail item={selected} />
               ) : selected ? (
                 <InterventionDetail
                   item={selected}
@@ -944,7 +959,7 @@ export function Inbox({
           <p>Select a request to review its complete form or exact material.</p>
         )}
       </section>
-      {inspector && selected && selected.kind !== "runtime" && (
+      {inspector && selected && isTaskInboxItem(selected) && (
         <InboxContext
           item={selected}
           task={task}

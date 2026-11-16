@@ -5107,3 +5107,89 @@ test("omitted install LAN options refuse a malformed saved sidecar before activa
   assert.deepEqual(f.launchd.mutations(), []);
   assert.equal(readFileSync(path, "utf8"), "{malformed");
 });
+
+test("workspace limits round-trip through agent installation, omitted upgrade, explicit off and failed activation", async (t) => {
+  const f = await installed(t);
+  f.options.workspaceMaintenance = {
+    idleHours: 7,
+    deliveredRetentionHours: "off",
+    mergedRetentionHours: 2,
+    diskCapGb: 3,
+  };
+  let result = await f.upgrade(f.releaseA);
+  assert.equal(result.code, 0, result.stderr);
+  const kept = f.record().configuration.workspaceMaintenance;
+  assert.deepEqual(kept, f.options.workspaceMaintenance);
+  assert.equal(environment(f.activation).CAB_WORKSPACE_IDLE_HOURS, "7");
+  assert.equal(
+    environment(f.activation).CAB_WORKSPACE_DELIVERED_RETENTION_HOURS,
+    "off",
+  );
+  assert.equal(result.report.workspaceMaintenance.diskCapGb, 3);
+  delete f.options.workspaceMaintenance;
+  f.launchd.clock += 60_000;
+  result = await f.upgrade();
+  assert.equal(result.code, 0, result.stderr);
+  assert.deepEqual(f.record().configuration.workspaceMaintenance, kept);
+  f.options.workspaceMaintenance = { idleHours: "off" };
+  f.launchd.clock += 60_000;
+  result = await f.upgrade(f.releaseB);
+  assert.equal(result.code, 0, result.stderr);
+  assert.equal(environment(f.activation).CAB_WORKSPACE_IDLE_HOURS, "off");
+  assert.equal(
+    f.record().configuration.workspaceMaintenance.deliveredRetentionHours,
+    "off",
+  );
+  const oldBytes = readFileSync(f.recordPath);
+  const host = f.launchd.host();
+  host.rename = () => {
+    throw Error("injected activation rename");
+  };
+  const { out, io } = capture();
+  f.launchd.clock += 60_000;
+  const connection: OperatorConnection = {
+    origin: async () => f.record().configuration.origin,
+    readiness: async () => [],
+  };
+  const code = await upgradeService(
+    { ...f.options, workspaceMaintenance: { diskCapGb: "off" } },
+    f.releaseB,
+    connection,
+    host,
+    io,
+  );
+  assert.equal(code, 1, out.stderr);
+  assert.deepEqual(readFileSync(f.recordPath), oldBytes);
+  assert.equal(JSON.parse(out.stderr).jobStopped, true);
+});
+
+test("workspace installation limits reach staged daemon environment and verify refuses a changed desired value", async (t) => {
+  const f = await setup(t);
+  f.options.workspaceMaintenance = {
+    idleHours: "off",
+    deliveredRetentionHours: 48,
+    mergedRetentionHours: "off",
+    diskCapGb: 12,
+  };
+  const first = await f.installDaemon();
+  assert.equal(first.code, 0, first.stderr);
+  assert.equal(
+    environment(f.staged).CAB_WORKSPACE_MERGED_RETENTION_HOURS,
+    "off",
+  );
+  assert.equal(environment(f.staged).CAB_WORKSPACE_DISK_CAP_GB, "12");
+  assert.equal(
+    JSON.parse(first.stdout).workspaceMaintenance.deliveredRetentionHours,
+    48,
+  );
+  const saved = readFileSync(f.recordPath);
+  delete f.options.workspaceMaintenance;
+  const verify = await f.installDaemon();
+  assert.equal(verify.code, 0, verify.stderr);
+  assert.deepEqual(readFileSync(f.recordPath), saved);
+  f.options.workspaceMaintenance = { diskCapGb: 1 };
+  const refused = await f.installDaemon();
+  assert.equal(refused.code, 1);
+  assert.match(refused.stderr, /maintenance settings differ/);
+  assert.deepEqual(readFileSync(f.recordPath), saved);
+});

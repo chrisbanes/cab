@@ -1,4 +1,10 @@
 import {
+  parseWorkspaceMaintenanceLimit,
+  workspaceMaintenanceSettings,
+  type WorkspaceMaintenanceSettings,
+  type WorkspaceMaintenanceConfiguration,
+} from "../operator/workspace-maintenance-settings.js";
+import {
   chmodSync,
   closeSync,
   constants as fsConstants,
@@ -30,6 +36,7 @@ export type LaunchAgentConfiguration = {
   /** Written only when set; the service's own defaults apply otherwise. */
   diagnosticRetentionDays?: number | undefined;
   diagnosticStorageMib?: number | undefined;
+  workspaceMaintenance?: WorkspaceMaintenanceConfiguration | undefined;
   /** LaunchDaemon only: the account the job runs as and its HOME. Set both or neither. */
   userName?: string | undefined;
   home?: string | undefined;
@@ -161,6 +168,20 @@ function validateConfiguration(configuration: LaunchAgentConfiguration): void {
   ] as const)
     if (value !== undefined && !isInBound(value, bound))
       throw new Error(`${label} is invalid`);
+  if (configuration.workspaceMaintenance) {
+    for (const key of Object.keys(configuration.workspaceMaintenance))
+      if (!Object.hasOwn(workspaceMaintenanceSettings, key))
+        throw new Error("Unknown workspace maintenance setting");
+    for (const [key, definition] of Object.entries(
+      workspaceMaintenanceSettings,
+    ))
+      parseWorkspaceMaintenanceLimit(
+        configuration.workspaceMaintenance[
+          key as keyof WorkspaceMaintenanceSettings
+        ],
+        definition,
+      );
+  }
   requireRegularFile(configuration.nodePath, "Node executable", true);
   requireRegularFile(configuration.cliPath, "Compiled CLI", false);
   requirePrivateDirectory(configuration.dataDirectory, "Data directory");
@@ -214,10 +235,28 @@ export function launchdEnvironment(
     | "home"
     | "diagnosticRetentionDays"
     | "diagnosticStorageMib"
+    | "workspaceMaintenance"
   >,
 ): Record<string, string> {
   return {
     PATH: LAUNCHD_PATH,
+    ...Object.fromEntries(
+      Object.entries(workspaceMaintenanceSettings)
+        .filter(
+          ([key]) =>
+            configuration.workspaceMaintenance?.[
+              key as keyof WorkspaceMaintenanceSettings
+            ] !== undefined,
+        )
+        .map(([key, definition]) => [
+          definition.name,
+          String(
+            configuration.workspaceMaintenance![
+              key as keyof WorkspaceMaintenanceSettings
+            ],
+          ),
+        ]),
+    ),
     ...(configuration.home === undefined ? {} : { HOME: configuration.home }),
     CAB_OPERATOR_AUTH_FILE: configuration.authFile,
     CAB_OPERATOR_ORIGIN: configuration.origin,

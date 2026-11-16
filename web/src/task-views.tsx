@@ -21,6 +21,7 @@ import {
   useEffect,
 } from "react";
 import { createPortal } from "react-dom";
+import { isTaskInboxItem } from "../../src/operator/attention.js";
 import type {
   InboxItem,
   Workspace,
@@ -282,7 +283,7 @@ export function TaskBoard({
   const hiddenCounts = columnCounts(hiddenByReadiness);
   const firstRequest = new Map<string, InboxItem>();
   for (const item of requests.data?.items ?? [])
-    if (item.kind !== "runtime" && !firstRequest.has(item.taskId))
+    if (isTaskInboxItem(item) && !firstRequest.has(item.taskId))
       firstRequest.set(item.taskId, item);
   const setSelected = (next: number) => {
     updateSelected(next);

@@ -1,3 +1,7 @@
+import {
+  WorkspaceLifecycleStore,
+  workspaceLifecycleEventSchema,
+} from "../core/workspace-lifecycle.js";
 import { UnstackStore } from "../core/unstack.js";
 import { createHash } from "node:crypto";
 import { nativeInputEndpointIdentitySchema } from "../core/structured-questions.js";
@@ -395,6 +399,66 @@ function readReceipts(db: Database, owner: OwnershipParameters) {
       taskOwner(db, i.edge.blockerTaskId) !== i.projectId
     )
       throw new Error("Unstack captured task/project ownership mismatch");
+  }
+  const lifecycle = new WorkspaceLifecycleStore(db);
+  for (const row of all(
+    db,
+    "SELECT workspaceId,taskId FROM workspace_generations",
+  )) {
+    const generation = lifecycle.get(uuid.parse(row.workspaceId))!;
+    if (generation.taskId !== row.taskId)
+      throw new Error("Lifecycle generation owner mismatch");
+    taskOwner(db, generation.taskId);
+    for (const operation of lifecycle.operations(generation)) {
+      if (
+        operation.effects.some(
+          (effect) =>
+            effect.target.kind === "repository" &&
+            !generation.repositories.some(
+              (r) =>
+                r.repositoryId ===
+                (effect.target as { repositoryId: string }).repositoryId,
+            ),
+        ) ||
+        operation.repositories?.some(
+          (proof) =>
+            !generation.repositories.some(
+              (r) => r.repositoryId === proof.repositoryId,
+            ),
+        )
+      )
+        throw new Error("Lifecycle operation repository owner mismatch");
+    }
+  }
+  for (const row of all(
+    db,
+    "SELECT workspaceId,eventId,data FROM workspace_lifecycle_events",
+  )) {
+    const generation = lifecycle.get(uuid.parse(row.workspaceId));
+    const event = workspaceLifecycleEventSchema.parse(json(row.data));
+    if (!generation || event.eventId !== row.eventId)
+      throw new Error("Lifecycle event owner mismatch");
+    if (event.kind === "turn-ended") {
+      const binding = db
+        .prepare("SELECT taskId FROM task_execution_bindings WHERE workId=?")
+        .get(event.workId) as Row | undefined;
+      const owners = independentWorkOwners(db, event.workId);
+      if (
+        binding?.taskId !== generation.taskId ||
+        owners.length !== 1 ||
+        owners[0] !== taskOwner(db, generation.taskId)
+      )
+        throw new Error("Lifecycle event work owner mismatch");
+    }
+    if (event.kind === "push" && event.removalOperationId !== null)
+      lifecycle.operation(generation, event.removalOperationId);
+    if (
+      (event.kind === "push" || event.kind === "merge") &&
+      !generation.repositories.some(
+        (r) => r.repositoryId === event.repositoryId,
+      )
+    )
+      throw new Error("Lifecycle event repository owner mismatch");
   }
   // New structured records keep their existing task ownership; validate identity, never infer it from arbitrary JSON.
   for (const row of all(db, "SELECT * FROM delivery_pr_bindings")) {

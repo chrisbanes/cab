@@ -1,3 +1,4 @@
+import { initializedWorkspaceLifecycle } from "./workspace-lifecycle.js";
 import {
   assertOwnedTaskWritable,
   assertProjectWritable,
@@ -587,6 +588,7 @@ export class GitHubSourceStore {
           String(task.nodeId),
           new Date().toISOString(),
         );
+      initializedWorkspaceLifecycle(this.db)?.taskStateChanged(taskId, "done");
       new LeadTextStore(this.db).recordHandback(taskId, "done");
       return true;
     });
@@ -1645,131 +1647,141 @@ export class GitHubSourceStore {
 
   /** `deliveryClosure` marks the own-delivery closure flow, which sets its own hold. */
   updateReadiness(taskId: string, deliveryClosure = false): void {
-    if (!this.ownerWritable(taskId)) return;
-    const owner = this.ownerOf(taskId);
-    if (owner !== this) {
-      owner.updateReadiness(taskId, deliveryClosure);
-      return;
-    }
-    const external = this.db
-      .prepare(
-        "SELECT e.externalId AS nodeId, e.labels, e.observedStatus, e.observedFields, e.observedState, t.projectId FROM external_items e JOIN domain_tasks t ON t.id = e.taskId WHERE e.taskId = ?",
-      )
-      .get(taskId) as Row;
-    const config = this.db
-      .prepare("SELECT readiness FROM project_task_sources WHERE projectId = ?")
-      .get(String(external.projectId)) as Row;
-    const nodeId = String(external.nodeId);
-    const closed = external.observedState === "closed";
-    // Reopening reverses a provider completion; holds are untouched.
-    if (!closed && this.providerCompletion(taskId)) {
-      this.db
-        .prepare("DELETE FROM source_completions WHERE taskId = ?")
-        .run(taskId);
-      this.db
-        .prepare(
-          "UPDATE domain_tasks SET state = 'open', version = version + 1 WHERE id = ?",
-        )
-        .run(taskId);
-    }
-    const facts = this.readinessFacts(external);
-    const memberships = facts.memberships;
-    const ready =
-      memberships > 0 &&
-      external.observedState === "open" &&
-      evaluateReadiness(parseRule(config.readiness), facts).satisfied;
-    const row = this.db
-      .prepare(
-        "SELECT ready, state, readinessRule FROM domain_tasks WHERE id = ?",
-      )
-      .get(taskId) as Row;
-    const hold = this.hold(nodeId);
-    if (
-      closed &&
-      row.state === "open" &&
-      !deliveryClosure &&
-      !(
-        this.db
-          .prepare(`SELECT ${effectiveOwnClosure(itemParams)} AS present`)
-          .get(...this.key(nodeId)) as Row
-      ).present &&
-      !new DeliveryStore(this.db).ownsConfirmedClosure(taskId, nodeId)
-    ) {
-      // Closure after import holds the task whatever its readiness. Stricter text review
-      // keeps its hold; an unsuperseded own closure, proved or not, is not this closure.
-      if (
-        !hold?.active ||
-        ["withdrawn", "readiness-lost"].includes(String(hold.reason))
-      ) {
-        this.setSourceHold(nodeId, "closed");
-        if (Number(row.ready) === Number(ready))
-          this.db
-            .prepare(
-              "UPDATE domain_tasks SET version = version + 1 WHERE id = ?",
-            )
-            .run(taskId);
+    const update = () => {
+      if (!this.ownerWritable(taskId)) return;
+      const owner = this.ownerOf(taskId);
+      if (owner !== this) {
+        owner.updateReadiness(taskId, deliveryClosure);
+        return;
       }
-    } else if (
-      Number(row.ready) === 1 &&
-      !ready &&
-      // A closure hold, or a pending or unattributed own-delivery closure proof, keeps its reason:
-      // only the operator resolves it, so a later readiness loss or withdrawal must not make it self-releasing.
-      !(
-        hold?.active &&
-        [
-          "closed",
-          "closure-read-unavailable",
-          "closure-attribution-unproved",
-        ].includes(String(hold.reason))
-      )
-    )
-      this.setSourceHold(
-        String(external.nodeId),
-        external.observedState === "closed"
-          ? "closed"
-          : memberships === 0
-            ? "withdrawn"
-            : "readiness-lost",
-      );
-    if (Number(row.ready) !== Number(ready)) {
-      const { version } = this.db
-        .prepare("SELECT version FROM domain_tasks WHERE id = ?")
-        .get(taskId) as { version: number };
-      // The readiness the closure itself removed, were the issue still open.
-      const change =
-        closed &&
-        Number(row.ready) === 1 &&
-        memberships > 0 &&
-        closureReadinessProof(
-          parseRule(config.readiness),
-          facts,
-          external.observedStatus != null,
-          new DeliveryStore(this.db).closureProjectFields(taskId),
-        )
-          ? "closed"
-          : !closed && ready
-            ? "reopened-read"
-            : undefined;
-      if (change)
-        new DeliveryStore(this.db).carryClosureVersionWithinTransaction(
-          taskId,
-          nodeId,
-          version,
-          change,
-        );
-      this.db
+      const external = this.db
         .prepare(
-          "UPDATE domain_tasks SET ready = ?, readinessRule = ?, version = version + 1 WHERE id = ?",
+          "SELECT e.externalId AS nodeId, e.labels, e.observedStatus, e.observedFields, e.observedState, t.projectId FROM external_items e JOIN domain_tasks t ON t.id = e.taskId WHERE e.taskId = ?",
         )
-        .run(Number(ready), String(config.readiness), taskId);
-    }
-    // Stamp only: approval bindings compare the task version, which Ready alone moves.
-    else if (row.readinessRule !== config.readiness)
-      this.db
-        .prepare("UPDATE domain_tasks SET readinessRule = ? WHERE id = ?")
-        .run(String(config.readiness), taskId);
-    // Every committed source write passes here, whether or not it moved Ready.
-    new DeliveryStore(this.db).observeReadinessInputs(taskId);
+        .get(taskId) as Row;
+      const config = this.db
+        .prepare(
+          "SELECT readiness FROM project_task_sources WHERE projectId = ?",
+        )
+        .get(String(external.projectId)) as Row;
+      const nodeId = String(external.nodeId);
+      const closed = external.observedState === "closed";
+      // Reopening reverses a provider completion; holds are untouched.
+      if (!closed && this.providerCompletion(taskId)) {
+        this.db
+          .prepare("DELETE FROM source_completions WHERE taskId = ?")
+          .run(taskId);
+        this.db
+          .prepare(
+            "UPDATE domain_tasks SET state = 'open', version = version + 1 WHERE id = ?",
+          )
+          .run(taskId);
+        initializedWorkspaceLifecycle(this.db)?.taskStateChanged(
+          taskId,
+          "open",
+        );
+      }
+      const facts = this.readinessFacts(external);
+      const memberships = facts.memberships;
+      const ready =
+        memberships > 0 &&
+        external.observedState === "open" &&
+        evaluateReadiness(parseRule(config.readiness), facts).satisfied;
+      const row = this.db
+        .prepare(
+          "SELECT ready, state, readinessRule FROM domain_tasks WHERE id = ?",
+        )
+        .get(taskId) as Row;
+      const hold = this.hold(nodeId);
+      if (
+        closed &&
+        row.state === "open" &&
+        !deliveryClosure &&
+        !(
+          this.db
+            .prepare(`SELECT ${effectiveOwnClosure(itemParams)} AS present`)
+            .get(...this.key(nodeId)) as Row
+        ).present &&
+        !new DeliveryStore(this.db).ownsConfirmedClosure(taskId, nodeId)
+      ) {
+        // Closure after import holds the task whatever its readiness. Stricter text review
+        // keeps its hold; an unsuperseded own closure, proved or not, is not this closure.
+        if (
+          !hold?.active ||
+          ["withdrawn", "readiness-lost"].includes(String(hold.reason))
+        ) {
+          this.setSourceHold(nodeId, "closed");
+          if (Number(row.ready) === Number(ready))
+            this.db
+              .prepare(
+                "UPDATE domain_tasks SET version = version + 1 WHERE id = ?",
+              )
+              .run(taskId);
+        }
+      } else if (
+        Number(row.ready) === 1 &&
+        !ready &&
+        // A closure hold, or a pending or unattributed own-delivery closure proof, keeps its reason:
+        // only the operator resolves it, so a later readiness loss or withdrawal must not make it self-releasing.
+        !(
+          hold?.active &&
+          [
+            "closed",
+            "closure-read-unavailable",
+            "closure-attribution-unproved",
+          ].includes(String(hold.reason))
+        )
+      )
+        this.setSourceHold(
+          String(external.nodeId),
+          external.observedState === "closed"
+            ? "closed"
+            : memberships === 0
+              ? "withdrawn"
+              : "readiness-lost",
+        );
+      if (Number(row.ready) !== Number(ready)) {
+        const { version } = this.db
+          .prepare("SELECT version FROM domain_tasks WHERE id = ?")
+          .get(taskId) as { version: number };
+        // The readiness the closure itself removed, were the issue still open.
+        const change =
+          closed &&
+          Number(row.ready) === 1 &&
+          memberships > 0 &&
+          closureReadinessProof(
+            parseRule(config.readiness),
+            facts,
+            external.observedStatus != null,
+            new DeliveryStore(this.db).closureProjectFields(taskId),
+          )
+            ? "closed"
+            : !closed && ready
+              ? "reopened-read"
+              : undefined;
+        if (change)
+          new DeliveryStore(this.db).carryClosureVersionWithinTransaction(
+            taskId,
+            nodeId,
+            version,
+            change,
+          );
+        this.db
+          .prepare(
+            "UPDATE domain_tasks SET ready = ?, readinessRule = ?, version = version + 1 WHERE id = ?",
+          )
+          .run(Number(ready), String(config.readiness), taskId);
+      }
+      // Stamp only: approval bindings compare the task version, which Ready alone moves.
+      else if (row.readinessRule !== config.readiness)
+        this.db
+          .prepare("UPDATE domain_tasks SET readinessRule = ? WHERE id = ?")
+          .run(String(config.readiness), taskId);
+      // Every committed source write passes here, whether or not it moved Ready.
+      new DeliveryStore(this.db).observeReadinessInputs(taskId);
+    };
+    if (this.db.isTransaction) update();
+    else transaction(this.db, update);
   }
 
   /** The stored readiness rule; `null` filters nothing. */

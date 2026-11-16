@@ -18,7 +18,8 @@ export const projectDeletionInventory = {
       "note",
       "obsolete",
     ],
-    ownership: "taskId in T; KEEP runtime episodes",
+    ownership:
+      "taskId in T; KEEP runtime and workspace-maintenance episodes, pruning T from maintenance blockers",
   },
   inbox_lifecycle_receipts: {
     columns: ["key", "taskId", "itemId", "payloadHash", "result"],
@@ -1602,13 +1603,13 @@ export const projectDeletionInventory = {
     ownership: "projectId=P",
   },
   task_archival_holds: {
-    columns: ["taskId", "reason"],
+    columns: ["taskId", "reason", "ownerToken"],
     ownership: "taskId in T",
   },
   task_control_receipts: {
     columns: ["taskId", "key", "payloadHash", "receiptJson", "createdAt"],
     ownership:
-      "taskId in T; task-cancel receipt binds taskId/key and cancellation count, no external ownership",
+      "taskId in T; task-cancel receipt binds taskId/key and cancellation count; workspace-remove request and receipt bind taskId/key, workspace generation and maintenance operation; no external ownership",
   },
   task_dependency_records: {
     columns: ["seq", "taskId", "blockerTaskId"],
@@ -1731,6 +1732,21 @@ export const projectDeletionInventory = {
   task_work_revisions: {
     columns: ["workId", "assignmentId", "conversationRevision", "workRevision"],
     ownership: "workId in W",
+  },
+  workspace_generations: {
+    columns: ["workspaceId", "taskId", "data"],
+    ownership:
+      "taskId in T; validate data task/workspace and repository identities; private retained paths and clock facts",
+  },
+  workspace_lifecycle_events: {
+    columns: ["workspaceId", "eventId", "data"],
+    ownership:
+      "workspaceId belongs to generation with taskId in T; validate event identity and work owner",
+  },
+  workspace_maintenance_operations: {
+    columns: ["operationId", "workspaceId", "data"],
+    ownership:
+      "workspaceId belongs to generation with taskId in T; validate captured task/workspace/op/repo/effect identities; private reason",
   },
   task_workspace_bindings: {
     columns: [

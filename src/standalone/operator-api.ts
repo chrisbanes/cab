@@ -12,6 +12,7 @@ import { ProjectDeletionUnavailableError } from "./project-deletion.js";
 import { projectArchiveBlockedMessage } from "../operator/project-lifecycle-copy.js";
 import type { ReadinessResult } from "../operator/readiness.js";
 import type { RecoveryRecord } from "./recovery-types.js";
+import type { TaskWorkspaceBinding } from "./workspaces.js";
 import { createHash, randomUUID } from "node:crypto";
 import {
   issueBodyLimit,
@@ -189,6 +190,7 @@ import {
   taskResultPageSchema,
   sourceHoldReasonSchema,
   taskSchema,
+  type TaskWorkspaceRecords,
   taskTimelineSchema,
   taskToolOutputSchema,
   textMaxLength,
@@ -212,7 +214,17 @@ import type {
   PublicationReview,
 } from "../core/task-publication.js";
 import { deriveWaits } from "../operator/wait-reasons.js";
-import { type AttentionCode, attentionNext } from "../operator/attention.js";
+import {
+  type AttentionCode,
+  attentionNext,
+  isTaskInboxItem,
+} from "../operator/attention.js";
+import { workspaceMaintenanceInboxId } from "../core/inbox-lifecycle.js";
+import {
+  maintenanceInboxHeadline,
+  maintenanceInboxReason,
+  maintenanceReasonLabels,
+} from "../operator/workspace-maintenance-copy.js";
 import {
   claudeTokenExclusions,
   claudeTokenSource,
@@ -300,6 +312,7 @@ import {
   RuntimeConfigurationRefusedError,
   type StandaloneService,
   WorkspaceRecheckRefusedError,
+  WorkspaceRemovalRefusedError,
   withoutWithdrawn,
 } from "./service.js";
 import {
@@ -441,6 +454,17 @@ const escalationMaterialSchema = z.object({
     dirty: z.boolean().nullable(),
   }),
 });
+
+/** The root an anchor or artifact path is relative to: the workspace, or one repository's worktree. */
+function bindingRoot(
+  binding: Pick<TaskWorkspaceBinding, "path" | "repositories">,
+  repositoryId: string | null,
+): string | undefined {
+  return repositoryId
+    ? binding.repositories.find((r) => r.repositoryId === repositoryId)
+        ?.workspacePath
+    : binding.path;
+}
 
 export class OperatorApiError extends Error {
   constructor(
@@ -1301,18 +1325,31 @@ export class OperatorApi {
       return this.workspaceInspectionFailure(error);
     }
   }
+  /**
+   * A gap anchor records no root: it takes the current binding's only when its work or capture
+   * time places it in that generation, never a removed one's successor.
+   */
   private async retainedAnchorOriginRoot(
-    taskId: string,
-    repositoryId: string | null,
+    anchor: {
+      taskId: string;
+      repositoryId: string | null;
+      workId?: string | undefined;
+      capturedAt: number;
+    },
     retainedRoot?: string,
   ) {
     if (retainedRoot) return retainedRoot;
-    const binding = await this.service.taskWorkspace(taskId);
-    if (!binding) return undefined;
-    if (!repositoryId) return binding.path;
-    return binding.repositories.find(
-      (repository) => repository.repositoryId === repositoryId,
-    )?.workspacePath;
+    const binding = await this.service.taskWorkspace(anchor.taskId);
+    if (
+      !binding ||
+      this.service.resultWorkspace(
+        anchor.taskId,
+        anchor.workId ?? null,
+        anchor.capturedAt,
+      )?.workspaceId !== binding.workspaceId
+    )
+      return undefined;
+    return bindingRoot(binding, anchor.repositoryId);
   }
   private async retainedAnchorStatus(
     anchor: NonNullable<
@@ -1330,6 +1367,9 @@ export class OperatorApi {
         current.binding?.state !== "ready" ||
         current.taskVersion !== policy.taskVersion
       )
+        return "unknown";
+      // An anchor captured in a removed generation is never compared with a later workspace.
+      if (bindingRoot(current.binding, anchor.repositoryId) !== originRoot)
         return "unknown";
       const path = relativePolicySegments(anchor.path);
       if (!path) return "unknown";
@@ -1478,8 +1518,7 @@ export class OperatorApi {
     if (!retained) throw new OperatorApiError(404, "not-found");
     const { anchor, bytes } = retained;
     const originRoot = await this.retainedAnchorOriginRoot(
-      taskId,
-      anchor.repositoryId,
+      anchor,
       retained.originRoot,
     );
     if (!originRoot) return unavailable("unavailable");
@@ -3899,6 +3938,54 @@ export class OperatorApi {
         };
       });
   }
+  /**
+   * The installation's maintenance item, with each blocker's task and project names resolved
+   * now under current exclusions. A blocker whose task is gone is dropped.
+   */
+  private async workspaceMaintenanceItems(
+    excluded: readonly string[] | undefined,
+    base: ExclusionBase,
+  ): Promise<InboxItem[]> {
+    const current = this.service.inboxLifecycle().workspaceMaintenance();
+    if (!current) return [];
+    const { row, attention } = current;
+    const blockers = [];
+    for (const b of attention.blockers) {
+      let task: ReturnType<OperatorApi["requireTask"]>;
+      try {
+        task = this.requireTask(b.taskId);
+      } catch {
+        continue;
+      }
+      const projectId = String(task.projectId),
+        named = await this.exclusions(projectId, b.taskId, [], [], base);
+      blockers.push({
+        ...b,
+        taskTitle: this.safe(task.title, named),
+        projectName: this.safe(this.domain().project(projectId).name, named),
+        reasonText: maintenanceReasonLabels[b.reason],
+        destination: `/tasks/${b.taskId}`,
+      });
+    }
+    return [
+      {
+        id: workspaceMaintenanceInboxId,
+        kind: "workspace-maintenance" as const,
+        urgency: 0 as const,
+        createdAt: row.createdAt,
+        headline: maintenanceInboxHeadline,
+        reason: maintenanceInboxReason(attention.usage, blockers),
+        usage: attention.usage,
+        blockers,
+        moreBlockers:
+          (attention.total ?? attention.blockers.length) -
+          attention.blockers.length,
+        destination: `/inbox?request=${workspaceMaintenanceInboxId}`,
+        lifecycle: this.inboxLifecycleView(row.id, excluded),
+        dismissible: false as const,
+      },
+    ];
+  }
   async readInbox(params = new URLSearchParams()) {
     this.service.reconcileInbox();
     return this.readWithExclusionFence(() => this.readInboxOnce(params));
@@ -3925,6 +4012,7 @@ export class OperatorApi {
             "intervention",
             "runtime",
             "result-review",
+            "workspace-maintenance",
           ])
           .optional(),
         status: z
@@ -4092,17 +4180,26 @@ export class OperatorApi {
       )
         throw new OperatorApiError(503, "unavailable");
     }
-    // Runtime episodes belong to no project, so a project filter excludes them.
+    // Runtime and maintenance episodes belong to no project, so a project filter excludes them.
+    const installationExcluded = await this.exclusions(
+      undefined,
+      undefined,
+      [],
+      [],
+      exclusionBase,
+    );
     const filtered: InboxItem[] = [
-      ...this.runtimeInboxItems(
-        await this.exclusions(undefined, undefined, [], [], exclusionBase),
-      ),
+      ...this.runtimeInboxItems(installationExcluded),
+      ...(await this.workspaceMaintenanceItems(
+        installationExcluded,
+        exclusionBase,
+      )),
       ...items,
     ].filter(
       (item) =>
         (item.lifecycle?.status ?? "actionable") === status &&
         (!kind || item.kind === kind) &&
-        (!project || (item.kind !== "runtime" && item.projectId === project)),
+        (!project || (isTaskInboxItem(item) && item.projectId === project)),
     );
     filtered.sort(
       (a, b) =>
@@ -4553,6 +4650,7 @@ export class OperatorApi {
       waits: this.taskWaits(t, admission, execution, excluded, view.approvals),
       execution,
       taskHold: this.nonStopTaskHold(taskId, excluded),
+      workspace: this.taskWorkspaceRecords(taskId, excluded),
       localDependencies: d.dependencies(taskId).map((id) => {
         const b = d.task(id);
         return { id, title: this.safe(b.title, excluded), state: b.state };
@@ -4749,6 +4847,46 @@ export class OperatorApi {
     )
       throw new OperatorApiError(503, "unavailable");
     return taskSchema.parse({ data, observedAt: Date.now() });
+  }
+  /** The stored workspace generation and latest trim and removal; branch names are disclosed under the exclusions. */
+  private taskWorkspaceRecords(
+    taskId: string,
+    excluded: Awaited<ReturnType<OperatorApi["exclusions"]>>,
+  ): TaskWorkspaceRecords {
+    const { binding, trim, removal } =
+      this.service.taskWorkspaceRecords(taskId);
+    return {
+      workspaceId: binding?.workspaceId ?? null,
+      state: binding
+        ? binding.state === "archived"
+          ? "removed"
+          : binding.state === "archiving"
+            ? "removing"
+            : binding.state
+        : null,
+      trim:
+        trim && trim.trigger !== "delivered" && trim.trigger !== "merged"
+          ? {
+              workspaceId: trim.workspaceId,
+              at: trim.completedAt!,
+              trigger: trim.trigger,
+            }
+          : null,
+      removal:
+        removal && removal.trigger !== "idle"
+          ? {
+              workspaceId: removal.workspaceId,
+              at: removal.completedAt!,
+              trigger: removal.trigger,
+              repositories: (removal.repositories ?? []).map((r) => ({
+                repositoryId: r.repositoryId,
+                kind: r.kind,
+                branch: this.exact(r.branch, excluded, 1024),
+                commit: r.commit,
+              })),
+            }
+          : null,
+    };
   }
   /** Pages `readTask` results or messages, so projections and redaction match `task get`. */
   async readTaskRecordPage(
@@ -7096,11 +7234,14 @@ export class OperatorApi {
   }
   /** The repository (null for the task root) and repository-relative path an artifact names. */
   private async artifactLocation(taskId: string, artifactId: string) {
-    const file = this.service
-      .taskReview()
-      .artifactOwner(taskId, artifactId)
-      ?.metadata.artifacts.find((a) => a.artifactId === artifactId)?.file;
-    const workspace = await this.service.taskWorkspace(taskId);
+    const record = this.service.taskReview().artifactOwner(taskId, artifactId);
+    const file = record?.metadata.artifacts.find(
+      (a) => a.artifactId === artifactId,
+    )?.file;
+    // The result's own generation: a later workspace's repo-N may hold another repository.
+    const workspace = record
+      ? this.service.resultWorkspace(taskId, record.workId)
+      : undefined;
     if (!file || !workspace) return undefined;
     const target = resolve(workspace.path, file.relativePath);
     const repository = workspace.repositories.find(
@@ -7138,6 +7279,9 @@ export class OperatorApi {
           !workspace ||
           workspace.state !== "ready" ||
           !record ||
+          // Only the workspace the result was recorded in can hold its live copy.
+          this.service.resultWorkspace(taskId, record.workId)?.workspaceId !==
+            workspace.workspaceId ||
           !artifact ||
           excluded === undefined ||
           !this.disclosable(artifact.label, excluded)
@@ -7195,7 +7339,9 @@ export class OperatorApi {
       ),
       file = artifact?.availability === "available" ? artifact.file : undefined,
       excluded = await this.exclusions(String(task.projectId), taskId),
-      workspace = await this.service.taskWorkspace(taskId);
+      workspace = record
+        ? this.service.resultWorkspace(taskId, record.workId)
+        : undefined;
     if (
       !record ||
       !artifact ||
@@ -7209,14 +7355,20 @@ export class OperatorApi {
     for (const recorded of this.service
       .resultWorkspaces(taskId)
       .get(record.resultId) ?? []) {
-      const root = workspace.repositories.find(
-        (repository) => repository.repositoryId === recorded.repositoryId,
-      )?.workspacePath;
-      if (!root || target === resolve(root) || !isWithin(resolve(root), target))
+      const repository = workspace.repositories.find(
+        (candidate) => candidate.repositoryId === recorded.repositoryId,
+      );
+      const root = repository?.workspacePath;
+      if (
+        !repository ||
+        !root ||
+        target === resolve(root) ||
+        !isWithin(resolve(root), target)
+      )
         continue;
       const body = await this.service.readCommittedFile(
         taskId,
-        recorded.repositoryId,
+        repository,
         recorded.headCommit,
         relative(resolve(root), target).split(sep).join("/"),
         file.size + 1,
@@ -7521,6 +7673,25 @@ export class OperatorApi {
                 id,
               ),
             }
+          : { state: "not-recorded" },
+        observedAt: Date.now(),
+      });
+    }
+    if (type.data === "task.workspace.remove") {
+      if (kind !== "task") throw new OperatorApiError(400, "invalid-input");
+      this.requireTask(id);
+      let receipt: ReturnType<StandaloneService["taskWorkspaceRemovalReceipt"]>;
+      try {
+        receipt = this.service.taskWorkspaceRemovalReceipt(id, key.data);
+      } catch (error) {
+        if (error instanceof DomainConflictError)
+          throw new OperatorApiError(409, "conflict");
+        throw error;
+      }
+      // Identifiers, times and commits only: nothing in it is subject to the exclusions.
+      return operationReadSchema.parse({
+        data: receipt
+          ? { state: "recorded", receipt }
           : { state: "not-recorded" },
         observedAt: Date.now(),
       });
@@ -10913,6 +11084,36 @@ export class OperatorApi {
             undefined,
             message === null
               ? "The workspace recheck was refused. The task's workspace reason says why."
+              : message.length <= 256
+                ? message
+                : `${message.slice(0, 255)}…`,
+          );
+        }
+      }
+      if (c.type === "task.workspace.remove") {
+        const task = this.requireTask(c.taskId);
+        try {
+          return commandReceiptSchema.parse(
+            await this.service.removeTaskWorkspaceCommand(c),
+          );
+        } catch (error) {
+          if (
+            !(error instanceof WorkspaceRemovalRefusedError) &&
+            !(error instanceof DomainConflictError)
+          )
+            throw error;
+          // Redacted like any read: a Git or removal reason can name the workspace's paths.
+          const message = this.safe(
+            error.message,
+            await this.exclusions(String(task.projectId), c.taskId),
+          );
+          throw new OperatorApiError(
+            409,
+            "conflict",
+            undefined,
+            undefined,
+            message === null
+              ? "The workspace was not removed. The task's workspace record says why."
               : message.length <= 256
                 ? message
                 : `${message.slice(0, 255)}…`,

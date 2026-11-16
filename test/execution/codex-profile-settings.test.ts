@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, rmSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { test } from "node:test";
 import type {
@@ -97,7 +97,7 @@ async function waitUntil(predicate: () => boolean, describe: () => unknown) {
   }
 }
 
-test("Codex turns carry the captured profile revision's settings, wait on a preflight reason and keep the unchanged call shapes without settings", async (t) => {
+test("Codex turns carry the captured profile revision's settings, wait on a preflight reason and send only scratch without settings", async (t) => {
   const root = mkdtempSync(join(tmpdir(), "cab-codex-settings-"));
   const runtime = new SettingsRuntime();
   const service = new StandaloneService(
@@ -205,9 +205,13 @@ test("Codex turns carry the captured profile revision's settings, wait on a pref
   assert.equal(request(first)?.state, "queued");
   assert.equal(runtime.threads.length, 0);
   assert.equal(runtime.turns.length, 0);
+  const workspace = service.list().find((i) => i.workId === first)?.workspace;
+  assert.ok(workspace);
+  // Every task turn carries its workspace's scratch child.
+  const scratchDirectory = join(workspace, "scratch");
   assert.deepEqual(runtime.preflights.at(-1), {
-    workspace: service.list().find((i) => i.workId === first)?.workspace,
-    settings: { model: "m-alt", reasoningEffort: "medium" },
+    workspace,
+    settings: { model: "m-alt", reasoningEffort: "medium", scratchDirectory },
   });
 
   runtime.preflightReason = undefined;
@@ -226,7 +230,7 @@ test("Codex turns carry the captured profile revision's settings, wait on a pref
     runtime: { harness: "codex", model: "m-default", reasoningEffort: "high" },
   });
   const second = assign(worker);
-  // (d) A profile without settings keeps today's call shapes.
+  // (d) A profile without settings sends only the task scratch.
   const plain = assign(lead);
   await waitUntil(() => done(second) && done(plain), describe);
 
@@ -241,21 +245,26 @@ test("Codex turns carry the captured profile revision's settings, wait on a pref
   assert.deepEqual(settingsOf(first).thread?.[2], {
     model: "m-alt",
     reasoningEffort: "medium",
+    scratchDirectory,
   });
   assert.deepEqual(settingsOf(first).turn?.[3], {
     model: "m-alt",
     reasoningEffort: "medium",
+    scratchDirectory,
   });
   assert.deepEqual(settingsOf(second).thread?.[2], {
     model: "m-default",
     reasoningEffort: "high",
+    scratchDirectory,
   });
   assert.deepEqual(settingsOf(second).turn?.[3], {
     model: "m-default",
     reasoningEffort: "high",
+    scratchDirectory,
   });
-  assert.equal(settingsOf(plain).thread?.length, 2);
-  assert.equal(settingsOf(plain).turn?.length, 3);
+  const scratchOnly = { model: null, reasoningEffort: null, scratchDirectory };
+  assert.deepEqual(settingsOf(plain).thread?.[2], scratchOnly);
+  assert.deepEqual(settingsOf(plain).turn?.[3], scratchOnly);
 
   // (a) Diagnostics name the configured and the runtime-reported values.
   const entries = (workId: string) => {
@@ -281,7 +290,7 @@ test("Codex turns carry the captured profile revision's settings, wait on a pref
   assert.equal("profile.model" in entries(plain), false);
 });
 
-test("a follow-up turn of a Codex profile without settings still resumes with its workspace, under native configuration", async (t) => {
+test("a follow-up turn of a Codex profile without settings resumes with its workspace and task scratch, under native configuration", async (t) => {
   const root = mkdtempSync(join(tmpdir(), "cab-codex-resume-"));
   const runtime = new SettingsRuntime();
   const service = new StandaloneService(
@@ -356,6 +365,39 @@ test("a follow-up turn of a Codex profile without settings still resumes with it
   await waitUntil(() => runtime.resumes.length > 0, describe);
   const [threadId, , settings, workspace] = runtime.resumes[0] ?? [];
   assert.equal(threadId, "thread-1");
-  assert.equal(settings, undefined);
   assert.equal(typeof workspace, "string");
+  // The follow-up resumes and runs with the same task scratch as the first turn.
+  const scratchOnly = {
+    model: null,
+    reasoningEffort: null,
+    scratchDirectory: join(String(workspace), "scratch"),
+  };
+  assert.deepEqual(settings, scratchOnly);
+  assert.deepEqual(runtime.threads[0]?.[2], scratchOnly);
+  await waitUntil(() => runtime.turns.length > 1, describe);
+  assert.deepEqual(runtime.turns[1]?.[3], scratchOnly);
+  assert.equal(runtime.turns[1]?.[1], workspace);
+
+  // Another task's turns get its own scratch; nothing is shared between tasks.
+  const other = randomUUID();
+  execute({
+    type: "task.create",
+    projectId,
+    taskId: other,
+    title: "Other",
+    outcome: "Second task",
+    ready: true,
+  });
+  await waitUntil(() => runtime.threads.length > 1, describe);
+  const otherWorkspace = String(runtime.threads[1]?.[0]);
+  assert.notEqual(otherWorkspace, workspace);
+  assert.deepEqual(runtime.threads[1]?.[2], {
+    model: null,
+    reasoningEffort: null,
+    scratchDirectory: join(otherWorkspace, "scratch"),
+  });
+  for (const root of [String(workspace), otherWorkspace])
+    assert.ok(statSync(join(root, "scratch")).isDirectory());
+  // Scratch is per thread; the service never sets it for the whole installation.
+  assert.equal(process.env.CAB_SCRATCH_DIR, undefined);
 });

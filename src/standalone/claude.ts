@@ -1,3 +1,4 @@
+import { taskScratchEnvironment } from "./codex.js";
 import {
   capturedFilesystemState,
   observeFilesystem,
@@ -1180,6 +1181,11 @@ export class ClaudeRuntime implements Runtime {
     const { sdk, executable } = this;
     const generation = this.generation;
     if (!sdk || !executable || !generation) throw new Error("Runtime stopped");
+    const scratch =
+      settings?.scratchDirectory === undefined
+        ? undefined
+        : taskScratchEnvironment(workspace, settings.scratchDirectory)
+            .CAB_SCRATCH_DIR;
     const environment = this.options.claude.turnEnvironment();
     if ("unavailable" in environment) throw new Error(environment.unavailable);
     const sandboxed = policy?.access === "read-only" || !policy?.skipSandbox;
@@ -1214,6 +1220,7 @@ export class ClaudeRuntime implements Runtime {
     const instructions = await claudeRepositoryInstructions(workspace);
     if (this.generation !== generation) throw new Error("Runtime stopped");
     const turnEnvironment = claudeTurnEnvironment(environment.env, base);
+    if (scratch !== undefined) turnEnvironment.CAB_SCRATCH_DIR = scratch;
     // Claude Code 2.1.322 starts out of auto mode with the subprocess scrub set (#1682 T4), so
     // escalate turns run without it; every other turn keeps it.
     if (escalate) delete turnEnvironment.CLAUDE_CODE_SUBPROCESS_ENV_SCRUB;

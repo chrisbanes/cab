@@ -714,6 +714,23 @@ export const projectDeletionStatements = [
     sql: "DELETE FROM task_work_revisions WHERE workId IN (SELECT value FROM json_each(:work))",
   },
   {
+    table: "workspace_lifecycle_events",
+    where:
+      "workspaceId IN (SELECT workspaceId FROM workspace_generations WHERE taskId IN (SELECT value FROM json_each(:tasks)))",
+    sql: "DELETE FROM workspace_lifecycle_events WHERE workspaceId IN (SELECT workspaceId FROM workspace_generations WHERE taskId IN (SELECT value FROM json_each(:tasks)))",
+  },
+  {
+    table: "workspace_maintenance_operations",
+    where:
+      "workspaceId IN (SELECT workspaceId FROM workspace_generations WHERE taskId IN (SELECT value FROM json_each(:tasks)))",
+    sql: "DELETE FROM workspace_maintenance_operations WHERE workspaceId IN (SELECT workspaceId FROM workspace_generations WHERE taskId IN (SELECT value FROM json_each(:tasks)))",
+  },
+  {
+    table: "workspace_generations",
+    where: "taskId IN (SELECT value FROM json_each(:tasks))",
+    sql: "DELETE FROM workspace_generations WHERE taskId IN (SELECT value FROM json_each(:tasks))",
+  },
+  {
     table: "task_workspace_bindings",
     where: "taskId IN (SELECT value FROM json_each(:tasks))",
     sql: "DELETE FROM task_workspace_bindings WHERE taskId IN (SELECT value FROM json_each(:tasks))",

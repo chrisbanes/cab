@@ -615,10 +615,10 @@ test("a turn admitted after enabling runs with network access and one admitted b
   const setNetwork = (enabled: boolean) =>
     configure(projectId, { commandNetworkAccess: enabled });
 
-  // (a) Default: today's three-argument call and a recorded off.
+  // (a) Default: settings carry only the task scratch, no policy, and a recorded off.
   await start(projectId, "default");
   const first = await finished();
-  assert.deepEqual(turnOf(first), { arity: 3, policy: undefined });
+  assert.deepEqual(turnOf(first), { arity: 4, policy: undefined });
   assert.equal(service.commandNetworkAccessFor(first.workId), false);
 
   // (c) Admitted, then held in its thread start while the setting is enabled.
@@ -635,7 +635,7 @@ test("a turn admitted after enabling runs with network access and one admitted b
   setNetwork(true);
   release();
   const before = await finished();
-  assert.deepEqual(turnOf(before), { arity: 3, policy: undefined });
+  assert.deepEqual(turnOf(before), { arity: 4, policy: undefined });
   assert.equal(service.commandNetworkAccessFor(before.workId), false);
 
   // (b) A turn admitted after enabling carries the policy as the fifth argument.
@@ -651,7 +651,7 @@ test("a turn admitted after enabling runs with network access and one admitted b
   setNetwork(false);
   await start(projectId, "disabled");
   const disabled = await finished();
-  assert.deepEqual(turnOf(disabled), { arity: 3, policy: undefined });
+  assert.deepEqual(turnOf(disabled), { arity: 4, policy: undefined });
   assert.equal(service.commandNetworkAccessFor(disabled.workId), false);
   assert.equal(service.commandNetworkAccessFor(after.workId), true);
   assert.equal(service.commandNetworkAccessFor("unknown-work"), null);

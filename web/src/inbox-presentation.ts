@@ -3,10 +3,12 @@ import type {
   RuntimeInboxItem,
   TaskInboxItem,
   TaskRead,
+  WorkspaceMaintenanceInboxItem,
 } from "../../src/operator/contracts.js";
 import { type WaitCode, waitLabels } from "../../src/operator/wait-reasons.js";
 import {
   attentionNext,
+  isTaskInboxItem,
   kindLabels,
   nextAttention,
 } from "../../src/operator/attention.js";
@@ -26,7 +28,8 @@ export const requestKindLabel = (kind: InboxItem["kind"]) => kindLabels[kind];
 export const requestActionLabel = (
   item:
     | Pick<TaskInboxItem, "kind" | "attentionCode" | "lifecycle">
-    | Pick<RuntimeInboxItem, "kind" | "lifecycle">,
+    | Pick<RuntimeInboxItem, "kind" | "lifecycle">
+    | Pick<WorkspaceMaintenanceInboxItem, "kind" | "lifecycle">,
 ) =>
   item.lifecycle?.status === "resolved"
     ? "View resolved item"
@@ -34,10 +37,14 @@ export const requestActionLabel = (
       ? "View dismissed item"
       : item.kind === "runtime"
         ? runtimeSettingsAction
-        : attentionNext[
-            item.attentionCode ??
-              (item.kind === "intervention" ? "execution-uncertain" : item.kind)
-          ].inboxAction;
+        : item.kind === "workspace-maintenance"
+          ? "Review blocking workspaces"
+          : attentionNext[
+              item.attentionCode ??
+                (item.kind === "intervention"
+                  ? "execution-uncertain"
+                  : item.kind)
+            ].inboxAction;
 
 /**
  * What a request is called in the queue and the pane: the question or exact action when the read
@@ -55,11 +62,15 @@ export function requestHeading(
         | "reason"
         | "attentionCode"
       >
-    | Pick<RuntimeInboxItem, "kind" | "headline">,
+    | Pick<RuntimeInboxItem, "kind" | "headline">
+    | Pick<WorkspaceMaintenanceInboxItem, "kind" | "headline" | "reason">,
 ) {
   // A runtime problem names the runtime; the queue says only that retries ran out.
   if (item.kind === "runtime")
     return { title: item.headline, subtitle: null, reason: retriesExhausted };
+  // The installation's maintenance item says what is unresolved; its pane lists the workspaces.
+  if (item.kind === "workspace-maintenance")
+    return { title: item.headline, subtitle: null, reason: item.reason };
   // Stored headlines may span lines; the queue shows one.
   const title =
       (item.headline ?? item.taskTitle)?.replace(/\s+/g, " ").trim() ?? null,
@@ -93,8 +104,8 @@ export function filterCounts(items: readonly InboxItem[]) {
   const project: Record<string, number> = {},
     kind: Record<string, number> = {};
   for (const item of items) {
-    // A runtime item belongs to no project: it counts toward the total and its kind only.
-    if (item.kind !== "runtime")
+    // A runtime or maintenance item belongs to no project: it counts toward the total and its kind only.
+    if (isTaskInboxItem(item))
       project[item.projectId] = (project[item.projectId] ?? 0) + 1;
     kind[item.kind] = (kind[item.kind] ?? 0) + 1;
   }
@@ -443,7 +454,9 @@ export function queueGroups<T extends Pick<InboxItem, "kind">>(
   rows: readonly T[],
 ) {
   const isIntervention = (row: T) =>
-      row.kind === "intervention" || row.kind === "runtime",
+      row.kind === "intervention" ||
+      row.kind === "runtime" ||
+      row.kind === "workspace-maintenance",
     interventions = rows.filter(isIntervention),
     requests = rows.filter((row) => !isIntervention(row));
   return [

@@ -3500,6 +3500,7 @@ export function TaskWorkspace({
             client={client}
             session={session}
             taskId={taskId}
+            generation={`${data.workspace?.workspaceId ?? ""}:${data.workspace?.state ?? ""}`}
             state={state.files}
             changes={state.changes}
             onObservation={recordWorkspaceObservation}
@@ -3756,6 +3757,7 @@ function Changes({
         client={client}
         session={session}
         taskId={taskId}
+        generation={`${data.workspace?.workspaceId ?? ""}:${data.workspace?.state ?? ""}`}
         assignments={data.assignments}
         state={state.changes}
         knownWorkspaceObservationAt={state.files.workspaceObservedAt}

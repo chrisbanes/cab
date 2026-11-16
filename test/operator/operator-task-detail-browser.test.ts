@@ -5461,7 +5461,7 @@ test("Phone task header is Back, title, identity subtitle and one Task actions c
     [true, true],
   );
 
-  // A finished task offers Execution and no Stop….
+  // A finished task offers Execution and Remove workspace…, and no Stop….
   await page.goto(`${web.origin}/tasks/${finished.taskId}`);
   await toggle.click();
   assert.deepEqual(
@@ -5471,6 +5471,7 @@ test("Phone task header is Back, title, identity subtitle and one Task actions c
     [
       ["A", "Execution"],
       ["BUTTON", "Edit task…"],
+      ["BUTTON", "Remove workspace…"],
       ["BUTTON", "Publish to GitHub"],
     ],
   );

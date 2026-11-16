@@ -63,14 +63,17 @@ test("the task header offers Stop… only on an open task and Resume… on a sto
     ["BUTTON", "Edit task…", false],
     ["BUTTON", "Stop…", false],
   ]);
-  // Editing a local task stays offered once it is finished, as on the retained page.
+  // Editing a local task stays offered once it is finished, as on the retained page; a finished
+  // task's workspace can be removed.
   assert.deepEqual(await actions(done.taskId, "Done task"), [
     ["A", "Execution", undefined],
     ["BUTTON", "Edit task…", false],
+    ["BUTTON", "Remove workspace…", false],
   ]);
   assert.deepEqual(await actions(cancelled.taskId, "Cancelled task"), [
     ["A", "Execution", undefined],
     ["BUTTON", "Edit task…", false],
+    ["BUTTON", "Remove workspace…", false],
   ]);
 
   // An existing Stop on a finished task offers Resume….
@@ -82,6 +85,7 @@ test("the task header offers Stop… only on an open task and Resume… on a sto
   assert.deepEqual(await actions(done.taskId, "Done task"), [
     ["A", "Execution", undefined],
     ["BUTTON", "Edit task…", false],
+    ["BUTTON", "Remove workspace…", false],
     ["BUTTON", "Resume…", false],
   ]);
 });

@@ -394,9 +394,11 @@ test("a Claude preflight reason keeps work queued without admission, then the ne
     [],
   );
   assert.equal(runtimes.claude.startTurnArgs.length, 0);
+  assert.ok(waiting?.workspace);
+  const scratchDirectory = join(waiting.workspace, "scratch");
   assert.deepEqual(runtimes.claude.preflights.at(-1), {
-    workspace: waiting?.workspace,
-    settings: { model: "opus", reasoningEffort: "high" },
+    workspace: waiting.workspace,
+    settings: { model: "opus", reasoningEffort: "high", scratchDirectory },
   });
 
   runtimes.claude.preflightReason = undefined;
@@ -411,6 +413,7 @@ test("a Claude preflight reason keeps work queued without admission, then the ne
   assert.deepEqual(runtimes.claude.startTurnArgs[0]?.[3], {
     model: "opus",
     reasoningEffort: "high",
+    scratchDirectory,
   });
   assert.deepEqual(runtimes.claude.recorded, [true, false]);
   assert.deepEqual(
@@ -437,7 +440,16 @@ test("a Claude preflight reason keeps work queued without admission, then the ne
   });
   await service.provisionTask(codexTask);
   await waitUntil(() => runtimes.codex.startTurnArgs.length > 0, describe);
-  assert.ok(runtimes.codex.startTurnArgs.every((args) => args.length === 3));
+  // Its task turns carry only the task scratch, not Claude settings.
+  assert.ok(
+    runtimes.codex.startTurnArgs.every(
+      (args) =>
+        args.length === 4 &&
+        JSON.stringify(Object.keys(args[3] as object)) ===
+          '["model","reasoningEffort","scratchDirectory"]' &&
+        (args[3] as { model: unknown }).model === null,
+    ),
+  );
 });
 
 const T6_NAME = "FIXTURE_CLAUDE_T6_TOKEN_REF";

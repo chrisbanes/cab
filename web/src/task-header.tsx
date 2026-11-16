@@ -32,6 +32,8 @@ import { useMediaQuery } from "./use-media-query.js";
 import { EditTask, type TaskEditOffer } from "./task-edit.js";
 import { ResetTask, taskChangedEvent } from "./task-restart.js";
 import { stateIcons } from "./task-views.js";
+import { RemoveWorkspace } from "./task-workspace-remove.js";
+import { workspaceRemovalOffered } from "./workspace-removal-presentation.js";
 import {
   Dialog,
   DialogClose,
@@ -68,6 +70,8 @@ export interface TaskHeaderReport {
   } | null;
   /** Edit task…: a local task's editable values, null for an imported task (its text is the source's). */
   edit: TaskEditOffer | null;
+  /** Remove workspace…: the current workspace generation and whether removal is offered. */
+  workspace: { workspaceId: string | null; offered: boolean };
   /** The strip's options, which a phone shows in Task actions instead. */
   options: TaskOption[];
 }
@@ -122,12 +126,16 @@ export function taskHeaderReport(
             version: data.task.version,
           }
         : null,
+    workspace: {
+      workspaceId: data.workspace?.workspaceId ?? null,
+      offered: workspaceRemovalOffered(data),
+    },
     options,
   };
 }
 
 /**
- * Execution, Edit task…, Reset task…, Stop… and Resume…: from 760px they sit in the header; on a phone
+ * Execution, Edit task…, Reset task…, Remove workspace…, Stop… and Resume…: from 760px they sit in the header; on a phone
  * the one "Task actions" disclosure holds them, with the strip's task options. It is one element at every width, forced open
  * from 760px, so a resize never remounts a dialog. Stop and Resume confirm first, then send
  * `task.stop` or `task.resume` through the command flow.
@@ -144,6 +152,7 @@ export function TaskHeaderActions({
   const [open, setOpen] = useState(false),
     [resetOpen, setResetOpen] = useState(false),
     [editOpen, setEditOpen] = useState(false),
+    [removeOpen, setRemoveOpen] = useState(false),
     [menuOpen, setMenuOpen] = useState(false);
   // An unconfirmed reset keeps its control, so a lost reply can still be checked; otherwise the
   // control follows the task's current offer.
@@ -156,7 +165,7 @@ export function TaskHeaderActions({
   const overflow = useRef<HTMLDetailsElement>(null);
   // A tap outside closes the phone overflow; the Stop dialog's own layer is not outside.
   useEffect(() => {
-    if (!phone || open || resetOpen || editOpen) return;
+    if (!phone || open || resetOpen || editOpen || removeOpen) return;
     const away = (event: PointerEvent) => {
       const details = overflow.current;
       if (details?.open && !details.contains(event.target as Node)) {
@@ -167,7 +176,7 @@ export function TaskHeaderActions({
     };
     document.addEventListener("pointerdown", away);
     return () => document.removeEventListener("pointerdown", away);
-  }, [phone, open, resetOpen, editOpen]);
+  }, [phone, open, resetOpen, editOpen, removeOpen]);
   // A page restored from the back-forward cache starts with the phone overflow closed: it is
   // a visit-long overlay, not state to keep.
   useEffect(() => {
@@ -176,6 +185,7 @@ export function TaskHeaderActions({
         setMenuOpen(false);
         setOpen(false);
         setEditOpen(false);
+        setRemoveOpen(false);
       }
     };
     addEventListener("pageshow", restored);
@@ -185,7 +195,7 @@ export function TaskHeaderActions({
     <details
       ref={overflow}
       className="task-header-overflow"
-      open={!phone || menuOpen || open || resetOpen || editOpen}
+      open={!phone || menuOpen || open || resetOpen || editOpen || removeOpen}
       onToggle={(event) => {
         if (phone) setMenuOpen(event.currentTarget.open);
       }}
@@ -249,6 +259,19 @@ export function TaskHeaderActions({
               }
             />
           )}
+        <RemoveWorkspace
+          client={client}
+          session={session}
+          taskId={report.taskId}
+          title={report.title}
+          workspaceId={report.workspace.workspaceId}
+          offered={report.workspace.offered}
+          onOpenChange={(next) => {
+            // The trigger lives in the overflow, which stays open behind the dialog.
+            if (phone) setMenuOpen(true);
+            setRemoveOpen(next);
+          }}
+        />
         {phone &&
           report.options.map((option) => (
             <Button

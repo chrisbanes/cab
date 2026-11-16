@@ -3,7 +3,7 @@ import { createHash, randomUUID } from "node:crypto";
 import { execFileSync } from "node:child_process";
 import { mkdtempSync } from "node:fs";
 import { mkdir, writeFile } from "node:fs/promises";
-import { tmpdir } from "node:os";
+import { tmpdir } from "./temp.js";
 import { dirname, join, relative } from "node:path";
 import type { createOperatorFixture } from "./operator-web.js";
 import { seedReviewTask } from "./task-review.js";

@@ -7,6 +7,8 @@ import {
 } from "../../src/core/project-lifecycle.js";
 import { archivedProjectFixture } from "../fixtures/archived-project.js";
 
+const leaseOwner = "60000000-0000-4000-8000-000000000001";
+
 test("the live service archive authority sees an unfinished callback after its execution settled", async (t) => {
   const f = await archivedProjectFixture(t, false);
   let release!: () => void;
@@ -57,8 +59,8 @@ test("archived execution control and direct state calls cannot queue, bind, chan
     () => f.components.state.hold(f.intent.id, "new hold"),
     () => f.components.state.wait(f.intent.id, "wait"),
     () => f.components.state.replaceConversation(f.assignmentId),
-    () => f.components.state.beginArchive(f.taskId),
-    () => f.components.state.endArchive(f.taskId),
+    () => f.components.state.beginArchive(f.taskId, leaseOwner),
+    () => f.components.state.endArchive(f.taskId, leaseOwner),
     () => f.components.state.claimStopInterrupt(f.workId),
     () => f.components.state.recordStopInterrupt(f.workId, "failed"),
   ];

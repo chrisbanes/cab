@@ -1,3 +1,4 @@
+import { workspaceMaintenanceFromEnv } from "../operator/workspace-maintenance-settings.js";
 import {
   networkSettingsPath,
   readNetworkSettings,
@@ -100,6 +101,7 @@ export const productionRuntimeHarnesses = ["codex", "claude"] as const;
 export const productionService = (dataDir: string) =>
   // Invalid retention variables fail startup rather than using defaults.
   new StandaloneService(dataDir, undefined, undefined, {
+    workspaceMaintenance: workspaceMaintenanceFromEnv(process.env),
     diagnostics: { limits: diagnosticLimitsFromEnv(process.env) },
     runtimeHarnesses: productionRuntimeHarnesses,
     // Control paths like OperatorApi's: failure records must not disclose them.

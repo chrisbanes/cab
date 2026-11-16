@@ -33,6 +33,7 @@ import {
 } from "./installation-record.js";
 import { coverage, uuidArg } from "./browse.js";
 import { browseCommands, writeCommands } from "./commands.js";
+import { workspaceRecordLines } from "./task-workspace.js";
 import {
   defaultServiceHost,
   type InstallCli,
@@ -146,6 +147,7 @@ export const BUILTIN_USAGE = new Map([
   ["connection use", "connection use NAME"],
   ["connection remove", "connection remove NAME"],
   ["task get", "task get TASK_ID [--connection NAME]"],
+  ["task show", "task show TASK_ID [--connection NAME]"],
 ]);
 
 /** Every operator command's usage line by key ("area action", or "logs"/"doctor"). */
@@ -192,7 +194,10 @@ cannot be undone. task allowance sets a task's execution allowance total (it
 gates only new admissions); task allowance --remove turns it off. Reverse pairs: task stop/resume (Stop is
 best-effort cancellation of an open task; Resume clears only the operator
 Stop),
-add-dependency/remove-dependency and task configure --ready true/false.`;
+add-dependency/remove-dependency and task configure --ready true/false.
+task workspace-remove deletes a done or cancelled task's workspace once the
+service proves its work is pushed; it cannot be undone. The task branch, change
+requests, results and conversations remain, and a later turn gets a new workspace.`;
 const PROJECT_NOTE = `Project lifecycle: project archive freezes a paused, drained project; project restore
 keeps it paused. project delete is irreversible and requires the inspected preview,
 exact name, version and digest. It can discard dirty, untracked and unpushed captured
@@ -895,7 +900,8 @@ async function run(
           : `Removed connection ${name}. Its server credential stays active until revoked or expired.`,
     };
   }
-  if (key === "task get") {
+  // `task show` reads exactly as `task get`.
+  if (key === "task get" || key === "task show") {
     expectArgs(positionals, 3);
     rejectManaged(deps.env);
     const taskId = uuidArg(argument ?? "", "TASK_ID");
@@ -976,6 +982,7 @@ async function run(
             // Model-written, so flattened: a multi-line command or rationale cannot fake a line.
             `Review ${oneLine(r.reviewId, 100)}: ${oneLine(r.command ?? sandboxEscalationCommandUnavailable, 200)} ${oneLine(sandboxReviewPlace(r), 1200)} · ${sandboxReviewResultLine(r)}${r.rationale === null ? "" : ` · Rationale: ${oneLine(r.rationale, 400)}`}`,
         ),
+        ...workspaceRecordLines(read.data),
         ...read.data.unresolvedResults.map((r) =>
           r.availability === "available"
             ? `Undelivered result ${r.resultId}: cab result deliver ${task.id} ${r.resultId}`

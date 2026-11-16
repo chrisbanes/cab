@@ -1,4 +1,9 @@
-import { inboxLifecycleSchema } from "../core/inbox-lifecycle.js";
+import {
+  inboxLifecycleSchema,
+  workspaceMaintenanceBlockerLimit,
+  workspaceMaintenanceInboxId,
+  workspaceMaintenanceReasons,
+} from "../core/inbox-lifecycle.js";
 import {
   sandboxLevelSchema,
   sandboxReviewRiskSchema,
@@ -2093,6 +2098,48 @@ const assignmentRecoveryRecordSchema = z
     workspace: z.enum(["preserved", "reconciled", "unknown"]),
   })
   .strict();
+const workspaceRecordTime = z.number().int().nonnegative().safe();
+/**
+ * The task's current workspace generation and its latest maintenance records, kept across
+ * re-provisioning. Paths, sizes and file lists are never part of it.
+ */
+export const taskWorkspaceRecordsSchema = z
+  .object({
+    /** The current workspace's generation, which `task.workspace.remove` must name; null without one. */
+    workspaceId: uuid.nullable(),
+    state: z
+      .enum(["provisioning", "ready", "held", "removing", "removed"])
+      .nullable(),
+    trim: z
+      .object({
+        workspaceId: uuid,
+        at: workspaceRecordTime,
+        trigger: z.enum(["manual", "idle", "disk"]),
+      })
+      .strict()
+      .nullable(),
+    removal: z
+      .object({
+        workspaceId: uuid,
+        at: workspaceRecordTime,
+        trigger: z.enum(["manual", "delivered", "merged", "disk"]),
+        repositories: z.array(
+          z
+            .object({
+              repositoryId: z.string().min(1).max(512),
+              kind: z.enum(["pushed", "base"]),
+              /** Null when the privacy exclusions withhold the branch name. */
+              branch: z.string().min(1).max(1024).nullable(),
+              commit: z.string().regex(/^[0-9a-f]{40}$/),
+            })
+            .strict(),
+        ),
+      })
+      .strict()
+      .nullable(),
+  })
+  .strict();
+export type TaskWorkspaceRecords = z.infer<typeof taskWorkspaceRecordsSchema>;
 export const taskSchema = envelope(
   z
     .object({
@@ -2236,6 +2283,8 @@ export const taskSchema = envelope(
       execution: executionSchema,
       // The recorded reason of a task hold other than Stop; null when there is none.
       taskHold: z.object({ reason: safeText }).strict().nullable(),
+      /** Absent from older services: unknown, never "no workspace". */
+      workspace: taskWorkspaceRecordsSchema.optional(),
       localDependencies: z.array(
         z.object({ id: uuid, title: safeText, state: taskState }).strict(),
       ),
@@ -3928,6 +3977,16 @@ export const operatorCommandSchema = z.discriminatedUnion("type", [
       taskId: uuid,
     })
     .strict(),
+  // A generation fence, not safety evidence: cab derives every removal check itself.
+  z
+    .object({
+      ...base,
+      type: z.literal("task.workspace.remove"),
+      taskId: uuid,
+      /** The workspace the operator confirmed; a later one is never removed by this command. */
+      workspaceId: uuid,
+    })
+    .strict(),
   // Recovery: the inner service command plus its assignment scope.
   z
     .object({
@@ -4725,9 +4784,52 @@ export const runtimeInboxItemSchema = z
     destination: z.string().max(512),
   })
   .strict();
+/**
+ * The installation's one workspace maintenance item: usage still over the disk cap after a pass,
+ * or a workspace past its retention that cab refused to remove. It belongs to no project and is
+ * not dismissible; it resolves once both conditions clear. Task names are resolved on each read.
+ */
+export const workspaceMaintenanceInboxItemSchema = z
+  .object({
+    lifecycle: inboxLifecycleSchema.optional(),
+    dismissible: z.literal(false),
+    id: z.literal(workspaceMaintenanceInboxId),
+    kind: z.literal("workspace-maintenance"),
+    urgency: z.literal(0),
+    /** When this active episode began; a refresh keeps it. */
+    createdAt: time,
+    headline: z.string().max(200),
+    reason: z.string().max(400),
+    usage: z
+      .object({ measuredBytes: count, capBytes: count })
+      .strict()
+      .nullable(),
+    blockers: z
+      .array(
+        z
+          .object({
+            taskId: uuid,
+            taskTitle: safeText,
+            projectName: safeText,
+            workspaceId: uuid,
+            condition: z.enum(["disk-cap", "retention"]),
+            reason: z.enum(workspaceMaintenanceReasons),
+            reasonText: z.string().max(200),
+            /** The task page; it never opens the removal confirmation. */
+            destination: z.string().max(512),
+          })
+          .strict(),
+      )
+      .max(workspaceMaintenanceBlockerLimit),
+    /** Blockers the pass found beyond those listed. */
+    moreBlockers: count,
+    destination: z.string().max(512),
+  })
+  .strict();
 export const inboxItemSchema = z.union([
   taskInboxItemSchema,
   runtimeInboxItemSchema,
+  workspaceMaintenanceInboxItemSchema,
 ]);
 export const inboxReadSchema = z
   .object({
@@ -4744,6 +4846,9 @@ export const inboxReadSchema = z
   .strict();
 export type TaskInboxItem = z.infer<typeof taskInboxItemSchema>;
 export type RuntimeInboxItem = z.infer<typeof runtimeInboxItemSchema>;
+export type WorkspaceMaintenanceInboxItem = z.infer<
+  typeof workspaceMaintenanceInboxItemSchema
+>;
 export type InboxItem = z.infer<typeof inboxItemSchema>;
 // Fixed strict command envelope maxima; question JSON independently remains <=256 KiB.
 export const questionCommandRawLimit =
@@ -5119,6 +5224,28 @@ export const commandReceiptSchema = z.discriminatedUnion("kind", [
       taskId: uuid,
       /** False when the workspace was already ready (a recorded no-op). */
       released: z.boolean(),
+    })
+    .strict(),
+  z
+    .object({
+      kind: z.literal("workspace-remove"),
+      key: uuid,
+      recorded: z.literal(true),
+      taskId: uuid,
+      workspaceId: uuid,
+      /** The maintenance operation that removed it, for reconciliation. */
+      operationId: uuid,
+      removedAt: time,
+      /** What made each repository safe to remove: its pushed task branch or its untouched base. */
+      repositories: z.array(
+        z
+          .object({
+            repositoryId: z.string().min(1).max(512),
+            kind: z.enum(["pushed", "base"]),
+            commit: z.string().regex(/^[0-9a-f]{40}$/),
+          })
+          .strict(),
+      ),
     })
     .strict(),
   z
@@ -5785,6 +5912,7 @@ export const operationTypeSchema = z.enum([
   "recovery.bound-turn.recover",
   "recovery.conversation.replace",
   "task.comment.send",
+  "task.workspace.remove",
 ]);
 /** `project:<id>`, `profile:<id>`, `assignment:<id>`, `task:<id>`, `system:capacity` or `system:runtime:<harness>`; nothing else is a readable scope. */
 export const operationScopeSchema = z

@@ -182,6 +182,15 @@ test("a recovered runtime's notification closes when no alert is current", () =>
   assert.deepEqual(n.closed, ["runtime:codex:S1"]);
 });
 
+test("a maintenance notification stays while its episode is current and closes once it resolves", () => {
+  const n = open(["workspace-maintenance:500"]);
+  // A refresh keeps the episode's start, so the alert key, and the notification, stay.
+  closeResolved(n.list, new Set(["workspace-maintenance:500"]), true, READ_AT);
+  assert.deepEqual(n.closed, []);
+  closeResolved(n.list, new Set(), true, READ_AT);
+  assert.deepEqual(n.closed, ["workspace-maintenance:500"]);
+});
+
 test("an incomplete read closes nothing", () => {
   const n = open(["q1", "runtime:codex:S1"]);
   assert.equal(closeResolved(n.list, new Set(), false, READ_AT), 0);
@@ -265,6 +274,13 @@ test("a worker message opens only a same-origin app address from this origin", (
   assert.equal(
     notificationOpenPath(message("/inbox?task=T&request=Q"), origin),
     "/inbox?task=T&request=Q",
+  );
+  assert.equal(
+    notificationOpenPath(
+      message("/inbox?request=workspace-maintenance"),
+      origin,
+    ),
+    "/inbox?request=workspace-maintenance",
   );
   assert.equal(
     notificationOpenPath(message("/settings#notifications"), origin),

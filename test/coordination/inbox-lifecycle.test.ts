@@ -1,7 +1,10 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { DatabaseSync } from "node:sqlite";
-import { InboxLifecycle } from "../../src/core/inbox-lifecycle.js";
+import {
+  InboxLifecycle,
+  workspaceMaintenanceInboxId,
+} from "../../src/core/inbox-lifecycle.js";
 import { randomUUID } from "node:crypto";
 
 test("Inbox visibility receipts replay without effects and resolved episodes never restore", () => {
@@ -221,5 +224,83 @@ test("exact PR supersession preserves response state and queues one no-grant eve
     );
   } finally {
     f.close();
+  }
+});
+
+test("the maintenance episode refreshes in place, reactivates the same item, cannot be dismissed and prunes deleted tasks", () => {
+  const db = new DatabaseSync(":memory:");
+  try {
+    db.exec("CREATE TABLE domain_tasks (id TEXT PRIMARY KEY)");
+    const store = new InboxLifecycle(db);
+    store.migrate();
+    const [a, b] = [randomUUID(), randomUUID()];
+    const blocker = (taskId: string, reason: "uncommitted" | "unsettled") => ({
+      taskId,
+      workspaceId: randomUUID(),
+      condition: "retention" as const,
+      reason,
+    });
+    const first = store.refreshWorkspaceMaintenance(
+      { usage: null, blockers: [blocker(a, "uncommitted")] },
+      100,
+    );
+    assert.equal(first.id, workspaceMaintenanceInboxId);
+    assert.equal(first.taskId, null);
+    assert.equal(first.kind, "workspace-maintenance");
+    // Unchanged data is no new revision; changed reasons update the same row.
+    const same = store.refreshWorkspaceMaintenance(
+      JSON.parse(first.dataJson),
+      200,
+    );
+    assert.equal(same.revision, 1);
+    const changed = store.refreshWorkspaceMaintenance(
+      {
+        usage: { measuredBytes: 12, capBytes: 10 },
+        blockers: [blocker(a, "unsettled"), blocker(b, "uncommitted")],
+      },
+      300,
+    );
+    assert.equal(changed.revision, 2);
+    assert.equal(changed.createdAt, 100);
+    assert.equal(store.rows().length, 1);
+    assert.throws(
+      () =>
+        store.command(
+          {
+            type: "inbox.dismiss",
+            key: randomUUID(),
+            itemId: changed.id,
+            expectedRevision: 2,
+          },
+          () => {},
+        ),
+      /cannot be dismissed/,
+    );
+    store.pruneWorkspaceMaintenance([a]);
+    assert.deepEqual(
+      store.workspaceMaintenance()?.attention.blockers.map((x) => x.taskId),
+      [b],
+    );
+    store.resolve(changed.id, "cleared");
+    assert.equal(store.get(changed.id)?.status, "resolved");
+    // A recurrence reactivates the same item as a new episode.
+    const again = store.refreshWorkspaceMaintenance(
+      { usage: null, blockers: [blocker(b, "uncommitted")] },
+      900,
+    );
+    assert.equal(again.id, changed.id);
+    assert.equal(again.status, "actionable");
+    assert.equal(again.createdAt, 900);
+    assert.equal(again.resolvedAt, null);
+    assert.equal(store.rows().length, 1);
+    // Bounded, validated data only.
+    assert.throws(() =>
+      store.refreshWorkspaceMaintenance({
+        usage: null,
+        blockers: [{ ...blocker(a, "uncommitted"), path: "/private" }],
+      } as never),
+    );
+  } finally {
+    db.close();
   }
 });

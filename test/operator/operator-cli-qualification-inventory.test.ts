@@ -21,6 +21,7 @@ const mainOnly = [
   "connection use",
   "connection remove",
   "task get",
+  "task show",
 ];
 
 const areas = [
