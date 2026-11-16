@@ -1523,7 +1523,8 @@ test("final service checks refuse what a stale snapshot chose: a reopened task a
 
 /**
  * The service's applied limits, which every automatic decision reads at effect time. Settings
- * apply only on start; tests write them to stand in for a limit that differs by then.
+ * apply only on start, so no supported path changes them mid-pass; the defensive tests write
+ * them to prove the effect re-reads them rather than trusting the pass.
  */
 const liveLimits = (service: StandaloneService) =>
   service.workspaceMaintenance as {
@@ -1683,7 +1684,7 @@ test("a merged removal refuses when a new push leaves the repository unmerged", 
   assert.equal(w.lifecycle().current(taskId)?.allMergedAt, null);
 });
 
-test("an expired removal refuses when retention is turned off or raised before the service acts, and is not backed off", async (t) => {
+test("defensive: an expired removal refuses when retention is turned off or raised before the service acts, and is not backed off", async (t) => {
   const w = await serviceWorld(t);
   const { taskId, binding } = await w.task();
   finishTask(w.f.service, taskId);
@@ -1726,7 +1727,7 @@ test("an idle trim refuses when a new turn ends before the service acts, and tri
   assert.equal(existsSync(cache), false);
 });
 
-test("cap effects refuse when the cap is raised or turned off before the service acts", async (t) => {
+test("defensive: cap effects refuse when the cap is raised or turned off before the service acts", async (t) => {
   const w = await serviceWorld(t, { settings: { diskCapGb: 1 } });
   const limits = liveLimits(w.f.service);
   const open = await w.task("Open and large");

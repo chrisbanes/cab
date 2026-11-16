@@ -1310,8 +1310,9 @@ stored facts and the service's current limits by the pass's own rules: the reten
 idle limit has passed, or the latest measured usage is still over the cap. They check
 again before the first deletion when the effect awaited Git or a push in between. A
 turn end, push, reopening, terminal transition or merge since the pass decided refuses
-the effect, as does a limit turned off or raised; that refusal is not listed and does
-not wait, and the next pass decides again. Manual removal has no trigger to re-derive.
+the effect. Each effect reads the service's current limits, which change only when the
+service restarts. That refusal is not listed and does not wait, and the next pass decides
+again. Manual removal has no trigger to re-derive.
 In order, it:
 
 - removes a done or cancelled task's workspace once its delivered retention has passed

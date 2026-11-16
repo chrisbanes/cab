@@ -140,15 +140,16 @@ export function idleDue(
   );
 }
 
-/** The stored facts an automatic decision rests on; a turn, push, reopen or merge changes them. */
+/**
+ * The stored facts an automatic decision rests on; a turn, push, reopen or merge changes them.
+ * The fingerprint carries the task version, delivery policy, last turn end and last push.
+ */
 const basis = (c: MaintenanceCandidate) =>
   JSON.stringify([
     c.taskId,
     c.workspaceId,
     c.terminal,
     c.terminalAt,
-    c.lastTurnEndedAt,
-    c.lastPushAt,
     c.pushUnknown,
     c.allMergedAt,
     c.fingerprint,

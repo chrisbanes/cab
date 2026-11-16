@@ -28,6 +28,7 @@ import { captureNativeResult } from "../fixtures/native-result.js";
 import { createOperatorFixture } from "../fixtures/operator-web.js";
 import { startedOf } from "../fixtures/service-internals.js";
 import { OperatorApi } from "../../src/standalone/operator-api.js";
+import type { StandaloneServiceOptions } from "../../src/standalone/service.js";
 import { tmpdir } from "../fixtures/temp.js";
 
 const git = (cwd: string, ...args: string[]) =>
@@ -82,7 +83,11 @@ type PushHook = (
  * standing in for the code host: the real GitHub provider reads refs from it through a fake API
  * and pushes to it with real Git.
  */
-async function world(t: TestContext, repositoryCount = 1) {
+async function world(
+  t: TestContext,
+  repositoryCount = 1,
+  service: StandaloneServiceOptions = {},
+) {
   const root = mkdtempSync(join(tmpdir(), "cab-workspace-removal-"));
   const repositories = Array.from({ length: repositoryCount }, (_, index) => {
     const id = `R${index + 1}`;
@@ -183,9 +188,14 @@ async function world(t: TestContext, repositoryCount = 1) {
       return target.remote(request);
     },
   );
-  const f = await createOperatorFixture(null, undefined, {
-    providerFactories: { github: () => provider },
-  });
+  const f = await createOperatorFixture(
+    null,
+    undefined,
+    { providerFactories: { github: () => provider } },
+    {},
+    undefined,
+    service,
+  );
   t.after(async () => {
     await f.close();
     rmSync(root, { recursive: true, force: true });
@@ -497,6 +507,68 @@ test("committed work is pushed to the task branch before the workspace is remove
       .every((a) => a.state === "confirmed-success"),
     true,
   );
+});
+
+/** A service whose maintenance runs only when woken, on a test clock, with every root at `bytes`. */
+const maintained = (
+  clock: { offset: number },
+  workspaceMaintenance: StandaloneServiceOptions["workspaceMaintenance"],
+  bytes = 0,
+): StandaloneServiceOptions => ({
+  workspaceMaintenance: { idleHours: "off", ...workspaceMaintenance },
+  maintenancePass: {
+    now: () => Date.now() + clock.offset,
+    every: () => () => {},
+    measure: async (roots) => new Map(roots.map((r) => [r.key, bytes])),
+  },
+});
+
+test("an automatic removal past delivered retention pushes committed work first, then removes the workspace", async (t) => {
+  const clock = { offset: 0 };
+  const w = await world(t, 1, maintained(clock, {}));
+  const { taskId, binding, worktree } = await w.task();
+  const head = commitFile(worktree(), "work.txt");
+  w.finish(taskId);
+  clock.offset = 25 * 3_600_000;
+  const report = await w.f.service.runWorkspaceMaintenance();
+  assert.deepEqual(report?.removed, [
+    { workspaceId: binding.workspaceId, trigger: "delivered" },
+  ]);
+  const branch = w.branchOf(taskId)!.branch;
+  assert.equal(remoteRef(w.repositories[0]!.remote, branch), head);
+  gone(binding);
+  const removal = w.f.service.taskWorkspaceRecords(taskId).removal;
+  assert.equal(removal?.trigger, "delivered");
+  assert.deepEqual(removal?.repositories, [
+    { kind: "pushed", repositoryId: "R1", branch, commit: head },
+  ]);
+});
+
+test("an automatic removal over the disk cap pushes committed work first, then removes the workspace", async (t) => {
+  const clock = { offset: 0 };
+  const w = await world(t, 1, maintained(clock, { diskCapGb: 1 }, 2e9));
+  const { taskId, binding, worktree } = await w.task();
+  const head = commitFile(worktree(), "work.txt");
+  w.finish(taskId);
+  w.lifecycle().observe(binding, {
+    kind: "turn-ended",
+    eventId: `turn-ended:${randomUUID()}`,
+    at: Date.now(),
+    workId: randomUUID(),
+    turnId: randomUUID(),
+  });
+  const report = await w.f.service.runWorkspaceMaintenance();
+  assert.deepEqual(report?.removed, [
+    { workspaceId: binding.workspaceId, trigger: "disk" },
+  ]);
+  const branch = w.branchOf(taskId)!.branch;
+  assert.equal(remoteRef(w.repositories[0]!.remote, branch), head);
+  gone(binding);
+  const removal = w.f.service.taskWorkspaceRecords(taskId).removal;
+  assert.equal(removal?.trigger, "disk");
+  assert.deepEqual(removal?.repositories, [
+    { kind: "pushed", repositoryId: "R1", branch, commit: head },
+  ]);
 });
 
 test("the operator command pushes first and its receipt and task read name the pushed branch", async (t) => {
