@@ -235,7 +235,7 @@ const maintenanceItem = (): WorkspaceMaintenanceInboxItem => ({
   headline: "Workspace maintenance needs attention",
   reason: maintenanceInboxReason(
     { measuredBytes: 12_300_000_000, capBytes: 10_000_000_000 },
-    true,
+    [{ condition: "retention", reason: "unsettled" }],
   ),
   usage: { measuredBytes: 12_300_000_000, capBytes: 10_000_000_000 },
   blockers: [],
@@ -254,8 +254,21 @@ test("the maintenance item is named by its kind, says what is unresolved and bel
       "Task workspaces use 12.3 GB, over the 10.0 GB disk limit; a workspace past its retention was not removed.",
   });
   assert.equal(
-    maintenanceInboxReason(null, true),
+    maintenanceInboxReason(null, [
+      { condition: "retention", reason: "unsettled" },
+    ]),
     "A workspace past its retention was not removed.",
+  );
+  // An unknown size never reads as resolved, and an emptied list still reads truthfully.
+  assert.equal(
+    maintenanceInboxReason(null, [
+      { condition: "disk-cap", reason: "unmeasured" },
+    ]),
+    "The disk usage of some workspaces could not be measured, so the disk limit is unconfirmed.",
+  );
+  assert.equal(
+    maintenanceInboxReason(null, []),
+    "No blocking workspace remains; the next pass resolves this item.",
   );
   const p = randomUUID(),
     counts = filterCounts([maintenance, item("question", p)]);

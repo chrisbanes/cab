@@ -1304,18 +1304,30 @@ candidates. In order, it:
   pushed, or once its merged retention has passed since cab first observed every
   repository's change request merged, whichever expires first (merged on an exact tie).
   A push made by removal does not restart the clock. A workspace whose needed time fact
-  predates cab's records is never expired: the pass records it as an evidence gap;
+  predates cab's records is never expired and raises no attention; it stays until it is
+  removed by hand;
 - trims a workspace once its idle limit has passed since its last turn ended, once per
   ended turn;
 - over the disk cap, trims eligible workspaces oldest idle first, then removes done or
-  cancelled ones oldest idle first while usage stays over the cap, measuring again
-  after each effect. Workspaces of unknown idle time or unmeasured size are not ranked.
+  cancelled ones oldest idle first while usage stays over the cap, measuring the trimmed
+  workspace again after each trim and dropping a removed one. Workspaces of unknown idle
+  time or unmeasured size are not ranked.
+
+A refused trim or removal is not tried again while its task version, delivery policy,
+last turn end and last push are unchanged: it waits 5 minutes, then twice as long after
+each further refusal, up to an hour, and is still listed meanwhile. A changed fact or a
+service restart retries it at once.
 
 Disk usage is the allocated bytes of each task workspace root and its Claude temporary
 base, measured in a worker thread that has only the paths: links are not followed and
-an inode reached twice counts once. Managed repositories, drafting workspaces and other
+an inode reached twice in one measurement counts once. A root is walked again only when
+its last measurement is 15 minutes old, its last turn ended or it was trimmed since,
+or its size was unknown; a hard link between roots measured at different times may
+count twice. Managed repositories, drafting workspaces and other
 installation directories are not counted, and a measurement error is unknown usage,
-never zero. Each limit set to `off` disables only its trigger. With both retentions off
+never zero. When known usage is within the cap but some root could not be measured, the
+cap is unconfirmed: the pass does not resolve it and lists each such workspace as
+unmeasured. Each limit set to `off` disables only its trigger. With both retentions off
 nothing is removed automatically, including over the cap, while cap trimming still
 runs; with the disk cap off nothing is measured and no cap attention is raised.
 Workspaces of archived or deleting projects are not trimmed or removed. Shutdown stops

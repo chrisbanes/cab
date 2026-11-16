@@ -152,7 +152,10 @@ import {
   type WorkspaceMaintenanceOptions,
 } from "./workspace-maintenance.js";
 import { measureInWorker } from "./workspace-maintenance-worker.js";
-import type { WorkspaceMaintenanceAttention } from "../core/inbox-lifecycle.js";
+import type {
+  WorkspaceMaintenanceAttention,
+  WorkspaceMaintenanceReason,
+} from "../core/inbox-lifecycle.js";
 import { projectCleanupId } from "./project-cleanup-identities.js";
 import {
   type DraftingRun,
@@ -2178,21 +2181,24 @@ export class StandaloneService {
       heldTurns?.start();
       await this.wakeScheduler();
       // After startup recovery: a pass only reads stored facts and calls the service entry points.
-      this.maintenance = new WorkspaceMaintenance({
-        settings: this.workspaceMaintenance,
-        host: this.maintenanceHost(generation),
-        measure: measureInWorker,
-        ...this.options.maintenancePass,
-        failed: (error) =>
-          void this.writeBackgroundDiagnostic(generation, {
-            serviceId: generation.id,
-            incident: generation.incident,
-            operation: "workspace-maintenance",
-            errorCode: "workspace-maintenance-failed",
-            error: sanitizeError(error, this.failureExclusions()),
-          }).catch(() => {}),
-      });
-      this.maintenance.start();
+      // A stop that began during the awaits above gets no maintenance to drain.
+      if (this.generation === generation && generation.accepting) {
+        this.maintenance = new WorkspaceMaintenance({
+          settings: this.workspaceMaintenance,
+          host: this.maintenanceHost(generation),
+          measure: measureInWorker,
+          ...this.options.maintenancePass,
+          failed: (error) =>
+            void this.writeBackgroundDiagnostic(generation, {
+              serviceId: generation.id,
+              incident: generation.incident,
+              operation: "workspace-maintenance",
+              errorCode: "workspace-maintenance-failed",
+              error: sanitizeError(error, this.failureExclusions()),
+            }).catch(() => {}),
+        });
+        this.maintenance.start();
+      }
       this.sweepConversationArchives(generation);
       this.timers.add(
         setInterval(
@@ -6234,16 +6240,19 @@ export class StandaloneService {
         const retained = (
           current: TaskWorkspaceBinding,
           reason: string,
+          code?: WorkspaceMaintenanceReason,
         ): WorkspaceCleanupResult => ({
           outcome: "retained",
           binding: current,
           reason,
+          ...(code ? { code } : {}),
         });
         // The fence: a confirmation of one workspace never removes the next one.
         if (request && binding.workspaceId !== request.workspaceId)
           return retained(
             binding,
             "The task's workspace was replaced after this removal was confirmed",
+            "unsettled",
           );
         if (binding.state === "archived") {
           const record = lifecycle.get(binding.workspaceId)
@@ -6267,12 +6276,14 @@ export class StandaloneService {
           return retained(
             binding,
             "Only a done or cancelled task's workspace can be removed",
+            "task-open",
           );
         const operationId = request?.operationId ?? randomUUID();
         if (!state.beginArchive(taskId, operationId))
           return retained(
             binding,
             "Task execution is not settled or its workspace is held",
+            "unsettled",
           );
         const owner = { taskId, workspaceId: binding.workspaceId };
         const attempt = () =>
@@ -6315,7 +6326,11 @@ export class StandaloneService {
           if (generation?.workspaceId !== binding.workspaceId)
             return retained(binding, "Workspace generation is not recorded");
           if (lifecycle.operations(generation).some(unfinishedOperation))
-            return retained(binding, "Workspace has unfinished maintenance");
+            return retained(
+              binding,
+              "Workspace has unfinished maintenance",
+              "maintenance-held",
+            );
           const plan = await workspaces.removalPlan(taskId, facts());
           if (plan.outcome === "retained") return plan;
           lifecycle.beginOperation(owner, {
@@ -6370,7 +6385,11 @@ export class StandaloneService {
                   : (record?.observation?.reason ?? record?.state ?? "failed");
               const reason = `Pushing ${repository.repositoryId} to its task branch was refused: ${why}`;
               lifecycle.refuseOperation(owner, operationId, reason);
-              return retained(workspaceBindings.get(taskId) ?? binding, reason);
+              return retained(
+                workspaceBindings.get(taskId) ?? binding,
+                reason,
+                "push-refused",
+              );
             }
           }
           return await workspaces.remove(taskId, {
@@ -6598,14 +6617,21 @@ export class StandaloneService {
       generation.accepting &&
       !!this.cache?.isOpen;
     const effect = async (
-      run: () => Promise<{ done: boolean; reason?: string }>,
+      run: () => Promise<{
+        done: boolean;
+        reason?: string;
+        code?: WorkspaceMaintenanceReason | undefined;
+      }>,
     ): Promise<MaintenanceOutcome> => {
       if (!live()) return { done: false, reason: "refused" };
       try {
         const result = await run();
         return result.done
           ? { done: true }
-          : { done: false, reason: maintenanceReason(result.reason ?? "") };
+          : {
+              done: false,
+              reason: result.code ?? maintenanceReason(result.reason ?? ""),
+            };
       } catch (error) {
         return {
           done: false,
@@ -6638,7 +6664,7 @@ export class StandaloneService {
           );
           return result.outcome === "cleaned"
             ? { done: true }
-            : { done: false, reason: result.reason };
+            : { done: false, reason: result.reason, code: result.code };
         }),
       report: (attention) => {
         if (live()) this.reportWorkspaceMaintenance(attention);
@@ -6678,12 +6704,13 @@ export class StandaloneService {
       if (binding.state === "archived" || binding.state === "provisioning")
         continue;
       const { taskId } = binding;
-      let state: string;
+      let task: ReturnType<typeof domain.task>;
       try {
-        state = String(domain.task(taskId).state);
+        task = domain.task(taskId);
       } catch {
         continue;
       }
+      const state = String(task.state);
       const recorded = lifecycle.get(binding.workspaceId);
       const generation = recorded?.taskId === taskId ? recorded : undefined;
       const terminal = state === "done" || state === "cancelled";
@@ -6697,7 +6724,9 @@ export class StandaloneService {
           )
         : -1;
       const ended = generation?.lastTurnEndedAt ?? null;
-      const generations = lifecycle.forTask(taskId);
+      // Other generations are read only when a recorded push needs attributing.
+      let generations: ReturnType<typeof lifecycle.forTask> | undefined;
+      const lastPushAt = generation?.lastPushAt ?? null;
       candidates.push({
         taskId,
         workspaceId: binding.workspaceId,
@@ -6710,25 +6739,30 @@ export class StandaloneService {
         terminalAt: terminal ? (generation?.terminal?.at ?? null) : null,
         lastTurnEndedAt: ended,
         trimmedSinceTurn: ended !== null && lastTrim >= ended,
-        lastPushAt: generation?.lastPushAt ?? null,
+        lastPushAt,
         // A push the delivery store knows but no generation's clock recorded predates the clock.
         pushUnknown: binding.repositories.some((repository) => {
           const pushed = deliveryStore.taskBranch(
             taskId,
             repository.repositoryId,
           )?.lastPushedSha;
-          return (
-            !!pushed &&
-            !generations.some((g) =>
-              g.repositoryClocks.some(
-                (c) =>
-                  c.repositoryId === repository.repositoryId &&
-                  c.pushedCommit === pushed,
-              ),
-            )
+          if (!pushed) return false;
+          generations ??= lifecycle.forTask(taskId);
+          return !generations.some((g) =>
+            g.repositoryClocks.some(
+              (c) =>
+                c.repositoryId === repository.repositoryId &&
+                c.pushedCommit === pushed,
+            ),
           );
         }),
         allMergedAt: terminal ? (generation?.allMergedAt ?? null) : null,
+        fingerprint: JSON.stringify([
+          task.version,
+          deliveryStore.configuration(String(task.projectId)).version,
+          ended,
+          lastPushAt,
+        ]),
       });
     }
     return candidates;

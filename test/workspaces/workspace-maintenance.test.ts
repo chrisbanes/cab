@@ -68,6 +68,7 @@ const candidate = (
   lastPushAt: null,
   pushUnknown: false,
   allMergedAt: null,
+  fingerprint: "facts-1",
   ...overrides,
 });
 
@@ -93,6 +94,7 @@ function fakeWorld(
   const reports: Array<WorkspaceMaintenanceAttention | null> = [];
   const clock = { now: 0 };
   let measured = 0;
+  const walked: number[] = [];
   const number = (c: MaintenanceCandidate) => Number(c.workspaceId.slice(-12));
   const effect = async (
     kind: "trim" | "remove",
@@ -125,6 +127,7 @@ function fakeWorld(
       },
       measure: async (roots: readonly MeasureRoot[]) => {
         measured++;
+        walked.push(...roots.map((r) => Number(r.key.slice(-12))));
         return new Map(
           roots.map((r) => [r.key, table.has(r.key) ? table.get(r.key)! : 0]),
         );
@@ -139,6 +142,7 @@ function fakeWorld(
     reports,
     clock,
     measured: () => measured,
+    walked,
     make,
     total: () =>
       [...table.values()].reduce<number>((sum, b) => sum + (b ?? 0), 0),
@@ -304,9 +308,10 @@ test("each limit off disables only its trigger", async () => {
     await w.make().wake();
     return { calls: w.calls, measured: w.measured() };
   };
+  // The removed root is never walked.
   assert.deepEqual(await run({}), {
     calls: ["remove:delivered:1"],
-    measured: 1,
+    measured: 0,
   });
   assert.deepEqual(
     await run({
@@ -428,7 +433,7 @@ test("refused candidates leave residual pressure named by one attention report",
     "trim:disk:1",
     "trim:disk:2",
     "trim:disk:3",
-    "remove:disk:6",
+    // 6 was refused removal this pass on the same facts, so it is not tried again.
     "remove:disk:3",
   ]);
   const attention = report!.attention!;
@@ -494,7 +499,7 @@ test("with both retentions off the cap only trims, and with the cap off it neith
   assert.equal(quiet?.attention, null);
 });
 
-test("unknown usage is never zero: the cap keeps its last state and an over-cap total lists the unmeasured", async () => {
+test("unknown usage is never zero: it never resolves the cap and names each unmeasured workspace", async () => {
   const w = fakeWorld(
     [
       candidate(1, { lastTurnEndedAt: 1 }),
@@ -509,13 +514,84 @@ test("unknown usage is never zero: the cap keeps its last state and an over-cap 
     over?.attention?.blockers.map((b) => b.reason),
     ["task-open", "unmeasured"],
   );
-  // Known usage now under the cap but one root unknown: the warning stays as it was.
+  // Known usage now under the cap but one root unknown: the item stays, naming that workspace.
   w.table.set(wid(1), 1 * GB);
+  w.clock.now += 16 * 60_000;
   const unknown = await m.wake();
   assert.equal(unknown?.usage, "unknown");
-  assert.deepEqual(unknown?.attention, over?.attention);
+  assert.deepEqual(unknown?.attention, {
+    usage: null,
+    blockers: [
+      {
+        taskId: candidate(2).taskId,
+        workspaceId: wid(2),
+        condition: "disk-cap",
+        reason: "unmeasured",
+      },
+    ],
+  });
   w.table.set(wid(2), 1 * GB);
   assert.equal((await m.wake())?.attention, null);
+});
+
+test("an unchanged root is not walked again until it is stale, and only a touched root is walked after an effect", async () => {
+  const w = fakeWorld(
+    [
+      candidate(1, { lastTurnEndedAt: 1 }),
+      candidate(2, { lastTurnEndedAt: 2 }),
+    ],
+    { 1: 6 * GB, 2: 6 * GB },
+    { settings: { idleHours: "off" }, trimmed: { 1: 1 * GB } },
+  );
+  const m = w.make();
+  await m.wake();
+  // The first pass walks both, then only the trimmed root.
+  assert.deepEqual(w.walked, [1, 2, 1]);
+  await m.wake();
+  assert.deepEqual(w.walked, [1, 2, 1], "a second pass walks no tree");
+  w.clock.now += 15 * 60_000;
+  await m.wake();
+  assert.deepEqual(w.walked, [1, 2, 1, 1, 2]);
+  // A new turn end makes a root stale at once.
+  w.list[1] = { ...w.list[1]!, lastTurnEndedAt: 3 };
+  await m.wake();
+  assert.deepEqual(w.walked, [1, 2, 1, 1, 2, 2]);
+});
+
+test("a refused removal on unchanged facts backs off, doubling to an hour, and retries when the facts change", async () => {
+  const w = fakeWorld(
+    [candidate(1, { terminal: true, terminalAt: 0, lastPushAt: 0 })],
+    {},
+    {
+      settings: { diskCapGb: "off" },
+      refuse: { "remove:1": { done: false, reason: "push-refused" } },
+    },
+  );
+  const m = w.make();
+  const passAt = async (at: number) => {
+    w.clock.now = at;
+    return m.wake();
+  };
+  const base = 25 * H;
+  for (const minute of [0, 1, 2]) {
+    const report = await passAt(base + minute * 60_000);
+    // Skipped passes still name the blocker.
+    assert.deepEqual(
+      report?.attention?.blockers.map((b) => b.reason),
+      ["push-refused"],
+    );
+  }
+  assert.equal(w.calls.length, 1);
+  await passAt(base + 5 * 60_000);
+  assert.equal(w.calls.length, 2);
+  await passAt(base + 14 * 60_000);
+  assert.equal(w.calls.length, 2, "the second wait is ten minutes");
+  await passAt(base + 15 * 60_000);
+  assert.equal(w.calls.length, 3);
+  // Changed facts, such as a new delivery policy, retry at once.
+  w.list[0] = { ...w.list[0]!, fingerprint: "facts-2" };
+  await passAt(base + 16 * 60_000);
+  assert.equal(w.calls.length, 4);
 });
 
 test("service refusal text maps to fixed reason codes, never to its detail", () => {
@@ -688,7 +764,12 @@ async function serviceWorld(
           options.measure ??
           (async (roots) => {
             measures++;
-            return new Map(roots.map((r) => [r.key, sizes.get(r.key) ?? 0]));
+            return new Map(
+              roots.map((r) => [
+                r.key,
+                sizes.has(r.key) ? sizes.get(r.key)! : 0,
+              ]),
+            );
           }),
       },
     },
@@ -987,6 +1068,8 @@ test("one Inbox item names cap pressure and a refused expired removal, refreshes
   const createdAt = item.createdAt;
   // A refresh with a changed reason keeps the same item and episode.
   w.sizes.set(open.binding.workspaceId, 0);
+  // Past the measurement reuse and refusal back-off windows.
+  w.clock.offset += 16 * 60_000;
   await w.pass();
   [item] = await w.maintenanceItems();
   assert.ok(item?.kind === "workspace-maintenance");
@@ -1001,6 +1084,8 @@ test("one Inbox item names cap pressure and a refused expired removal, refreshes
   assert.equal((await w.maintenanceItems()).length, 1);
   // Both conditions clear: the item resolves.
   w.releaseWriterHold(held.taskId);
+  // The start-up pass refused it again; wait out that refusal's back-off.
+  w.clock.offset += 6 * 60_000;
   await w.pass();
   assert.deepEqual(await w.maintenanceItems(), []);
   const resolved = await w.maintenanceItems(
@@ -1009,7 +1094,7 @@ test("one Inbox item names cap pressure and a refused expired removal, refreshes
   assert.equal(resolved.length, 1);
   // A recurrence reactivates the same item as a new episode.
   w.sizes.set(open.binding.workspaceId, 3 * GB);
-  w.clock.offset += 60_000;
+  w.clock.offset += 16 * 60_000;
   await w.pass();
   [item] = await w.maintenanceItems();
   assert.equal(item?.id, resolved[0]!.id);
@@ -1227,4 +1312,128 @@ test("shutdown cancels a measurement in flight and closes the database after the
   assert.equal(await pass, undefined);
   // Nothing late reaches the closed database, and a stopped service runs no pass.
   assert.equal(await w.f.service.runWorkspaceMaintenance(), undefined);
+});
+
+test("after a restart an unmeasurable root keeps the active item instead of resolving it", async (t) => {
+  const w = await serviceWorld(t, { settings: { diskCapGb: 1 } });
+  const { binding } = await w.task("Unmeasurable");
+  w.turnEnded(binding, Date.now());
+  w.sizes.set(binding.workspaceId, 2 * GB);
+  await w.pass();
+  assert.equal((await w.maintenanceItems()).length, 1);
+  // The root can no longer be measured, and the service restarts: memory of the cap is gone.
+  w.sizes.set(binding.workspaceId, null);
+  await w.f.reopen();
+  await w.pass();
+  const [item] = await w.maintenanceItems();
+  assert.ok(item?.kind === "workspace-maintenance");
+  assert.equal(item.usage, null);
+  assert.deepEqual(
+    item.blockers.map((b) => [b.workspaceId, b.reason]),
+    [[binding.workspaceId, "unmeasured"]],
+  );
+  assert.equal(
+    item.reason,
+    "The disk usage of some workspaces could not be measured, so the disk limit is unconfirmed.",
+  );
+});
+
+test("a refused push is attempted once across passes on unchanged facts, with one operation row", async (t) => {
+  const root = mkdtempSync(join(tmpdir(), "cab-maintenance-push-"));
+  t.after(() => rmSync(root, { recursive: true, force: true }));
+  const git = (cwd: string, ...args: string[]) =>
+    execFileSync(
+      "git",
+      [
+        "-C",
+        cwd,
+        "-c",
+        "user.name=M",
+        "-c",
+        "user.email=m@example.invalid",
+        ...args,
+      ],
+      {
+        encoding: "utf8",
+        env: { ...process.env, GIT_CONFIG_GLOBAL: "/dev/null" },
+      },
+    ).trim();
+  const source = join(root, "R1");
+  mkdirSync(source);
+  git(source, "init", "--quiet", "--initial-branch=main");
+  writeFileSync(join(source, "README.md"), "R1\n");
+  git(source, "add", ".");
+  git(source, "commit", "--quiet", "-m", "base");
+  const w = await serviceWorld(t, { settings: { diskCapGb: "off" } });
+  const taskId = randomUUID();
+  w.domain.execute({
+    type: "task.create",
+    actor: "operator",
+    key: randomUUID(),
+    projectId: w.projectId,
+    taskId,
+    title: "Unpushed work",
+    outcome: "O",
+  });
+  const binding = await w.f.service.provisionTask(taskId, [
+    { repositoryId: "R1", path: source, ref: "main" },
+  ]);
+  assert.equal(binding.state, "ready", binding.reason ?? "");
+  const worktree = binding.repositories[0]!.workspacePath;
+  writeFileSync(join(worktree, "work.txt"), "committed, not pushed\n");
+  git(worktree, "add", "work.txt");
+  git(worktree, "commit", "--quiet", "-m", "work");
+  finishTask(w.f.service, taskId);
+  const operations = () =>
+    // biome-ignore lint/complexity/useLiteralKeys: the service's own database
+    w.f.service["cache"]!.prepare(
+      "SELECT count(*) AS n FROM workspace_maintenance_operations WHERE workspaceId=?",
+    ).get(binding.workspaceId) as { n: number };
+  w.clock.offset = 25 * H;
+  for (let pass = 0; pass < 3; pass++) {
+    await w.pass();
+    w.clock.offset += 60_000;
+  }
+  assert.equal(operations().n, 1);
+  const [item] = await w.maintenanceItems();
+  assert.ok(item?.kind === "workspace-maintenance");
+  assert.deepEqual(
+    item.blockers.map((b) => [b.condition, b.reason]),
+    [["retention", "push-refused"]],
+  );
+  assert.equal(existsSync(worktree), true);
+});
+
+test("the measurement walk runs in the worker: the main thread never stats and keeps serving timers", async () => {
+  const root = mkdtempSync(join(tmpdir(), "cab-maintenance-offloop-"));
+  const fs = (await import("node:fs")).default;
+  const { syncBuiltinESMExports } = await import("node:module");
+  const original = fs.lstatSync;
+  try {
+    for (let d = 0; d < 40; d++) {
+      mkdirSync(join(root, `d${d}`));
+      for (let f = 0; f < 100; f++)
+        writeFileSync(join(root, `d${d}`, `f${f}`), "x");
+    }
+    let mainStats = 0;
+    fs.lstatSync = ((...args: Parameters<typeof original>) => {
+      mainStats++;
+      return original(...args);
+    }) as typeof original;
+    syncBuiltinESMExports();
+    let ticks = 0;
+    const timer = setInterval(() => ticks++, 1);
+    const sizes = await measureInWorker(
+      [{ key: "tree", paths: [{ path: root, optional: false }] }],
+      new AbortController().signal,
+    );
+    clearInterval(timer);
+    assert.ok((sizes.get("tree") ?? 0) > 0);
+    assert.equal(mainStats, 0, "no lstat on the main thread");
+    assert.ok(ticks > 0, "timers ran while the worker walked 4000 files");
+  } finally {
+    fs.lstatSync = original;
+    syncBuiltinESMExports();
+    rmSync(root, { recursive: true, force: true });
+  }
 });

@@ -10,6 +10,11 @@ import type { MeasureRoot } from "./workspace-maintenance-worker.js";
 
 /** The bounded periodic wake: internal scheduling, not a setting. */
 export const MAINTENANCE_WAKE_MS = 60_000;
+/** An unchanged root is walked again at most this often. */
+export const MEASURE_REUSE_MS = 15 * 60_000;
+/** A refused effect with unchanged facts waits this long, doubling up to an hour. */
+export const REFUSAL_RETRY_MS = 5 * 60_000;
+const REFUSAL_RETRY_MAX_MS = 3_600_000;
 
 /**
  * One task workspace generation as stored facts: an advisory snapshot. It never authorizes an
@@ -35,6 +40,11 @@ export interface MaintenanceCandidate {
   pushUnknown: boolean;
   /** First observation that every repository's change request is merged. */
   allMergedAt: number | null;
+  /**
+   * Stored facts whose change may let a refused effect succeed (task version, delivery policy,
+   * last turn end and push). An unchanged one backs a refused effect off.
+   */
+  fingerprint: string;
 }
 
 export type MaintenanceOutcome =
@@ -141,10 +151,24 @@ export class WorkspaceMaintenance {
   private lastNow = 0;
   /** Last-ended-turn epochs already given one idle trim attempt in this process. */
   private readonly idleAttempted = new Map<string, number>();
-  private previousCap: {
-    usage: { measuredBytes: number; capBytes: number } | null;
-    blockers: WorkspaceMaintenanceAttention["blockers"];
-  } = { usage: null, blockers: [] };
+  /**
+   * Each root's last measurement. shortcut: a root measured in a different batch than another
+   * root sharing a hard-linked inode counts that inode twice; within one batch it counts once.
+   */
+  private readonly measured = new Map<
+    string,
+    { bytes: number; at: number; stamp: string }
+  >();
+  /** Refused effects, by `kind:workspaceId`; in memory, so a restart retries each once. */
+  private readonly refusals = new Map<
+    string,
+    {
+      fingerprint: string;
+      reason: WorkspaceMaintenanceReason;
+      retryAt: number;
+      delay: number;
+    }
+  >();
 
   constructor(private readonly options: WorkspaceMaintenanceOptions) {}
 
@@ -209,22 +233,80 @@ export class WorkspaceMaintenance {
     if (this.stopped) throw new Error("Workspace maintenance stopped");
   }
 
+  /**
+   * Sizes of `candidates`, walking only roots not measured recently or whose last turn or trim
+   * changed since; an unknown size is always walked again. A failure is unknown, never zero.
+   */
   private async measure(
     candidates: readonly MaintenanceCandidate[],
+    now: number,
   ): Promise<Map<string, number | null>> {
     this.live();
-    try {
-      const sizes = await this.options.measure(
-        candidates.map((c) => ({ key: c.workspaceId, paths: c.roots })),
-        this.abort.signal,
+    const stamp = (c: MaintenanceCandidate) =>
+      `${c.lastTurnEndedAt}:${c.trimmedSinceTurn}`;
+    const stale = candidates.filter((c) => {
+      const cached = this.measured.get(c.workspaceId);
+      return (
+        !cached ||
+        cached.stamp !== stamp(c) ||
+        now - cached.at >= MEASURE_REUSE_MS
       );
-      this.live();
-      return sizes;
-    } catch {
-      this.live();
-      // A failed measurement is unknown usage, never zero.
-      return new Map(candidates.map((c) => [c.workspaceId, null]));
+    });
+    let fresh = new Map<string, number | null>();
+    if (stale.length)
+      try {
+        fresh = await this.options.measure(
+          stale.map((c) => ({ key: c.workspaceId, paths: c.roots })),
+          this.abort.signal,
+        );
+      } catch {
+        this.live();
+      }
+    this.live();
+    const sizes = new Map<string, number | null>();
+    for (const c of candidates) {
+      const isStale = stale.includes(c);
+      const bytes = isStale
+        ? (fresh.get(c.workspaceId) ?? null)
+        : this.measured.get(c.workspaceId)!.bytes;
+      if (isStale && bytes !== null)
+        this.measured.set(c.workspaceId, { bytes, at: now, stamp: stamp(c) });
+      else if (isStale) this.measured.delete(c.workspaceId);
+      sizes.set(c.workspaceId, bytes);
     }
+    for (const id of [...this.measured.keys()])
+      if (!sizes.has(id)) this.measured.delete(id);
+    return sizes;
+  }
+
+  /** Runs one effect unless the same refusal stands on unchanged facts and is backing off. */
+  private async attempt(
+    kind: "trim" | "remove",
+    candidate: MaintenanceCandidate,
+    now: number,
+    run: () => Promise<MaintenanceOutcome>,
+  ): Promise<MaintenanceOutcome & { skipped?: true }> {
+    const key = `${kind}:${candidate.workspaceId}`,
+      prior = this.refusals.get(key),
+      same = prior?.fingerprint === candidate.fingerprint;
+    if (prior && same && now < prior.retryAt)
+      return { done: false, reason: prior.reason, skipped: true };
+    this.live();
+    const outcome = await run();
+    if (outcome.done) this.refusals.delete(key);
+    else {
+      const delay =
+        prior && same
+          ? Math.min(prior.delay * 2, REFUSAL_RETRY_MAX_MS)
+          : REFUSAL_RETRY_MS;
+      this.refusals.set(key, {
+        fingerprint: candidate.fingerprint,
+        reason: outcome.reason,
+        retryAt: now + delay,
+        delay,
+      });
+    }
+    return outcome;
   }
 
   private async pass(): Promise<MaintenancePassReport> {
@@ -250,10 +332,15 @@ export class WorkspaceMaintenance {
       await yieldLoop();
       this.live();
     };
+    // Stored facts are read once, then again only after an effect changed them.
+    let candidates = host.candidates();
+    const changed = (outcome: MaintenanceOutcome) => {
+      if (outcome.done) candidates = host.candidates();
+    };
 
     // Retention: a terminal workspace past its delivered or merged limit.
     if (removalOn)
-      for (const candidate of host.candidates()) {
+      for (const candidate of [...candidates]) {
         const due = retentionDue(candidate, settings, now);
         if (due === "unknown") {
           report.gaps.push({
@@ -263,10 +350,12 @@ export class WorkspaceMaintenance {
           continue;
         }
         if (!due) continue;
-        this.live();
         const outcome = candidate.writable
-          ? await host.remove(candidate, due.trigger)
+          ? await this.attempt("remove", candidate, now, () =>
+              host.remove(candidate, due.trigger),
+            )
           : { done: false as const, reason: "project-read-only" as const };
+        changed(outcome);
         if (outcome.done)
           report.removed.push({
             workspaceId: candidate.workspaceId,
@@ -279,7 +368,7 @@ export class WorkspaceMaintenance {
     // Idle: one trim attempt per last-ended-turn epoch.
     const idle = hours(settings.idleHours);
     if (idle !== null)
-      for (const candidate of host.candidates()) {
+      for (const candidate of [...candidates]) {
         const ended = candidate.lastTurnEndedAt;
         if (
           ended === null ||
@@ -291,7 +380,9 @@ export class WorkspaceMaintenance {
           continue;
         this.live();
         this.idleAttempted.set(candidate.workspaceId, ended);
-        if ((await host.trim(candidate, "idle")).done)
+        const outcome = await host.trim(candidate, "idle");
+        changed(outcome);
+        if (outcome.done)
           report.trimmed.push({
             workspaceId: candidate.workspaceId,
             trigger: "idle",
@@ -300,24 +391,32 @@ export class WorkspaceMaintenance {
       }
 
     // Disk cap: trim oldest idle first, then remove terminal ones, remeasuring after each.
-    let cap = { usage: null, blockers: [] } as typeof this.previousCap;
+    let cap: Pick<WorkspaceMaintenanceAttention, "usage" | "blockers"> = {
+      usage: null,
+      blockers: [],
+    };
     if (settings.diskCapGb !== "off") {
       const capBytes = settings.diskCapGb * definitions.diskCapGb.multiplier;
-      let candidates = host.candidates();
-      let sizes = await this.measure(candidates);
+      let sizes = await this.measure(candidates, now);
       const total = () =>
         candidates.reduce((sum, c) => sum + (sizes.get(c.workspaceId) ?? 0), 0);
-      const unknown = () =>
-        candidates.some((c) => sizes.get(c.workspaceId) === null);
+      const unmeasured = () =>
+        candidates.filter((c) => sizes.get(c.workspaceId) === null);
+      // Only the root an effect touched is walked again; a removed one drops out.
       const remeasure = async () => {
-        candidates = host.candidates();
-        sizes = await this.measure(candidates);
+        sizes = await this.measure(candidates, now);
       };
       const over = () => total() > capBytes;
-      if (!over() && unknown()) {
-        // Known usage is under the cap but some is unknown: the cap's state is unknown.
+      if (!over() && unmeasured().length) {
+        // Known usage is under the cap but some is unknown, so the cap is unconfirmed: name each
+        // unmeasured workspace instead of resolving the condition.
         report.usage = "unknown";
-        cap = this.previousCap;
+        cap = {
+          usage: null,
+          blockers: unmeasured().map((c) =>
+            blocker(c, "disk-cap", "unmeasured"),
+          ),
+        };
       } else if (over()) {
         const refused = new Map<string, WorkspaceMaintenanceReason>();
         const ranked = () =>
@@ -338,15 +437,19 @@ export class WorkspaceMaintenance {
             refused.set(candidate.workspaceId, "project-read-only");
             continue;
           }
-          this.live();
-          const outcome = await host.trim(candidate, "disk");
+          const outcome = await this.attempt("trim", candidate, now, () =>
+            host.trim(candidate, "disk"),
+          );
           if (outcome.done)
             report.trimmed.push({
               workspaceId: candidate.workspaceId,
               trigger: "disk",
             });
           else refused.set(candidate.workspaceId, outcome.reason);
-          await remeasure();
+          if (!("skipped" in outcome)) {
+            changed(outcome);
+            await remeasure();
+          }
           await step();
         }
         for (const candidate of ranked()) {
@@ -361,15 +464,19 @@ export class WorkspaceMaintenance {
             refused.set(candidate.workspaceId, "project-read-only");
             continue;
           }
-          this.live();
-          const outcome = await host.remove(candidate, "disk");
+          const outcome = await this.attempt("remove", candidate, now, () =>
+            host.remove(candidate, "disk"),
+          );
           if (outcome.done)
             report.removed.push({
               workspaceId: candidate.workspaceId,
               trigger: "disk",
             });
           else refused.set(candidate.workspaceId, outcome.reason);
-          await remeasure();
+          if (!("skipped" in outcome)) {
+            changed(outcome);
+            await remeasure();
+          }
           await step();
         }
         if (over()) {
@@ -398,35 +505,33 @@ export class WorkspaceMaintenance {
         report.usage = cap.usage;
       }
     }
-    this.previousCap = cap;
     this.live();
+    const blockers = [...retention, ...cap.blockers].slice(
+      0,
+      workspaceMaintenanceBlockerLimit,
+    );
     const attention =
-      cap.usage || retention.length
-        ? {
-            usage: cap.usage,
-            blockers: [...retention, ...cap.blockers].slice(
-              0,
-              workspaceMaintenanceBlockerLimit,
-            ),
-          }
-        : null;
+      cap.usage || blockers.length ? { usage: cap.usage, blockers } : null;
     report.attention = attention;
     host.report(attention);
     return report;
   }
 }
 
-/** Fixed reason codes for a service refusal; its text may carry Git or provider detail. */
+/**
+ * Fallback reason codes for a service refusal that carries no code; its text may carry Git or
+ * provider detail, which never leaves here.
+ */
 export function maintenanceReason(reason: string): WorkspaceMaintenanceReason {
   const table: Array<[RegExp, WorkspaceMaintenanceReason]> = [
     [/^Only a done or cancelled task/, "task-open"],
+    [/^Pushing .* was refused/, "push-refused"],
     [
       /unfinished maintenance|Workspace removal stopped|interrupted/i,
       "maintenance-held",
     ],
     [/^Uncommitted work remains/, "uncommitted"],
     [/^Result .* recorded uncommitted changes/, "pending-result"],
-    [/^Pushing .* was refused/, "push-refused"],
     [/does not provably follow|changed outside cab/, "history"],
     [/delivery actions/i, "delivery-unsettled"],
     [/not settled|is held|callback .* still running|replaced/i, "unsettled"],

@@ -70,17 +70,27 @@ export const maintenanceInboxHeadline = "Workspace maintenance needs attention";
 export const gigabytes = (bytes: number) =>
   `${(bytes / 1_000_000_000).toFixed(1)} GB`;
 
-/** The item's reason: what is still unresolved after the latest pass. */
+/** The item's reason: what is still unresolved after the latest pass, as its blockers show. */
 export function maintenanceInboxReason(
   usage: { measuredBytes: number; capBytes: number } | null,
-  retentionRefused: boolean,
+  blockers: readonly {
+    condition: "disk-cap" | "retention";
+    reason: WorkspaceMaintenanceReason;
+  }[],
 ): string {
   const parts = [
     usage
       ? `Task workspaces use ${gigabytes(usage.measuredBytes)}, over the ${gigabytes(usage.capBytes)} disk limit`
+      : blockers.some((b) => b.reason === "unmeasured")
+        ? "the disk usage of some workspaces could not be measured, so the disk limit is unconfirmed"
+        : null,
+    blockers.some((b) => b.condition === "retention")
+      ? "a workspace past its retention was not removed"
       : null,
-    retentionRefused ? "a workspace past its retention was not removed" : null,
   ].filter((part): part is string => part !== null);
-  const text = parts.join("; ");
+  // Every listed workspace may have gone since the pass, as a deleted task's entry is dropped.
+  const text = parts.length
+    ? parts.join("; ")
+    : "no blocking workspace remains; the next pass resolves this item";
   return `${text.charAt(0).toUpperCase()}${text.slice(1)}.`;
 }

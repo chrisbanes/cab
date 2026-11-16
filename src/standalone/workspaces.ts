@@ -1,3 +1,4 @@
+import type { WorkspaceMaintenanceReason } from "../core/inbox-lifecycle.js";
 import {
   initializedWorkspaceLifecycle,
   unfinishedOperation,
@@ -288,7 +289,13 @@ export type WorkspaceCleanupResult =
       binding: TaskWorkspaceBinding;
       operation: WorkspaceOperation;
     }
-  | { outcome: "retained"; binding: TaskWorkspaceBinding; reason: string };
+  | {
+      outcome: "retained";
+      binding: TaskWorkspaceBinding;
+      reason: string;
+      /** cab's fixed code for the refusal, where the refusing site names one. */
+      code?: WorkspaceMaintenanceReason;
+    };
 
 /** Trimmed: every effect settled after readback. Held: effects may have run; the journal says which. */
 export type WorkspaceTrimResult =

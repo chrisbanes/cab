@@ -3974,10 +3974,7 @@ export class OperatorApi {
         urgency: 0 as const,
         createdAt: row.createdAt,
         headline: maintenanceInboxHeadline,
-        reason: maintenanceInboxReason(
-          attention.usage,
-          attention.blockers.some((b) => b.condition === "retention"),
-        ),
+        reason: maintenanceInboxReason(attention.usage, blockers),
         usage: attention.usage,
         blockers,
         destination: `/inbox?request=${workspaceMaintenanceInboxId}`,

@@ -171,6 +171,8 @@ test("the installation maintenance item lists blocking workspaces, links to thei
   f.seedPersistedState((db) =>
     db.prepare("DELETE FROM task_writer_holds WHERE taskId=?").run(held.taskId),
   );
+  // Past the refused removal's back-off.
+  clock.offset += 6 * 60_000;
   await f.service.runWorkspaceMaintenance();
   await row.click();
   await page
@@ -186,6 +188,8 @@ test("the installation maintenance item lists blocking workspaces, links to thei
     .waitFor();
   // Usage falls under the limit: the item resolves and leaves the queue.
   sizes.set(large.binding.workspaceId, 0);
+  // Past the measurement reuse window, so the root is walked again.
+  clock.offset += 16 * 60_000;
   await f.service.runWorkspaceMaintenance();
   await page
     .getByRole("button", { name: "Refresh", exact: true })
