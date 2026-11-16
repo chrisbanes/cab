@@ -2093,6 +2093,48 @@ const assignmentRecoveryRecordSchema = z
     workspace: z.enum(["preserved", "reconciled", "unknown"]),
   })
   .strict();
+const workspaceRecordTime = z.number().int().nonnegative().safe();
+/**
+ * The task's current workspace generation and its latest maintenance records, kept across
+ * re-provisioning. Paths, sizes and file lists are never part of it.
+ */
+export const taskWorkspaceRecordsSchema = z
+  .object({
+    /** The current workspace's generation, which `task.workspace.remove` must name; null without one. */
+    workspaceId: uuid.nullable(),
+    state: z
+      .enum(["provisioning", "ready", "held", "removing", "removed"])
+      .nullable(),
+    trim: z
+      .object({
+        workspaceId: uuid,
+        at: workspaceRecordTime,
+        trigger: z.enum(["manual", "idle", "disk"]),
+      })
+      .strict()
+      .nullable(),
+    removal: z
+      .object({
+        workspaceId: uuid,
+        at: workspaceRecordTime,
+        trigger: z.enum(["manual", "delivered", "merged", "disk"]),
+        repositories: z.array(
+          z
+            .object({
+              repositoryId: z.string().min(1).max(512),
+              kind: z.enum(["pushed", "base"]),
+              /** Null when the privacy exclusions withhold the branch name. */
+              branch: z.string().min(1).max(1024).nullable(),
+              commit: z.string().regex(/^[0-9a-f]{40}$/),
+            })
+            .strict(),
+        ),
+      })
+      .strict()
+      .nullable(),
+  })
+  .strict();
+export type TaskWorkspaceRecords = z.infer<typeof taskWorkspaceRecordsSchema>;
 export const taskSchema = envelope(
   z
     .object({
@@ -2236,6 +2278,8 @@ export const taskSchema = envelope(
       execution: executionSchema,
       // The recorded reason of a task hold other than Stop; null when there is none.
       taskHold: z.object({ reason: safeText }).strict().nullable(),
+      /** Absent from older services: unknown, never "no workspace". */
+      workspace: taskWorkspaceRecordsSchema.optional(),
       localDependencies: z.array(
         z.object({ id: uuid, title: safeText, state: taskState }).strict(),
       ),
@@ -3928,6 +3972,16 @@ export const operatorCommandSchema = z.discriminatedUnion("type", [
       taskId: uuid,
     })
     .strict(),
+  // A generation fence, not safety evidence: cab derives every removal check itself.
+  z
+    .object({
+      ...base,
+      type: z.literal("task.workspace.remove"),
+      taskId: uuid,
+      /** The workspace the operator confirmed; a later one is never removed by this command. */
+      workspaceId: uuid,
+    })
+    .strict(),
   // Recovery: the inner service command plus its assignment scope.
   z
     .object({
@@ -5123,6 +5177,28 @@ export const commandReceiptSchema = z.discriminatedUnion("kind", [
     .strict(),
   z
     .object({
+      kind: z.literal("workspace-remove"),
+      key: uuid,
+      recorded: z.literal(true),
+      taskId: uuid,
+      workspaceId: uuid,
+      /** The maintenance operation that removed it, for reconciliation. */
+      operationId: uuid,
+      removedAt: time,
+      /** What made each repository safe to remove: its pushed task branch or its untouched base. */
+      repositories: z.array(
+        z
+          .object({
+            repositoryId: z.string().min(1).max(512),
+            kind: z.enum(["pushed", "base"]),
+            commit: z.string().regex(/^[0-9a-f]{40}$/),
+          })
+          .strict(),
+      ),
+    })
+    .strict(),
+  z
+    .object({
       kind: z.literal("recovery-adoption"),
       key: uuid,
       recorded: z.literal(true),
@@ -5785,6 +5861,7 @@ export const operationTypeSchema = z.enum([
   "recovery.bound-turn.recover",
   "recovery.conversation.replace",
   "task.comment.send",
+  "task.workspace.remove",
 ]);
 /** `project:<id>`, `profile:<id>`, `assignment:<id>`, `task:<id>`, `system:capacity` or `system:runtime:<harness>`; nothing else is a readable scope. */
 export const operationScopeSchema = z

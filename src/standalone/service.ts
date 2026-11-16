@@ -1,5 +1,6 @@
 import {
   unfinishedOperation,
+  type WorkspaceOperation,
   WorkspaceLifecycleStore,
 } from "../core/workspace-lifecycle.js";
 import {
@@ -370,6 +371,7 @@ import {
   type StopTarget,
   type TaskControlReceipt,
   type WorkspaceRecheckReceipt,
+  type WorkspaceRemoveReceipt,
   type TaskResetReceipt,
   type TaskAllowanceReceipt,
   type AssignmentWithdrawReceipt,
@@ -608,6 +610,14 @@ const draftingUnverifiedReason = "Waiting to confirm the runtime stopped";
 const draftingNotStartedReason = "The lead's turn could not start";
 const draftingCleanupReason = "Waiting to remove the working copy";
 const draftingWorkspaceFailedReason = "The working copy could not be prepared";
+
+/** A workspace removal that recorded no receipt; its message names why, without paths redacted yet. */
+export class WorkspaceRemovalRefusedError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "WorkspaceRemovalRefusedError";
+  }
+}
 
 /** A workspace recheck that released nothing and recorded no receipt. */
 export class WorkspaceRecheckRefusedError extends Error {
@@ -1030,6 +1040,8 @@ export class StandaloneService {
     }
   >();
   private readonly callbacks = new Map<string, Set<Promise<unknown>>>();
+  /** In-flight operator removal requests by task and key. */
+  private readonly removalRequests = new Map<string, Promise<unknown>>();
   /** Drafting commands in flight, by key. */
   private readonly draftingKeys = new Map<string, Promise<unknown>>();
   /** The linked repositories each queued draft's copy was built from, until it is admitted. */
@@ -6144,6 +6156,8 @@ export class StandaloneService {
   async removeTaskWorkspace(
     taskId: string,
     trigger: "manual" | "delivered" | "merged" | "disk",
+    /** An operator request's confirmed generation and reserved operation identity. */
+    request?: { workspaceId: string; operationId: string },
   ): Promise<WorkspaceCleanupResult> {
     const cause = z
       .enum(["manual", "delivered", "merged", "disk"])
@@ -6174,6 +6188,12 @@ export class StandaloneService {
           binding: current,
           reason,
         });
+        // The fence: a confirmation of one workspace never removes the next one.
+        if (request && binding.workspaceId !== request.workspaceId)
+          return retained(
+            binding,
+            "The task's workspace was replaced after this removal was confirmed",
+          );
         if (binding.state === "archived") {
           const record = lifecycle.get(binding.workspaceId)
             ? lifecycle.removal(binding)
@@ -6197,7 +6217,7 @@ export class StandaloneService {
             binding,
             "Only a done or cancelled task's workspace can be removed",
           );
-        const operationId = randomUUID();
+        const operationId = request?.operationId ?? randomUUID();
         if (!state.beginArchive(taskId, operationId))
           return retained(
             binding,
@@ -6333,6 +6353,130 @@ export class StandaloneService {
         }
       },
     );
+  }
+
+  /**
+   * The receipted operator removal of the workspace the operator confirmed. The request and its
+   * operation are stored before anything runs; same-key requests run one at a time, and a replay
+   * returns the original receipt, even after the task got a new workspace.
+   */
+  async removeTaskWorkspaceCommand(command: {
+    key: string;
+    taskId: string;
+    workspaceId: string;
+  }): Promise<WorkspaceRemoveReceipt> {
+    this.domain().task(command.taskId);
+    const id = `${command.taskId}:${command.key}`;
+    for (
+      let running = this.removalRequests.get(id);
+      running;
+      running = this.removalRequests.get(id)
+    )
+      await running.catch(() => undefined);
+    const run = this.runRemovalRequest(command);
+    this.removalRequests.set(id, run);
+    try {
+      return await run;
+    } finally {
+      if (this.removalRequests.get(id) === run) this.removalRequests.delete(id);
+    }
+  }
+
+  private async runRemovalRequest(command: {
+    key: string;
+    taskId: string;
+    workspaceId: string;
+  }): Promise<WorkspaceRemoveReceipt> {
+    const { state, workspaceBindings } = this.started();
+    const lifecycle = new WorkspaceLifecycleStore(this.cache!);
+    const owner = { taskId: command.taskId, workspaceId: command.workspaceId };
+    const operation = (operationId: string) =>
+      lifecycle.get(command.workspaceId)?.taskId === command.taskId
+        ? lifecycle.operations(owner).find((o) => o.operationId === operationId)
+        : undefined;
+    const held = (o: WorkspaceOperation) =>
+      new WorkspaceRemovalRefusedError(
+        `Workspace removal ${o.operationId} stopped and is held${o.reason ? `: ${o.reason}` : ""}. Nothing more is deleted until it is reconciled.`,
+      );
+    const stored = state.workspaceRemovalRequest(command);
+    if (stored && "receipt" in stored) return stored.receipt;
+    if (stored) {
+      // Reserved by an earlier attempt that did not return: settle from its journal, never rerun it.
+      const prior = operation(stored.pending.operationId);
+      if (prior?.state === "completed")
+        return state.completeWorkspaceRemoval(command, prior);
+      if (prior && unfinishedOperation(prior)) throw held(prior);
+    }
+    // Refused or never begun: nothing was deleted, so the request runs as new.
+    if (!workspaceBindings.get(command.taskId))
+      throw new WorkspaceRemovalRefusedError(
+        "This task has no workspace to remove.",
+      );
+    const operationId = randomUUID();
+    state.reserveWorkspaceRemoval(command, operationId);
+    let result: WorkspaceCleanupResult;
+    try {
+      result = await this.removeTaskWorkspace(command.taskId, "manual", {
+        workspaceId: command.workspaceId,
+        operationId,
+      });
+    } catch (error) {
+      const ours = operation(operationId);
+      if (!ours || ours.state === "refused")
+        state.releaseWorkspaceRemoval(command);
+      throw error;
+    }
+    if (
+      result.outcome === "cleaned" &&
+      result.operation.operationId === operationId
+    )
+      return state.completeWorkspaceRemoval(command, result.operation);
+    const ours = operation(operationId);
+    if (ours && unfinishedOperation(ours)) throw held(ours);
+    state.releaseWorkspaceRemoval(command);
+    throw new WorkspaceRemovalRefusedError(
+      result.outcome === "cleaned"
+        ? "This workspace was already removed."
+        : `Workspace not removed: ${result.reason}.`,
+    );
+  }
+
+  /** The recorded receipt of the removal request under `key`, or null while none is recorded. */
+  taskWorkspaceRemovalReceipt(
+    taskId: string,
+    key: string,
+  ): WorkspaceRemoveReceipt | null {
+    this.domain().task(taskId);
+    const row = this.cache!.prepare(
+      "SELECT receiptJson FROM task_control_receipts WHERE taskId=? AND key=?",
+    ).get(taskId, key) as { receiptJson: string } | undefined;
+    if (!row) return null;
+    const receipt = commandReceiptSchema.safeParse(JSON.parse(row.receiptJson));
+    if (!receipt.success || receipt.data.kind !== "workspace-remove")
+      return null;
+    if (receipt.data.taskId !== taskId || receipt.data.key !== key)
+      throw new DomainConflictError("Removal receipt identity mismatch");
+    return receipt.data;
+  }
+
+  /**
+   * The current workspace generation and the latest completed trim and removal across every
+   * generation of the task. Reads stored records only: no Git, no filesystem.
+   */
+  taskWorkspaceRecords(taskId: string) {
+    this.domain().task(taskId);
+    const binding = this.started().workspaceBindings.get(taskId);
+    const lifecycle = new WorkspaceLifecycleStore(this.cache!);
+    const completed = lifecycle
+      .forTask(taskId)
+      .flatMap((generation) => lifecycle.operations(generation))
+      .filter((o) => o.state === "completed")
+      .sort((a, b) => a.completedAt! - b.completedAt!);
+    return {
+      binding,
+      trim: completed.filter((o) => o.kind === "trim").at(-1),
+      removal: completed.filter((o) => o.kind === "remove").at(-1),
+    };
   }
 
   /**

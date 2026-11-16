@@ -190,6 +190,7 @@ import {
   taskResultPageSchema,
   sourceHoldReasonSchema,
   taskSchema,
+  type TaskWorkspaceRecords,
   taskTimelineSchema,
   taskToolOutputSchema,
   textMaxLength,
@@ -301,6 +302,7 @@ import {
   RuntimeConfigurationRefusedError,
   type StandaloneService,
   WorkspaceRecheckRefusedError,
+  WorkspaceRemovalRefusedError,
   withoutWithdrawn,
 } from "./service.js";
 import {
@@ -4580,6 +4582,7 @@ export class OperatorApi {
       waits: this.taskWaits(t, admission, execution, excluded, view.approvals),
       execution,
       taskHold: this.nonStopTaskHold(taskId, excluded),
+      workspace: this.taskWorkspaceRecords(taskId, excluded),
       localDependencies: d.dependencies(taskId).map((id) => {
         const b = d.task(id);
         return { id, title: this.safe(b.title, excluded), state: b.state };
@@ -4776,6 +4779,46 @@ export class OperatorApi {
     )
       throw new OperatorApiError(503, "unavailable");
     return taskSchema.parse({ data, observedAt: Date.now() });
+  }
+  /** The stored workspace generation and latest trim and removal; branch names are disclosed under the exclusions. */
+  private taskWorkspaceRecords(
+    taskId: string,
+    excluded: Awaited<ReturnType<OperatorApi["exclusions"]>>,
+  ): TaskWorkspaceRecords {
+    const { binding, trim, removal } =
+      this.service.taskWorkspaceRecords(taskId);
+    return {
+      workspaceId: binding?.workspaceId ?? null,
+      state: binding
+        ? binding.state === "archived"
+          ? "removed"
+          : binding.state === "archiving"
+            ? "removing"
+            : binding.state
+        : null,
+      trim:
+        trim && trim.trigger !== "delivered" && trim.trigger !== "merged"
+          ? {
+              workspaceId: trim.workspaceId,
+              at: trim.completedAt!,
+              trigger: trim.trigger,
+            }
+          : null,
+      removal:
+        removal && removal.trigger !== "idle"
+          ? {
+              workspaceId: removal.workspaceId,
+              at: removal.completedAt!,
+              trigger: removal.trigger,
+              repositories: (removal.repositories ?? []).map((r) => ({
+                repositoryId: r.repositoryId,
+                kind: r.kind,
+                branch: this.safe(r.branch, excluded, 1024),
+                commit: r.commit,
+              })),
+            }
+          : null,
+    };
   }
   /** Pages `readTask` results or messages, so projections and redaction match `task get`. */
   async readTaskRecordPage(
@@ -7562,6 +7605,25 @@ export class OperatorApi {
                 id,
               ),
             }
+          : { state: "not-recorded" },
+        observedAt: Date.now(),
+      });
+    }
+    if (type.data === "task.workspace.remove") {
+      if (kind !== "task") throw new OperatorApiError(400, "invalid-input");
+      this.requireTask(id);
+      let receipt: ReturnType<StandaloneService["taskWorkspaceRemovalReceipt"]>;
+      try {
+        receipt = this.service.taskWorkspaceRemovalReceipt(id, key.data);
+      } catch (error) {
+        if (error instanceof DomainConflictError)
+          throw new OperatorApiError(409, "conflict");
+        throw error;
+      }
+      // Identifiers, times and commits only: nothing in it is subject to the exclusions.
+      return operationReadSchema.parse({
+        data: receipt
+          ? { state: "recorded", receipt }
           : { state: "not-recorded" },
         observedAt: Date.now(),
       });
@@ -10954,6 +11016,36 @@ export class OperatorApi {
             undefined,
             message === null
               ? "The workspace recheck was refused. The task's workspace reason says why."
+              : message.length <= 256
+                ? message
+                : `${message.slice(0, 255)}…`,
+          );
+        }
+      }
+      if (c.type === "task.workspace.remove") {
+        const task = this.requireTask(c.taskId);
+        try {
+          return commandReceiptSchema.parse(
+            await this.service.removeTaskWorkspaceCommand(c),
+          );
+        } catch (error) {
+          if (
+            !(error instanceof WorkspaceRemovalRefusedError) &&
+            !(error instanceof DomainConflictError)
+          )
+            throw error;
+          // Redacted like any read: a Git or removal reason can name the workspace's paths.
+          const message = this.safe(
+            error.message,
+            await this.exclusions(String(task.projectId), c.taskId),
+          );
+          throw new OperatorApiError(
+            409,
+            "conflict",
+            undefined,
+            undefined,
+            message === null
+              ? "The workspace was not removed. The task's workspace record says why."
               : message.length <= 256
                 ? message
                 : `${message.slice(0, 255)}…`,

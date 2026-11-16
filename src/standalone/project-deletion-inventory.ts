@@ -1608,7 +1608,7 @@ export const projectDeletionInventory = {
   task_control_receipts: {
     columns: ["taskId", "key", "payloadHash", "receiptJson", "createdAt"],
     ownership:
-      "taskId in T; task-cancel receipt binds taskId/key and cancellation count, no external ownership",
+      "taskId in T; task-cancel receipt binds taskId/key and cancellation count; workspace-remove request and receipt bind taskId/key, workspace generation and maintenance operation; no external ownership",
   },
   task_dependency_records: {
     columns: ["seq", "taskId", "blockerTaskId"],

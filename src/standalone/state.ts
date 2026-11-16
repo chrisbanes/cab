@@ -17,7 +17,10 @@ import {
   TaskNotOpenError,
 } from "../core/domain.js";
 import { executionIntentStateSchema } from "../core/execution-runtime.js";
-import type { CommandReceipt } from "../operator/contracts.js";
+import {
+  type CommandReceipt,
+  commandReceiptSchema,
+} from "../operator/contracts.js";
 import {
   archivedResumeRejectionSchema,
   historicalPreTurnAdoptionSchema,
@@ -76,6 +79,27 @@ export type WorkspaceRecheckReceipt = Extract<
   CommandReceipt,
   { kind: "workspace-recheck" }
 >;
+export type WorkspaceRemoveReceipt = Extract<
+  CommandReceipt,
+  { kind: "workspace-remove" }
+>;
+type WorkspaceRemoveCommand = {
+  key: string;
+  taskId: string;
+  workspaceId: string;
+};
+const workspaceRemoveDigest = (command: WorkspaceRemoveCommand) =>
+  materialDigest({
+    type: "task.workspace.remove",
+    taskId: command.taskId,
+    workspaceId: command.workspaceId,
+  });
+const workspaceRemovePending = z
+  .object({
+    kind: z.literal("workspace-remove-pending"),
+    operationId: z.string().uuid(),
+  })
+  .strict();
 export type DraftTurnReceipt = Extract<CommandReceipt, { kind: "draft-turn" }>;
 export type StartAgainReceipt = Extract<
   CommandReceipt,
@@ -1264,6 +1288,105 @@ export class ExecutionState {
           Date.now(),
         );
       return { receipt, replayed: false };
+    });
+  }
+
+  /**
+   * The removal request stored under this key: its receipt, or the operation it reserved before
+   * any effect. Other content under the same key conflicts.
+   */
+  workspaceRemovalRequest(
+    command: WorkspaceRemoveCommand,
+  ):
+    | { receipt: WorkspaceRemoveReceipt }
+    | { pending: { operationId: string } }
+    | undefined {
+    const id = z.string().uuid().parse(command.taskId);
+    const key = z.string().uuid().parse(command.key);
+    const stored = this.db
+      .prepare(
+        "SELECT payloadHash, receiptJson FROM task_control_receipts WHERE taskId = ? AND key = ?",
+      )
+      .get(id, key) as { payloadHash: string; receiptJson: string } | undefined;
+    if (!stored) return undefined;
+    if (stored.payloadHash !== workspaceRemoveDigest(command))
+      throw new DomainConflictError("Request key reused for other content");
+    const value = JSON.parse(stored.receiptJson) as unknown;
+    const pending = workspaceRemovePending.safeParse(value);
+    if (pending.success)
+      return { pending: { operationId: pending.data.operationId } };
+    const receipt = commandReceiptSchema.parse(value);
+    if (receipt.kind !== "workspace-remove")
+      throw new DomainConflictError("Request key reused for other content");
+    return { receipt };
+  }
+
+  /** Persists the request and its operation before removal runs, replacing only a pending one. */
+  reserveWorkspaceRemoval(
+    command: WorkspaceRemoveCommand,
+    operationId: string,
+  ): void {
+    transaction(this.db, () => {
+      const stored = this.workspaceRemovalRequest(command);
+      if (stored && "receipt" in stored)
+        throw new DomainConflictError("Removal request already recorded");
+      this.db
+        .prepare(
+          "INSERT OR REPLACE INTO task_control_receipts (taskId, key, payloadHash, receiptJson, createdAt) VALUES (?, ?, ?, ?, ?)",
+        )
+        .run(
+          command.taskId,
+          command.key,
+          workspaceRemoveDigest(command),
+          JSON.stringify({ kind: "workspace-remove-pending", operationId }),
+          Date.now(),
+        );
+    });
+  }
+
+  /** Frees a reserved request whose removal stopped before deleting anything. */
+  releaseWorkspaceRemoval(command: WorkspaceRemoveCommand): void {
+    this.db
+      .prepare(
+        "DELETE FROM task_control_receipts WHERE taskId = ? AND key = ? AND payloadHash = ? AND json_extract(receiptJson, '$.kind') = 'workspace-remove-pending'",
+      )
+      .run(command.taskId, command.key, workspaceRemoveDigest(command));
+  }
+
+  /** Records the receipt of the reserved removal once its operation completed. */
+  completeWorkspaceRemoval(
+    command: WorkspaceRemoveCommand,
+    operation: {
+      operationId: string;
+      completedAt: number | null;
+      repositories:
+        | { repositoryId: string; kind: "pushed" | "base"; commit: string }[]
+        | null;
+    },
+  ): WorkspaceRemoveReceipt {
+    return transaction(this.db, () => {
+      const stored = this.workspaceRemovalRequest(command);
+      if (stored && "receipt" in stored) return stored.receipt;
+      if (stored?.pending.operationId !== operation.operationId)
+        throw new DomainConflictError("Removal request identity changed");
+      const receipt: WorkspaceRemoveReceipt = {
+        kind: "workspace-remove",
+        key: command.key,
+        recorded: true,
+        taskId: command.taskId,
+        workspaceId: command.workspaceId,
+        operationId: operation.operationId,
+        removedAt: z.number().int().nonnegative().parse(operation.completedAt),
+        repositories: (operation.repositories ?? []).map(
+          ({ repositoryId, kind, commit }) => ({ repositoryId, kind, commit }),
+        ),
+      };
+      this.db
+        .prepare(
+          "UPDATE task_control_receipts SET receiptJson = ? WHERE taskId = ? AND key = ?",
+        )
+        .run(JSON.stringify(receipt), command.taskId, command.key);
+      return receipt;
     });
   }
 

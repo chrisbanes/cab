@@ -36,6 +36,17 @@ export function receiptLines(receipt: CommandReceipt): [string, string][] {
       ["Reason", receipt.reason],
       ["Material hash", receipt.materialHash],
     ];
+  if (receipt.kind === "workspace-remove")
+    return [
+      ["Task", receipt.taskId],
+      ["Workspace", receipt.workspaceId],
+      ["Operation", receipt.operationId],
+      ["Removed", new Date(receipt.removedAt).toISOString()],
+      ...receipt.repositories.map((r): [string, string] => [
+        r.repositoryId,
+        `${r.kind} ${r.commit}`,
+      ]),
+    ];
   if (receipt.kind === "task-cancel")
     return [
       ["Task", receipt.taskId],
