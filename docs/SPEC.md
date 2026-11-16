@@ -1309,7 +1309,9 @@ candidates. In order, it:
 - removes a done or cancelled task's workspace once its delivered retention has passed
   since the task's last confirmed push, or since it became terminal when nothing was
   pushed, or once its merged retention has passed since cab first observed every
-  repository's change request merged, whichever expires first (merged on an exact tie).
+  repository's change request merged at cab's last confirmed push to it, whichever
+  expires first (merged on an exact tie). A later push makes that repository unmerged
+  again until its change request is observed merged at the new head.
   A push made by removal does not restart the clock. A workspace whose needed time fact
   predates cab's records is never expired and raises no attention; it stays until it is
   removed by hand;
