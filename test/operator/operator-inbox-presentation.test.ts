@@ -20,7 +20,9 @@ import type {
   RuntimeInboxItem,
   TaskInboxItem,
   TaskRead,
+  WorkspaceMaintenanceInboxItem,
 } from "../../src/operator/contracts.js";
+import { maintenanceInboxReason } from "../../src/operator/workspace-maintenance-copy.js";
 import { orderWaits } from "../../src/operator/wait-reasons.js";
 
 const minute = 60_000;
@@ -223,6 +225,49 @@ test("a runtime item counts toward the total and its kind but under no project",
   assert.equal(counts.total, 3);
   assert.deepEqual(counts.project, { [p]: 1 });
   assert.deepEqual(counts.kind, { runtime: 2, question: 1 });
+});
+
+const maintenanceItem = (): WorkspaceMaintenanceInboxItem => ({
+  id: "workspace-maintenance",
+  kind: "workspace-maintenance",
+  urgency: 0,
+  createdAt: 2_000,
+  headline: "Workspace maintenance needs attention",
+  reason: maintenanceInboxReason(
+    { measuredBytes: 12_300_000_000, capBytes: 10_000_000_000 },
+    true,
+  ),
+  usage: { measuredBytes: 12_300_000_000, capBytes: 10_000_000_000 },
+  blockers: [],
+  destination: "/inbox?request=workspace-maintenance",
+  dismissible: false,
+});
+
+test("the maintenance item is named by its kind, says what is unresolved and belongs to no project", () => {
+  const maintenance = maintenanceItem();
+  assert.equal(requestKindLabel(maintenance.kind), "Workspace maintenance");
+  assert.equal(requestActionLabel(maintenance), "Review blocking workspaces");
+  assert.deepEqual(requestHeading(maintenance), {
+    title: "Workspace maintenance needs attention",
+    subtitle: null,
+    reason:
+      "Task workspaces use 12.3 GB, over the 10.0 GB disk limit; a workspace past its retention was not removed.",
+  });
+  assert.equal(
+    maintenanceInboxReason(null, true),
+    "A workspace past its retention was not removed.",
+  );
+  const p = randomUUID(),
+    counts = filterCounts([maintenance, item("question", p)]);
+  assert.deepEqual(counts.project, { [p]: 1 });
+  assert.deepEqual(counts.kind, { "workspace-maintenance": 1, question: 1 });
+  // It leads the Intervention group with runtime problems.
+  assert.deepEqual(
+    queueGroups([item("question", p), maintenance]).map((g) =>
+      g.items.map((i) => i.kind),
+    ),
+    [["workspace-maintenance"], ["question"]],
+  );
 });
 
 test("filter counts add up per project and per kind", () => {

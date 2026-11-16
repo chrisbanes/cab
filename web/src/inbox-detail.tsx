@@ -3,6 +3,7 @@ import {
   taskSchema,
   type RuntimeInboxItem,
   type Session,
+  type WorkspaceMaintenanceInboxItem,
   type TaskInboxItem,
   type TaskRead,
 } from "../../src/operator/contracts.js";
@@ -270,6 +271,60 @@ export function RuntimeDetail({ item }: { item: RuntimeInboxItem }) {
         <ActionLink href={item.destination}>
           {requestActionLabel(item)}
         </ActionLink>
+      </div>
+    </div>
+  );
+}
+
+/**
+ * The installation's maintenance item: each blocking workspace by task, with cab's reason. A
+ * task's link opens its page only; the removal confirmation is never opened from here.
+ */
+export function WorkspaceMaintenanceDetail({
+  item,
+}: {
+  item: WorkspaceMaintenanceInboxItem;
+}) {
+  const groups = [
+    {
+      condition: "disk-cap",
+      heading: "Over the disk limit",
+    },
+    { condition: "retention", heading: "Past retention, not removed" },
+  ] as const;
+  return (
+    <div className="inbox-approval">
+      <div className="inbox-approval-body">
+        {groups.map(({ condition, heading }) => {
+          const blockers = item.blockers.filter(
+            (b) => b.condition === condition,
+          );
+          return blockers.length ? (
+            <section key={condition} aria-label={heading}>
+              <h3 className="small-heading">{heading}</h3>
+              <ul className="inbox-attempts">
+                {blockers.map((b) => (
+                  <li key={`${condition}:${b.workspaceId}`}>
+                    {/* Each link is named by its task, so no two share a name. */}
+                    <a href={b.destination}>
+                      {b.taskTitle ?? `Task ${b.taskId}`}
+                    </a>
+                    {b.projectName && ` · ${b.projectName}`}
+                    {" — "}
+                    {b.reasonText}
+                  </li>
+                ))}
+              </ul>
+            </section>
+          ) : null;
+        })}
+        {!item.blockers.length && (
+          <p>No listed workspace can be trimmed or removed safely.</p>
+        )}
+        <p className="metadata muted">
+          This item clears on its own once usage is within the limit and no
+          workspace past its retention is refused.
+        </p>
       </div>
     </div>
   );

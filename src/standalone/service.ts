@@ -21,7 +21,10 @@ import { adoptMergedStackRebase } from "./stack-rebase.js";
 import { ProjectDeletionCleanup } from "./project-deletion-cleanup.js";
 import { ProjectDeletion, ProjectTombstones } from "./project-deletion.js";
 import { prepareDeletionPrivateInputs } from "./project-deletion-private.js";
-import type { ProjectDeleteCommand } from "../core/project-lifecycle.js";
+import {
+  ProjectArchivedError,
+  type ProjectDeleteCommand,
+} from "../core/project-lifecycle.js";
 import { ProjectWrites } from "./project-writes.js";
 import {
   assertOwnedWorkWritable,
@@ -135,7 +138,21 @@ import type {
   HarnessStatus,
   RuntimeRestartFailure,
 } from "../operator/contracts.js";
-import { ClaudeRuntime, releaseClaudeTemporaryBase } from "./claude.js";
+import {
+  ClaudeRuntime,
+  claudeTemporaryBase,
+  releaseClaudeTemporaryBase,
+} from "./claude.js";
+import {
+  type MaintenanceCandidate,
+  type MaintenanceOutcome,
+  type MaintenancePassReport,
+  maintenanceReason,
+  WorkspaceMaintenance,
+  type WorkspaceMaintenanceOptions,
+} from "./workspace-maintenance.js";
+import { measureInWorker } from "./workspace-maintenance-worker.js";
+import type { WorkspaceMaintenanceAttention } from "../core/inbox-lifecycle.js";
 import { projectCleanupId } from "./project-cleanup-identities.js";
 import {
   type DraftingRun,
@@ -701,8 +718,12 @@ export interface StandaloneServiceOptions {
     fallbackBackoffMs?: number;
     maxFallbackBackoffMs?: number;
   };
-  /** Validated desired limits; automatic maintenance is not yet scheduled. */
+  /** Validated limits the automatic maintenance pass applies from start. */
   workspaceMaintenance?: WorkspaceMaintenanceConfiguration;
+  /** Test-only: the maintenance pass's measurement, clock and wake; production uses a worker. */
+  maintenancePass?: Partial<
+    Pick<WorkspaceMaintenanceOptions, "measure" | "now" | "every">
+  >;
   /** Execution diagnostic retention; `cli.ts` passes the environment limits. */
   diagnostics?: {
     limits?: Partial<DiagnosticLimits>;
@@ -729,13 +750,16 @@ export type BackgroundFailureOperation =
   | "scheduler-drain"
   /** Not fatal: the failing stacked dependency is retried on the next wake. */
   | "restack-reconcile"
+  /** Not fatal: a failed maintenance pass is retried on the next wake. */
+  | "workspace-maintenance"
   | "safe-shutdown";
 
 export type BackgroundFailureCode =
   | "unexpected-background-failure"
   | "shutdown-failed"
   | "diagnostic-writer-failed"
-  | "restack-reconcile-failed";
+  | "restack-reconcile-failed"
+  | "workspace-maintenance-failed";
 
 export interface BackgroundFailureDiagnostic {
   serviceId: string;
@@ -955,8 +979,9 @@ const sandboxReviewKey = (identity: SandboxReviewIdentity) =>
 
 /** Owns only standalone.sqlite in a marked data directory. No import or attach path exists. */
 export class StandaloneService {
-  /** Desired validated limits; no automatic maintenance is scheduled yet. */
+  /** Validated limits the automatic maintenance pass applies. */
   readonly workspaceMaintenance: WorkspaceMaintenanceSettings;
+  private maintenance: WorkspaceMaintenance | undefined;
   private owner: StandaloneDataDirectory | undefined;
   private db: DatabaseSync | undefined;
   private deletedProjectRedaction: DeletedProjectRedactionStore | undefined;
@@ -2152,6 +2177,22 @@ export class StandaloneService {
       scheduler.start();
       heldTurns?.start();
       await this.wakeScheduler();
+      // After startup recovery: a pass only reads stored facts and calls the service entry points.
+      this.maintenance = new WorkspaceMaintenance({
+        settings: this.workspaceMaintenance,
+        host: this.maintenanceHost(generation),
+        measure: measureInWorker,
+        ...this.options.maintenancePass,
+        failed: (error) =>
+          void this.writeBackgroundDiagnostic(generation, {
+            serviceId: generation.id,
+            incident: generation.incident,
+            operation: "workspace-maintenance",
+            errorCode: "workspace-maintenance-failed",
+            error: sanitizeError(error, this.failureExclusions()),
+          }).catch(() => {}),
+      });
+      this.maintenance.start();
       this.sweepConversationArchives(generation);
       this.timers.add(
         setInterval(
@@ -2183,6 +2224,7 @@ export class StandaloneService {
       this.abortRuntimeRestarts();
       // Read live, as stop() may release these while start() is still running.
       const { scheduler, workspaces, draftingWorkspaces } = this.acquired ?? {};
+      this.maintenance?.cancel();
       workspaces?.cancelGitWork();
       draftingWorkspaces?.cancelGitWork();
       scheduler?.stop();
@@ -2214,6 +2256,8 @@ export class StandaloneService {
             ),
           ]);
           this.detachedRuntimeStops.clear();
+          await this.maintenance?.settle();
+          this.maintenance = undefined;
           await workspaces?.settle();
           await draftingWorkspaces?.settle();
           try {
@@ -3129,6 +3173,9 @@ export class StandaloneService {
     }
     for (const timer of this.timers) clearInterval(timer);
     this.timers.clear();
+    const maintenance = this.maintenance;
+    // No new candidate starts; the effect in flight settles before the database closes.
+    maintenance?.cancel();
     this.heldTurns?.stop();
     this.heldTurns = undefined;
     // Before Git cancellation and runtime stop, so interrupted turns can record their end.
@@ -3199,6 +3246,10 @@ export class StandaloneService {
       ),
       ...detachedStops.map((cleanup) => attempt("runtime stop", () => cleanup)),
     ]);
+    await attempt("workspace maintenance settlement", async () => {
+      await maintenance?.settle();
+      if (this.maintenance === maintenance) this.maintenance = undefined;
+    });
     await attempt("workspace settlement", () => workspaces?.settle());
     await attempt("drafting workspace settlement", () =>
       draftingWorkspaces?.settle(),
@@ -6486,6 +6537,8 @@ export class StandaloneService {
   async trimTaskWorkspace(
     taskId: string,
     trigger: "manual" | "idle" | "disk",
+    /** The generation an automatic pass chose; a replaced workspace is refused. */
+    workspaceId?: string,
   ): Promise<WorkspaceTrimResult> {
     return this.withProjectWrite(
       this.taskProject(taskId),
@@ -6502,6 +6555,13 @@ export class StandaloneService {
             reason: "Task execution is not settled or its workspace is held",
           };
         try {
+          const current = workspaceBindings.get(taskId);
+          if (workspaceId !== undefined && current?.workspaceId !== workspaceId)
+            return {
+              outcome: "refused",
+              binding: current,
+              reason: "The task's workspace was replaced",
+            };
           return await workspaces.trim(
             taskId,
             trigger,
@@ -6518,6 +6578,160 @@ export class StandaloneService {
         }
       },
     );
+  }
+
+  /** Runs a maintenance pass now (or joins the running one); undefined once stopped. */
+  runWorkspaceMaintenance(): Promise<MaintenancePassReport | undefined> {
+    return this.maintenance?.wake() ?? Promise.resolve(undefined);
+  }
+
+  /**
+   * The pass's seam to the service. Candidates are stored facts only (no Git, no filesystem);
+   * every effect goes through the trim and removal entry points, which re-derive safety for
+   * the named generation. Nothing runs or is recorded once this generation stops.
+   */
+  private maintenanceHost(
+    generation: ServiceGeneration,
+  ): WorkspaceMaintenanceOptions["host"] {
+    const live = () =>
+      this.generation === generation &&
+      generation.accepting &&
+      !!this.cache?.isOpen;
+    const effect = async (
+      run: () => Promise<{ done: boolean; reason?: string }>,
+    ): Promise<MaintenanceOutcome> => {
+      if (!live()) return { done: false, reason: "refused" };
+      try {
+        const result = await run();
+        return result.done
+          ? { done: true }
+          : { done: false, reason: maintenanceReason(result.reason ?? "") };
+      } catch (error) {
+        return {
+          done: false,
+          reason:
+            error instanceof ProjectArchivedError
+              ? "project-read-only"
+              : maintenanceReason(error instanceof Error ? error.message : ""),
+        };
+      }
+    };
+    return {
+      candidates: () => (live() ? this.maintenanceCandidates() : []),
+      trim: (candidate, trigger) =>
+        effect(async () => {
+          const result = await this.trimTaskWorkspace(
+            candidate.taskId,
+            trigger,
+            candidate.workspaceId,
+          );
+          return result.outcome === "trimmed"
+            ? { done: true }
+            : { done: false, reason: result.reason };
+        }),
+      remove: (candidate, trigger) =>
+        effect(async () => {
+          const result = await this.removeTaskWorkspace(
+            candidate.taskId,
+            trigger,
+            { workspaceId: candidate.workspaceId, operationId: randomUUID() },
+          );
+          return result.outcome === "cleaned"
+            ? { done: true }
+            : { done: false, reason: result.reason };
+        }),
+      report: (attention) => {
+        if (live()) this.reportWorkspaceMaintenance(attention);
+      },
+    };
+  }
+
+  /** Refreshes or resolves the one installation item; a deleted task's late blocker is dropped. */
+  private reportWorkspaceMaintenance(
+    attention: WorkspaceMaintenanceAttention | null,
+  ): void {
+    const lifecycle = this.inboxLifecycle();
+    const blockers = (attention?.blockers ?? []).filter(
+      (b) =>
+        !!this.cache!.prepare("SELECT 1 FROM domain_tasks WHERE id=?").get(
+          b.taskId,
+        ),
+    );
+    if (attention && (attention.usage || blockers.length)) {
+      lifecycle.refreshWorkspaceMaintenance({ ...attention, blockers });
+      return;
+    }
+    const current = lifecycle.workspaceMaintenance();
+    if (current && current.row.status !== "resolved")
+      lifecycle.resolve(
+        current.row.id,
+        "Disk usage is within the limit and no workspace past its retention is refused",
+      );
+  }
+
+  /** Every task workspace generation on disk, as stored facts. */
+  private maintenanceCandidates(): MaintenanceCandidate[] {
+    const { workspaceBindings, domain, deliveryStore } = this.started();
+    const lifecycle = new WorkspaceLifecycleStore(this.cache!);
+    const candidates: MaintenanceCandidate[] = [];
+    for (const binding of workspaceBindings.list()) {
+      if (binding.state === "archived" || binding.state === "provisioning")
+        continue;
+      const { taskId } = binding;
+      let state: string;
+      try {
+        state = String(domain.task(taskId).state);
+      } catch {
+        continue;
+      }
+      const recorded = lifecycle.get(binding.workspaceId);
+      const generation = recorded?.taskId === taskId ? recorded : undefined;
+      const terminal = state === "done" || state === "cancelled";
+      const lastTrim = generation
+        ? Math.max(
+            -1,
+            ...lifecycle
+              .operations(generation)
+              .filter((o) => o.kind === "trim" && o.state === "completed")
+              .map((o) => o.completedAt!),
+          )
+        : -1;
+      const ended = generation?.lastTurnEndedAt ?? null;
+      const generations = lifecycle.forTask(taskId);
+      candidates.push({
+        taskId,
+        workspaceId: binding.workspaceId,
+        roots: [
+          { path: binding.path, optional: false },
+          { path: claudeTemporaryBase(binding.path), optional: true },
+        ],
+        writable: this.writableTask(taskId),
+        terminal,
+        terminalAt: terminal ? (generation?.terminal?.at ?? null) : null,
+        lastTurnEndedAt: ended,
+        trimmedSinceTurn: ended !== null && lastTrim >= ended,
+        lastPushAt: generation?.lastPushAt ?? null,
+        // A push the delivery store knows but no generation's clock recorded predates the clock.
+        pushUnknown: binding.repositories.some((repository) => {
+          const pushed = deliveryStore.taskBranch(
+            taskId,
+            repository.repositoryId,
+          )?.lastPushedSha;
+          return (
+            !!pushed &&
+            !generations.some((g) =>
+              g.repositoryClocks.some(
+                (c) =>
+                  c.repositoryId === repository.repositoryId &&
+                  c.pushedCommit === pushed,
+              ),
+            )
+          );
+        }),
+        allMergedAt: terminal ? (generation?.allMergedAt ?? null) : null,
+      });
+    }
+    return candidates;
   }
 
   /** A replacement keeps the durable assignment and its captured revisions. */

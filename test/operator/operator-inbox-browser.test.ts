@@ -146,6 +146,7 @@ test("queue rows are request cards with kind, action and relative age; filters a
       "Result reviews · 0",
       "Interventions · 0",
       "Runtime · 0",
+      "Workspace maintenance · 0",
     ],
   );
   // Filters are compact controls, not full-width labelled fields.
@@ -2367,6 +2368,7 @@ for (const [name, viewport] of [
         "Result reviews · 0",
         "Interventions · 0",
         "Runtime · 1",
+        "Workspace maintenance · 0",
       ],
     );
 

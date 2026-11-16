@@ -4,6 +4,7 @@ import { test } from "node:test";
 import {
   taskSourceSummarySchema,
   type InboxItem,
+  type TaskInboxItem,
   type TaskListSummary,
 } from "../../src/operator/contracts.js";
 import {
@@ -426,7 +427,7 @@ test("request wording is exhaustive and links match the Inbox selection", () => 
     ["Answer question", "Review material & decide", "Inspect execution"],
   );
   const taskId = randomUUID();
-  const item = (kind: InboxItem["kind"], rest: object = {}) => ({
+  const item = (kind: TaskInboxItem["kind"], rest: object = {}) => ({
     id: "interaction:1/x",
     kind,
     taskId,

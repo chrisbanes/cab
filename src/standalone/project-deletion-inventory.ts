@@ -18,7 +18,8 @@ export const projectDeletionInventory = {
       "note",
       "obsolete",
     ],
-    ownership: "taskId in T; KEEP runtime episodes",
+    ownership:
+      "taskId in T; KEEP runtime and workspace-maintenance episodes, pruning T from maintenance blockers",
   },
   inbox_lifecycle_receipts: {
     columns: ["key", "taskId", "itemId", "payloadHash", "result"],

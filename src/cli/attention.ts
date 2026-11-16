@@ -97,20 +97,47 @@ const inboxNext = (item: InboxItem) =>
       ? "Restore"
       : item.kind === "runtime"
         ? "Open runtime settings"
-        : attentionNext[
-            item.attentionCode ??
-              (item.kind === "intervention" ? "execution-uncertain" : item.kind)
-          ].inboxAction;
+        : item.kind === "workspace-maintenance"
+          ? "Open the listed tasks"
+          : attentionNext[
+              item.attentionCode ??
+                (item.kind === "intervention"
+                  ? "execution-uncertain"
+                  : item.kind)
+            ].inboxAction;
+
+/** Each blocking workspace of a maintenance item: task, workspace and cab's reason. */
+const maintenanceLines = (items: readonly InboxItem[]) =>
+  items
+    .flatMap((i) =>
+      i.kind === "workspace-maintenance" && i.blockers.length
+        ? [
+            "\nWorkspace maintenance blockers (cab task get TASK_ID):",
+            ...i.blockers.map(
+              (b) =>
+                `  ${b.taskId}  ${oneLine(b.taskTitle, 40)}  workspace ${b.workspaceId}  ${b.condition === "disk-cap" ? "disk limit" : "retention"}: ${b.reasonText}`,
+            ),
+          ]
+        : [],
+    )
+    .join("\n");
 
 const inboxList: BrowseCommand = {
   usage:
-    "inbox list [--status actionable|resolved|dismissed] [--kind question|approval|result-review|intervention|runtime] [--project ID] [--limit N] [--cursor TOKEN]",
+    "inbox list [--status actionable|resolved|dismissed] [--kind question|approval|result-review|intervention|runtime|workspace-maintenance] [--project ID] [--limit N] [--cursor TOKEN]",
   positionals: 0,
   capabilities: ["cli.identity", "attention.read"],
   async run(ctx) {
     const kind = enumArg(
       ctx.values.kind,
-      ["question", "approval", "result-review", "intervention", "runtime"],
+      [
+        "question",
+        "approval",
+        "result-review",
+        "intervention",
+        "runtime",
+        "workspace-maintenance",
+      ],
       "--kind",
     );
     const status = enumArg(
@@ -160,44 +187,64 @@ const inboxList: BrowseCommand = {
               "Next",
             ],
             items.map((i) =>
-              i.kind === "runtime"
-                ? // The Task column names the runtime; its detail is `runtime list`.
+              i.kind === "workspace-maintenance"
+                ? // An installation item: its blockers are listed below the table.
                   [
                     i.id,
                     i.lifecycle?.status ?? "actionable",
                     String(i.lifecycle?.revision ?? 1),
-                    i.lifecycle?.resolvedAt || i.lifecycle?.dismissedAt
-                      ? new Date(
-                          (i.lifecycle.resolvedAt ?? i.lifecycle.dismissedAt)!,
-                        ).toISOString()
+                    i.lifecycle?.resolvedAt
+                      ? new Date(i.lifecycle.resolvedAt).toISOString()
                       : "-",
-                    oneLine(i.lifecycle?.note, 60),
+                    "-",
                     i.kind,
-                    i.harness,
-                    "(cab runtime list)",
+                    "(installation)",
+                    "-",
                     "-",
                     "-",
                     oneLine(i.lifecycle?.resolution ?? i.reason, 60),
                     inboxNext(i),
                   ]
-                : [
-                    i.id,
-                    i.lifecycle?.status ?? "actionable",
-                    String(i.lifecycle?.revision ?? 1),
-                    i.lifecycle?.resolvedAt || i.lifecycle?.dismissedAt
-                      ? new Date(
-                          (i.lifecycle.resolvedAt ?? i.lifecycle.dismissedAt)!,
-                        ).toISOString()
-                      : "-",
-                    oneLine(i.lifecycle?.note, 60),
-                    i.kind,
-                    i.taskId,
-                    i.interactionId ?? `(cab task get ${i.taskId})`,
-                    i.revision === null ? "-" : String(i.revision),
-                    oneLine(i.requesterName, 30),
-                    oneLine(i.lifecycle?.resolution ?? i.reason, 60),
-                    inboxNext(i),
-                  ],
+                : i.kind === "runtime"
+                  ? // The Task column names the runtime; its detail is `runtime list`.
+                    [
+                      i.id,
+                      i.lifecycle?.status ?? "actionable",
+                      String(i.lifecycle?.revision ?? 1),
+                      i.lifecycle?.resolvedAt || i.lifecycle?.dismissedAt
+                        ? new Date(
+                            (i.lifecycle.resolvedAt ??
+                              i.lifecycle.dismissedAt)!,
+                          ).toISOString()
+                        : "-",
+                      oneLine(i.lifecycle?.note, 60),
+                      i.kind,
+                      i.harness,
+                      "(cab runtime list)",
+                      "-",
+                      "-",
+                      oneLine(i.lifecycle?.resolution ?? i.reason, 60),
+                      inboxNext(i),
+                    ]
+                  : [
+                      i.id,
+                      i.lifecycle?.status ?? "actionable",
+                      String(i.lifecycle?.revision ?? 1),
+                      i.lifecycle?.resolvedAt || i.lifecycle?.dismissedAt
+                        ? new Date(
+                            (i.lifecycle.resolvedAt ??
+                              i.lifecycle.dismissedAt)!,
+                          ).toISOString()
+                        : "-",
+                      oneLine(i.lifecycle?.note, 60),
+                      i.kind,
+                      i.taskId,
+                      i.interactionId ?? `(cab task get ${i.taskId})`,
+                      i.revision === null ? "-" : String(i.revision),
+                      oneLine(i.requesterName, 30),
+                      oneLine(i.lifecycle?.resolution ?? i.reason, 60),
+                      inboxNext(i),
+                    ],
             ),
           ) +
           (items.some(
@@ -206,7 +253,8 @@ const inboxList: BrowseCommand = {
               i.attentionCode === "unresolved-result",
           )
             ? "\nAn undelivered result's 'cab task get TASK_ID' names its 'cab result deliver' command."
-            : "")
+            : "") +
+          maintenanceLines(items)
         : status && status !== "actionable"
           ? "No Inbox history in this view."
           : "Nothing needs attention.",
@@ -425,7 +473,9 @@ function inboxVisibilityCommand(action: "dismiss" | "restore"): WriteCommand {
       const scope =
         item.kind === "runtime"
           ? `system:runtime:${item.harness}`
-          : `task:${item.taskId}`;
+          : item.kind === "workspace-maintenance"
+            ? "system:workspace-maintenance"
+            : `task:${item.taskId}`;
       const command = {
         type: `inbox.${action}` as "inbox.dismiss" | "inbox.restore",
         itemId,

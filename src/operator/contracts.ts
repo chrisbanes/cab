@@ -1,4 +1,9 @@
-import { inboxLifecycleSchema } from "../core/inbox-lifecycle.js";
+import {
+  inboxLifecycleSchema,
+  workspaceMaintenanceBlockerLimit,
+  workspaceMaintenanceInboxId,
+  workspaceMaintenanceReasons,
+} from "../core/inbox-lifecycle.js";
 import {
   sandboxLevelSchema,
   sandboxReviewRiskSchema,
@@ -4779,9 +4784,50 @@ export const runtimeInboxItemSchema = z
     destination: z.string().max(512),
   })
   .strict();
+/**
+ * The installation's one workspace maintenance item: usage still over the disk cap after a pass,
+ * or a workspace past its retention that cab refused to remove. It belongs to no project and is
+ * not dismissible; it resolves once both conditions clear. Task names are resolved on each read.
+ */
+export const workspaceMaintenanceInboxItemSchema = z
+  .object({
+    lifecycle: inboxLifecycleSchema.optional(),
+    dismissible: z.literal(false),
+    id: z.literal(workspaceMaintenanceInboxId),
+    kind: z.literal("workspace-maintenance"),
+    urgency: z.literal(0),
+    /** When this active episode began; a refresh keeps it. */
+    createdAt: time,
+    headline: z.string().max(200),
+    reason: z.string().max(400),
+    usage: z
+      .object({ measuredBytes: count, capBytes: count })
+      .strict()
+      .nullable(),
+    blockers: z
+      .array(
+        z
+          .object({
+            taskId: uuid,
+            taskTitle: safeText,
+            projectName: safeText,
+            workspaceId: uuid,
+            condition: z.enum(["disk-cap", "retention"]),
+            reason: z.enum(workspaceMaintenanceReasons),
+            reasonText: z.string().max(200),
+            /** The task page; it never opens the removal confirmation. */
+            destination: z.string().max(512),
+          })
+          .strict(),
+      )
+      .max(workspaceMaintenanceBlockerLimit),
+    destination: z.string().max(512),
+  })
+  .strict();
 export const inboxItemSchema = z.union([
   taskInboxItemSchema,
   runtimeInboxItemSchema,
+  workspaceMaintenanceInboxItemSchema,
 ]);
 export const inboxReadSchema = z
   .object({
@@ -4798,6 +4844,9 @@ export const inboxReadSchema = z
   .strict();
 export type TaskInboxItem = z.infer<typeof taskInboxItemSchema>;
 export type RuntimeInboxItem = z.infer<typeof runtimeInboxItemSchema>;
+export type WorkspaceMaintenanceInboxItem = z.infer<
+  typeof workspaceMaintenanceInboxItemSchema
+>;
 export type InboxItem = z.infer<typeof inboxItemSchema>;
 // Fixed strict command envelope maxima; question JSON independently remains <=256 KiB.
 export const questionCommandRawLimit =

@@ -3,6 +3,7 @@ import type {
   InboxItem,
   RuntimeInboxItem,
   TaskInboxItem,
+  WorkspaceMaintenanceInboxItem,
 } from "./contracts.js";
 
 /** A task's attention codes, in the precedence that names who acts next. */
@@ -152,7 +153,14 @@ export const kindLabels: Record<InboxItem["kind"], string> = {
   intervention: "Intervention",
   runtime: "Runtime",
   "result-review": "Result review",
+  "workspace-maintenance": "Workspace maintenance",
 };
+
+/** Task items carry a task and project; runtime and workspace maintenance items belong to none. */
+export const isTaskInboxItem = <T extends Pick<InboxItem, "kind">>(
+  item: T,
+): item is Extract<T, Pick<TaskInboxItem, "kind">> =>
+  item.kind !== "runtime" && item.kind !== "workspace-maintenance";
 
 /**
  * The identity of one alert: what the Inbox shows, what a push notification is tagged with and
@@ -170,6 +178,9 @@ export function inboxAlertKey(item: InboxItem): string {
       return `${item.id}:${item.attentionCode ?? ""}`;
     case "runtime":
       return `${item.id}:${item.since}`;
+    // A refresh keeps the episode's start, so only a recurrence is a new alert.
+    case "workspace-maintenance":
+      return `${item.id}:${item.createdAt}`;
     default: {
       const exhaustive: never = item;
       return exhaustive;
@@ -181,7 +192,8 @@ export function inboxAlertKey(item: InboxItem): string {
 export function inboxSelectionHref(
   item:
     | Pick<TaskInboxItem, "id" | "kind" | "taskId">
-    | Pick<RuntimeInboxItem, "id" | "kind">,
+    | Pick<RuntimeInboxItem, "id" | "kind">
+    | Pick<WorkspaceMaintenanceInboxItem, "id" | "kind">,
 ): string {
   switch (item.kind) {
     case "question":
@@ -190,6 +202,7 @@ export function inboxSelectionHref(
     case "result-review":
       return `/inbox?task=${item.taskId}&request=${encodeURIComponent(item.id)}`;
     case "runtime":
+    case "workspace-maintenance":
       return `/inbox?request=${encodeURIComponent(item.id)}`;
     default: {
       const exhaustive: never = item;

@@ -2,6 +2,7 @@ import {
   CircleQuestionMark,
   ClipboardCheck,
   Diamond,
+  HardDrive,
   ServerOff,
   TriangleAlert,
   type LucideIcon,
@@ -10,6 +11,7 @@ import type {
   InboxItem,
   RuntimeInboxItem,
   TaskInboxItem,
+  WorkspaceMaintenanceInboxItem,
 } from "../../src/operator/contracts.js";
 import { inboxSelectionHref } from "../../src/operator/attention.js";
 import { requestActionLabel, requestKindLabel } from "./inbox-presentation.js";
@@ -21,13 +23,18 @@ export const requestKindIcons: Record<InboxItem["kind"], LucideIcon> = {
   intervention: TriangleAlert,
   runtime: ServerOff,
   "result-review": ClipboardCheck,
+  "workspace-maintenance": HardDrive,
 };
 type Request =
   | Pick<
       TaskInboxItem,
       "id" | "kind" | "taskId" | "destination" | "requesterName" | "createdAt"
     >
-  | Pick<RuntimeInboxItem, "id" | "kind" | "destination" | "createdAt">;
+  | Pick<RuntimeInboxItem, "id" | "kind" | "destination" | "createdAt">
+  | Pick<
+      WorkspaceMaintenanceInboxItem,
+      "id" | "kind" | "destination" | "createdAt"
+    >;
 /**
  * A question or result review opens in the Inbox's own selection; other kinds go to their exact
  * destination, which for a runtime is its settings.
@@ -41,6 +48,7 @@ export const interventionRequester = (
   items: readonly (
     | Pick<TaskInboxItem, "taskId" | "kind" | "requesterName">
     | Pick<RuntimeInboxItem, "kind">
+    | Pick<WorkspaceMaintenanceInboxItem, "kind">
   )[],
   taskId: string,
 ) => {
@@ -57,6 +65,7 @@ export function inboxSummaryOf(state: {
     items: readonly (
       | Pick<TaskInboxItem, "projectId">
       | Pick<RuntimeInboxItem, "kind">
+      | Pick<WorkspaceMaintenanceInboxItem, "kind">
     )[];
   } | null;
   error: string | null;
@@ -64,7 +73,7 @@ export function inboxSummaryOf(state: {
   return state.data?.complete && !state.data.unavailable && !state.error
     ? {
         count: state.data.items.length,
-        // A runtime item names no project, so it never adds one.
+        // A runtime or maintenance item names no project, so it never adds one.
         projects: new Set(
           state.data.items.flatMap((item) =>
             "projectId" in item ? [item.projectId] : [],

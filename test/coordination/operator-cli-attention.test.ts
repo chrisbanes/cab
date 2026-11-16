@@ -169,7 +169,7 @@ test("inbox list prints and filters the runtime item", async (t) => {
   assert.equal(r.code, 2);
   assert.match(
     r.err + r.out,
-    /--kind must be question, approval, result-review, intervention, runtime\./,
+    /--kind must be question, approval, result-review, intervention, runtime, workspace-maintenance\./,
   );
 
   // `runtime list` carries the same state and, as JSON, the restart facts.
@@ -873,4 +873,64 @@ test("task get names the rejected completion's exact request and its identity-bo
   r = await o.h.run(["task", "get", q.taskId, "--connection", "rw"]);
   assert.equal(r.code, 0, r.err + r.out);
   assert.match(r.out, /dismissed; no longer required for completion/);
+});
+
+test("inbox list prints the installation maintenance item with each blocking task, workspace and reason", async (t) => {
+  const o = await startCliOperator(t);
+  const { cli, s } = o;
+  const q = await seedOwnQuestion(s.f);
+  const workspaceId = randomUUID();
+  // The start-up pass settles first, so it cannot resolve the seeded item.
+  await s.f.service.runWorkspaceMaintenance();
+  s.f.service.inboxLifecycle().refreshWorkspaceMaintenance({
+    usage: { measuredBytes: 12_000_000_000, capBytes: 10_000_000_000 },
+    blockers: [
+      {
+        taskId: q.taskId,
+        workspaceId,
+        condition: "disk-cap",
+        reason: "uncommitted",
+      },
+    ],
+  });
+  const human = await o.h.run(["inbox", "list", "--connection", "ro"]);
+  assert.equal(human.code, 0, human.err + human.out);
+  assert.match(human.out, /workspace-maintenance\s+\(installation\)/);
+  assert.match(human.out, /Open the listed tasks/);
+  assert.ok(
+    human.out.includes(
+      `${q.taskId}  Choose full form  workspace ${workspaceId}  disk limit: Uncommitted work remains`,
+    ),
+    human.out,
+  );
+  const r = await cli("ro", [
+    "inbox",
+    "list",
+    "--kind",
+    "workspace-maintenance",
+  ]);
+  assert.equal(r.code, 0, r.err + r.out);
+  assert.deepEqual(
+    r
+      .json()
+      .data.items.map(
+        (i: { kind: string; blockers: { workspaceId: string }[] }) => [
+          i.kind,
+          i.blockers[0]?.workspaceId,
+        ],
+      ),
+    [["workspace-maintenance", workspaceId]],
+  );
+  // A project filter excludes the installation item.
+  const scoped = await o.h.run([
+    "inbox",
+    "list",
+    "--kind",
+    "workspace-maintenance",
+    "--project",
+    q.projectId,
+    "--connection",
+    "ro",
+  ]);
+  assert.match(scoped.out, /Nothing needs attention\./);
 });

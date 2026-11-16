@@ -1,3 +1,4 @@
+import { InboxLifecycle } from "../../src/core/inbox-lifecycle.js";
 import { prepareDeletionPrivateInputs } from "../../src/standalone/project-deletion-private.js";
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
@@ -1385,4 +1386,29 @@ test("summary ownership retains orphan history but refuses a conflicting intent 
   } finally {
     db.close();
   }
+});
+
+test("deletion prunes only the deleted project's tasks from the maintenance Inbox item, in its transaction", async (t) => {
+  const f = await projectDeletionFixture(t);
+  const lifecycle = new InboxLifecycle(f.db);
+  const blocker = (taskId: string) => ({
+    taskId,
+    workspaceId: randomUUID(),
+    condition: "retention" as const,
+    reason: "unsettled" as const,
+  });
+  // The start-up pass settles first, so it cannot resolve the seeded item.
+  await f.service.runWorkspaceMaintenance();
+  lifecycle.refreshWorkspaceMaintenance({
+    usage: null,
+    blockers: [blocker(f.taskId), blocker(f.taskB)],
+  });
+  const result = await f.service.deleteProject(await f.command());
+  assert.equal(result.kind, "project-deleted");
+  const kept = lifecycle.workspaceMaintenance();
+  assert.equal(kept?.row.status, "actionable");
+  assert.deepEqual(
+    kept?.attention.blockers.map((b) => b.taskId),
+    [f.taskB],
+  );
 });

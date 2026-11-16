@@ -9,6 +9,7 @@ import {
   type InboxItem,
   inboxReadSchema,
   type RuntimeInboxItem,
+  type WorkspaceMaintenanceInboxItem,
   type TaskInboxItem,
 } from "../../src/operator/contracts.js";
 import { OperatorApi } from "../../src/standalone/operator-api.js";
@@ -535,6 +536,33 @@ const runtimeItem = (
   lastFailure: "start-failed",
   attempts: [],
   destination: "/settings/runtime",
+});
+
+const maintenanceItem = (
+  createdAt: number,
+  reasonText = "Uncommitted work remains",
+): WorkspaceMaintenanceInboxItem => ({
+  id: "workspace-maintenance",
+  kind: "workspace-maintenance",
+  urgency: 0,
+  createdAt,
+  headline: "Workspace maintenance needs attention",
+  reason: "A workspace past its retention was not removed.",
+  usage: null,
+  blockers: [
+    {
+      taskId,
+      taskTitle: "SECRET-TASK-TITLE",
+      projectName: "Relay",
+      workspaceId: "00000000-0000-4000-8000-000000000001",
+      condition: "retention",
+      reason: "uncommitted",
+      reasonText,
+      destination: `/tasks/${taskId}`,
+    },
+  ],
+  destination: "/inbox?request=workspace-maintenance",
+  dismissible: false,
 });
 
 /** A scripted Inbox: the test says what each read returns. */
@@ -1393,6 +1421,7 @@ test("every Inbox kind has an alert key and a payload", () => {
     },
     intervention: intervention("execution-uncertain"),
     runtime: runtimeItem("codex", 7),
+    "workspace-maintenance": maintenanceItem(9),
   } as const satisfies Record<InboxItem["kind"], InboxItem>;
   assert.deepEqual(Object.values(samples).map(inboxAlertKey), [
     "q1",
@@ -1400,6 +1429,7 @@ test("every Inbox kind has an alert key and a payload", () => {
     "r1",
     `intervention:${taskId}:execution-uncertain`,
     "runtime:codex:7",
+    "workspace-maintenance:9",
   ]);
   const all = Object.values(samples);
   assert.deepEqual(
@@ -1410,8 +1440,16 @@ test("every Inbox kind has an alert key and a payload", () => {
       "Result review in Relay: 4 waiting",
       "Intervention in Relay: 4 waiting",
       "Codex runtime unavailable",
+      "Workspace maintenance needs attention",
     ],
   );
+  // The maintenance push is fixed text and the Inbox item's link: no task, project or reason.
+  assert.deepEqual(pushPayload(samples["workspace-maintenance"], all), {
+    v: 1,
+    title: "Workspace maintenance needs attention",
+    url: "/inbox?request=workspace-maintenance",
+    tag: "workspace-maintenance:9",
+  });
   assert.equal(
     pushPayload(samples["result-review"], all).url,
     `/inbox?task=${taskId}&request=r1`,
@@ -1788,5 +1826,35 @@ test("a push listener stops its timers and in-flight sends when the listener sto
     assert.equal(fake.requests.length, 1);
   } finally {
     await f.close();
+  }
+});
+
+test("a refreshed maintenance item notifies once per active episode; a recurrence notifies again", async () => {
+  const inbox = scripted();
+  const x = await pushFixture({ readInbox: inbox.readInbox });
+  try {
+    const a = x.subscribe();
+    await x.tick();
+    inbox.set([maintenanceItem(1_000)]);
+    await x.tick();
+    assert.equal(sent(x.fake, a.device).length, 1);
+    // New blockers and reasons on the same active item are not a new alert.
+    inbox.set([maintenanceItem(1_000, "Pushing committed work was refused")]);
+    await x.tick();
+    assert.equal(sent(x.fake, a.device).length, 1);
+    inbox.set([]);
+    await x.tick();
+    inbox.set([maintenanceItem(5_000)]);
+    await x.tick();
+    assert.deepEqual(
+      sent(x.fake, a.device).map((p) => p.tag),
+      ["workspace-maintenance:1000", "workspace-maintenance:5000"],
+    );
+    assert.equal(
+      JSON.stringify(sent(x.fake, a.device)).includes("SECRET"),
+      false,
+    );
+  } finally {
+    await x.f.close();
   }
 });

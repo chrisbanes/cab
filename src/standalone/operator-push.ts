@@ -4,8 +4,10 @@ import { type Database, transaction } from "../core/store.js";
 import {
   inboxAlertKey,
   inboxSelectionHref,
+  isTaskInboxItem,
   kindLabels,
 } from "../operator/attention.js";
+import { maintenanceInboxHeadline } from "../operator/workspace-maintenance-copy.js";
 import {
   type InboxItem,
   type PushSubscriptionRecord,
@@ -72,8 +74,7 @@ export function pushPayload(
           .join("")
           .trim() || "a project";
       const waiting = items.filter(
-        (other) =>
-          other.kind !== "runtime" && other.projectId === item.projectId,
+        (other) => isTaskInboxItem(other) && other.projectId === item.projectId,
       ).length;
       return {
         v: 1,
@@ -86,6 +87,14 @@ export function pushPayload(
       return {
         v: 1,
         title: runtimeInboxHeadline(item.harness),
+        url: inboxSelectionHref(item),
+        tag,
+      };
+    // Fixed text only: no task, project, path or size leaves in the push.
+    case "workspace-maintenance":
+      return {
+        v: 1,
+        title: maintenanceInboxHeadline,
         url: inboxSelectionHref(item),
         tag,
       };

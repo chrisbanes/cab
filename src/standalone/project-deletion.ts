@@ -26,6 +26,7 @@ import {
   type ProjectOwnership,
 } from "./project-deletion-ownership.js";
 import { projectDeletionStatements } from "./project-deletion-sql.js";
+import { InboxLifecycle } from "../core/inbox-lifecycle.js";
 import {
   captureDeletionCleanup,
   deletionWorktreeStatusSchema,
@@ -673,6 +674,10 @@ export function deleteCapturedProjectRowsWithinTransaction(
     db.prepare(query.sql).run(...query.parameters);
     phase?.(`delete:${statement.table}`);
   }
+  // The installation's maintenance item is kept; only the deleted tasks' blockers go.
+  new InboxLifecycle(db).pruneWorkspaceMaintenance(
+    owner.parameters.tasks as string[],
+  );
   assertProjectRowsRemoved(db, owner);
   if (db.prepare("PRAGMA foreign_key_check").all().length)
     throw new Error("Project deletion left invalid references");

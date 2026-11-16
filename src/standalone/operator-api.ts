@@ -214,7 +214,17 @@ import type {
   PublicationReview,
 } from "../core/task-publication.js";
 import { deriveWaits } from "../operator/wait-reasons.js";
-import { type AttentionCode, attentionNext } from "../operator/attention.js";
+import {
+  type AttentionCode,
+  attentionNext,
+  isTaskInboxItem,
+} from "../operator/attention.js";
+import { workspaceMaintenanceInboxId } from "../core/inbox-lifecycle.js";
+import {
+  maintenanceInboxHeadline,
+  maintenanceInboxReason,
+  maintenanceReasonLabels,
+} from "../operator/workspace-maintenance-copy.js";
 import {
   claudeTokenExclusions,
   claudeTokenSource,
@@ -3928,6 +3938,54 @@ export class OperatorApi {
         };
       });
   }
+  /**
+   * The installation's maintenance item, with each blocker's task and project names resolved
+   * now under current exclusions. A blocker whose task is gone is dropped.
+   */
+  private async workspaceMaintenanceItems(
+    excluded: readonly string[] | undefined,
+    base: ExclusionBase,
+  ): Promise<InboxItem[]> {
+    const current = this.service.inboxLifecycle().workspaceMaintenance();
+    if (!current) return [];
+    const { row, attention } = current;
+    const blockers = [];
+    for (const b of attention.blockers) {
+      let task: ReturnType<OperatorApi["requireTask"]>;
+      try {
+        task = this.requireTask(b.taskId);
+      } catch {
+        continue;
+      }
+      const projectId = String(task.projectId),
+        named = await this.exclusions(projectId, b.taskId, [], [], base);
+      blockers.push({
+        ...b,
+        taskTitle: this.safe(task.title, named),
+        projectName: this.safe(this.domain().project(projectId).name, named),
+        reasonText: maintenanceReasonLabels[b.reason],
+        destination: `/tasks/${b.taskId}`,
+      });
+    }
+    return [
+      {
+        id: workspaceMaintenanceInboxId,
+        kind: "workspace-maintenance" as const,
+        urgency: 0 as const,
+        createdAt: row.createdAt,
+        headline: maintenanceInboxHeadline,
+        reason: maintenanceInboxReason(
+          attention.usage,
+          attention.blockers.some((b) => b.condition === "retention"),
+        ),
+        usage: attention.usage,
+        blockers,
+        destination: `/inbox?request=${workspaceMaintenanceInboxId}`,
+        lifecycle: this.inboxLifecycleView(row.id, excluded),
+        dismissible: false as const,
+      },
+    ];
+  }
   async readInbox(params = new URLSearchParams()) {
     this.service.reconcileInbox();
     return this.readWithExclusionFence(() => this.readInboxOnce(params));
@@ -3954,6 +4012,7 @@ export class OperatorApi {
             "intervention",
             "runtime",
             "result-review",
+            "workspace-maintenance",
           ])
           .optional(),
         status: z
@@ -4121,17 +4180,26 @@ export class OperatorApi {
       )
         throw new OperatorApiError(503, "unavailable");
     }
-    // Runtime episodes belong to no project, so a project filter excludes them.
+    // Runtime and maintenance episodes belong to no project, so a project filter excludes them.
+    const installationExcluded = await this.exclusions(
+      undefined,
+      undefined,
+      [],
+      [],
+      exclusionBase,
+    );
     const filtered: InboxItem[] = [
-      ...this.runtimeInboxItems(
-        await this.exclusions(undefined, undefined, [], [], exclusionBase),
-      ),
+      ...this.runtimeInboxItems(installationExcluded),
+      ...(await this.workspaceMaintenanceItems(
+        installationExcluded,
+        exclusionBase,
+      )),
       ...items,
     ].filter(
       (item) =>
         (item.lifecycle?.status ?? "actionable") === status &&
         (!kind || item.kind === kind) &&
-        (!project || (item.kind !== "runtime" && item.projectId === project)),
+        (!project || (isTaskInboxItem(item) && item.projectId === project)),
     );
     filtered.sort(
       (a, b) =>
