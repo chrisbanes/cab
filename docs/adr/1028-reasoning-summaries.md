@@ -1,8 +1,11 @@
 ---
-status: accepted
+status: superseded
+superseded_by: [ADR-1038]
 ---
 
 # Opt-in reasoning summaries
+
+Superseded by [ADR-1038](1038-coordinate-agents-that-run-elsewhere.md), under which cab coordinates agents that run elsewhere. The text below is the earlier decision.
 
 Operators reviewing or debugging an agent's work need usable explanations of its
 choices. The [probes](../evidence/reasoning-summary-probes-2026-11-06.md) found usable

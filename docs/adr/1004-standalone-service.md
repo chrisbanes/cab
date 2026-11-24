@@ -1,6 +1,6 @@
 ---
 status: accepted
-partially_superseded_by: [ADR-1005, ADR-1008]
+partially_superseded_by: [ADR-1005, ADR-1008, ADR-1038]
 ---
 
 # Build cab as a standalone service without BB
@@ -8,7 +8,7 @@ partially_superseded_by: [ADR-1005, ADR-1008]
 Superseded in part: [ADR-1005](1005-service-assignment-routing.md) replaces the
 separate task-owner role and lead-only initial allocation;
 [ADR-1008](1008-claude-code-execution-harness.md) adds Claude Code as a second
-execution harness.
+execution harness. [ADR-1038](1038-coordinate-agents-that-run-elsewhere.md) removes scheduling, execution admission, process supervision, task workspaces and conversation records; cab stays a standalone service without BB.
 
 cab removes BB and builds its own service. cab owns scheduling,
 execution admission, process supervision, task workspaces, conversation records

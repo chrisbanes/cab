@@ -1,8 +1,11 @@
 ---
-status: accepted
+status: superseded
+superseded_by: [ADR-1038]
 ---
 
 # Local listening for test fixtures
+
+Superseded by [ADR-1038](1038-coordinate-agents-that-run-elsewhere.md), under which cab coordinates agents that run elsewhere. The text below is the earlier decision.
 
 A project's browser and HTTP tests start local servers. In a task workspace both harnesses'
 sandboxes deny binding a port, so those tests fail with `listen EPERM 127.0.0.1`. Command network

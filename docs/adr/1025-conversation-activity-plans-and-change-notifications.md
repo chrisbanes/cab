@@ -1,8 +1,11 @@
 ---
-status: accepted
+status: superseded
+superseded_by: [ADR-1038]
 ---
 
 # Widen the conversation's tool projection, capture agent plans and push change notifications
+
+Superseded by [ADR-1038](1038-coordinate-agents-that-run-elsewhere.md), under which cab coordinates agents that run elsewhere. The text below is the earlier decision.
 
 [ADR-1022](1022-task-conversation-view.md) limits tool activity in the task conversation
 to a curated projection: the tool kind, a one-line summary and bounded output on request.

@@ -1,8 +1,11 @@
 ---
-status: accepted
+status: superseded
+superseded_by: [ADR-1038]
 ---
 
 # Results reference git, not retained copies
+
+Superseded by [ADR-1038](1038-coordinate-agents-that-run-elsewhere.md), under which cab coordinates agents that run elsewhere. The text below is the earlier decision.
 
 cab copies a result's linked files and its turn diff into SQLite when the agent reports it
 (retained result evidence), so the result stays inspectable after the workspace changes or is

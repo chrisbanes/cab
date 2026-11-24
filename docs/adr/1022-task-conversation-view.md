@@ -1,8 +1,11 @@
 ---
-status: accepted
+status: superseded
+superseded_by: [ADR-1038]
 ---
 
 # Present a task as one conversation with curated tool activity
+
+Superseded by [ADR-1038](1038-coordinate-agents-that-run-elsewhere.md), under which cab coordinates agents that run elsewhere. The text below is the earlier decision.
 
 Task detail treated conversations as supporting history, disclosed underneath the
 overview. In practice the History tab showed each captured assistant item as a

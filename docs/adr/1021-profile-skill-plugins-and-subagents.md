@@ -1,8 +1,11 @@
 ---
-status: accepted
+status: superseded
+superseded_by: [ADR-1038]
 ---
 
 # Use native harness configuration and retain in-turn subagents
+
+Superseded by [ADR-1038](1038-coordinate-agents-that-run-elsewhere.md), under which cab coordinates agents that run elsewhere. The text below is the earlier decision.
 
 cab runs the service user's existing coding environment. Authentication, personal
 instructions, skills, plugins, MCP servers and hooks belong to the native harness;

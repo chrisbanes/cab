@@ -1,8 +1,11 @@
 ---
-status: accepted
+status: superseded
+superseded_by: [ADR-1038]
 ---
 
 # Run drafting as a project-owned run, not a Draft task
+
+Superseded by [ADR-1038](1038-coordinate-agents-that-run-elsewhere.md), under which cab coordinates agents that run elsewhere. The text below is the earlier decision.
 
 The task composer lets the operator hand a rough idea to the project lead and get
 back an editable title and outcome. Every agent turn with coordination belongs to a

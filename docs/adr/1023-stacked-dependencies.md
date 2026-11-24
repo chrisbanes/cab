@@ -1,8 +1,11 @@
 ---
-status: accepted
+status: superseded
+superseded_by: [ADR-1038]
 ---
 
 # Start a dependent on its blocker's head
+
+Superseded by [ADR-1038](1038-coordinate-agents-that-run-elsewhere.md), under which cab coordinates agents that run elsewhere. The text below is the earlier decision.
 
 A blocked task started no work until every blocker was Done, so a chain of changes in one
 repository was delivered one merge at a time. A project can now turn on **stacking**: a

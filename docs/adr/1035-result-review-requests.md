@@ -1,8 +1,11 @@
 ---
-status: accepted
+status: superseded
+superseded_by: [ADR-1038]
 ---
 
 # Result review requests
+
+Superseded by [ADR-1038](1038-coordinate-agents-that-run-elsewhere.md), under which cab coordinates agents that run elsewhere. The text below is the earlier decision.
 
 A lead hands back a result that needs an operator decision, such as whether a UI change is right or
 which of two follow-ups to take. Today the operator reconstructs that decision from the

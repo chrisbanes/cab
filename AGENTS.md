@@ -14,32 +14,20 @@ configuration schema, and persisted runs are not compatibility requirements.
 
 ## Planning gate
 
-Product scope is confirmed: the standalone specification, design choices, acceptance
-scope and delivery sequence. Do not request product review again for unchanged scope;
-return material scope or guarantee changes for review.
+Product scope is [ADR-1038](docs/adr/1038-coordinate-agents-that-run-elsewhere.md):
+cab coordinates agents that run elsewhere and runs no agent turns. Do not request
+product review again for unchanged scope; return material scope or guarantee changes
+for review.
 GitHub issues are authoritative for delivery scope, sequencing, native dependencies,
-status and slice completion criteria; start from [epic #649](https://github.com/chrisbanes/cab/issues/649).
+status and slice completion criteria.
 Keep product contracts, ADRs and evidence in the repo, without a parallel delivery plan.
 
-[S01 #688](https://github.com/chrisbanes/cab/issues/688) is the capability gate,
-scoped to the approved minimum integration contract: qualify its bounded protocol and
-coordination probes before dependent implementation. Use its finite completion rule;
-distinguish demonstrated failures, untested surfaces and accepted limits instead of
-expanding the gate after each probe. Do not restore strict outside-read denial,
-complete descendant containment or universal live reattachment as inherent S01 gates.
+Until the removal slices land, the code, specification and design documents still
+describe the version ADR-1038 replaces. Where they differ, ADR-1038 is the target.
 
-The approved runtime trust boundary: normal handoff trusts the bound successful Codex
-terminal status, ended cab callbacks and no other hold/known unfinished
-execution. Tool-history completeness and a general model-tool allowlist are not S01
-gates. The approved S01 approval-evidence limit: model-originated escalation rejection
-remains an unproved limitation; S02 #689 owns deterministic unexpected-approval
-callback rejection and S05 #695 owns integrated approval-flow testing. Preserve
-unresolved ownership holds and the documented recovery boundary. Settle detailed
-contracts using evidence.
-
-Delivery includes automated service/runtime/UI integration and bounded live validation
+Delivery includes automated service and UI integration and bounded live validation
 run by the implementation agent; do not hand incremental testing to the user. Preserve
-the installed Haze prototype until a reviewed cutover.
+the installed Haze prototype until the new cab runs Haze work.
 
 ## Working conventions
 

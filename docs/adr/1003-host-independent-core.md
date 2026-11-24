@@ -1,6 +1,6 @@
 ---
 status: accepted
-partially_superseded_by: [ADR-1004, ADR-1005]
+partially_superseded_by: [ADR-1004, ADR-1005, ADR-1038]
 ---
 
 # Keep cab's core independent of its host
@@ -9,7 +9,7 @@ Superseded in part: [ADR-1004](1004-standalone-service.md) removes BB and the
 host-adapter model for execution, workspaces, UI, capacity and cleanup;
 [ADR-1005](1005-service-assignment-routing.md) replaces the separate task-owner
 role and lead-only initial allocation. The portable identities, SQLite ownership
-and other product policies remain in force.
+and other product policies remain in force. [ADR-1038](1038-coordinate-agents-that-run-elsewhere.md) removes assignments and recovery.
 
 cab owns project and task identities, assignments, policy, durable
 coordination, results, and recovery decisions in a host-independent core. BB

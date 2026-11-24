@@ -1,6 +1,6 @@
 ---
 status: accepted
-partially_superseded_by: [ADR-1003, ADR-1004, ADR-1005, ADR-1020]
+partially_superseded_by: [ADR-1003, ADR-1004, ADR-1005, ADR-1020, ADR-1038]
 ---
 
 # Build cab around agent coordination
@@ -9,7 +9,7 @@ Superseded in part: [ADR-1003](1003-host-independent-core.md) and
 [ADR-1004](1004-standalone-service.md) replace the BB hosting, identity and
 integration choices; [ADR-1005](1005-service-assignment-routing.md) replaces the
 separate task-owner role and lead-only initial allocation. Other product policies
-remain in force.
+remain in force. [ADR-1038](1038-coordinate-agents-that-run-elsewhere.md) replaces the project lead's accountability, assignments, and the execution and recovery cab owned; agents still decide how work proceeds.
 
 cab is a BB plugin where agents organise work through instructions
 and runtime tools. Agents decide how to plan, implement, review, and revise work;

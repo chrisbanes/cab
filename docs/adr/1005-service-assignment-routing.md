@@ -1,8 +1,11 @@
 ---
-status: accepted
+status: superseded
+superseded_by: [ADR-1038]
 ---
 
 # Route assignments in the service while the project lead retains accountability
+
+Superseded by [ADR-1038](1038-coordinate-agents-that-run-elsewhere.md), under which cab coordinates agents that run elsewhere. The text below is the earlier decision.
 
 The project lead remains accountable for all task outcomes, using separate per-task
 conversations with the same lead agent. Defer a separate task-owner role. cab service code invokes TypeSafe directly

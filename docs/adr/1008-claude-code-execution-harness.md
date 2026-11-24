@@ -1,8 +1,11 @@
 ---
-status: accepted
+status: superseded
+superseded_by: [ADR-1038]
 ---
 
 # Add Claude Code as a second execution harness
+
+Superseded by [ADR-1038](1038-coordinate-agents-that-run-elsewhere.md), under which cab coordinates agents that run elsewhere. The text below is the earlier decision.
 
 This amends [ADR-1004](1004-standalone-service.md), which deferred Claude for agent
 execution. The Claude harness is implemented and qualified with limits by bounded

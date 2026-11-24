@@ -1,8 +1,11 @@
 ---
-status: proposed
+status: superseded
+superseded_by: [ADR-1038]
 ---
 
 # Retire agents through revocation and hide them from default lists
+
+Superseded by [ADR-1038](1038-coordinate-agents-that-run-elsewhere.md), under which cab coordinates agents that run elsewhere. The text below is the earlier decision.
 
 Proposal for [#1522](https://github.com/chrisbanes/cab/issues/1522).
 This document requests a maintainer decision. It changes no accepted contract

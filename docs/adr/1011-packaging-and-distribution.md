@@ -1,8 +1,11 @@
 ---
 status: accepted
+partially_superseded_by: ADR-1038
 ---
 
 # Distribute cab through one npm package
+
+Superseded in part: [ADR-1038](1038-coordinate-agents-that-run-elsewhere.md) makes tower, not a macOS service install, the deployment for the operator's own cab. Other decisions here remain in force.
 
 cab runs from a reviewed checkout built in place, which ties the LaunchAgent and
 the cutover packet to a development tree and the host's nvm-managed Node. npm is

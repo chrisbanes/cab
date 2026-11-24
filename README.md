@@ -13,6 +13,11 @@ work; cab keeps track of who's responsible and what happens next.
 > **In development.** The service and operator UI exist, but the complete
 > task-to-delivery journey is still being built and qualified. This isn't a
 > ready-to-install release yet.
+>
+> **Changing direction.** [ADR-1038](docs/adr/1038-coordinate-agents-that-run-elsewhere.md)
+> replaces the project lead and cab-run agents with claimable tasks for agents that
+> run elsewhere. The rest of this page describes the current implementation, which
+> that decision replaces.
 
 [Follow the roadmap](https://github.com/chrisbanes/cab/issues/649) ·
 [Current status](#where-it-stands) · [Development](#development)

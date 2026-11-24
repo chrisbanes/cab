@@ -1,8 +1,11 @@
 ---
-status: accepted
+status: superseded
+superseded_by: [ADR-1038]
 ---
 
 # Run draft turns as a read-only mode of the lead assignment
+
+Superseded by [ADR-1038](1038-coordinate-agents-that-run-elsewhere.md), under which cab coordinates agents that run elsewhere. The text below is the earlier decision.
 
 An operator often needs to talk to a task's project lead before the task is Ready:
 to clarify an imported issue, have the lead investigate the repositories, or let it
