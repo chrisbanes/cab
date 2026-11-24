@@ -1,8 +1,11 @@
 ---
-status: accepted
+status: superseded
+superseded_by: [ADR-1038]
 ---
 
 # Pre-turn failures are refusals
+
+Superseded by [ADR-1038](1038-coordinate-agents-that-run-elsewhere.md), under which cab coordinates agents that run elsewhere. The text below is the earlier decision.
 
 cab held every submission failure as "Runtime submission or observation uncertain", keeping
 writer ownership and capacity until an operator supplied recovery evidence. When the failure

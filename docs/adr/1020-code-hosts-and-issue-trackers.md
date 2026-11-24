@@ -1,8 +1,11 @@
 ---
 status: accepted
+partially_superseded_by: ADR-1038
 ---
 
 # Separate code hosts from issue trackers, adding GitLab and Jira Cloud
+
+Superseded in part: [ADR-1038](1038-coordinate-agents-that-run-elsewhere.md) removes the code host as a delivery target; cab reads change-request state and fetches a read-only copy. Other decisions here remain in force.
 
 GitHub currently fills two roles in cab: it is the **issue tracker** behind task sources and
 the **code host** that receives task branches and change requests. The two are combined in

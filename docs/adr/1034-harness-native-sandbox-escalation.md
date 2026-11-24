@@ -1,8 +1,11 @@
 ---
-status: accepted
+status: superseded
+superseded_by: [ADR-1038]
 ---
 
 # Escalate single commands through the harness
+
+Superseded by [ADR-1038](1038-coordinate-agents-that-run-elsewhere.md), under which cab coordinates agents that run elsewhere. The text below is the earlier decision.
 
 A project's verification needs host tools that the harness sandbox blocks, such as Chromium and
 Android emulators ([ADR-1029](1029-skip-sandbox-for-host-tools.md)). Skipping the sandbox unblocks

@@ -1,8 +1,11 @@
 ---
-status: accepted
+status: superseded
+superseded_by: [ADR-1038]
 ---
 
 # cab proves, the operator confirms
+
+Superseded by [ADR-1038](1038-coordinate-agents-that-run-elsewhere.md), under which cab coordinates agents that run elsewhere. The text below is the earlier decision.
 
 Recovery asked the operator to vouch for facts cab already holds. A bound-turn, pre-turn or
 no-turn recovery needs a receipt restating that the process exited, effects settled and the

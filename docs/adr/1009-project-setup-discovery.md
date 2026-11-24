@@ -1,8 +1,11 @@
 ---
 status: accepted
+partially_superseded_by: ADR-1038
 ---
 
 # Discover repositories and pick checkouts during project setup
+
+Superseded in part: [ADR-1038](1038-coordinate-agents-that-run-elsewhere.md) removes choosing a checkout; cab fetches its own read-only copy of each repository. Other decisions here remain in force.
 
 These decisions follow the settings and setup designs and amend the guided project setup in
 [SPEC.md](../SPEC.md#task-creation-and-project-setup). The operator UI implements

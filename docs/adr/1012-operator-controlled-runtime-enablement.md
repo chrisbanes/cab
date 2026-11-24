@@ -1,8 +1,11 @@
 ---
-status: accepted
+status: superseded
+superseded_by: [ADR-1038]
 ---
 
 # Let the operator enable and disable each execution runtime
+
+Superseded by [ADR-1038](1038-coordinate-agents-that-run-elsewhere.md), under which cab coordinates agents that run elsewhere. The text below is the earlier decision.
 
 The service ran every production runtime and required Codex: it refused to start
 without Codex, and agents defaulted to it. An operator who uses only one runtime

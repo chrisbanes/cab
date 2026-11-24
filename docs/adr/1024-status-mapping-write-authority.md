@@ -1,8 +1,11 @@
 ---
 status: accepted
+partially_superseded_by: ADR-1038
 ---
 
 # The status mapping is its own write authority
+
+Superseded in part: [ADR-1038](1038-coordinate-agents-that-run-elsewhere.md) redefines its four events as first claimed, PR linked, waiting on the operator, and done. Other decisions here remain in force.
 
 Saving a status mapping asked the operator to state one intent twice: map the option, then
 allow it again as a `project.field` grant (GitHub) or an `issue.status` grant (Jira). A grant

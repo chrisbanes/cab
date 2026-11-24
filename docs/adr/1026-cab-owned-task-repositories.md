@@ -1,8 +1,11 @@
 ---
-status: accepted
+status: superseded
+superseded_by: [ADR-1038]
 ---
 
 # Task worktrees come from cab-owned repositories
+
+Superseded by [ADR-1038](1038-coordinate-agents-that-run-elsewhere.md), under which cab coordinates agents that run elsewhere. The text below is the earlier decision.
 
 A task workspace was a worktree of the operator's checkout, so its Git metadata lived in the
 operator's common directory, outside every writable root. Agents could edit files but not

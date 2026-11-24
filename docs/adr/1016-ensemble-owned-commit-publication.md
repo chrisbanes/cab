@@ -1,8 +1,11 @@
 ---
-status: accepted
+status: superseded
+superseded_by: [ADR-1038]
 ---
 
 # Publish task commits through cab, never through the agent
+
+Superseded by [ADR-1038](1038-coordinate-agents-that-run-elsewhere.md), under which cab coordinates agents that run elsewhere. The text below is the earlier decision.
 
 No product path published a task's commits to GitHub. `pr.create` needs its head
 branch to exist already, cab's own Git children use no network transport, and

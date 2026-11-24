@@ -1,9 +1,11 @@
 ---
-status: accepted
-partially_superseded_by: ADR-1034
+status: superseded
+superseded_by: [ADR-1038]
 ---
 
 # Skip the sandbox for host tools
+
+Superseded by [ADR-1038](1038-coordinate-agents-that-run-elsewhere.md), under which cab coordinates agents that run elsewhere. The text below is the earlier decision.
 
 Superseded in part: [ADR-1034](1034-harness-native-sandbox-escalation.md) replaces the
 `dangerouslySkipSandbox` field with a sandbox level whose `unsandboxed` level keeps this

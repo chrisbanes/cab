@@ -1,8 +1,11 @@
 ---
-status: accepted
+status: superseded
+superseded_by: [ADR-1038]
 ---
 
 # Distribute cab as a Mac app through a Homebrew tap
+
+Superseded by [ADR-1038](1038-coordinate-agents-that-run-elsewhere.md), under which cab coordinates agents that run elsewhere. The text below is the earlier decision.
 
 This records the deferred desktop channel alongside the primary npm release in
 [ADR-1011](1011-packaging-and-distribution.md). Desktop evaluation and implementation

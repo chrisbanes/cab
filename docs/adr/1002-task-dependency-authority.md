@@ -1,12 +1,12 @@
 ---
 status: accepted
-partially_superseded_by: ADR-1004
+partially_superseded_by: [ADR-1004, ADR-1038]
 ---
 
 # Treat task dependencies as a separate execution gate
 
 Superseded in part: [ADR-1004](1004-standalone-service.md) removes the BB
-Send-now exception. The dependency authority rules remain in force.
+Send-now exception. The dependency authority rules remain in force. [ADR-1038](1038-coordinate-agents-that-run-elsewhere.md) lets agents in a project change local dependencies, except removing a blocker from a task they have claimed, and makes dependencies gate claims rather than execution.
 
 Task dependencies gate cab-managed execution independently of readiness
 or assignment waits. cab owns edges from local tasks, while imported GitHub
